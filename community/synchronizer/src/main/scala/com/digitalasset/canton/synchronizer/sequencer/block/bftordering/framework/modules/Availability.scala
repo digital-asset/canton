@@ -311,6 +311,19 @@ object Availability {
         batch: Option[OrderingRequestBatch],
     ) extends LocalOutputFetch
 
+    /** Result of asynchronously validating a batch fetched from a remote node (i.e. checking that
+      * its payload matches the requested `BatchId`). The (potentially expensive) hash computation
+      * is performed off the actor thread, and this message carries the outcome back so that the
+      * remaining, state-mutating handling runs on the actor thread.
+      */
+    final case class LocalFetchedBatchValidated(
+        batchId: BatchId,
+        batch: OrderingRequestBatch,
+        from: BftNodeId,
+        isValid: Boolean,
+        timeWeReceivedResponse: Instant,
+    ) extends LocalOutputFetch
+
     final case class FetchedBatchStored(batchId: BatchId) extends LocalOutputFetch
 
     final case class PickedRecipientsForFetch(

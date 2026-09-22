@@ -3,19 +3,16 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.crypto.{GeneratorsCrypto, Salt}
+import com.digitalasset.canton.crypto.Salt
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
-final class GeneratorsContract(
-    version: CantonContractIdVersion,
-    generatorsCrypto: GeneratorsCrypto,
-) {
+final class GeneratorsContract(version: CantonContractIdVersion) {
   import com.digitalasset.canton.Generators.*
-  import generatorsCrypto.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
 
   def contractAuthenticationDataV1Arb(
       version: CantonContractIdV1Version

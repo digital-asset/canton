@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger
 
 import cats.syntax.either.*
-import cats.syntax.order.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.package_management_service
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
@@ -374,13 +373,12 @@ package api {
 
     override def getParticipantBound(
         synchronizerId: SynchronizerId
-    ): Option[Option[TopoParticipantId]] =
-      if (synchronizerId > synchronizerBound)
-        Some(None)
-      else if (synchronizerId == synchronizerBound)
-        Some(Some(participantBound))
-      else
-        None
+    ): Option[Option[TopoParticipantId]] = {
+      val syncOrder = SynchronizerId.orderingIdentifierThenNamespace
+      if (syncOrder.gt(synchronizerId, synchronizerBound)) Some(None)
+      else if (syncOrder.equiv(synchronizerId, synchronizerBound)) Some(Some(participantBound))
+      else None
+    }
   }
 
   final case object InitialPageToken extends PageToken {
@@ -548,6 +546,13 @@ package api {
       )
   }
 
+  /** Flags to force updating the vetting topology state on potentially unsafe operations.
+    *
+    * @param forceVetIncompatibleUpgrade
+    *   Allow vetting a package that is upgrade-incompatible with other vetted packages
+    * @param forceUnvettedDependencies
+    *   Allow vetting a package without vetting one or more of its dependencies
+    */
   final case class UpdateVettedPackagesForceFlags(
       forceVetIncompatibleUpgrade: Boolean = false,
       forceUnvettedDependencies: Boolean = false,
@@ -706,6 +711,7 @@ package api {
       }
   }
 
+  /** Generic reference to one or more vetted packages. */
   sealed trait VettedPackagesRef extends PrettyPrinting {
     def toProtoLAPI: package_management_service.VettedPackagesRef
     def findMatchingPackages(
@@ -733,6 +739,9 @@ package api {
         prettyOfString(id => s"package-id: ${id.id.singleQuoted}")
     }
 
+    /** A package reference for packages with package-name `name` and version `version` known to the
+      * participant to which the request is addressed.
+      */
     final case class NameAndVersion(
         name: Ref.PackageName,
         version: Ref.PackageVersion,
@@ -808,6 +817,9 @@ package api {
         )
     }
 
+    /** Package reference identifying all packages with package-name `name` known to the participant
+      * to which the request is addressed.
+      */
     final case class Name(
         name: Ref.PackageName
     ) extends VettedPackagesRef {
@@ -884,6 +896,14 @@ package api {
     def toBoundedPageToken: BoundedPageToken = BoundedPageToken(synchronizerId, participantId)
   }
 
+  final case class VettedPackagesPage[+A](
+      results: Seq[A],
+      nextPageToken: Option[BoundedPageToken],
+  ) {
+    def mapResults[B](f: Seq[A] => Seq[B]): VettedPackagesPage[B] =
+      VettedPackagesPage(f(results), nextPageToken)
+  }
+
   final case class ParticipantVettedPackages(
       packages: Seq[VettedPackage],
       participantId: TopoParticipantId,
@@ -941,5 +961,4 @@ package api {
   final case class PriorTopologySerialExists(serial: PositiveInt) extends PriorTopologySerial
 
   case object PriorTopologySerialNone extends PriorTopologySerial
-
 }

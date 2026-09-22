@@ -295,20 +295,20 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_36:
-    name: Test Protocol Version 36
+  test_protocol_version_35:
+    name: Test Protocol Version 35
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
-      protocol_version: '36'
-      job_name: test_protocol_version_36
+      protocol_version: '35'
+      job_name: test_protocol_version_35
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_36_requires_external_kms:
+  test_protocol_version_35_requires_external_kms:
     name: Test Protocol Version 36 (RequiresExternalKms)
-    needs: [pick_runner, test_protocol_version_36]
+    needs: [pick_runner, test]
     if: |
       github.event_name != 'merge_group' &&
       github.ref_type != 'tag'  &&
@@ -318,13 +318,13 @@ jobs:
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: true
-      protocol_version: '36'
-      job_name: test_protocol_version_36_requires_external_kms
+      protocol_version: '35'
+      job_name: test_protocol_version_35_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_protocol_version_dev:
     name: Test Protocol Version Dev
-    needs: [pick_runner, test_protocol_version_36]
+    needs: [pick_runner, test]
     if: github.event_name == 'push'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
@@ -406,8 +406,8 @@ jobs:
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_protocol_version_36
-      - test_protocol_version_36_requires_external_kms
+      - test_protocol_version_35
+      - test_protocol_version_35_requires_external_kms
       - test_protocol_version_dev
       - toxiproxy_test_fast
       - toxiproxy_test_fast_requires_external_kms
@@ -416,7 +416,7 @@ jobs:
       - variations_test_selected_users
     if: |
       always() &&
-      github.run_attempt >= 2  &&
+      github.event_name == 'push' &&
       (
         contains(needs.*.result, 'failure') ||
         contains(needs.*.result, 'cancelled')
@@ -460,8 +460,8 @@ jobs:
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_protocol_version_36
-      - test_protocol_version_36_requires_external_kms
+      - test_protocol_version_35
+      - test_protocol_version_35_requires_external_kms
       - test_protocol_version_dev
       - toxiproxy_test_fast
       - toxiproxy_test_fast_requires_external_kms

@@ -4,7 +4,11 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseLfParticipantId}
 import com.digitalasset.canton.validation.ProtoValidation
@@ -13,11 +17,9 @@ import com.digitalasset.canton.version.ProtocolVersionValidation
 final case class DigestForCounterparticipant(
     digest: Digest.DigestType,
     counterparticipant: LedgerParticipantId,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[DigestForCounterparticipant.this.type] = prettyOfClass(
-    param("digest", _.digest),
-    param("counterparticipant", _.counterparticipant),
-  )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[DigestForCounterparticipant] =
+    DigestForCounterparticipant
 
   def toProtoV32: v32.DigestForCounterparticipant = v32.DigestForCounterparticipant(
     digest = digest,
@@ -25,7 +27,12 @@ final case class DigestForCounterparticipant(
   )
 }
 
-object DigestForCounterparticipant {
+object DigestForCounterparticipant extends PrettyPrintingCompanion[DigestForCounterparticipant] {
+
+  override protected val pretty: Pretty[DigestForCounterparticipant] = prettyOfClass(
+    param("digest", _.digest),
+    param("counterparticipant", _.counterparticipant),
+  )
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,

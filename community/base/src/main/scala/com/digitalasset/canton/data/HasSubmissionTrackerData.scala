@@ -3,10 +3,14 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.topology.ParticipantId
 
-trait HasSubmissionTrackerData extends PrettyPrinting {
+trait HasSubmissionTrackerData extends PrettyPrintingFromCompanion {
   def submissionTrackerData: Option[SubmissionTrackerData]
 }
 
@@ -18,7 +22,13 @@ final case class SubmissionTrackerData(
     maxSequencingTime: CantonTimestamp,
 ) extends HasSubmissionTrackerData {
   override def submissionTrackerData: Option[SubmissionTrackerData] = Some(this)
-  override protected def pretty: Pretty[SubmissionTrackerData] = prettyOfClass(
+
+  override def prettyCompanion: PrettyPrintingCompanion[SubmissionTrackerData] =
+    SubmissionTrackerData
+}
+
+object SubmissionTrackerData extends PrettyPrintingCompanion[SubmissionTrackerData] {
+  override protected val pretty: Pretty[SubmissionTrackerData] = prettyOfClass(
     param("submitting participant", _.submittingParticipant),
     param("max sequencing time", _.maxSequencingTime),
   )

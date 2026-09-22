@@ -990,14 +990,13 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   override def findStoredForVersion(
       asOfExclusive: CantonTimestamp,
       transaction: GenericTopologyTransaction,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = {
-    val rpv = TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+    val rpv = transaction.representativeProtocolVersion
 
     logger.debug(
-      s"Querying for transaction ${transaction.hash} with protocol version $protocolVersion"
+      s"Querying for transaction ${transaction.hash} with representative protocol version $rpv"
     )
 
     findStoredSql(
@@ -1115,6 +1114,15 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     ).asUpdate
   }
 
+  // Same as SQL `ORDER BY identifier, namespace`
+  private val paginationOrdering: Ordering[GenericStoredTopologyTransaction] =
+    Ordering.by { t =>
+      (
+        t.mapping.maybeUid.map(_.identifier).getOrElse(String185.empty).toProtoPrimitive,
+        t.mapping.namespace.toProtoPrimitive,
+      )
+    }
+
   // Helper to break up large uid-filters into batches to limit the size of sql "in-clauses".
   // Fashioned to reuse lessons learned in 2.x-based DbTopologyStore
   private def findTransactionsBatchingUidFilter(
@@ -1184,7 +1192,14 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           ).map(_.result)
         }
         .map { chunkedResult =>
-          StoredTopologyTransactions(chunkedResult.flatten)
+          val merged = chunkedResult.flatten
+          // Every chunk has its own LIMIT, so re-sort and trim the merged results.
+          pagination match {
+            case Some((_, pageLimit)) if chunkedFilters.sizeIs > 1 =>
+              StoredTopologyTransactions(merged.sorted(paginationOrdering).take(pageLimit))
+            case _ =>
+              StoredTopologyTransactions(merged)
+          }
         }
     }
   }

@@ -51,6 +51,7 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
       cleanupTopologyState: Boolean,
       timeout: FiniteDuration,
       physicalSynchronizerIdOverride: Option[PhysicalSynchronizerId] = None,
+      validateInitialTopologySnapshot: Boolean = true,
   )(implicit
       env: TestConsoleEnvironment
   ): (TopologyStore[TopologyStoreId], InitialTopologySnapshotValidator) = {
@@ -67,8 +68,32 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
         .toPhysical
     }
     val static = StaticSynchronizerParameters.defaults(testedProtocolVersion).toInternal.value
+    val store = getTopologyStore(topoStoreIdx, physicalSynchronizerId)
+    val validator = new InitialTopologySnapshotValidator(
+      participant1.underlying.value.cryptoPureApi,
+      store,
+      BatchAggregatorConfig.defaultsForTesting,
+      TopologyConfig.forTesting
+        .copy(validateInitialTopologySnapshot = validateInitialTopologySnapshot),
+      Some(static),
+      timeouts,
+      futureSupervisor = env.environment.futureSupervisor,
+      loggerFactory,
+      cleanupTopologySnapshot = cleanupTopologyState,
+    )
+    validator
+      .validateAndApplyInitialTopologySnapshot(txs)
+      .futureValueUS(Timeout(timeout)) // See https://github.com/DACH-NY/canton/issues/26651
+      .value
+    (store, validator)
+  }
+
+  protected def getTopologyStore(topoStoreIdx: Int, physicalSynchronizerId: PhysicalSynchronizerId)(
+      implicit env: TestConsoleEnvironment
+  ): TopologyStore[TopologyStoreId] = {
+    import env.*
     val storeId = SynchronizerStore(physicalSynchronizerId)
-    val store = participant1.underlying.valueOrFail("is there").storage match {
+    participant1.underlying.valueOrFail("is there").storage match {
       case _: MemoryStorage =>
         new InMemoryTopologyStore[TopologyStoreId](
           SynchronizerStore(physicalSynchronizerId),
@@ -89,22 +114,6 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
           loggerFactory,
         )
     }
-    val validator = new InitialTopologySnapshotValidator(
-      participant1.underlying.value.cryptoPureApi,
-      store,
-      BatchAggregatorConfig.defaultsForTesting,
-      TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
-      Some(static),
-      timeouts,
-      futureSupervisor = env.environment.futureSupervisor,
-      loggerFactory,
-      cleanupTopologySnapshot = cleanupTopologyState,
-    )
-    validator
-      .validateAndApplyInitialTopologySnapshot(txs)
-      .futureValueUS(Timeout(timeout)) // See https://github.com/DACH-NY/canton/issues/26651
-      .value
-    (store, validator)
   }
 }
 

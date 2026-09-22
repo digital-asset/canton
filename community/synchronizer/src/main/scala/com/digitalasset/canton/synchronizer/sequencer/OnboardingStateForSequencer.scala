@@ -34,6 +34,8 @@ final case class OnboardingStateForSequencer(
         v30.OnboardingStateForSequencer.Parameters.V30(staticSynchronizerParameters.toProtoV30)
       case ProtoVersion(31) =>
         v30.OnboardingStateForSequencer.Parameters.V31(staticSynchronizerParameters.toProtoV31)
+      case ProtoVersion(32) =>
+        v30.OnboardingStateForSequencer.Parameters.V32(staticSynchronizerParameters.toProtoV32)
       case other =>
         throw new IllegalStateException(
           s"Cannot serialize synchronizer parameters to proto version $other"
@@ -74,6 +76,8 @@ object OnboardingStateForSequencer extends VersioningCompanion[OnboardingStateFo
           StaticSynchronizerParameters.fromProtoV30(ssp)
         case v30.OnboardingStateForSequencer.Parameters.V31(ssp) =>
           StaticSynchronizerParameters.fromProtoV31(ssp)
+        case v30.OnboardingStateForSequencer.Parameters.V32(ssp) =>
+          StaticSynchronizerParameters.fromProtoV32(ssp)
         case v30.OnboardingStateForSequencer.Parameters.Empty =>
           Left(ProtoDeserializationError.FieldNotSet("parameters"))
       }

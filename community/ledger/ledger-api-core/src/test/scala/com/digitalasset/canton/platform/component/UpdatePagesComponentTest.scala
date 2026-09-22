@@ -227,7 +227,7 @@ class UpdatePagesComponentTest extends AnyWordSpec with IndexComponentTest {
       val exception = index
         .updatesPage(
           request.copy(continueStreamFromIncl =
-            Some(Offset.tryFromLong(firstPage.lowestPageOffsetExclusive))
+            Some(Offset.tryFromLong(firstPage.highestPageOffsetInclusive + 1))
           )
         )
         .failed

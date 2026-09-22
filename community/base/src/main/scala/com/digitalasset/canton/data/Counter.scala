@@ -3,11 +3,17 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import slick.jdbc.{GetResult, SetParameter}
 
-final case class Counter[Discr](v: Long) extends Ordered[Counter[Discr]] with PrettyPrinting {
+final case class Counter[Discr](v: Long)
+    extends Ordered[Counter[Discr]]
+    with PrettyPrintingFromCompanion {
   def unwrap: Long = v
   def toProtoPrimitive: Long = v
 
@@ -34,7 +40,7 @@ final case class Counter[Discr](v: Long) extends Ordered[Counter[Discr]] with Pr
 
   override def compare(that: Counter[Discr]): Int = v.compare(that.v)
 
-  override protected def pretty: Pretty[Counter.this.type] = prettyOfString(_.v.toString)
+  override def prettyCompanion: PrettyPrintingCompanion[Counter[Discr]] = Counter
 }
 
 trait CounterCompanion[T] {
@@ -52,7 +58,10 @@ trait CounterCompanion[T] {
   def unapply(sc: Counter[T]): Option[Long] = Some(sc.unwrap)
 }
 
-object Counter {
+object Counter extends PrettyPrintingCompanion[Counter[?]] {
+
+  override protected val pretty: Pretty[Counter[?]] = prettyOfString(_.v.toString)
+
   def MaxValue[Discr]: Counter[Discr] = Counter[Discr](Long.MaxValue)
   def MinValue[Discr]: Counter[Discr] = Counter[Discr](Long.MinValue)
 

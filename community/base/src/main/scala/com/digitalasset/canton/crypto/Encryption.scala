@@ -697,8 +697,6 @@ final case class EncryptionPublicKey private (
 
   override protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key] =
     v30.PublicKey.Key.EncryptionPublicKey(toProtoV30).asRight
-  override protected def toProtoPublicKeyKeyV31: Either[String, v31.PublicKey.Key] =
-    v31.PublicKey.Key.EncryptionPublicKey(toProtoV30).asRight
 
   override def prettyCompanion: PrettyPrintingCompanion[EncryptionPublicKey] = EncryptionPublicKey
 

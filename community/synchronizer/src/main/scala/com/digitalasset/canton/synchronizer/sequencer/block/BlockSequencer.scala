@@ -1323,7 +1323,7 @@ class BlockSequencer(
         }
 
       case Right(bootstrapInfo) =>
-        if (bootstrapInfo.psid != successorPsid) {
+        if (bootstrapInfo.psid.opaque != successorPsid) {
           logger.warn(
             s"Error when contacting successor: expecting psid to be $successorPsid but found ${bootstrapInfo.psid}"
           )

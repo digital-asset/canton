@@ -37,8 +37,8 @@
         },
         {
           "stage_name": "fetch_acs_with_high_archival_rate",
-          "scala_test": "AcsFetchPerfTest",
-          "file_pattern": "acs_fetch",
+          "scala_test": "AcsFetchWithIncreasedArchivalRatePerfTest",
+          "file_pattern": "high_archive_fetch",
           "description": "Acs fetch for high archival rate",
           "new_db": false,
           "xmx": "32G"

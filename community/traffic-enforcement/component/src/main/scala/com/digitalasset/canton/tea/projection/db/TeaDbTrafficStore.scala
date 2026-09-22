@@ -295,7 +295,7 @@ object TeaDbTrafficStore {
   ): PartialFunction[Throwable, TrafficEnforcementError] = {
     case ex if isOutOfBound(ex) =>
       TrafficEnforcementErrors.TrafficUpdateOutOfBound
-        .Reject(accountId.toString, trafficDelta.toString)
+        .Reject(accountId.toString, trafficDelta.value, trafficDelta.eventType.toString)
   }
 
   private def isOutOfBound(ex: Throwable): Boolean = ex match {

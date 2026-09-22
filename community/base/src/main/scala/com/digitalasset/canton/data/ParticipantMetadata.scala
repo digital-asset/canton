@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
@@ -43,12 +43,8 @@ final case class ParticipantMetadata private (
 
   override val hashPurpose: HashPurpose = HashPurpose.ParticipantMetadata
 
-  override protected def pretty: Pretty[ParticipantMetadata] = prettyOfClass(
-    param("ledger time", _.ledgerTime),
-    param("preparation time", _.preparationTime),
-    paramIfDefined("workflow id", _.workflowIdO),
-    param("salt", _.salt),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ParticipantMetadata] =
+    ParticipantMetadata
 
   @transient override protected lazy val companionObj: ParticipantMetadata.type =
     ParticipantMetadata
@@ -62,8 +58,16 @@ final case class ParticipantMetadata private (
 }
 
 object ParticipantMetadata
-    extends VersioningCompanionContextMemoization[ParticipantMetadata, HashOps] {
+    extends VersioningCompanionContextMemoization[ParticipantMetadata, HashOps]
+    with PrettyPrintingCompanion[ParticipantMetadata] {
   override val name: String = "ParticipantMetadata"
+
+  override protected val pretty: Pretty[ParticipantMetadata] = prettyOfClass(
+    param("ledger time", _.ledgerTime),
+    param("preparation time", _.preparationTime),
+    paramIfDefined("workflow id", _.workflowIdO),
+    param("salt", _.salt),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ParticipantMetadata)(

@@ -30,7 +30,6 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
-import com.digitalasset.canton.util.BatchN.{CatchUpMode, MaximizeConcurrency}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.SingletonTraverse.syntax.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -101,12 +100,23 @@ object PekkoUtil extends HasLoggerName {
     *
     * By default, a Pekko flow will discard exceptions. Use this method to avoid discarding
     * exceptions.
+    *
+    * @param isDone
+    *   Evaluated on the materialized value when an unhandled exception reaches the supervisor. If
+    *   it returns true (e.g., indicating the stream has already completed naturally), the exception
+    *   is logged at INFO level with the suffix "(encountered after the graph is completed)" to
+    *   prevent false-positive alerts from late straggler exceptions.
+    * @param reportExceptionAtInfo
+    *   Evaluated on the exception itself. If it returns true (e.g., for expected control-flow
+    *   exceptions like aborts due to shutdown or non-failure cancellations), the exception is
+    *   logged at INFO level with the suffix "(explicitly suppressed)" instead of ERROR.
     */
   def runSupervised[MaterializedValueT](
       graph: RunnableGraph[MaterializedValueT],
       errorLogMessagePrefix: String,
       isDone: MaterializedValueT => Boolean = (_: MaterializedValueT) => false,
       debugLogging: Boolean = false,
+      reportExceptionAtInfo: Throwable => Boolean = _ => false,
   )(implicit mat: Materializer, loggingContext: ErrorLoggingContext): MaterializedValueT = {
     val materializedValueCell = new SingleUseCell[MaterializedValueT]
 
@@ -118,10 +128,12 @@ object PekkoUtil extends HasLoggerName {
             ex, // Pass the original error as well so that we don't lose it
           )
         )
-        // Avoid errors on shutdown
+        // Avoid errors on shutdown or if explicitly suppress
         if (isDone(materializedValue)) {
           loggingContext
             .info(s"$errorLogMessagePrefix (encountered after the graph is completed)", ex)
+        } else if (reportExceptionAtInfo(ex)) {
+          loggingContext.info(s"$errorLogMessagePrefix (explicitly suppressed)", ex)
         } else {
           loggingContext.error(errorLogMessagePrefix, ex)
         }
@@ -927,6 +939,15 @@ object PekkoUtil extends HasLoggerName {
       }
     }
 
+  def optionalTake[A, Mat](
+      graph: FlowOps[A, Mat],
+      limit: Option[Long],
+  ): graph.Repr[A] =
+    limit match {
+      case Some(l) => graph.take(l)
+      case None => graph.via(Flow.apply[A])
+    }
+
   val noOpKillSwitch = new KillSwitch {
     override def shutdown(): Unit = ()
     override def abort(ex: Throwable): Unit = ()
@@ -1127,12 +1148,17 @@ object PekkoUtil extends HasLoggerName {
       )(implicit loggingContext: NamedLoggingContext): U#Repr[B] =
         PekkoUtil.mapAsyncAndDrainUS(graph, parallelism)(f)
 
-      def batchN(
+      def batchNForMaxConcurrency(
           maxBatchSize: Int,
           maxBatchCount: Int,
-          catchUpMode: CatchUpMode = MaximizeConcurrency,
       ): U#Repr[Iterable[A]] =
-        graph.via(BatchN(maxBatchSize, maxBatchCount, catchUpMode))
+        graph.via(BatchN.forMaxConcurrency(maxBatchSize, maxBatchCount))
+
+      def batchNForMaxBatchSize(
+          maxBatchSize: Int,
+          maxBatchCount: Int,
+      ): U#Repr[Iterable[A]] =
+        graph.via(BatchN.forMaxBatchSize(maxBatchSize, maxBatchCount))
 
       def dropIf(count: Int)(condition: A => Boolean): U#Repr[A] =
         PekkoUtil.dropIf(graph, count, condition)
@@ -1167,6 +1193,11 @@ object PekkoUtil extends HasLoggerName {
           onStuck: (A, B) => Option[A]
       ): U#Repr[A] =
         PekkoUtil.gateKeeper(graph, gate)(by)(onStuck)
+
+      def optionalTake(
+          limit: Option[Long]
+      ): U#Repr[A] =
+        PekkoUtil.optionalTake(graph, limit)
     }
 
     // Use separate implicit conversions for Sources and Flows to help IntelliJ

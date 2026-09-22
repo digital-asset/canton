@@ -38,12 +38,6 @@ object SubscriptionCloseReason {
     */
   trait PermissionDeniedError extends SubscriptionCloseReason[Nothing]
 
-  /** The sequencer connection details are being updated, so the subscription is being closed so
-    * another one is created with the updated transport. This is not an error and also not a reason
-    * to close the sequencer client.
-    */
-  case object TransportChange extends SubscriptionCloseReason[Nothing]
-
   /** The subscription was closed by the client. */
   case object Closed extends SubscriptionCloseReason[Nothing]
 
@@ -60,9 +54,7 @@ object SubscriptionCloseReason {
   * close is called while the handler is running closeReason should not be completed until the
   * handler has completed.
   */
-trait InternallyCompletedSequencerSubscription[HandlerError]
-    extends FlagCloseableAsync
-    with NamedLogging {
+trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedLogging {
 
   protected val closeReasonPromise: Promise[SubscriptionCloseReason[HandlerError]] =
     Promise[SubscriptionCloseReason[HandlerError]]()
@@ -86,12 +78,6 @@ trait InternallyCompletedSequencerSubscription[HandlerError]
   // a stalled stream
   override def onCloseFailure(e: Throwable): Unit =
     logger.warn("Failed to close sequencer subscription", e)(TraceContext.empty)
-}
-
-/** A subscription to a sequencer that can also be completed externally.
-  */
-trait SequencerSubscription[HandlerError]
-    extends InternallyCompletedSequencerSubscription[HandlerError] {
 
   /** Completes the subscription with the given reason and closes it. */
   private[canton] def complete(reason: SubscriptionCloseReason[HandlerError])(implicit

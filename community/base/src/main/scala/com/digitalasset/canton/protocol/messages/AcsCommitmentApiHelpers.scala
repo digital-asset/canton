@@ -6,7 +6,11 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.ProtoDeserializationError.UnrecognizedEnum
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -16,8 +20,14 @@ final case class SynchronizerSearchCommitmentPeriod(
     indexedSynchronizer: IndexedSynchronizer,
     fromExclusive: CantonTimestamp,
     toInclusive: CantonTimestamp,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[SynchronizerSearchCommitmentPeriod] =
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerSearchCommitmentPeriod] =
+    SynchronizerSearchCommitmentPeriod
+}
+
+object SynchronizerSearchCommitmentPeriod
+    extends PrettyPrintingCompanion[SynchronizerSearchCommitmentPeriod] {
+  override protected val pretty: Pretty[SynchronizerSearchCommitmentPeriod] =
     prettyOfClass(
       param("synchronizerId", _.indexedSynchronizer.synchronizerId),
       param("fromExclusive", _.fromExclusive),
@@ -25,7 +35,10 @@ final case class SynchronizerSearchCommitmentPeriod(
     )
 }
 
-sealed trait CommitmentPeriodState extends Product with Serializable with PrettyPrinting {
+sealed trait CommitmentPeriodState
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
   def toInt: Int
 
   def toReceivedCommitmentStateProtoV30: v30.ReceivedCommitmentState =
@@ -42,10 +55,8 @@ sealed trait CommitmentPeriodState extends Product with Serializable with Pretty
         v30.ReceivedCommitmentState.RECEIVED_COMMITMENT_STATE_UNSPECIFIED
     }
 
-  override protected def pretty: Pretty[CommitmentPeriodState] =
-    prettyOfClass(
-      param("state", _.toInt)
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[CommitmentPeriodState] =
+    CommitmentPeriodState
 }
 
 sealed trait ValidSentPeriodState extends CommitmentPeriodState {
@@ -59,7 +70,13 @@ sealed trait ValidSentPeriodState extends CommitmentPeriodState {
     }
 }
 
-object CommitmentPeriodState extends {
+object CommitmentPeriodState extends PrettyPrintingCompanion[CommitmentPeriodState] {
+
+  override protected val pretty: Pretty[CommitmentPeriodState] =
+    prettyOfClass(
+      param("state", _.toInt)
+    )
+
   sealed trait CommitmentPeriodStateInOutstanding
       extends CommitmentPeriodState
       with ValidSentPeriodState

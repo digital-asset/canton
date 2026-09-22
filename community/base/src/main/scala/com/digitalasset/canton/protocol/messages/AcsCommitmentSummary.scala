@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter.{
   ParsingResult,
@@ -45,7 +49,7 @@ final case class AcsCommitmentSummary(
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitmentSummary]
     with ProtocolVersionedMemoizedEvidence
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   @transient override protected lazy val companionObj: AcsCommitmentSummary.type =
     AcsCommitmentSummary
@@ -53,15 +57,8 @@ final case class AcsCommitmentSummary(
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override def pretty: Pretty[AcsCommitmentSummary] =
-    prettyOfClass(
-      param("psid", _.psid),
-      param("commitmentTick", _.commitmentTick),
-      param("addressedCounterparticipants", _.addressedCounterparticipants),
-      param("unsentDigests", _.unsentDigests),
-      param("batchIndex", _.batchIndex),
-      param("lastBatch", _.lastBatch),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[AcsCommitmentSummary] =
+    AcsCommitmentSummary
 
   private[messages] def toProtoV32: v32.AcsCommitmentSummary = v32.AcsCommitmentSummary(
     physicalSynchronizerId = psid.toProtoPrimitive,
@@ -73,7 +70,19 @@ final case class AcsCommitmentSummary(
   )
 }
 
-object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitmentSummary] {
+object AcsCommitmentSummary
+    extends VersioningCompanionMemoization[AcsCommitmentSummary]
+    with PrettyPrintingCompanion[AcsCommitmentSummary] {
+
+  override protected val pretty: Pretty[AcsCommitmentSummary] =
+    prettyOfClass(
+      param("psid", _.psid),
+      param("commitmentTick", _.commitmentTick),
+      param("addressedCounterparticipants", _.addressedCounterparticipants),
+      param("unsentDigests", _.unsentDigests),
+      param("batchIndex", _.batchIndex),
+      param("lastBatch", _.lastBatch),
+    )
 
   override def name: String = "AcsCommitmentSummary"
 

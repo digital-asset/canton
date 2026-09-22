@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.connection
 
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
   SequencerConnectionPoolDelays,
@@ -21,6 +22,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -32,8 +34,6 @@ import com.digitalasset.canton.sequencing.client.pool.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.time.PositiveFiniteDuration
-import com.digitalasset.canton.{SequencerAlias, config}
-import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
 
 import scala.concurrent.duration.DurationInt
@@ -48,10 +48,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
     // even though the test only needs to work with 2 sequencers, we need 4 sequencers
     // in order to be able to crash one and things still work with the BFT orderer
     EnvironmentDefinition.P2S4M1_Config
-      .addConfigTransforms(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(config.NonNegativeDuration.tryFromDuration(2.seconds))
-      )
+      .addConfigTransforms(ConfigTransforms.setSequencerInfoTimeout(2.second))
       .withNetworkBootstrap { implicit env =>
         import env.*
         new NetworkBootstrapper(

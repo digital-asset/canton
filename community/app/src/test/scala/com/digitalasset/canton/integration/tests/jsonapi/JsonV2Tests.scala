@@ -105,6 +105,8 @@ class JsonV2Tests
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   // Configure extremely small wait time to avoid long test times and test edge cases
   override def wsConfig: Option[WebsocketConfig] = Some(
     WebsocketConfig(httpListWaitTime = 1.milliseconds)

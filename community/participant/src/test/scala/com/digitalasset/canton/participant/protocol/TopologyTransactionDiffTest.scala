@@ -80,6 +80,7 @@ class TopologyTransactionDiffTest
       participants.map { case (participant, (permission, onboarding)) =>
         HostingParticipant(participant, permission, onboarding)
       },
+      isOffline = false,
     )
 
     val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction

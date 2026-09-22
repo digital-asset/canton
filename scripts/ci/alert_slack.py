@@ -25,6 +25,8 @@ from flaky_common import (
     branch,
     get_ci_commit_hash,
     get_ci_job_name,
+    is_circle_ci,
+    is_github_actions_ci,
     is_nightly_job,
     NIGHTLY_CONSECUTIVE_FAILURES,
     read_streaks,
@@ -33,6 +35,20 @@ from flaky_common import (
 )
 
 REPO_URL = "https://github.com/DACH-NY/canton"
+
+
+def _redact(text: str) -> str:
+    """Strip known secret env values from helper output before it reaches the log.
+
+    select_rota.py's diagnostics are audited to carry only failure reasons, never
+    credentials, but this is defense in depth so echoing its stderr stays safe if
+    that helper ever changes.
+    """
+    for var in ('GCLOUD_SHEETS_SA_KEY', 'SLACK_BOT_QA_NOTIFICATIONS'):
+        secret = os.environ.get(var)
+        if secret:
+            text = text.replace(secret, '***')
+    return text
 
 
 def select_rota(rotation: str) -> list[str]:
@@ -51,8 +67,13 @@ def select_rota(rotation: str) -> list[str]:
         text=True,
     )
     if result.returncode != 0:
-        print(f"select_rota.py failed: {result.stderr.strip()}. No one selected.")
+        print(f"select_rota.py failed: {_redact(result.stderr.strip())}. No one selected.")
         return []
+    # select_rota.py exits 0 even when it degrades to the fallback pool, writing the
+    # reason (sheet auth/lookup failure) to stderr. Surface it so a fallback ping is
+    # explained in the log instead of looking like a normal rota pick.
+    if result.stderr.strip():
+        print(f"select_rota.py diagnostics: {_redact(result.stderr.strip())}")
     ids = [tok for tok in result.stdout.split() if re.match(r'^U[A-Z0-9]+$', tok)]
     if not ids:
         print(f"Unexpected output from select_rota.py: {result.stdout.strip()!r}. No one selected.")
@@ -63,12 +84,25 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
     """Post a single summary to the team Slack channel when tests fail repeatedly."""
     token = os.environ.get('SLACK_BOT_QA_NOTIFICATIONS', '')
     channel = os.environ.get('SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS', '')
-    if not token:
-        print("SLACK_BOT_QA_NOTIFICATIONS not set. Skipping Slack channel summary.")
-        return
-    if not channel:
-        print("SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS not set. Skipping Slack channel summary.")
-        return
+    # We only get here with streaks worth alerting on, and streaks are written
+    # only on tracked branches (main / main-2.x, see should_report_issues), never
+    # on PRs or forks. So missing creds here means a branch that must alert has
+    # not been wired up. Fail loudly instead of swallowing the alert, which is the
+    # silent no-op that left main un-alerted. This also self-enforces wiring: a new
+    # test job that forgets the creds goes red on its first real streak.
+    missing = [
+        name
+        for name, value in (
+            ('SLACK_BOT_QA_NOTIFICATIONS', token),
+            ('SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS', channel),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"{' and '.join(missing)} not set, but {len(duplicates)} streak(s) need a Slack alert. "
+            "Wire the credential(s) into this workflow's job-level env (see the other _*_test.yml)."
+        )
     commit_hash = get_ci_commit_hash()
     commit_link = f"<{REPO_URL}/commit/{commit_hash}|{commit_hash[:8]}>"
     nightly = is_nightly_job(get_ci_job_name())
@@ -76,15 +110,19 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
     # Canton rotation's (two people share it, so both get pinged).
     responders = select_rota("ci" if nightly else "flaky-canton")
     mention = "".join(f"<@{uid}> " for uid in responders)
+    # Label the alert with the CI that produced it so the reader can tell GHA from
+    # CircleCI at a glance (they route the rota mention differently). Matches the
+    # `*[CircleCI]*` convention in .circleci/config/commands/@slack.yml.
+    source = "GHA" if is_github_actions_ci() else "CircleCI" if is_circle_ci() else "CI"
     if nightly:
-        alert = f"Broken nightly test alert on {branch}"
+        alert = f"*[{source}]* Broken nightly test alert on {branch}"
         description = (
             f"The following test(s) failed on the last {NIGHTLY_CONSECUTIVE_FAILURES} nightly runs "
             f"on `{branch}` (latest at {commit_link}). Likely genuinely broken, not flaky."
         )
         prompt = "Can you have a look?"
     else:
-        alert = f"Flaky test alert on {branch}"
+        alert = f"*[{source}]* Flaky test alert on {branch}"
         description = f"Flaky tests have failed on several consecutive commits ending at {commit_link} on branch `{branch}`."
         prompt = "Main may be broken, can you have a look?"
     issue_lines = []

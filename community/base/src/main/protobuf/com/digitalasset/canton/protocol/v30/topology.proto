@@ -289,7 +289,7 @@ message PartyToParticipant {
 
   // which participants will host the party.
   // if threshold > 1, must be Confirmation or Observation.
-  // if all participants have Observation permission, the confirmation treshold is ignored, making the party
+  // if all participants have Observation permission, the confirmation threshold is ignored, making the party
   // a purely observing party.
   repeated HostingParticipant participants = 3;
 

@@ -726,7 +726,7 @@ object NextGenContractStateMachine {
   def empty(mode: Mode): Journal =
     empty(mode == Mode.NoKey)
 
-  def empty(authorizeRollBack: Boolean = true): Journal =
+  def empty(authorizeRollBack: Boolean = false): Journal =
     Journal.Impl(
       authorizeRollback = authorizeRollBack,
       localContracts = immutable.VectorMap.empty,

@@ -21,12 +21,13 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryLogicalSyncPersistentState,
   InMemoryPhysicalSyncPersistentState,
 }
+import com.digitalasset.canton.participant.topology.OfflineTopologyLookup
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
@@ -158,6 +159,8 @@ object LogicalSyncPersistentState {
       acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
       ledgerApiStore: Eval[LedgerApiStore],
       contractStore: Eval[ContractStore],
+      participantId: ParticipantId,
+      offlineTopologyLookup: OfflineTopologyLookup,
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
   )(implicit ec: ExecutionContext): LogicalSyncPersistentState =
@@ -170,6 +173,8 @@ object LogicalSyncPersistentState {
           contractStore.value,
           acsCounterParticipantConfigStore,
           ledgerApiStore,
+          participantId,
+          offlineTopologyLookup,
           loggerFactory,
           futureSupervisor,
         )
@@ -182,6 +187,8 @@ object LogicalSyncPersistentState {
           acsCounterParticipantConfigStore,
           contractStore.value,
           ledgerApiStore,
+          participantId,
+          offlineTopologyLookup,
           loggerFactory,
           futureSupervisor,
         )

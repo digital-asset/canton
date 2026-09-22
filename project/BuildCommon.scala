@@ -694,8 +694,7 @@ object BuildCommon {
       `community-participant`,
       `community-testing`,
       `community-integration-testing`,
-      // TODO (i29705) removed as jmh code generation was possibly causing oom errors
-      // microbench,
+      microbench,
       `daml-script-tests`,
       `performance-driver`,
       performance,
@@ -1287,8 +1286,8 @@ object BuildCommon {
             "com.digitalasset.canton.participant.admin.workflows",
           ),
           (
-            (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-party-replication-alpha",
-            (Compile / resourceDirectory).value / "dar" / "canton-builtin-admin-workflow-party-replication-alpha.dar",
+            (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-acs-replication-alpha",
+            (Compile / resourceDirectory).value / "dar" / "canton-builtin-admin-workflow-acs-replication-alpha.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
         ),
@@ -1304,7 +1303,7 @@ object BuildCommon {
         Compile / damlDarOutput := (Compile / target).value / "dar-output",
         damlPinnedProjects := Seq(
           (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-ping",
-          (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-party-replication-alpha",
+          (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-acs-replication-alpha",
         ),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
@@ -1433,12 +1432,6 @@ object BuildCommon {
         Compile / compile / wartremoverErrors ~= (_.filterNot(
           _.clazz == "com.digitalasset.canton.EnforceVisibleForTesting"
         )),
-        // to find the correct classpath https://stackoverflow.com/a/30056340
-        Test / fork := true,
-        // to produce the Jmh resources needed before running the scalatest that calls the Jmh runner
-        (Test / testOnly) := (Test / testOnly)
-          .dependsOn(Jmh / compile)
-          .evaluated,
       )
       .dependsOn(
         `community-app` % "compile->test",
@@ -2325,6 +2318,8 @@ object BuildCommon {
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
         assembly / assemblyJarName := s"ledger-api-test-tool-2.3-${version.value}.jar",
+        // logback.xml is scoped only to the assembly JAR to avoid classpath conflicts in community-app / Test
+        assembly / fullClasspath += Attributed.blank(sourceDirectory.value / "assembly"),
         assembly / assemblyMergeStrategy := {
           case PathList("logback.xml") => MergeStrategy.last
           case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last

@@ -5,10 +5,19 @@ package com.digitalasset.canton.protocol
 
 import com.digitalasset.base.error.{ErrorCode, ErrorResource}
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.rpc.status.Status
 
-trait LocalError extends TransactionError with PrettyPrinting with Product with Serializable {
+trait LocalError
+    extends TransactionError
+    with PrettyPrintingFromCompanion
+    with Product
+    with Serializable {
 
   def reason(): Status = rpcStatusWithoutLoggingContext()
 
@@ -46,7 +55,11 @@ trait LocalError extends TransactionError with PrettyPrinting with Product with 
   override def context: Map[String, String] =
     _resourcesType.map(_.asString -> _resources.show).toList.toMap ++ super.context
 
-  override protected def pretty: Pretty[LocalError] =
+  override def prettyCompanion: PrettyPrintingCompanion[LocalError] = LocalError
+}
+
+object LocalError extends PrettyPrintingCompanion[LocalError] {
+  override protected val pretty: Pretty[LocalError] =
     prettyOfClass(
       param("code", _.code.id.unquoted),
       param("cause", _.cause.doubleQuoted),

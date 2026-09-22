@@ -1,0 +1,210 @@
+name: Close stale draft PRs
+
+# Sweep open draft pull requests and close the ones with no activity for longer than the
+# `days` input, leaving a comment that invites the author to reopen if they still care.
+
+on:
+  schedule:
+    - cron: '30 5 * * 1' # Every Monday at 05:30 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print what would be closed without actually closing'
+        type: boolean
+        default: true
+      days:
+        description: 'Age in days beyond which a draft PR is stale'
+        type: string
+
+# A scheduled run and a manual run must not sweep the same PRs concurrently.
+concurrency:
+  group: close-stale-draft-prs
+  cancel-in-progress: false
+
+jobs:
+  close-stale-draft-prs:
+    name: Close draft PRs with no activity for sufficiently long
+    # Pure GitHub API calls with no checkout, so a GitHub-hosted runner is enough.
+    runs-on: ubuntu-latest
+    # Only sweep the canonical repository. The OSS mirror carries its own PRs.
+    if: github.repository == 'DACH-NY/canton'
+    permissions:
+      # pull-requests: write closes the PR; issues: write posts the closing comment,
+      # since PR comments go through the issues API.
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Close stale draft PRs
+        uses: actions/github-script@v9
+        env:
+          # A scheduled sweep always acts for real; only a manual run can ask for a dry run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          # The fallback covers the scheduled run, where the inputs context is unset.
+          DAYS: ${{ inputs.days || '31' }}
+        with:
+          script: |
+            // A draft PR carrying this label stays open however old it is.
+            const SKIP_LABEL = 'keep-open';
+            // Each closure costs two content-generating requests (comment, then close), and
+            // GitHub's secondary limit is 80 per minute. 2s spacing keeps the sweep at 60/min.
+            const WRITE_DELAY_MS = 2000;
+            // The same limit is 500 content-generating requests per hour, so one run can close
+            // at most 250 PRs. Stop well short of that and let the weekly schedule drain the
+            // rest, rather than burning the budget and failing the tail of the sweep. This
+            // bounds PRs attempted, not PRs closed, so a systemic failure cannot spend the
+            // whole budget on retries that all fail.
+            const MAX_PRS_PER_RUN = 100;
+
+            const dryRun = process.env.DRY_RUN === 'true';
+            const days = Number(process.env.DAYS);
+            if (!Number.isInteger(days) || days <= 0) {
+              core.setFailed(`days must be a positive integer, got ${JSON.stringify(process.env.DAYS)}.`);
+              return;
+            }
+
+            const now = Date.now();
+            const cutoff = now - days * 24 * 60 * 60 * 1000;
+            const ageInDays = (stamp) => Math.floor((now - Date.parse(stamp)) / (24 * 60 * 60 * 1000));
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            // A 429, or a 403 once the budget is spent, means we are rate limited. Anything else
+            // is a real per-PR failure.
+            const isRateLimit = (error) =>
+              error.status === 429 ||
+              (error.status === 403 &&
+                (error.response?.headers?.['x-ratelimit-remaining'] === '0' ||
+                  /rate limit|secondary/i.test(error.message ?? '')));
+
+            // Ask for the oldest first on the very field we measure, so the walk can stop at the
+            // first PR inside the cutoff instead of paginating every open PR.
+            const iterator = github.paginate.iterator(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'updated',
+              direction: 'asc',
+              per_page: 100,
+            });
+
+            const stale = [];
+            let scanned = 0;
+            let skippedLabel = 0;
+            let notDraft = 0;
+            outer: for await (const { data: page } of iterator) {
+              for (const pr of page) {
+                scanned += 1;
+                // The listing is sorted by the field we measure, so everything after the first
+                // PR inside the cutoff is newer still.
+                if (Date.parse(pr.updated_at) >= cutoff) break outer;
+                if (!pr.draft) {
+                  notDraft += 1;
+                  continue;
+                }
+                if ((pr.labels ?? []).some(({ name }) => name === SKIP_LABEL)) {
+                  core.info(`#${pr.number} ${pr.title}: has the ${SKIP_LABEL} label, skipping`);
+                  skippedLabel += 1;
+                  continue;
+                }
+                stale.push(pr);
+              }
+            }
+
+            core.info(
+              `Scanned ${scanned} open PRs (least recently updated first). ${stale.length} stale drafts, ` +
+              `${notDraft} non-draft, ${skippedLabel} skipped by the ${SKIP_LABEL} label. ` +
+              `Cutoff: ${new Date(cutoff).toISOString().slice(0, 10)} (${days} days ago).`
+            );
+
+            const closingComment = (pr) => {
+              const mention = pr.user?.login ? `@${pr.user.login}: ` : '';
+              return (
+                `${mention}closing automatically: this pull request has been a draft with no ` +
+                `activity for ${ageInDays(pr.updated_at)} days (threshold: ${days} days). ` +
+                `Nothing is lost: if you still care about it, reopen it and add the ` +
+                `\`${SKIP_LABEL}\` label, which exempts it from this sweep for good. ` +
+                `Reopening on its own only buys another ${days} days.`
+              );
+            };
+
+            const closed = [];
+            const failed = [];
+            let deferred = [];
+            // Leave everything from `from` onwards to the next run rather than pressing on.
+            const deferRest = (from, reason) => {
+              deferred = stale.slice(from).map((rest) => `#${rest.number} ${rest.title}`);
+              core.warning(`${reason} ${deferred.length} stale drafts are left for the next run.`);
+            };
+
+            for (const [index, pr] of stale.entries()) {
+              const label = `#${pr.number} ${pr.title} (${ageInDays(pr.updated_at)}d, author ${pr.user?.login ?? 'unknown'})`;
+              if (index >= MAX_PRS_PER_RUN) {
+                deferRest(index, `Reached the per-run cap of ${MAX_PRS_PER_RUN} PRs.`);
+                break;
+              }
+              if (dryRun) {
+                core.info(`[dry-run] would close ${label} with comment: ${closingComment(pr)}`);
+                closed.push(label);
+                continue;
+              }
+              // Close before commenting. There is no atomic close-with-comment, and a comment
+              // that lands ahead of a failed close would announce a closure that never happened.
+              // This way round the only bad state is a closed PR missing its explanation, which
+              // the failure list surfaces and which cannot recur: the PR is no longer open.
+              try {
+                await github.rest.pulls.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                  state: 'closed',
+                });
+              } catch (error) {
+                if (isRateLimit(error)) {
+                  deferRest(index, `Rate limited closing #${pr.number}, stopping the sweep.`);
+                  break;
+                }
+                // One unclosable PR must not abandon the rest of the sweep.
+                core.warning(`Failed to close #${pr.number}: ${error.message}`);
+                failed.push(`${label}: ${error.message}`);
+                await sleep(WRITE_DELAY_MS);
+                continue;
+              }
+              closed.push(label);
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: closingComment(pr),
+                });
+                core.info(`Closed ${label}`);
+              } catch (error) {
+                core.warning(`Closed #${pr.number} but could not post the explanation: ${error.message}`);
+                failed.push(`${label}: closed without the explanatory comment: ${error.message}`);
+                if (isRateLimit(error)) {
+                  deferRest(index + 1, `Rate limited commenting on #${pr.number}, stopping the sweep.`);
+                  break;
+                }
+              }
+              await sleep(WRITE_DELAY_MS);
+            }
+
+            const action = dryRun ? 'Would close' : 'Closed';
+            core.summary
+              .addHeading('Stale draft PR sweep', 2)
+              .addRaw(
+                `${action} **${closed.length}** of ${stale.length} stale drafts ` +
+                `(threshold: ${days} days without activity${dryRun ? ', dry run' : ''}).`,
+                true
+              )
+              .addList(closed.length > 0 ? closed : ['(none)']);
+            if (deferred.length > 0) {
+              core.summary.addHeading('Deferred to the next run', 3).addList(deferred);
+            }
+            if (failed.length > 0) {
+              core.summary.addHeading('Failed', 3).addList(failed);
+            }
+            await core.summary.write();
+
+            if (failed.length > 0) {
+              core.setFailed(`${failed.length} of ${stale.length} stale drafts could not be closed.`);
+            }

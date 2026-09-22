@@ -134,6 +134,7 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
       (
         killSwitch,
         doneF.thereafter { result =>
+          metricsForSynchronizer.removeAllMatchingStatusMetrics()
           healthComponent.reportHealth(AcsCommitmentHealthState.stoppedFromTry(result))
         },
       )

@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeL
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationAcsReader
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
@@ -41,7 +42,7 @@ object SourceParticipantStore {
       contractOrdinalToSendUpToExclusive: NonNegativeLong,
       initialContractOrdinalInclusiveO: Option[NonNegativeLong],
       hasEndOfACSBeenReached: Boolean = false,
-      acsReaderO: Option[PartyReplicationAcsReader] = None,
+      acsReaderO: Option[AcsReplicationAcsReader] = None,
       nextAcsReaderId: Int = 0,
   )
 }
@@ -73,7 +74,7 @@ final class SourceParticipantStore(
 
   def initializeSourceParticipantState(
       initialContractOrdinalInclusive: NonNegativeLong,
-      createAcsReader: (SourceParticipantStore, NamedLoggerFactory) => PartyReplicationAcsReader,
+      createAcsReader: (SourceParticipantStore, NamedLoggerFactory) => AcsReplicationAcsReader,
   )(implicit traceContext: TraceContext): Either[String, Unit] =
     Either
       .cond(
@@ -129,7 +130,7 @@ final class SourceParticipantStore(
   private[party] def setHasEndOfACSBeenReached(): Unit =
     state.updateAndGet(_.copy(hasEndOfACSBeenReached = true)).discard
 
-  private[party] def acsReaderO: Option[PartyReplicationAcsReader] = state.get().acsReaderO
+  private[party] def acsReaderO: Option[AcsReplicationAcsReader] = state.get().acsReaderO
 }
 
 object TargetParticipantStore {

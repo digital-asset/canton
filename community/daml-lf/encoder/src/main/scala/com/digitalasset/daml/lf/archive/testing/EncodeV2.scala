@@ -482,6 +482,16 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
           builder.setFetchInterface(
             PLF.Update.FetchInterface.newBuilder().setInterface(interface).setCid(contractId)
           )
+        case UpdateUnpackTemplate(templateId, contractId) =>
+          assertVersionSupports(LV.featureUnpack, upd0.productPrefix)
+          builder.setUnpackTemplate(
+            PLF.Update.UnpackTemplate.newBuilder().setTemplate(templateId).setCid(contractId)
+          )
+        case UpdateUnpackInterface(interface, contractId) =>
+          assertVersionSupports(LV.featureUnpack, upd0.productPrefix)
+          builder.setUnpackInterface(
+            PLF.Update.UnpackInterface.newBuilder().setInterface(interface).setCid(contractId)
+          )
         case UpdateExercise(templateId, choice, cid, arg) =>
           val b = PLF.Update.Exercise.newBuilder()
           b.setTemplate(templateId)

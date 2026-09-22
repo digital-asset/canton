@@ -15,7 +15,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
@@ -39,6 +38,7 @@ import com.digitalasset.canton.ledger.api.{
   UpdateVettedPackagesOpts,
   UploadDarVettingChange,
   VetAllPackages,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
@@ -179,7 +179,6 @@ class CantonSyncService(
     parameters: ParticipantNodeParameters,
     connectedSynchronizerFactory: ConnectedSynchronizer.Factory[ConnectedSynchronizer],
     metrics: ParticipantMetrics,
-    sequencerInfoLoader: SequencerInfoLoader,
     override val isActive: () => Boolean,
     declarativeChangeTrigger: () => Unit,
     futureSupervisor: FutureSupervisor,
@@ -256,7 +255,6 @@ class CantonSyncService(
     pendingLsuOperationsStore,
     pendingOnboardingTransactionsStore,
     metrics,
-    sequencerInfoLoader,
     isActive,
     declarativeChangeTrigger,
     futureSupervisor,
@@ -347,7 +345,7 @@ class CantonSyncService(
       // vet any packages that have not yet been vetted
       EitherTUtil.toFutureUnlessShutdown(
         AdminWorkflowServices.handleDamlErrorDuringPackageLoading(
-          s"${AdminWorkflowServices.PingDarResourceName}__${AdminWorkflowServices.PartyReplicationDarResourceName}"
+          s"${AdminWorkflowServices.PingDarResourceName}__${AdminWorkflowServices.AcsReplicationDarResourceName}"
         )(
           packageService
             .vetPackages(
@@ -361,16 +359,16 @@ class CantonSyncService(
     val topologyClientO = connectedSynchronizersLookup.get(lsid).map(_.topologyClient)
     val vettingF = topologyClientO match {
       case Some(topologyClient) =>
-        val partyReplicationPackagesIfShouldVet =
+        val acsReplicationPackagesIfShouldVet =
           if (
-            AdminWorkflowServices.isPartyReplicationWorkflowLoaded(
+            AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
               parameters.alphaOnlinePartyReplicationSupport
             )
           ) {
-            AdminWorkflowServices.PartyReplicationPackages.keySet
+            AdminWorkflowServices.AcsReplicationPackages.keySet
           } else Set.empty
         val packagesToVet = AdminWorkflowServices.PingPackages.keySet ++
-          partyReplicationPackagesIfShouldVet
+          acsReplicationPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
         topologyClient.headSnapshot
@@ -482,11 +480,11 @@ class CantonSyncService(
   private val migrationService =
     new SynchronizerMigration(
       aliasManager,
+      connectionsManager,
       synchronizerConnectionConfigStore,
       stateInspection,
       repairService,
       prepareSynchronizerConnectionForMigration,
-      sequencerInfoLoader,
       parameters.processingTimeouts,
       loggerFactory,
     )
@@ -932,7 +930,7 @@ class CantonSyncService(
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[EnrichedVettedPackages]] =
+  ): Future[VettedPackagesPage[EnrichedVettedPackages]] =
     EitherTUtil.toFuture(
       packageService
         .listVettedPackages(opts)
@@ -1267,7 +1265,7 @@ class CantonSyncService(
     for {
       _ <- allSynchronizersMustBeOffline()
 
-      targetSynchronizerInfo <- migrationService.isSynchronizerMigrationPossible(
+      targetPsid <- migrationService.isSynchronizerMigrationPossible(
         source,
         target,
         force = force,
@@ -1279,7 +1277,7 @@ class CantonSyncService(
             .migrateSynchronizer(
               source,
               target,
-              targetSynchronizerInfo.map(_.psid),
+              targetPsid,
               forceRepairWhenTopologyTransactionAtLedgerEnd,
               commitmentProcessorManager,
             )
@@ -1292,6 +1290,11 @@ class CantonSyncService(
       _ <- purgeDeactivatedSynchronizer(source.unwrap)
     } yield ()
   }
+
+  def getPsid(config: SynchronizerConnectionConfig)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
+    connectionsManager.getPsid(config)
 
   @VisibleForTesting
   def performLsu(
@@ -1320,14 +1323,14 @@ class CantonSyncService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     // psid -> successor for all successors that are a LsuTarget
-    val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
+    val psidToSuccessor: Map[PhysicalSynchronizerId, PhysicalSynchronizerId] =
       synchronizerConnectionConfigStore
         .getAll()
         .mapFilter { connection =>
           if (connection.status == SynchronizerConnectionConfigStore.LsuTarget) {
             (connection.predecessor, connection.configuredPsid.toOption).mapN {
               case (predecessor, psid) =>
-                predecessor.psid -> SynchronizerSuccessor(psid, predecessor.upgradeTime)
+                predecessor.psid -> psid
             }
           } else None
         }
@@ -1338,11 +1341,11 @@ class CantonSyncService(
         connectionConfig.configuredPsid.toOption.flatMap { currentPsid =>
           psidToSuccessor
             .get(currentPsid)
-            .map(successor =>
+            .map(successorPsid =>
               FinishAutomaticLsuRequest(
                 connectionConfig.config.synchronizerAlias,
                 currentPsid = currentPsid,
-                successorPsid = successor.psid,
+                successorPsid = successorPsid,
               )
             )
         }
@@ -1406,7 +1409,9 @@ class CantonSyncService(
     */
   def getLsuStatusMetrics()(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Set[(PhysicalSynchronizerId, NonNegativeInt)]] = {
+  ): EitherT[FutureUnlessShutdown, String, Set[
+    (OpaquePhysicalSynchronizerId, NonNegativeInt)
+  ]] = {
     import ParticipantMetrics.LsuStatus.*
 
     val topologyLookup = new TopologyLookup(
@@ -1438,24 +1443,26 @@ class CantonSyncService(
       announcedLsu <- EitherT.liftF(snapshot.announcedLsu())
     } yield announcedLsu.map { case (successor, _) => successor }
 
-    def getSequencerSuccessorsKnown(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def getSequencerSuccessorsKnown(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       synchronizerConnectionConfigStore
-        .get(successor.psid)
+        .get(successorPsid)
         .fold(_ => None, _ => Some(SequencerSuccessorsKnown))
 
-    def getHandshakeDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
-      syncPersistentStateManager.get(successor.psid).map(_ => HandshakeDone)
-
-    def getLocalCopyDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def getHandshakeDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       syncPersistentStateManager
-        .get(successor.psid)
+        .get(successorPsid)
+        .map(_ => HandshakeDone)
+
+    def getLocalCopyDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
+      syncPersistentStateManager
+        .get(successorPsid)
         .flatMap(state =>
           Option.when(state.connectivityStatusStore.isTopologyInitialized)(LocalCopyDone)
         )
 
-    def isLsuDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def isLsuDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       synchronizerConnectionConfigStore
-        .get(successor.psid)
+        .get(successorPsid)
         .fold(
           _ => None,
           config =>
@@ -1471,15 +1478,21 @@ class CantonSyncService(
           syncPersistentStateManager.getAll.values.toSeq
         ) { persistentState =>
           getLsuAnnounced(persistentState).map {
-            _.map { successor =>
-              val lsuStatus = Seq(
-                getSequencerSuccessorsKnown(successor),
-                getHandshakeDone(successor),
-                getLocalCopyDone(successor),
-                isLsuDone(successor),
-              ).maxOption.flatten.getOrElse(LsuAnnounced)
+            _.flatMap { successor =>
+              successor.psid.parseAsPhysical match {
+                case Left(err) =>
+                  logger.warn(OpaquePhysicalSynchronizerId.unparseablePSIdMessage(successor, err))
+                  None
+                case Right(successorPsid) =>
+                  val lsuStatus = Seq(
+                    getSequencerSuccessorsKnown(successorPsid),
+                    getHandshakeDone(successorPsid),
+                    getLocalCopyDone(successorPsid),
+                    isLsuDone(successorPsid),
+                  ).maxOption.flatten.getOrElse(LsuAnnounced)
 
-              (successor.psid, lsuStatus)
+                  Some((successorPsid, lsuStatus))
+              }
             }
           }
         }
@@ -1507,6 +1520,9 @@ class CantonSyncService(
             }
 
             lsuStatuses.take(if (allDone) 1 else 2).toSet
+          }
+          .map { case (psid, lsuStatus) =>
+            (psid.opaque, lsuStatus)
           }
           .toSet
       }
@@ -1912,7 +1928,6 @@ class CantonSyncService(
           .toSeq
       )(
         _.findIncomplete(
-          sourceSynchronizer = None,
           validAt = validAt,
           stakeholders = NonEmpty.from(stakeholders),
           limit = NonNegativeInt.maxValue,
@@ -2137,7 +2152,6 @@ object CantonSyncService {
       cantonParameterConfig: ParticipantNodeParameters,
       pruningProcessor: PruningProcessor,
       metrics: ParticipantMetrics,
-      sequencerInfoLoader: SequencerInfoLoader,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
       testingConfig: TestingConfigInternal,
@@ -2174,7 +2188,6 @@ object CantonSyncService {
         cantonParameterConfig,
         ConnectedSynchronizer.DefaultFactory,
         metrics,
-        sequencerInfoLoader,
         () => storage.isActive && replicaManager.isActive,
         triggerDeclarativeChange,
         futureSupervisor,

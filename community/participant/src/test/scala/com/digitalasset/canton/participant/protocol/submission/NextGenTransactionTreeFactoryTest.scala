@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{TestHash, TestSalt}
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
@@ -13,7 +14,6 @@ import com.digitalasset.canton.data.{
   GenTransactionTree,
   RollbackContextFactory,
   TransactionViewDecompositionFactory,
-  TransactionViewLimitConfig,
   ViewPosition,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -165,14 +165,12 @@ final class NextGenTransactionTreeFactoryTest
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
           maxTreeDepth: PositiveInt = defaultProtocolLimits.maxTransactionTreeDepth,
+          maxActAs: PositiveInt = defaultProtocolLimits.maxActAs,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
         val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
 
-        val limitConfig = TransactionViewLimitConfig(
-          maxRootViews = defaultProtocolLimits.maxTransactionRootViews,
-          maxSubViews = defaultProtocolLimits.maxTransactionSubViews,
-          maxTreeDepth = maxTreeDepth,
-        )
+        val protocolLimits =
+          defaultProtocolLimits.copy(maxTransactionTreeDepth = maxTreeDepth, maxActAs = maxActAs)
 
         treeFactory
           .createTransactionTree(
@@ -186,7 +184,7 @@ final class NextGenTransactionTreeFactoryTest
             contractOfId = contractInstanceOfId,
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
-            limitConfig = limitConfig,
+            protocolLimits = protocolLimits,
           )
           .failOnShutdown
       }
@@ -499,10 +497,10 @@ final class NextGenTransactionTreeFactoryTest
           }
         }
 
-        "empty actAs set is empty" must {
+        "checking actAs set" must {
           lazy val treeFactory = createTransactionTreeFactory()
 
-          "reject the input" in {
+          "reject the input if it is empty" in {
             val example = factory.standardHappyCases.headOption.value
             createTransactionTree(
               treeFactory,
@@ -512,6 +510,26 @@ final class NextGenTransactionTreeFactoryTest
             ).value
               .flatMap(
                 _ should equal(Left(SubmitterMetadataError("The actAs set must not be empty.")))
+              )
+          }
+
+          "reject the input if its size exceeds the limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+            val example = factory.standardHappyCases.headOption.value
+            val invariantViolation =
+              InvariantViolation(Some("act_as"), "size of 3 exceeds limit of 2")
+            createTransactionTree(
+              treeFactory,
+              example.wellFormedUnsuffixedTransaction,
+              successfulLookup(example),
+              actAs = List(
+                ExampleTransactionFactory.submitter,
+                ExampleTransactionFactory.observer,
+                ExampleTransactionFactory.extra,
+              ),
+              maxActAs = PositiveInt.two,
+            ).value
+              .flatMap(
+                _ should equal(Left(SubmitterMetadataError(invariantViolation.message)))
               )
           }
         }

@@ -7,8 +7,6 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   SynchronizerTimeRange,
   TimeRange,
 }
-import com.digitalasset.canton.annotations.UnstableTest
-import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
@@ -37,6 +35,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Receiv
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.store.UpdateMode
 import com.digitalasset.canton.participant.store.db.DbIncrementalCommitmentStore
+import com.digitalasset.canton.participant.sync.SyncEphemeralStateFactory
 import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.{SynchronizerAlias, config}
@@ -150,16 +149,21 @@ trait AcsCommitmentRepairIntegrationTest
             _.futureValue
           )
       )
-      // and the participant observes it as well, so that the commitments are computed.
+      // and the participants observe it as well, so that the commitments are computed.
       // with a frozen sim clock, `fetch_synchronizer_times` can keep treating a stale event as fresh.
       // waiting for the tick checks synchronizer time instead and requests a time proof if needed.
-      participant1.testing.await_synchronizer_time(
-        synchronizerAlias,
-        tick1.forgetRefinement.immediateSuccessor,
-        NonNegativeDuration.ofSeconds(10),
-      )
-      // the await only covers this synchronizer, the fetch still nudges the other one
-      participant1.testing.fetch_synchronizer_times()
+      for {
+        participant <- Seq(participant1, participant2)
+        alias <- Seq(daName, acmeName)
+      } {
+        participant.testing.await_synchronizer_time(
+          alias,
+          tick1.forgetRefinement.immediateSuccessor,
+          NonNegativeDuration.ofSeconds(10),
+        )
+        // the await only covers this synchronizer, the fetch still nudges the other one
+        participant.testing.fetch_synchronizer_times()
+      }
 
       val p1Computed = participant1.commitments
         .computed(
@@ -208,9 +212,20 @@ trait AcsCommitmentRepairIntegrationTest
         TestUtils.waitForTargetTimeOnSequencer(s, ts, logger)
       }
 
-      // Wait a bit until everything quiets down. This ensures that there's a high chance that the reinitialization happens
-      // when no further changes are queued that could move ledger end afterwards (in particular incoming ACS commitments).
-      Threading.sleep(2000)
+      // Wait for the participant to reach the expected timestamp on the synchronizers.
+      Seq(daId, acmeId).foreach { synchronizerId =>
+        clue(s"waiting for $participant1 $synchronizerId to reach $ts") {
+          eventually() {
+            val synchronizerIndex =
+              participant1.underlying.value.sync.syncPersistentStateManager.ledgerApiStore.value
+                .cleanSynchronizerIndex(
+                  synchronizerId
+                )
+            val synchronizerEnd = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
+            synchronizerEnd.timestamp should be >= ts
+          }
+        }
+      }
 
       val reinitCmtsResult =
         participant1.commitments.reinitialize_commitments(
@@ -225,8 +240,7 @@ trait AcsCommitmentRepairIntegrationTest
         daId.logical,
         acmeId.logical,
       )
-      forAll(reinitCmtsResult)(_.acsTimestamp.isDefined shouldBe true)
-      forAll(reinitCmtsResult)(_.acsTimestamp.value shouldBe >=(ts))
+      forAll(reinitCmtsResult)(_.acsTimestamp.value should be >= ts)
 
       logger.info("Reconnect participant1 to verify crash fault tolerance")
       participant1.synchronizers.disconnect(daName)
@@ -246,7 +260,7 @@ trait AcsCommitmentRepairIntegrationTest
       // compute a different commitment for participant1 than it had persisted previously,
       // which triggers an internal error.
       eventually() {
-        participant2.commitments.lastComputedAndSent(daName) should contain(period2a.toInclusive)
+        participant2.commitments.lastComputedAndSent(acmeName) should contain(period2a.toInclusive)
       }
       participant2.synchronizers.disconnect_all()
       eventually() {
@@ -453,7 +467,6 @@ trait AcsCommitmentRepairIntegrationTest
   }
 }
 
-@UnstableTest // TODO(i27387): Remove as soon as this test has been fixed
 class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -469,7 +482,6 @@ class AcsCommitmentRepairIntegrationTestPostgres extends AcsCommitmentRepairInte
   )
 }
 
-@UnstableTest // TODO(i27383): Remove as soon as this test has been fixed
 class AcsCommitmentRepairIntegrationTestH2 extends AcsCommitmentRepairIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(

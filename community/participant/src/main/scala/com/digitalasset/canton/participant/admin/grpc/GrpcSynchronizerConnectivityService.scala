@@ -18,11 +18,10 @@ import com.digitalasset.canton.admin.participant.v30.{
   PerformManualLsuResponse,
 }
 import com.digitalasset.canton.admin.sequencer.v30 as sequencerV30
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
@@ -63,7 +62,6 @@ class GrpcSynchronizerConnectivityService(
     sync: CantonSyncService,
     aliasManager: SynchronizerAliasManager,
     timeouts: ProcessingTimeout,
-    sequencerInfoLoader: SequencerInfoLoader,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContext
@@ -469,25 +467,12 @@ class GrpcSynchronizerConnectivityService(
           val connectionConfig = storedConnectionConfig.config
 
           for {
-            result <-
-              sequencerInfoLoader
-                .loadAndAggregateSequencerEndpoints(
-                  connectionConfig.synchronizerAlias,
-                  None,
-                  connectionConfig.sequencerConnections,
-                  SequencerConnectionValidation.Active,
-                )(
-                  traceContext,
-                  CloseContext(sync),
-                )
-                .leftMap[CantonBaseError](err =>
-                  SynchronizerRegistryError.fromSequencerInfoLoaderError(err)
-                )
+            result <- sync.getPsid(connectionConfig).leftWiden[CantonBaseError]
             _ <- aliasManager
-              .processHandshake(connectionConfig.synchronizerAlias, result.psid)
+              .processHandshake(connectionConfig.synchronizerAlias, result)
               .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
               .leftWiden[CantonBaseError]
-          } yield result.psid
+          } yield result
       }
 
     } yield v30.GetSynchronizerIdResponse(

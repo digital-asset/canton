@@ -14,10 +14,10 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.ProcessingSerializedEvent
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
-import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientSubscriptionError}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -61,7 +61,7 @@ trait SequencerSubscriptionPool extends FlagCloseable with HasCloseContext with 
   def getSubscriptionsHealthStatus: Seq[HealthQuasiComponent]
 
   /** Return the current active subscriptions in the pool. */
-  def subscriptions: Set[SequencerSubscription[SequencerClientSubscriptionError]]
+  def subscriptions: Set[SequencerSubscriptionWrapper]
 
   /** Return the number of active subscriptions in the pool. */
   final def nbSubscriptions: NonNegativeInt = NonNegativeInt.tryCreate(subscriptions.size)

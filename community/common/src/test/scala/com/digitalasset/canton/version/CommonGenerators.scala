@@ -4,7 +4,6 @@
 package com.digitalasset.canton.version
 
 import com.digitalasset.canton.GeneratorsLf
-import com.digitalasset.canton.crypto.GeneratorsCrypto
 import com.digitalasset.canton.data.{GeneratorsData, GeneratorsTrafficData}
 import com.digitalasset.canton.protocol.GeneratorsProtocol
 import com.digitalasset.canton.protocol.messages.{
@@ -21,9 +20,8 @@ final class CommonGenerators(protocolVersion: ProtocolVersion) {
   lazy val topology = new GeneratorsTopology(protocolVersion)
   lazy val generatorsSequencing = new GeneratorsSequencing(topology)
   lazy val lf = new GeneratorsLf(topology)
-  val crypto = new GeneratorsCrypto(protocolVersion)
-  lazy val protocol = new GeneratorsProtocol(protocolVersion, lf, topology, crypto)
-  lazy val data = new GeneratorsData(protocolVersion, lf, protocol, topology, crypto)
+  lazy val protocol = new GeneratorsProtocol(protocolVersion, lf, topology)
+  lazy val data = new GeneratorsData(protocolVersion, lf, protocol, topology)
   lazy val transaction =
     new GeneratorsTransaction(
       protocolVersion,
@@ -31,7 +29,6 @@ final class CommonGenerators(protocolVersion: ProtocolVersion) {
       protocol,
       topology,
       generatorsSequencing,
-      crypto,
     )
   lazy val localVerdict = GeneratorsLocalVerdict(protocolVersion, lf)
   lazy val verdict = GeneratorsVerdict(protocolVersion, localVerdict)
@@ -49,13 +46,11 @@ final class CommonGenerators(protocolVersion: ProtocolVersion) {
     topology,
     transaction,
     trafficData,
-    crypto,
   )
   lazy val generatorsProtocolSeq = new GeneratorsProtocolSequencing(
     protocolVersion,
     generatorsMessages,
     topology,
-    crypto,
   )
 
 }

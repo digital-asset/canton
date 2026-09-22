@@ -14,6 +14,10 @@ on:
     secrets:
       DATADOG_API_KEY:
         required: true
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
       GCLOUD_SERVICE_KEY:
         required: true
       AWS_ACCESS_KEY_ID:
@@ -42,6 +46,11 @@ jobs:
     timeout-minutes: 60
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

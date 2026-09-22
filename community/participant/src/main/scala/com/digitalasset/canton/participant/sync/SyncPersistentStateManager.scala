@@ -23,7 +23,10 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasResolution,
   SynchronizerRegistryError,
 }
-import com.digitalasset.canton.participant.topology.TopologyComponentFactory
+import com.digitalasset.canton.participant.topology.{
+  OfflineTopologyLookup,
+  TopologyComponentFactory,
+}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{
@@ -139,6 +142,7 @@ class SyncPersistentStateManager(
     clock: Clock,
     val ledgerApiStore: Eval[LedgerApiStore],
     val contractStore: Eval[ContractStore],
+    offlineTopologyLookup: OfflineTopologyLookup,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -473,6 +477,8 @@ class SyncPersistentStateManager(
         acsCounterParticipantConfigStore,
         ledgerApiStore,
         contractStore,
+        participantId,
+        offlineTopologyLookup,
         lsidLoggerFactory(synchronizerIdx.synchronizerId),
         futureSupervisor,
       )

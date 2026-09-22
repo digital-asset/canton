@@ -270,7 +270,7 @@ class PartyOnboardingClearanceSchedulerTest
 
       "return FlagSet with the upgrade time's immediate successor and schedule a background task if an LSU is announced" in {
         createFixture().flatMap { fixture =>
-          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+          val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
           // Define a specific future upgrade time to assert against
           val upgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
           val expectedSafeTime = upgradeTime.value.immediateSuccessor
@@ -307,7 +307,7 @@ class PartyOnboardingClearanceSchedulerTest
 
       "update an existing scheduled task if polled again and the safe time has changed (e.g. LSU cancelled)" in {
         createFixture().flatMap { fixture =>
-          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+          val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
 
           // 1st time: LSU is active.
           val lsuUpgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
@@ -475,7 +475,7 @@ class PartyOnboardingClearanceSchedulerTest
 
       "treat an announced LSU as a transient error and silently retry until cancelled" in {
         createFixture().map { fixture =>
-          val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+          val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
 
           // 1st attempt: LSU is announced (should backoff safely without spamming INFO/WARN logs)
           // 2nd attempt: LSU is cancelled (None) -> Proceeds to call workflow
@@ -786,7 +786,7 @@ class PartyOnboardingClearanceSchedulerTest
               fixture.fakeWorkflow.calls.size shouldBe 1
 
               // Now, simulate the LSU activating while the timer was ticking
-              val successor = SynchronizerSuccessor(psid, CantonTimestamp.now())
+              val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
               when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
                 .thenReturn(
                   FutureUnlessShutdown
@@ -934,6 +934,7 @@ class PartyOnboardingClearanceSchedulerTest
             threshold = PositiveInt.one,
             participants =
               Seq(HostingParticipant(participant, ParticipantPermission.Submission, onboarding)),
+            isOffline = false,
           )
         testData.makeSignedTx(mapping, isProposal = false)(testData.p1Key, testData.p2Key)
       }
@@ -950,6 +951,7 @@ class PartyOnboardingClearanceSchedulerTest
             participants = Seq(
               HostingParticipant(participant, ParticipantPermission.Submission, onboarding = false)
             ),
+            isOffline = false,
           )
         // Create a Remove transaction
         testData.makeSignedTx(mapping, TopologyChangeOp.Remove, isProposal = false)(
@@ -970,6 +972,7 @@ class PartyOnboardingClearanceSchedulerTest
             participants = Seq(
               HostingParticipant(participant, ParticipantPermission.Submission, onboarding = false)
             ),
+            isOffline = false,
           )
         testData.makeSignedTx(mapping, isProposal = true)(testData.p1Key, testData.p2Key)
       }

@@ -7,7 +7,11 @@ import cats.Order
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -44,7 +48,9 @@ import scala.collection.mutable.ArrayBuffer
   *      having checked all root hash messages and having observed the same tree structure.
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class RootHash(private val hash: Hash) extends PrettyPrinting with HasCryptographicEvidence {
+case class RootHash(private val hash: Hash)
+    extends PrettyPrintingFromCompanion
+    with HasCryptographicEvidence {
   def unwrap: Hash = hash
 
   override def getCryptographicEvidence: ByteString = hash.getCryptographicEvidence
@@ -54,10 +60,13 @@ case class RootHash(private val hash: Hash) extends PrettyPrinting with HasCrypt
   def asLedgerTransactionId: Either[String, LedgerTransactionId] =
     LedgerTransactionId.fromString(hash.toHexString)
 
-  override protected def pretty: Pretty[RootHash] = prettyOfParam(_.unwrap)
+  override def prettyCompanion: PrettyPrintingCompanion[RootHash] = RootHash
 }
 
-object RootHash {
+object RootHash extends PrettyPrintingCompanion[RootHash] {
+
+  override protected val pretty: Pretty[RootHash] = prettyOfParam(_.unwrap)
+
   implicit val setParameterRootHash: SetParameter[RootHash] = (rh, pp) =>
     pp >> rh.unwrap.toLengthLimitedHexString
 
@@ -161,17 +170,19 @@ object UpdateId {
   * Views from different requests may have the same view hash.
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class ViewHash(private val hash: Hash) extends PrettyPrinting {
+case class ViewHash(private val hash: Hash) extends PrettyPrintingFromCompanion {
   def unwrap: Hash = hash
 
   def toProtoPrimitive: ByteString = hash.getCryptographicEvidence
 
   def toRootHash: RootHash = RootHash(hash)
 
-  override def pretty: Pretty[ViewHash] = prettyOfClass(unnamedParam(_.hash))
+  override def prettyCompanion: PrettyPrintingCompanion[ViewHash] = ViewHash
 }
 
-object ViewHash {
+object ViewHash extends PrettyPrintingCompanion[ViewHash] {
+
+  override protected val pretty: Pretty[ViewHash] = prettyOfClass(unnamedParam(_.hash))
 
   def fromProtoPrimitive(hash: ByteString): ParsingResult[ViewHash] =
     Hash.fromProtoPrimitive(hash).map(ViewHash(_))
@@ -184,15 +195,18 @@ object ViewHash {
 }
 
 /** A confirmation request is identified by the sequencer timestamp. */
-final case class RequestId(private val ts: CantonTimestamp) extends PrettyPrinting {
+final case class RequestId(private val ts: CantonTimestamp) extends PrettyPrintingFromCompanion {
   def unwrap: CantonTimestamp = ts
 
   def toProtoPrimitive: Long = ts.toProtoPrimitive
 
-  override protected def pretty: Pretty[RequestId] = prettyOfClass(unnamedParam(_.ts))
+  override def prettyCompanion: PrettyPrintingCompanion[RequestId] = RequestId
 }
 
-object RequestId {
+object RequestId extends PrettyPrintingCompanion[RequestId] {
+
+  override protected val pretty: Pretty[RequestId] = prettyOfClass(unnamedParam(_.ts))
+
   implicit val requestIdOrdering: Ordering[RequestId] =
     Ordering.by[RequestId, CantonTimestamp](_.unwrap)
   implicit val requestIdOrder: Order[RequestId] = Order.fromOrdering[RequestId]
@@ -201,7 +215,7 @@ object RequestId {
     CantonTimestamp.fromProtoPrimitive(requestIdP).map(RequestId(_))
 }
 
-sealed abstract class ReassignmentId extends PrettyPrinting {
+sealed abstract class ReassignmentId extends PrettyPrintingFromCompanion {
   protected val version: Byte
   protected val payload: ByteString
 
@@ -215,12 +229,14 @@ sealed abstract class ReassignmentId extends PrettyPrinting {
   def toProtoPrimitive: String = HexString.toHexString(toBytes)
   def toProtoV30: v30.ReassignmentId = v30.ReassignmentId(id = toProtoPrimitive)
 
-  @VisibleForTesting
-  override protected def pretty: Pretty[ReassignmentId] =
-    prettyOfString(rid => s"ReassignmentId(${rid.toProtoPrimitive})")
+  override def prettyCompanion: PrettyPrintingCompanion[ReassignmentId] = ReassignmentId
 }
 
-object ReassignmentId {
+object ReassignmentId extends PrettyPrintingCompanion[ReassignmentId] {
+
+  @VisibleForTesting
+  override protected val pretty: Pretty[ReassignmentId] =
+    prettyOfString(rid => s"ReassignmentId(${rid.toProtoPrimitive})")
 
   def create(hex: String): Either[String, ReassignmentId] =
     HexString

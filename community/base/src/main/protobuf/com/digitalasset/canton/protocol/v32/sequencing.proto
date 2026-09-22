@@ -5,9 +5,11 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v32;
 
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "com/digitalasset/canton/protocol/v30/common_stable.proto";
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
+import "google/protobuf/duration.proto";
 import "google/rpc/status.proto";
 import "scalapb/scalapb.proto";
 
@@ -114,4 +116,80 @@ message SequencedEvent {
   // Traffic receipt with information about the traffic state after the cost for this event has been consumed
   // Optional - only set on deliver receipt sent back to the sender of the event when traffic control is enabled
   com.digitalasset.canton.protocol.v30.TrafficReceipt traffic_receipt = 8;
+}
+
+// size limits on various collections, globally enforced on a synchronizer
+message SynchronizerLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  TransactionProtocolLimits transaction_protocol_limits = 1;
+}
+
+// size limits on collections within the transaction protocol
+message TransactionProtocolLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // maximum number of `actAs` entries in a transaction
+  uint32 max_act_as = 1;
+
+  // maximum number of envelopes in the batch
+  uint32 max_envelopes = 2;
+
+  // TODO(i35858): merge with max_envelopes
+  // maximum number of `Recipients` structures in the batch
+  uint32 max_recipients_per_batch = 3;
+
+  // maximum number of recipients trees in a `Recipients` structure
+  // Should only be more than one for mediator verdicts, where it then limits the maximum number of participants involved in a transaction.
+  uint32 max_recipients_trees = 4;
+
+  // maximum number of recipients in a level of a recipients tree
+  // TODO(i35860): check whether this can be merged up and if not look back on the current default value that is too generous
+  uint32 max_recipients_per_recipients_tree_level = 5;
+
+  // maximum number of children in a level of a recipients tree
+  uint32 max_children_per_recipients_tree_level = 6;
+
+  // maximum number of distinct recipients of a single envelope
+  uint32 max_recipients_per_envelope = 7;
+
+  // maximum depth of a recipients tree in a single envelope
+  uint32 max_recipients_tree_depth = 8;
+
+  // maximum number of root views in a transaction
+  // TODO(i35888): Remove and make local config instead
+  uint32 max_transaction_root_views = 9;
+
+  // maximum number of sub views per root view
+  // TODO(i35888): Remove and make local config instead
+  uint32 max_transaction_sub_views = 10;
+
+  // maximum depth of the view tree in a transaction
+  // TODO(i35845): investigate whether to update the semantics of this limit or remove it
+  uint32 max_transaction_tree_depth = 11;
+}
+
+// Differences with v31:
+// - uses v32.SynchronizerLimits instead of v31
+message StaticSynchronizerParameters {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.RequiredSigningSpecs required_signing_specs = 1;
+  com.digitalasset.canton.crypto.v30.RequiredEncryptionSpecs required_encryption_specs = 2;
+  repeated com.digitalasset.canton.crypto.v30.SymmetricKeyScheme required_symmetric_key_schemes = 3;
+  repeated com.digitalasset.canton.crypto.v30.HashAlgorithm required_hash_algorithms = 4;
+  repeated com.digitalasset.canton.crypto.v30.CryptoKeyFormat required_crypto_key_formats = 5;
+  repeated com.digitalasset.canton.crypto.v30.SignatureFormat required_signature_formats = 6;
+  int32 protocol_version = 7;
+
+  // Serial of the synchronizer. Must be non-negative.
+  int32 serial = 8;
+
+  // Flag to enable transparency checks.
+  bool enable_transparency_checks = 9;
+
+  google.protobuf.Duration topology_change_delay = 10;
+
+  // Size limits to be enforced on this synchronizer
+  com.digitalasset.canton.protocol.v32.SynchronizerLimits synchronizer_limits = 11;
 }

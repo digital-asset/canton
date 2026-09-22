@@ -212,6 +212,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
         loggerFactory,
         timeouts,
       ),
+      managerVersion = TopologyManager.PV(testedProtocolVersion),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,

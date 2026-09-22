@@ -84,6 +84,22 @@ class AcsFetchPerfTest extends PerfTestBase {
   }
 }
 
+class AcsFetchWithIncreasedArchivalRatePerfTest extends PerfTestBase {
+
+  override val filenameSuffix =
+    "lapi_high_archive_fetch_perf_test_" + timestamp
+
+  override implicit val traceContext: TraceContext =
+    TraceContext.createNew("lapi-high-archive-fetch-perf-test")
+
+  it should "fetch ACS with high archival rate" in TraceContext.withNewTraceContext("ACS fetch") { implicit traceContext =>
+    measure {
+      fetchAcs()
+    }
+  }
+}
+
+
 class InsertWithIncreasedArchivalRatePerfTest extends PerfTestBase {
   override val filenameSuffix =
     "lapi_insert_high_archive_perf_test_" + timestamp

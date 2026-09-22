@@ -4,12 +4,14 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.ReassignmentRef
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.NonReassigningParticipantsDeclared
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors.{
   missingSignatoryReassigningParticipants,
   stakeholderNotHostedOnSynchronizer,
   stakeholdersNoReassigningParticipant,
 }
-import com.digitalasset.canton.protocol.Stakeholders
+import com.digitalasset.canton.protocol.{ExampleContractFactory, Stakeholders}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
@@ -52,6 +54,8 @@ final class ReassigningParticipantsComputationTest
   private lazy val charlie: LfPartyId = PartyId(
     UniqueIdentifier.tryFromProtoPrimitive("charlie::party")
   ).toLf
+
+  private lazy val reassignmentRef = ReassignmentRef(ExampleContractFactory.buildContractId())
 
   private lazy val p1 = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("p1::participant1")
@@ -448,6 +452,84 @@ final class ReassigningParticipantsComputationTest
         sourceTopology = Source(t2_c_c_c),
         targetTopology = Target(t1_c_o_x),
       ).compute.futureValueUS.value shouldBe Set(p1, p2)
+    }
+
+    "accept a declared set that covers the stakeholders" in {
+      val snapshot = createTestingIdentityFactory(
+        Map(
+          p1 -> Map(signatory -> ParticipantPermission.Submission),
+          p2 -> Map(observer -> ParticipantPermission.Submission),
+          p3 -> Map(charlie -> ParticipantPermission.Submission),
+        )
+      )
+
+      def checkSufficient(declared: Set[ParticipantId]) =
+        new ReassigningParticipantsComputation(
+          stakeholders = Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(observer)),
+          sourceTopology = Source(snapshot),
+          targetTopology = Target(snapshot),
+        ).checkSufficient(declared, reassignmentRef).futureValueUS
+
+      checkSufficient(Set(p1, p2)).value shouldBe ()
+
+      checkSufficient(Set(p1)).left.value shouldBe stakeholdersNoReassigningParticipant(
+        Set(observer)
+      )
+    }
+
+    "reject a declared set that is not included in the computed set" in {
+      val snapshot = createTestingIdentityFactory(
+        Map(
+          p1 -> Map(signatory -> ParticipantPermission.Submission),
+          p2 -> Map(observer -> ParticipantPermission.Submission),
+          p3 -> Map(charlie -> ParticipantPermission.Submission),
+        )
+      )
+
+      new ReassigningParticipantsComputation(
+        stakeholders = Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(observer)),
+        sourceTopology = Source(snapshot),
+        targetTopology = Target(snapshot),
+      ).checkSufficient(Set(p1, p2, p3), reassignmentRef).futureValueUS.left.value shouldBe
+        NonReassigningParticipantsDeclared(
+          reassignmentRef,
+          targetTimestamp = Target(snapshot.timestamp),
+          reassigningParticipants = Set(p1, p2),
+          declared = Set(p1, p2, p3),
+        )
+    }
+
+    "reject a declared set that misses a signatory threshold" in {
+      val snapshot = createTestingWithThreshold(
+        Map(signatory -> (PositiveInt.two, Seq((p1, Confirmation), (p2, Confirmation))))
+      )
+
+      new ReassigningParticipantsComputation(
+        stakeholders = Stakeholders.withSignatories(Set(signatory)),
+        sourceTopology = Source(snapshot),
+        targetTopology = Target(snapshot),
+      ).checkSufficient(Set(p1), reassignmentRef).futureValueUS.left.value shouldBe
+        missingSignatoryReassigningParticipants(
+          signatory,
+          "source",
+          PositiveInt.two,
+          1,
+        )
+    }
+
+    "accept a declared set that is a strict subset of the computed set" in {
+      val snapshot = createTestingWithThreshold(
+        Map(signatory -> (PositiveInt.one, Seq((p1, Confirmation), (p2, Confirmation))))
+      )
+
+      val computation = new ReassigningParticipantsComputation(
+        stakeholders = Stakeholders.withSignatories(Set(signatory)),
+        sourceTopology = Source(snapshot),
+        targetTopology = Target(snapshot),
+      )
+
+      computation.compute.futureValueUS.value shouldBe Set(p1, p2)
+      computation.checkSufficient(Set(p1), reassignmentRef).futureValueUS.value shouldBe ()
     }
   }
 }

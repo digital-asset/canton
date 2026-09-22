@@ -284,8 +284,10 @@ object ListPartyToParticipantResult {
       contextProto <- ProtoConverter.required("context", value.context)
       context <- BaseResult.fromProtoV30(contextProto)
       item <- value.item match {
-        case v30.ListPartyToParticipantResponse.Result.Item.V30(i) =>
-          PartyToParticipant.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, i)
+        case v30.ListPartyToParticipantResponse.Result.Item.V30(mappingP) =>
+          PartyToParticipant.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, mappingP)
+        case v30.ListPartyToParticipantResponse.Result.Item.V31(mappingP) =>
+          PartyToParticipant.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, mappingP)
         case v30.ListPartyToParticipantResponse.Result.Item.Empty =>
           ProtoConverter.required("item", None)
       }

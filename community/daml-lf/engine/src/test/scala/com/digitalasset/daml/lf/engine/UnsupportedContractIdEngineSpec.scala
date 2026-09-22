@@ -8,29 +8,36 @@ import com.daml.logging.LoggingContext
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.interpretation
-import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig}
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
-import com.digitalasset.daml.lf.transaction.{
-  NeedKeyProgression,
-  NextGenContractStateMachine as ContractStateMachine,
-}
+import com.digitalasset.daml.lf.transaction.NeedKeyProgression
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class UnsupportedContractIdEngineSpec extends AnyWordSpec with Matchers with SuppressingLogging {
+//class UnsupportedContractIdEngineSpecConductor
+//    extends UnsupportedContractIdEngineSpec(ExecutionMode.Conductor)
+
+class UnsupportedContractIdEngineSpecUpdateMachine
+    extends UnsupportedContractIdEngineSpec(ExecutionMode.UpdateMachine)
+
+abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
+    extends AnyWordSpec
+    with Matchers
+    with SuppressingLogging {
 
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
 
   private val helpers =
-    new EngineTestHelpers(ContractIdVersion.V1, "BasicTests-keys.dar", loggerFactory)
+    new EngineTestHelpers(ContractIdVersion.V1, executionMode, "BasicTests-keys.dar", loggerFactory)
   import helpers.*
 
   private val seed = hash("UnsupportedContractIdEngineSpec")
   private val now = Time.Timestamp.now()
   private val withKeyTemplateId = Ref.Identifier(basicTestsPkgId, "BasicTests:WithKey")
   private val withKeySKey = mkSValuePair(SValue.SParty(alice), SValue.SInt64(42))
+
+  def assumeUpd = assume(executionMode == ExecutionMode.UpdateMachine)
 
   /** Drive a program past the needs that can be answered automatically (packages, prefetch,
     * interruptions), stopping at the first contract/key/external-call suspension (or the result).
@@ -50,35 +57,29 @@ class UnsupportedContractIdEngineSpec extends AnyWordSpec with Matchers with Sup
   private def runFetchTemplate(coid: com.digitalasset.daml.lf.value.Value.ContractId) = {
     val templateId = Ref.Identifier(basicTestsPkgId, "BasicTests:Simple")
     val cmds = ImmArray(speedy.Command.FetchTemplate(templateId, SValue.SContractId(coid)))
-    suffixLenientEngine.interpretCommands(
+    suffixLenientEngine.executeCommands(
       validating = false,
       submitters = Set(party),
-      readAs = Set.empty,
       commands = cmds,
       ledgerTime = now,
       preparationTime = now,
       seeding = InitialSeeding.TransactionSeed(seed),
       contractIdVersion = ContractIdVersion.V1,
-      interpretationConfig = InterpretationConfig.Default.copy(
-        contractStateMode = ContractStateMachine.Mode.NoKey
-      ),
+      interpretationConfig = InterpretationConfig.Default,
     )
   }
 
   private def runFetchByKey() = {
     val cmds = ImmArray(speedy.Command.FetchByKey(withKeyTemplateId, withKeySKey))
-    suffixLenientEngine.interpretCommands(
+    suffixLenientEngine.executeCommands(
       validating = false,
       submitters = Set(alice),
-      readAs = Set.empty,
       commands = cmds,
       ledgerTime = now,
       preparationTime = now,
       seeding = InitialSeeding.TransactionSeed(seed),
       contractIdVersion = ContractIdVersion.V1,
-      interpretationConfig = InterpretationConfig.Default.copy(
-        contractStateMode = ContractStateMachine.Mode.Key
-      ),
+      interpretationConfig = InterpretationConfig.Default,
     )
   }
 
@@ -110,6 +111,8 @@ class UnsupportedContractIdEngineSpec extends AnyWordSpec with Matchers with Sup
     }
 
     "return UnsupportedContractId Error when a NeedKey response contains only UnsupportedContractIdVersion" in {
+      assumeUpd
+
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 
@@ -139,6 +142,8 @@ class UnsupportedContractIdEngineSpec extends AnyWordSpec with Matchers with Sup
     }
 
     "defer unsupported overflow entries when first NeedKey entry is supported" in {
+      assumeUpd
+
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 

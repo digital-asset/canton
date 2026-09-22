@@ -10,7 +10,7 @@ import cats.syntax.parallel.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
-import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
+import com.digitalasset.base.error.*
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -24,10 +24,10 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.AdminWorkflowServices.isPartyReplicationWorkflowLoaded
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationAdminWorkflow,
-  PartyReplicator,
+import com.digitalasset.canton.participant.admin.AdminWorkflowServices.isAcsReplicationWorkflowLoaded
+import com.digitalasset.canton.participant.admin.party.acsreplication.{
+  AcsReplicationAdminWorkflow,
+  AcsReplicator,
 }
 import com.digitalasset.canton.participant.config.{
   AlphaOnlinePartyReplicationConfig,
@@ -58,15 +58,15 @@ import java.io.InputStream
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.chaining.scalaUtilChainingOps
 
-/** Manages our admin workflow applications (ping, party management). Currently, each is an
-  * individual application with their own ledger connection and acting independently.
+/** Manages our admin workflow applications (ping, ACS replication management). Currently, each is
+  * an individual application with their own ledger connection and acting independently.
   */
 class AdminWorkflowServices(
     config: ParticipantNodeConfig,
     parameters: ParticipantNodeParameters,
     packageService: PackageService,
     syncService: CantonSyncService,
-    partyReplicatorO: Option[PartyReplicator],
+    acsReplicatorO: Option[AcsReplicator],
     participantId: ParticipantId,
     adminTokenDispenser: CantonAdminTokenDispenser,
     futureSupervisor: FutureSupervisor,
@@ -127,29 +127,28 @@ class AdminWorkflowServices(
     )
   }
 
-  val partyManagementO: Option[
-    (FutureUnlessShutdown[ResilientLedgerSubscription[?, ?]], PartyReplicationAdminWorkflow)
+  val acsReplicationManagementO: Option[
+    (FutureUnlessShutdown[ResilientLedgerSubscription[?, ?]], AcsReplicationAdminWorkflow)
   ] =
-    partyReplicatorO
+    acsReplicatorO
       .collect {
-        case partyReplicator
-            if isPartyReplicationWorkflowLoaded(parameters.alphaOnlinePartyReplicationSupport) =>
+        case acsReplicator
+            if isAcsReplicationWorkflowLoaded(parameters.alphaOnlinePartyReplicationSupport) =>
           createService(
-            "party-management",
+            "acs-replication-management",
             // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
-            //  the PartyReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
+            //  the AcsReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
             resubscribeIfPruned = false,
           ) { connection =>
-            new PartyReplicationAdminWorkflow(
+            new AcsReplicationAdminWorkflow(
               connection,
               participantId,
               syncService,
-              partyReplicator,
               clock,
               futureSupervisor,
               timeouts,
               loggerFactory,
-            ).tap(partyReplicator.initializeDamlAdminWorkflow)
+            ).tap(acsReplicator.initializeDamlAdminWorkflow)
           }
       }
 
@@ -177,10 +176,14 @@ class AdminWorkflowServices(
         SyncCloseable(s"$name-service", LifeCycle.close(service)(logger)),
       )
 
-    adminServiceCloseables("ping", pingSubscription, ping) ++ partyManagementO
+    adminServiceCloseables("ping", pingSubscription, ping) ++ acsReplicationManagementO
       .fold(Seq.empty[AsyncOrSyncCloseable]) {
-        case (partyManagementSubscription, partyManagement) =>
-          adminServiceCloseables("party-management", partyManagementSubscription, partyManagement)
+        case (acsReplicationManagementSubscription, acsReplicationAdminWorkflow) =>
+          adminServiceCloseables(
+            "acs-replication-management",
+            acsReplicationManagementSubscription,
+            acsReplicationAdminWorkflow,
+          )
       }
   }
 
@@ -207,11 +210,11 @@ class AdminWorkflowServices(
           adminWorkflowLoaded <- isLoaded(AdminWorkflowServices.PingDarResourceFileName)
           partReplicationWorkflowLoaded <-
             if (
-              AdminWorkflowServices.isPartyReplicationWorkflowLoaded(
+              AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
                 config.parameters.alphaOnlinePartyReplicationSupport
               )
             ) {
-              isLoaded(AdminWorkflowServices.PartyReplicationDarResourceFileName)
+              isLoaded(AdminWorkflowServices.AcsReplicationDarResourceFileName)
             } else FutureUnlessShutdown.pure(true)
         } yield adminWorkflowLoaded && partReplicationWorkflowLoaded
       }
@@ -241,11 +244,11 @@ class AdminWorkflowServices(
           _ <- load(AdminWorkflowServices.PingDarResourceFileName)
           _ <-
             if (
-              AdminWorkflowServices.isPartyReplicationWorkflowLoaded(
+              AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
                 config.parameters.alphaOnlinePartyReplicationSupport
               )
             ) {
-              load(AdminWorkflowServices.PartyReplicationDarResourceFileName)
+              load(AdminWorkflowServices.AcsReplicationDarResourceFileName)
             } else FutureUnlessShutdown.unit
         } yield ()
 
@@ -374,11 +377,11 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
 
   val PingDarResourceName: String = "canton-builtin-admin-workflow-ping"
   val PingDarResourceFileName: String = s"dar/$PingDarResourceName.dar"
-  val PartyReplicationDarResourceName: String =
-    "canton-builtin-admin-workflow-party-replication-alpha"
-  private val PartyReplicationDarResourceFileName: String =
-    s"dar/$PartyReplicationDarResourceName.dar"
-  val AdminWorkflowNames: Set[String] = Set(PingDarResourceName, PartyReplicationDarResourceName)
+  val AcsReplicationDarResourceName: String =
+    "canton-builtin-admin-workflow-acs-replication-alpha"
+  private val AcsReplicationDarResourceFileName: String =
+    s"dar/$AcsReplicationDarResourceName.dar"
+  val AdminWorkflowNames: Set[String] = Set(PingDarResourceName, AcsReplicationDarResourceName)
 
   private def getDarInputStream(resourceName: String): InputStream =
     Option(
@@ -423,18 +426,18 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
           Left(new IllegalStateException(CantonError.stringFromContext(err)))
       }
 
-  // The party replication admin workflow is only loaded when online party replication is enabled
+  // The ACS replication admin workflow is only loaded when online party replication is enabled
   // in sequencer channel mode.
-  private[participant] def isPartyReplicationWorkflowLoaded(
+  private[participant] def isAcsReplicationWorkflowLoaded(
       config: Option[AlphaOnlinePartyReplicationConfig]
   ): Boolean = config.exists(_.unsafeSequencerChannelSupport)
 
   lazy val PingPackages: Map[PackageId, Ast.Package] = getDarPackages(PingDarResourceFileName)
-  lazy val PartyReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(
-    PartyReplicationDarResourceFileName
+  lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(
+    AcsReplicationDarResourceFileName
   )
   lazy val AllBuiltInPackages: Map[PackageId, Ast.Package] =
-    PingPackages ++ PartyReplicationPackages
+    PingPackages ++ AcsReplicationPackages
 
   @Explanation(
     """This error indicates that the admin workflow package could not be vetted. The admin workflows is

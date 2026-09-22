@@ -10,6 +10,7 @@ import com.digitalasset.canton.integration.{EnvironmentDefinition, SharedEnviron
 import com.digitalasset.canton.logging.NodeLoggingUtil
 import com.digitalasset.canton.synchronizer.sequencer.OnboardingStateForSequencerV2
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.util.{FutureUtil, GrpcStreamingUtils}
@@ -18,6 +19,9 @@ import com.google.cloud.storage.StorageOptions
 import io.circe.parser as circeParser
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.apache.commons.io.FilenameUtils
+import org.apache.pekko.stream.Materializer
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.time.{Minutes, Span}
 
 import java.io.{InputStream, PipedInputStream, PipedOutputStream}
 import java.util.concurrent.atomic.AtomicReference
@@ -27,6 +31,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 /** Try to deserialize and validate the topology state from CN as periodically exported on GCP.
+  * Note: run `gcloud auth application-default login` before running this test locally for it to
+  * work.
   */
 trait CantonNetworkRecentTopologyIntegrationTest
     extends CantonNetworkTopologyIntegrationTestBase
@@ -192,6 +198,41 @@ trait CantonNetworkRecentTopologyIntegrationTest
         timeout,
         physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
       ).discard
+    }
+
+    "successfully insert the non-validated topology snapshot" in { implicit env =>
+      // To avoid flooding the logs
+      NodeLoggingUtil.setLevel(level = "INFO")
+      // runValidation will fail if the validation fails. We discard the returned value because we don't need
+      // it here and only assert that validation passed
+      runValidation(
+        // Index value is not important, it just needs to be an index that isn't used by default by the node
+        topoStoreIdx = 12,
+        snapshot.get().value,
+        cleanupTopologyState = false,
+        timeout,
+        physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
+        validateInitialTopologySnapshot = false,
+      ).discard
+    }
+
+    "validated and non-validated topology store contents should match" in { implicit env =>
+      val store11 = getTopologyStore(11, physicalSynchronizerId)
+      val store12 = getTopologyStore(12, physicalSynchronizerId)
+
+      val hashComputationPatience = Timeout(Span(30, Minutes))
+
+      implicit val materializer: Materializer = Materializer(env.actorSystem)
+      val hash11 =
+        store11
+          .findEssentialStateHashAtSequencedTime(SequencedTime.MaxValue)
+          .futureValueUS(hashComputationPatience)
+      val hash12 =
+        store12
+          .findEssentialStateHashAtSequencedTime(SequencedTime.MaxValue)
+          .futureValueUS(hashComputationPatience)
+
+      hash11 shouldBe hash12
     }
   }
 }

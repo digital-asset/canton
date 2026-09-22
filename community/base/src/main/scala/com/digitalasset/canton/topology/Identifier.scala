@@ -8,16 +8,22 @@ import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String255, String68}
 import com.digitalasset.canton.crypto.{Fingerprint, HasFingerprint}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, checked}
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.math.Ordering
 
-object Namespace {
+object Namespace extends PrettyPrintingCompanion[Namespace] {
+
+  override protected val pretty: Pretty[Namespace] = prettyOfParam(_.fingerprint)
+
   implicit val setParameterNamespace: SetParameter[Namespace] = (v, pp) =>
     pp >> v.toLengthLimitedString
   implicit val namespaceOrder: Order[Namespace] = Order.by[Namespace, String](_.unwrap)
@@ -30,12 +36,14 @@ object Namespace {
   *
   * This is based on the assumption that the fingerprint is unique to the public-key
   */
-final case class Namespace(fingerprint: Fingerprint) extends HasFingerprint with PrettyPrinting {
+final case class Namespace(fingerprint: Fingerprint)
+    extends HasFingerprint
+    with PrettyPrintingFromCompanion {
   def unwrap: String = fingerprint.unwrap
   def toProtoPrimitive: String = fingerprint.toProtoPrimitive
   def toLengthLimitedString: String68 = fingerprint.toLengthLimitedString
   def filterString: String = fingerprint.unwrap
-  override protected def pretty: Pretty[Namespace] = prettyOfParam(_.fingerprint)
+  override def prettyCompanion: PrettyPrintingCompanion[Namespace] = Namespace
 }
 
 trait HasNamespace extends HasFingerprint {
@@ -52,7 +60,7 @@ trait HasNamespace extends HasFingerprint {
   */
 final case class UniqueIdentifier private (identifier: String185, namespace: Namespace)
     extends HasNamespace
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 // architecture-handbook-entry-end: UniqueIdentifier
 
   def toProtoPrimitive: String =
@@ -75,12 +83,14 @@ final case class UniqueIdentifier private (identifier: String185, namespace: Nam
       identifier.unwrap.startsWith(idFilter)
   }
 
-  override protected def pretty: Pretty[this.type] =
-    prettyOfString(uid => uid.identifier.str.show + UniqueIdentifier.delimiter + uid.namespace.show)
+  override def prettyCompanion: PrettyPrintingCompanion[UniqueIdentifier] = UniqueIdentifier
 
 }
 
-object UniqueIdentifier {
+object UniqueIdentifier extends PrettyPrintingCompanion[UniqueIdentifier] {
+
+  override protected val pretty: Pretty[UniqueIdentifier] =
+    prettyOfString(uid => uid.identifier.str.show + UniqueIdentifier.delimiter + uid.namespace.show)
 
   /** delimiter used to separate the identifier from the fingerprint */
   val delimiter = "::"

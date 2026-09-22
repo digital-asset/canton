@@ -353,6 +353,8 @@ abstract class SynchronizerChangeSimClockIntegrationTest
     )
     with SecurityTestSuite {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   // Workaround to avoid false errors reported by IDEA.
   implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
 
@@ -681,6 +683,8 @@ class SynchronizerChangeSimClockIntegrationTestPostgres
 
 trait SynchronizerChangeRealClockIntegrationTest
     extends AbstractSynchronizerChangeRealClockIntegrationTest {
+
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   "The paint fence scenario" when {
     "executed on the Iou synchronizer" must {

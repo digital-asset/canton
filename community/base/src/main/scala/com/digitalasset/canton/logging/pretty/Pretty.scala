@@ -45,8 +45,9 @@ object Pretty extends ShowUtil with PrettyUtil with PrettyInstances {
       defaultWidth = DefaultWidth,
       defaultHeight = DefaultHeight,
       defaultIndent = DefaultIndent,
-      additionalHandlers = { case p: PrettyPrinting =>
-        p.toTree
+      additionalHandlers = {
+        case p: PrettyPrinting => p.toTree
+        case p: PrettyPrintingFromCompanion => p.prettyCompanion.prettyInternal.treeOf(p)
       },
     )
 

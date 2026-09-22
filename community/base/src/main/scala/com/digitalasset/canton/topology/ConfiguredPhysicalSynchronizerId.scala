@@ -3,31 +3,46 @@
 
 package com.digitalasset.canton.topology
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 /*
 Before the first handshake with a synchronizer, the physical synchronizer id is unknown.
 This trait allows for an explicit representation of `Option[PhysicalSynchronizerId]`.
  */
-sealed trait ConfiguredPhysicalSynchronizerId extends PrettyPrinting {
+sealed trait ConfiguredPhysicalSynchronizerId extends PrettyPrintingFromCompanion {
   def toOption: Option[PhysicalSynchronizerId]
   def isDefined: Boolean = toOption.isDefined
 }
 
 final case class KnownPhysicalSynchronizerId(psid: PhysicalSynchronizerId)
     extends ConfiguredPhysicalSynchronizerId {
-  override protected def pretty: Pretty[KnownPhysicalSynchronizerId] =
-    prettyOfString(psid => psid.psid.toLengthLimitedString.unwrap)
+  override def prettyCompanion: PrettyPrintingCompanion[KnownPhysicalSynchronizerId] =
+    KnownPhysicalSynchronizerId
 
   override def toOption: Option[PhysicalSynchronizerId] = Some(psid)
 }
 
+object KnownPhysicalSynchronizerId extends PrettyPrintingCompanion[KnownPhysicalSynchronizerId] {
+  override protected val pretty: Pretty[KnownPhysicalSynchronizerId] =
+    prettyOfString(psid => psid.psid.toLengthLimitedString.unwrap)
+}
+
 case object UnknownPhysicalSynchronizerId extends ConfiguredPhysicalSynchronizerId {
-  override protected def pretty: Pretty[UnknownPhysicalSynchronizerId.type] =
-    prettyOfObject[UnknownPhysicalSynchronizerId.type]
+  override def prettyCompanion: PrettyPrintingCompanion[UnknownPhysicalSynchronizerId.type] =
+    UnknownPhysicalSynchronizerIdPrettyPrintingCompanion
 
   override def toOption: Option[PhysicalSynchronizerId] = None
+}
+
+private object UnknownPhysicalSynchronizerIdPrettyPrintingCompanion
+    extends PrettyPrintingCompanion[UnknownPhysicalSynchronizerId.type] {
+  override protected val pretty: Pretty[UnknownPhysicalSynchronizerId.type] =
+    prettyOfObject[UnknownPhysicalSynchronizerId.type]
 }
 
 object ConfiguredPhysicalSynchronizerId {

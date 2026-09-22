@@ -10,7 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
@@ -139,8 +139,11 @@ class MediatorEventDeduplicatorTest
 
     val mediatorRequest = mock[MediatorConfirmationRequest]
     when(mediatorRequest.requestUuid).thenReturn(uuid)
-    when(mediatorRequest.pretty).thenReturn(
-      prettyOfClass[MediatorConfirmationRequest](param("uuid", _.requestUuid))
+    when(mediatorRequest.prettyCompanion).thenReturn(
+      new PrettyPrintingCompanion[MediatorConfirmationRequest] {
+        override protected val pretty: Pretty[MediatorConfirmationRequest] =
+          prettyOfClass[MediatorConfirmationRequest](param("uuid", _.requestUuid))
+      }
     )
 
     mkDefaultOpenEnvelope(mediatorRequest)

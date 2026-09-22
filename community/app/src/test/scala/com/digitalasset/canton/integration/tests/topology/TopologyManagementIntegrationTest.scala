@@ -8,7 +8,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands.Write.GenerateTransactions
-import com.digitalasset.canton.config.PositiveDurationSeconds
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{PartiesAllocator, PartyToParticipantDeclarative}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.ForceFlag.{
   AllowInsufficientParticipantPermissionForSignatoryParty,
@@ -47,9 +48,10 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.digitalasset.nonempty.NonEmpty
+import com.google.protobuf.ByteString
 import org.slf4j.event.Level.DEBUG
 
 import scala.annotation.nowarn
@@ -60,12 +62,17 @@ import scala.jdk.CollectionConverters.*
 @nowarn("msg=match may not be exhaustive")
 // Needed because of PartyToKeyMapping deprecation
 @nowarn("cat=deprecation")
-trait TopologyManagementIntegrationTest
+final class TopologyManagementIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils
     with SecurityTestSuite
     with AccessTestScenario {
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   // TODO(#16283): disable participant / roll keys while the affected nodes are busy
 
@@ -77,10 +84,40 @@ trait TopologyManagementIntegrationTest
       sequencer1.topology.synchronizer_parameters.propose_update(
         daId,
         _.update(
-          reconciliationInterval = PositiveDurationSeconds.ofDays(7)
+          reconciliationInterval = config.PositiveDurationSeconds.ofDays(7)
         ),
       )
     }
+
+  private def buildMalformedTopologyTransaction(
+      mappingV30: v30.TopologyMapping,
+      mappingV31: v31.TopologyMapping,
+  ): ByteString = {
+    val protoVersion = TopologyTransaction.protoVersionFor(testedProtocolVersion)
+
+    val transactionBytes = if (protoVersion == ProtoVersion(31)) {
+      v31
+        .TopologyTransaction(
+          operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
+          serial = 1,
+          mapping = Some(mappingV31),
+        )
+        .toByteString
+    } else {
+      v30
+        .TopologyTransaction(
+          operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
+          serial = 1,
+          mapping = Some(mappingV30),
+        )
+        .toByteString
+    }
+
+    UntypedVersionedMessage(
+      UntypedVersionedMessage.Wrapper.Data(transactionBytes),
+      version = protoVersion.v,
+    ).toByteString
+  }
 
   "A Canton operator" can {
 
@@ -94,6 +131,7 @@ trait TopologyManagementIntegrationTest
           party,
           PositiveInt.one,
           Seq(HostingParticipant(participant1.id, ParticipantPermission.Submission)),
+          isOffline = false,
         )
 
         val ptpReplace = TopologyTransaction
@@ -533,22 +571,10 @@ trait TopologyManagementIntegrationTest
         ),
       )
 
-      val transaction = com.digitalasset.canton.protocol.v30.TopologyTransaction(
-        com.digitalasset.canton.protocol.v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
-        serial = 1,
-        mapping = Some(
-          com.digitalasset.canton.protocol.v30.TopologyMapping(
-            com.digitalasset.canton.protocol.v30.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto)
-          )
-        ),
+      val originalByteString = buildMalformedTopologyTransaction(
+        v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto)),
+        v31.TopologyMapping(v31.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto)),
       )
-
-      val wrapped = UntypedVersionedMessage(
-        UntypedVersionedMessage.Wrapper.Data(transaction.toByteString),
-        version = testedProtocolVersion.v,
-      )
-
-      val originalByteString = wrapped.toByteString
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
         TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
@@ -570,42 +596,38 @@ trait TopologyManagementIntegrationTest
 
       val party = PartyId.tryCreate("alice", Namespace(partyKey.fingerprint))
 
-      val ptpProto = com.digitalasset.canton.protocol.v30.PartyToParticipant(
-        party.toProtoPrimitive,
-        threshold = 1,
-        Seq(
-          // Participant 2 is listed twice with different permissions
-          com.digitalasset.canton.protocol.v30.PartyToParticipant.HostingParticipant(
-            participant2.toProtoPrimitive,
-            com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-            None,
-          ),
-          com.digitalasset.canton.protocol.v30.PartyToParticipant.HostingParticipant(
-            participant2.toProtoPrimitive,
-            com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
-            None,
-          ),
+      val participantsProto = Seq(
+        // Participant 2 is listed twice with different permissions
+        v30.PartyToParticipant.HostingParticipant(
+          participant2.toProtoPrimitive,
+          v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+          None,
         ),
-        None,
+        v30.PartyToParticipant.HostingParticipant(
+          participant2.toProtoPrimitive,
+          v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
+          None,
+        ),
       )
 
-      val transaction = com.digitalasset.canton.protocol.v30.TopologyTransaction(
-        com.digitalasset.canton.protocol.v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
-        serial = 1,
-        mapping = Some(
-          com.digitalasset.canton.protocol.v30.TopologyMapping(
-            com.digitalasset.canton.protocol.v30.TopologyMapping.Mapping
-              .PartyToParticipant(ptpProto)
+      val originalByteString = buildMalformedTopologyTransaction(
+        v30.TopologyMapping(
+          v30.TopologyMapping.Mapping.PartyToParticipant(
+            v30.PartyToParticipant(party.toProtoPrimitive, threshold = 1, participantsProto, None)
+          )
+        ),
+        v31.TopologyMapping(
+          v31.TopologyMapping.Mapping.PartyToParticipant(
+            v31.PartyToParticipant(
+              party.toProtoPrimitive,
+              threshold = 1,
+              participantsProto,
+              None,
+              isOffline = false,
+            )
           )
         ),
       )
-
-      val wrapped = UntypedVersionedMessage(
-        UntypedVersionedMessage.Wrapper.Data(transaction.toByteString),
-        version = testedProtocolVersion.v,
-      )
-
-      val originalByteString = wrapped.toByteString
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
         TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
@@ -638,6 +660,7 @@ trait TopologyManagementIntegrationTest
           partySigningKeysWithThreshold = Some(
             SigningKeysWithThreshold(NonEmpty.mk(Set, partyKey), PositiveInt.two)
           ),
+          isOffline = false,
         ),
         testedProtocolVersion,
       )
@@ -1748,21 +1771,26 @@ trait TopologyManagementIntegrationTest
             )
           ),
           partySigningKeysWithThreshold = None,
+          isOffline = false,
         )
         .value
 
-      val transactions = participant1.topology.transactions.generate(
-        Seq(
-          GenerateTransactions.Proposal(
-            namespaceDelegationMapping,
-            TopologyStoreId.Authorized,
-          ),
-          GenerateTransactions.Proposal(
-            partyHostingMapping,
-            TopologyStoreId.Authorized,
-          ),
+      val transactions = participant1.topology.transactions
+        .generate(
+          Seq(
+            GenerateTransactions.Proposal(
+              namespaceDelegationMapping,
+              TopologyStoreId.Authorized,
+            ),
+            GenerateTransactions.Proposal(
+              partyHostingMapping,
+              TopologyStoreId.Authorized,
+            ),
+          )
         )
-      )
+        .map(tx =>
+          TopologyTransaction.tryCreate(tx.operation, tx.serial, tx.mapping, testedProtocolVersion)
+        )
 
       transactions should contain theSameElementsAs List(
         TopologyTransaction.tryCreate(
@@ -1875,18 +1903,23 @@ trait TopologyManagementIntegrationTest
             ),
           ),
           partySigningKeysWithThreshold = None,
+          isOffline = false,
         )
         .value
 
       // Generate a new transaction for it
-      val transactions2 = participant1.topology.transactions.generate(
-        Seq(
-          GenerateTransactions.Proposal(
-            hostingTransaction2,
-            TopologyStoreId.Authorized,
+      val transactions2 = participant1.topology.transactions
+        .generate(
+          Seq(
+            GenerateTransactions.Proposal(
+              hostingTransaction2,
+              TopologyStoreId.Authorized,
+            )
           )
         )
-      )
+        .map(tx =>
+          TopologyTransaction.tryCreate(tx.operation, tx.serial, tx.mapping, testedProtocolVersion)
+        )
 
       // Now we expect the serial returned to be 2 (because it's the second PartyToParticipant mapping for Max)
       transactions2 should contain theSameElementsAs List(
@@ -1952,6 +1985,7 @@ trait TopologyManagementIntegrationTest
     val proposal = eventually() {
       participant2.topology.party_to_participant_mappings
         .list_hosting_proposals(sequencer1.synchronizer_id, participant2.id)
+        .filter(_.party == party)
         .loneElement
     }
     val tx =
@@ -1998,20 +2032,14 @@ trait TopologyManagementIntegrationTest
           .mkString("\n  ")
       )
 
-      actualTx should have length (2)
+      actualTx should have length 2
       forAll(actualTx.map(_.context.signedBy.forgetNE)) { sigs =>
-        sigs should have length (2)
+        sigs should have length 2
       }
-      proposal.loneElement.context.signedBy.forgetNE should have length (1)
+      proposal.loneElement.context.signedBy.forgetNE should have length 1
 
     }
 
   }
 
-}
-
-class TopologyManagementBftOrderingIntegrationTestPostgres
-    extends TopologyManagementIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
 }

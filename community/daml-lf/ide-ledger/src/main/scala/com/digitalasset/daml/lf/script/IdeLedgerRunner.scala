@@ -18,7 +18,7 @@ import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
-import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine as CSMachine, *}
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.nio.file.{Files, Path, StandardOpenOption}
@@ -81,7 +81,6 @@ private[lf] object IdeLedgerRunner {
         tx: CommittedTransaction,
         locationInfo: Map[NodeId, Location],
     ): Either[Error, R]
-    def csmMode: CSMachine.Mode
   }
 
   private[lf] case class ScriptLedgerApi(ledger: IdeLedger)
@@ -179,7 +178,6 @@ private[lf] object IdeLedgerRunner {
       Right(result)
     }
 
-    override val csmMode = ledger.csmMode
   }
 
   private[this] abstract class Enricher {
@@ -326,11 +324,9 @@ private[lf] object IdeLedgerRunner {
       initialSeeding = InitialSeeding.TransactionSeed(seed),
       expr = SEApp(compiledCommands, ArraySeq(SValue.SToken)),
       committers = committers,
-      readAs = readAs,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
-      interpretationConfig =
-        interpretation.InterpretationConfig.Default.copy(contractStateMode = ledger.csmMode),
+      interpretationConfig = interpretation.InterpretationConfig.Default,
       logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter

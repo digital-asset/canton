@@ -26,6 +26,7 @@ from flaky_common import (
     branch,
     should_report_issues,
     is_nightly_job,
+    is_unstable_job,
     format_issue_title,
     run_gh_with_retries,
     check_result,
@@ -54,6 +55,26 @@ from flaky_common import (
 )
 
 
+# How long after an issue is assigned we stay quiet on Slack. Past this window we resume
+# alerting on every consecutive-failure streak, so an assigned but still-breaking test does
+# not go unnoticed for weeks.
+ASSIGNMENT_SLACK_GRACE = datetime.timedelta(hours=24)
+
+
+def _latest_assignment_time(search_node) -> Optional[datetime.datetime]:
+    """Most recent AssignedEvent timestamp for the issue, or None if none is known."""
+    nodes = search_node.get("timelineItems", {}).get("nodes", [])
+    stamps = [_parse_iso(node["createdAt"]) for node in nodes if node.get("createdAt")]
+    return max(stamps) if stamps else None
+
+
+def _within_assignment_grace(assigned_at: Optional[datetime.datetime]) -> bool:
+    """True while a freshly assigned issue is still inside its Slack grace window."""
+    if assigned_at is None:
+        return False
+    return datetime.datetime.now(datetime.timezone.utc) - assigned_at < ASSIGNMENT_SLACK_GRACE
+
+
 def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
     title = format_issue_title(issue)
     idx = None
@@ -61,6 +82,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
     release_line = None
     is_archived = False
     has_assignee = False
+    assigned_at = None
 
     # search issues by title. also returns partial matches
     result = run_gh_with_retries(
@@ -82,6 +104,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
             idx = str(result["number"])
             body = result["body"]
             has_assignee = result["assignees"]["totalCount"] > 0
+            assigned_at = _latest_assignment_time(result)
             # look at the projects the issue is linked to
             for project_relation in result["projectItems"]["nodes"]:
                 # only extract data for the ticket if the linked project matches the flaky test project
@@ -117,8 +140,14 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
 
         # update the description and reopen if needed
         streak = update_issue(idx, title, body, cause)
-        if has_assignee and streak is not None:
-            print(f"Issue #{idx} has an assignee; skipping Slack notification.")
+        # Stay quiet on Slack for the ASSIGNMENT_SLACK_GRACE period after assignment to give the assignee room to
+        # act, then resume alerting on every consecutive-failure streak so an assigned but
+        # still-breaking test is not silenced for weeks.
+        if streak is not None and has_assignee and _within_assignment_grace(assigned_at):
+            grace_hours = int(ASSIGNMENT_SLACK_GRACE.total_seconds() // 3600)
+            print(
+                f"Issue #{idx} was assigned within the last {grace_hours}h, skipping Slack notification for now."
+            )
             return None
         return streak
 
@@ -380,9 +409,9 @@ def update_issue(
 ) -> Optional[tuple[str, str, str]]:
     job = get_ci_job_name()
     threshold = (
-        CONSECUTIVE_FAILURES_THRESHOLD
-        if job != 'unstable_test'
-        else CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+        CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+        if is_unstable_job(job)
+        else CONSECUTIVE_FAILURES_THRESHOLD
     )
 
     body = migrate_table_header_to_cause(body)
@@ -479,8 +508,9 @@ def self_test():
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info_stable()
     test_update_issue_returns_consecutive_streak_info_unstable()
+    test_update_issue_returns_consecutive_streak_info_unstable_slow()
     test_update_issue_dedupes_shard_duplicates()
-    test_report_issue_skips_slack_if_assignee()
+    test_report_issue_assignment_grace_period()
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
@@ -926,6 +956,13 @@ def test_update_issue_returns_consecutive_streak_info_unstable():
     )
 
 
+def test_update_issue_returns_consecutive_streak_info_unstable_slow():
+    # The slow lane must get the lenient threshold too, not the strict per-commit one.
+    _check_update_issue_returns_consecutive_streak_info(
+        "unstable_test_slow", CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+    )
+
+
 def test_update_issue_dedupes_shard_duplicates():
     # Repeated same-commit rows (multi-shard failures or manual retries) must not
     # shadow the streak check. are_consecutive_commits(X, X) is always False, so
@@ -964,7 +1001,7 @@ def test_update_issue_dedupes_shard_duplicates():
         assert result[2] == current
 
 
-def test_report_issue_skips_slack_if_assignee():
+def test_report_issue_assignment_grace_period():
     title = format_issue_title("SomeFlakyTest")
     commits = [format(i, '040x') for i in range(CONSECUTIVE_FAILURES_THRESHOLD)]
     current = commits[-1]
@@ -979,7 +1016,12 @@ def test_report_issue_skips_slack_if_assignee():
     )
     consecutive_pairs = set(zip(commits, commits[1:]))
 
-    def make_search_response(total_count):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    recent_assignment = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    old_assignment = (now - datetime.timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def make_search_response(total_count, assigned_at=None):
+        timeline_nodes = [{"createdAt": assigned_at}] if assigned_at else []
         return json.dumps(
             {
                 "data": {
@@ -990,6 +1032,7 @@ def test_report_issue_skips_slack_if_assignee():
                                 "number": 99,
                                 "body": body_with_history,
                                 "assignees": {"totalCount": total_count},
+                                "timelineItems": {"nodes": timeline_nodes},
                                 "projectItems": {"nodes": []},
                             }
                         ]
@@ -997,6 +1040,23 @@ def test_report_issue_skips_slack_if_assignee():
                 }
             }
         )
+
+    def run_report(env, total_count, assigned_at, assert_edit_called):
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
+            patch(
+                f'{__name__}.are_consecutive_commits',
+                side_effect=lambda a, b: (a, b) in consecutive_pairs,
+            ),
+            patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+        ):
+            mock_gh.return_value.returncode = 0
+            mock_gh.return_value.stdout = make_search_response(total_count, assigned_at)
+            result = report_issue("SomeFlakyTest")
+            if assert_edit_called:
+                mock_edit.assert_called_once()
+            return result
 
     # Test CircleCI
     env_cci = {
@@ -1007,39 +1067,6 @@ def test_report_issue_skips_slack_if_assignee():
         'CIRCLE_NODE_INDEX': '0',
         'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
     }
-
-    # assigned issue: body is updated but Slack is suppressed (CCI)
-    with (
-        patch.dict(os.environ, env_cci, clear=False),
-        patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
-        patch(
-            f'{__name__}.are_consecutive_commits',
-            side_effect=lambda a, b: (a, b) in consecutive_pairs,
-        ),
-        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
-    ):
-        mock_gh.return_value.returncode = 0
-        mock_gh.return_value.stdout = make_search_response(total_count=1)
-        result = report_issue("SomeFlakyTest")
-        assert result is None, (
-            "Expected None when issue has an assignee (no Slack notification) (CCI)"
-        )
-        mock_edit.assert_called_once()
-
-    # unassigned issue with same streak: Slack is not suppressed (CCI)
-    with (
-        patch.dict(os.environ, env_cci, clear=False),
-        patch(f'{__name__}.gh_issue_edit_cmd'),
-        patch(
-            f'{__name__}.are_consecutive_commits',
-            side_effect=lambda a, b: (a, b) in consecutive_pairs,
-        ),
-        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
-    ):
-        mock_gh.return_value.returncode = 0
-        mock_gh.return_value.stdout = make_search_response(total_count=0)
-        result = report_issue("SomeFlakyTest")
-        assert result is not None, "Expected streak result when issue has no assignee (CCI)"
 
     # Test GitHub Actions
     env_gha = {
@@ -1053,38 +1080,23 @@ def test_report_issue_skips_slack_if_assignee():
         'GITHUB_SERVER_URL': 'https://github.com',
     }
 
-    # assigned issue: body is updated but Slack is suppressed (GHA)
-    with (
-        patch.dict(os.environ, env_gha, clear=False),
-        patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
-        patch(
-            f'{__name__}.are_consecutive_commits',
-            side_effect=lambda a, b: (a, b) in consecutive_pairs,
-        ),
-        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
-    ):
-        mock_gh.return_value.returncode = 0
-        mock_gh.return_value.stdout = make_search_response(total_count=1)
-        result = report_issue("SomeFlakyTest")
-        assert result is None, (
-            "Expected None when issue has an assignee (no Slack notification) (GHA)"
-        )
-        mock_edit.assert_called_once()
+    for label, env in (("CCI", env_cci), ("GHA", env_gha)):
+        # recently assigned issue: body is updated but Slack is suppressed during the grace window
+        assert (
+            run_report(env, total_count=1, assigned_at=recent_assignment, assert_edit_called=True)
+            is None
+        ), f"Expected None when assigned within the grace window (no Slack notification) ({label})"
 
-    # unassigned issue with same streak: Slack is not suppressed (GHA)
-    with (
-        patch.dict(os.environ, env_gha, clear=False),
-        patch(f'{__name__}.gh_issue_edit_cmd'),
-        patch(
-            f'{__name__}.are_consecutive_commits',
-            side_effect=lambda a, b: (a, b) in consecutive_pairs,
-        ),
-        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
-    ):
-        mock_gh.return_value.returncode = 0
-        mock_gh.return_value.stdout = make_search_response(total_count=0)
-        result = report_issue("SomeFlakyTest")
-        assert result is not None, "Expected streak result when issue has no assignee (GHA)"
+        # assigned before the grace window and still streaking: Slack is not suppressed
+        assert (
+            run_report(env, total_count=1, assigned_at=old_assignment, assert_edit_called=True)
+            is not None
+        ), f"Expected streak result when assignment is older than the grace window ({label})"
+
+        # unassigned issue with same streak: Slack is not suppressed
+        assert (
+            run_report(env, total_count=0, assigned_at=None, assert_edit_called=False) is not None
+        ), f"Expected streak result when issue has no assignee ({label})"
 
 
 # Ordered most specific first. A timeout is more telling than a regular

@@ -112,7 +112,6 @@ class EngineExceptionTest extends AnyWordSpec with Matchers with Inside with Sup
   private def submit(engine: Engine, choiceName: String = "FailingChoice") =
     engine.submit(
       submitters = Set(alice),
-      readAs = Set.empty,
       cmds = ApiCommands(ImmArray(command(choiceName)), let, "exception-test"),
       participantId = participantId,
       submissionSeed = submissionSeed,

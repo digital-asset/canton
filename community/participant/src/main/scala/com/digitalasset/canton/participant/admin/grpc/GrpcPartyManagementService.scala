@@ -27,7 +27,8 @@ import com.digitalasset.canton.participant.admin.data.{
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.participant.admin.party.*
-import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
+import com.digitalasset.canton.participant.admin.party.PartyReplicator.PartyReplicationArguments
+import com.digitalasset.canton.participant.admin.party.acsreplication.PartyParticipantPermission
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.store.SyncPersistentState

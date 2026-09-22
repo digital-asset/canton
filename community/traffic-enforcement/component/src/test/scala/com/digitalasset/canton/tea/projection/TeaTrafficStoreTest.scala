@@ -175,7 +175,11 @@ trait TeaTrafficStoreTest
           accountFetch.value.totalCredits.value shouldBe Long.MaxValue
           val error = rejected.left.value
           error.code.id shouldBe TrafficEnforcementErrors.TrafficUpdateOutOfBound.id
-          error.context should contain("accountId" -> alice.toString)
+          error.context should contain allOf (
+            "account_id" -> alice.toString,
+            "traffic_delta" -> "1",
+            "delta_type" -> "credit_delta",
+          )
         }
       }
 
@@ -189,7 +193,11 @@ trait TeaTrafficStoreTest
           accountFetch.value.totalDebits.value shouldBe Long.MaxValue
           val error = rejected.left.value
           error.code.id shouldBe TrafficEnforcementErrors.TrafficUpdateOutOfBound.id
-          error.context should contain("accountId" -> alice.toString)
+          error.context should contain allOf (
+            "account_id" -> alice.toString,
+            "traffic_delta" -> Long.MaxValue.toString,
+            "delta_type" -> "debit_delta",
+          )
         }
       }
 
@@ -203,7 +211,11 @@ trait TeaTrafficStoreTest
           events shouldBe empty
           val error = rejected.left.value
           error.code.id shouldBe TrafficEnforcementErrors.TrafficUpdateOutOfBound.id
-          error.context should contain("accountId" -> alice.toString)
+          error.context should contain allOf (
+            "account_id" -> alice.toString,
+            "traffic_delta" -> "-1",
+            "delta_type" -> "credit_delta",
+          )
         }
       }
 
@@ -217,7 +229,11 @@ trait TeaTrafficStoreTest
           events shouldBe empty
           val error = rejected.left.value
           error.code.id shouldBe TrafficEnforcementErrors.TrafficUpdateOutOfBound.id
-          error.context should contain("accountId" -> alice.toString)
+          error.context should contain allOf (
+            "account_id" -> alice.toString,
+            "traffic_delta" -> "-1",
+            "delta_type" -> "debit_delta",
+          )
         }
       }
 

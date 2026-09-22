@@ -34,7 +34,7 @@ final class PartyReplicationTriggers(
   private[participant] val indexingWorkflow =
     new PartyReplicationIndexingWorkflow(
       syncService.participantNodePersistentState.map(_.contractStore),
-      config.pauseSynchronizerIndexingDuringPartyReplication,
+      config.target.pauseSynchronizerIndexingDuringPartyReplication,
       batchingConfig,
       loggerFactory,
     )

@@ -8,6 +8,7 @@ package com.digitalasset.canton.topology.admin.v30;
 import "com/digitalasset/canton/protocol/v30/sequencing_parameters.proto";
 import "com/digitalasset/canton/protocol/v30/synchronizer_parameters.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "com/digitalasset/canton/protocol/v31/topology.proto";
 import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
@@ -221,6 +222,7 @@ message ListPartyToParticipantResponse {
     BaseResult context = 1;
     oneof item {
       com.digitalasset.canton.protocol.v30.PartyToParticipant v30 = 2;
+      com.digitalasset.canton.protocol.v31.PartyToParticipant v31 = 3;
     }
   }
   repeated Result results = 2;

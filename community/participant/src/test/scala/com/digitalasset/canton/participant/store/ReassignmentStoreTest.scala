@@ -7,7 +7,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.UnassignmentData.{
@@ -31,6 +31,11 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.store.ReassignmentStore.*
+import com.digitalasset.canton.participant.topology.{
+  FailingOfflineTopologyLookup,
+  OfflineTopologyLookup,
+  TestingOfflineTopologyLookup,
+}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   defaultVersionedValue,
   suffixedId,
@@ -47,6 +52,8 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
+import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, MonadUtil}
@@ -65,9 +72,17 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
   import ReassignmentStoreTest.*
   import CantonTimestamp.{Epoch, ofEpochSecond}
 
+  private implicit def refinePartyONE(party: LfPartyId): Option[NonEmpty[Set[LfPartyId]]] =
+    Option(NonEmpty.mk(Set, party))
+
+  private implicit def refinePartyNE(party: LfPartyId): NonEmpty[Set[LfPartyId]] =
+    NonEmpty.mk(Set, party)
+
   private implicit def toOffset(i: Long): Offset = Offset.tryFromLong(i)
 
-  protected def reassignmentStore(mk: IndexedSynchronizer => ReassignmentStore): Unit = {
+  protected def reassignmentStore(
+      mk: (IndexedSynchronizer, OfflineTopologyLookup) => ReassignmentStore
+  ): Unit = {
     val unassignmentData = mkUnassignmentData(sourceSynchronizer1, Epoch, mediator1)
     val unassignmentData2 =
       mkUnassignmentData(sourceSynchronizer1, ofEpochSecond(1), mediator1)
@@ -89,7 +104,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
     "lookup" should {
       "find previously stored reassignments" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
           lookup10 <- valueOrFail(store.lookup(unassignmentData.reassignmentId))(
@@ -99,7 +114,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "not invent reassignments" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
           lookup10 <- store.lookup(reassignment11).value
@@ -147,7 +162,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "order pending reassignments" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           reassignments <- populate(store)
@@ -160,7 +175,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
       }
       "give pending reassignments after the given timestamp" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           reassignments <- populate(store)
@@ -179,13 +194,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         }
       }
       "give no pending reassignments when empty" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for { lookup <- store.findAfter(None, 10) } yield {
           lookup shouldBe empty
         }
       }
       "limit the results" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           reassignments <- populate(store)
@@ -197,7 +212,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         }
       }
       "exclude completed reassignments" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           reassignments <- populate(store)
@@ -228,7 +243,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       )
 
       "be idempotent" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           _ <- store.addAssignmentDataIfAbsent(assignmentData).value
@@ -237,7 +252,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "AddAssignmentData doesn't update if conflicting data" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         val updatedBatch = ContractsReassignmentBatch
           .create(assignmentData.contracts.contracts.map { reassign =>
@@ -262,7 +277,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "AddAssignmentData doesn't update the entry once the reassignment data is inserted" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- store.addUnassignmentData(data).value
           entry11 <- store.findReassignmentEntry(data.reassignmentId).value
@@ -283,7 +298,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "addUnassignment is called after addAssignmentData with conflicting data" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- store.addAssignmentDataIfAbsent(assignmentData).value
           modifiedUnassignmentData = ReassignmentStoreTest.mkUnassignmentDataForSynchronizer(
@@ -296,12 +311,12 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           _ <- store.addUnassignmentData(modifiedUnassignmentData).value
           entry <- store.findReassignmentEntry(data.reassignmentId).value
         } yield entry shouldBe Right(
-          ReassignmentEntry(modifiedUnassignmentData, None, None)
+          ReassignmentEntry(modifiedUnassignmentData, None, None, None)
         )
       }
 
       "addUnassignment updates the unassignment timestamp stored by addAssignmentData" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val unassignmentTs = CantonTimestamp.ofEpochSecond(3)
         val dataWithTs = mkUnassignmentData(sourceSynchronizer1, unassignmentTs, mediator1)
         val assignmentDataWithTs = AssignmentData(
@@ -318,12 +333,12 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           // addAssignmentDataIfAbsent stores a placeholder Epoch timestamp
           entryBefore.map(_.unassignmentTs) shouldBe Right(CantonTimestamp.Epoch)
           // the real unassignment timestamp must overwrite the placeholder
-          entryAfter shouldBe Right(ReassignmentEntry(dataWithTs, None, None))
+          entryAfter shouldBe Right(ReassignmentEntry(dataWithTs, None, None, None))
         }
       }
 
       "complete the assignment before the unassignment" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         (for {
           _ <- store.addAssignmentDataIfAbsent(assignmentData).value
           entry1 <- store.findReassignmentEntry(data.reassignmentId).value
@@ -342,6 +357,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             ReassignmentEntry(
               assignmentData,
               reassignmentGlobalOffset = None,
+              incompleteLastStakeholderOffboardedTargetOffset = None,
               unassignmentTs = CantonTimestamp.Epoch,
               tsCompletion = None,
             )
@@ -365,6 +381,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         ReassignmentEntry(
           unassignmentData,
           Some(UnassignmentGlobalOffset(unassignmentOffset.offset)),
+          incompleteLastStakeholderOffboardedTargetOffset = None,
           None,
         )
 
@@ -378,7 +395,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         )
 
       "allow batch updates" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         val data = (1L until 13).flatMap { i =>
           val reassignmentData =
@@ -437,7 +454,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "be idempotent" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
@@ -492,7 +509,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "return an error if assignment offset is the same as the unassignment" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
@@ -513,7 +530,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "return an error if unassignment offset is the same as the assignment" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
@@ -534,7 +551,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "return an error if the new value differs from the old one" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
@@ -623,7 +640,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "list incomplete reassignments (unassignment done)" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId1 = unassignmentData.reassignmentId
         val reassignmentId2 = unassignmentData2.reassignmentId
 
@@ -633,7 +650,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add 1 failed")
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData2))("add 2 failed")
-          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
+          lookupNoOffset <- store.findIncomplete(Long.MaxValue, None, limit)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -646,15 +663,10 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               "add unassignment offset failed"
             )
           lookupBeforeUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOsset - 1,
-              None,
-              limit,
-            )
+            .findIncomplete(unassignmentOsset - 1, None, limit)
 
           lookupAtUnassignment <- store
-            .findIncomplete(None, unassignmentOsset, None, limit)
+            .findIncomplete(unassignmentOsset, None, limit)
 
           _ <- store
             .addReassignmentsOffsets(
@@ -668,23 +680,11 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             )
 
           lookupBeforeAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset - 1,
-              None,
-              limit,
-            )
+            .findIncomplete(assignmentOffset - 1, None, limit)
 
-          lookupAtAssignment <- store
-            .findIncomplete(None, assignmentOffset, None, limit)
+          lookupAtAssignment <- store.findIncomplete(assignmentOffset, None, limit)
 
-          lookupAfterAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset,
-              None,
-              limit,
-            )
+          lookupAfterAssignment <- store.findIncomplete(assignmentOffset, None, limit)
 
         } yield {
           lookupNoOffset shouldBe empty
@@ -697,11 +697,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               ReassignmentEntry(
                 unassignmentData,
                 Some(UnassignmentGlobalOffset(unassignmentOsset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 None,
               ),
               ReassignmentEntry(
                 unassignmentData2,
                 Some(UnassignmentGlobalOffset(unassignmentOsset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 None,
               ),
             ),
@@ -714,11 +716,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               ReassignmentEntry(
                 unassignmentData,
                 Some(UnassignmentGlobalOffset(unassignmentOsset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 None,
               ),
               ReassignmentEntry(
                 unassignmentData2,
                 Some(UnassignmentGlobalOffset(unassignmentOsset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 None,
               ),
             ),
@@ -731,7 +735,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "list incomplete reassignments (assignment done)" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
 
         val assignmentOffset = 10L
@@ -744,7 +748,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
         for {
           _ <- valueOrFail(store.addAssignmentDataIfAbsent(assignmentData))("add failed")
-          lookupNoOffset <- store.findIncomplete(None, Long.MaxValue, None, limit)
+          lookupNoOffset <- store.findIncomplete(Long.MaxValue, None, limit)
           _ <- store.completeReassignment(assignmentData.reassignmentId, ts).value
           _ <-
             store
@@ -755,16 +759,9 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
                 "add assignment offset failed"
               )
 
-          lookupBeforeAssignment <- store
-            .findIncomplete(
-              None,
-              assignmentOffset - 1,
-              None,
-              limit,
-            )
+          lookupBeforeAssignment <- store.findIncomplete(assignmentOffset - 1, None, limit)
 
-          lookupAtAssignment <- store
-            .findIncomplete(None, assignmentOffset, None, limit)
+          lookupAtAssignment <- store.findIncomplete(assignmentOffset, None, limit)
 
           _ <- store.addUnassignmentData(unassignmentData).value
 
@@ -777,24 +774,11 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
                 "add unassignment offset failed"
               )
 
-          lookupBeforeUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset - 1,
-              None,
-              limit,
-            )
+          lookupBeforeUnassignment <- store.findIncomplete(unassignmentOffset - 1, None, limit)
 
-          lookupAtUnassignment <- store
-            .findIncomplete(None, unassignmentOffset, None, limit)
+          lookupAtUnassignment <- store.findIncomplete(unassignmentOffset, None, limit)
 
-          lookupAfterUnassignment <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset,
-              None,
-              limit,
-            )
+          lookupAfterUnassignment <- store.findIncomplete(unassignmentOffset, None, limit)
 
         } yield {
           lookupNoOffset shouldBe empty
@@ -807,6 +791,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               ReassignmentEntry(
                 assignmentData,
                 Some(AssignmentGlobalOffset(assignmentOffset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 CantonTimestamp.Epoch,
                 None,
               )
@@ -820,6 +805,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               ReassignmentEntry(
                 unassignmentData,
                 Some(AssignmentGlobalOffset(assignmentOffset)),
+                incompleteLastStakeholderOffboardedTargetOffset = None,
                 None,
               )
             ),
@@ -832,7 +818,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "take stakeholders filter into account" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         val alice = ReassignmentStoreTest.alice
         val bob = ReassignmentStoreTest.bob
@@ -866,21 +852,13 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             )
             .value
 
-          lookupNone <- store.findIncomplete(None, unassignmentOffset, None, limit)
+          lookupNone <- store.findIncomplete(unassignmentOffset, None, limit)
 
-          lookupAll <- store
-            .findIncomplete(
-              None,
-              unassignmentOffset,
-              lift(alice, bob),
-              limit,
-            )
+          lookupAll <- store.findIncomplete(unassignmentOffset, lift(alice, bob), limit)
 
-          lookupAlice <- store
-            .findIncomplete(None, unassignmentOffset, lift(alice), limit)
+          lookupAlice <- store.findIncomplete(unassignmentOffset, lift(alice), limit)
 
-          lookupBob <- store
-            .findIncomplete(None, unassignmentOffset, lift(bob), limit)
+          lookupBob <- store.findIncomplete(unassignmentOffset, lift(bob), limit)
 
         } yield {
           lookupNone.map(_.reassignmentId) should contain theSameElementsAs reassignmentsData.map(
@@ -898,36 +876,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         }
       }
 
-      "take synchronizer filter into account" in {
-        val store = mk(indexedTargetSynchronizer)
-        val offset = 10L
-
-        for {
-          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
-          _ <- store
-            .addReassignmentsOffsets(
-              Map(unassignmentData.reassignmentId -> AssignmentGlobalOffset(offset))
-            )
-            .valueOrFail("add out offset")
-          entry <- store
-            .findReassignmentEntry(unassignmentData.reassignmentId)
-            .valueOrFail("lookup")
-
-          lookup1a <- store
-            .findIncomplete(Some(sourceSynchronizer2), offset, None, limit) // Wrong synchronizer
-          lookup1b <- store
-            .findIncomplete(Some(sourceSynchronizer1), offset, None, limit)
-
-          lookup1c <- store.findIncomplete(None, offset, None, limit)
-        } yield {
-          lookup1a shouldBe empty
-          assertIsIncomplete(lookup1b, Seq(entry), offset)
-          assertIsIncomplete(lookup1c, Seq(entry), offset)
-        }
-      }
-
       "limit the results" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val offset = 42L
 
         for {
@@ -938,8 +888,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             )
             .valueOrFail("add out offset")
 
-          lookup0 <- store.findIncomplete(None, offset, None, NonNegativeInt.zero)
-          lookup1 <- store.findIncomplete(None, offset, None, NonNegativeInt.one)
+          lookup0 <- store.findIncomplete(offset, None, NonNegativeInt.zero)
+          lookup1 <- store.findIncomplete(offset, None, NonNegativeInt.one)
 
         } yield {
           lookup0 shouldBe empty
@@ -948,10 +898,359 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
     }
 
+    "offboarding the last stakeholder" should {
+      "mark an incomplete unassigned reassignment as not incomplete anymore" in {
+        /*
+          Scenario:
+            - Incomplete unassigned contract with Alice and Bob as stakeholders (with offset o_unassigned)
+            - Alice is offboarded on the target synchronizer
+            - Bob is offboarded on the target synchronizer (with offset o_offboarding)
+            - The reassignment is incomplete at offset o iff
+                o_unassigned <= o <= o_offboarding
+         */
+
+        val alice = LfPartyId.assertFromString(DefaultTestIdentities.party1.toProtoPrimitive)
+        val bob = LfPartyId.assertFromString(DefaultTestIdentities.party2.toProtoPrimitive)
+
+        val contract = ReassignmentStoreTest.contract(
+          ReassignmentStoreTest.coidAbs1,
+          alice,
+          observer = Some(bob),
+        )
+
+        val unassignmentData = unassignmentDataFor(
+          sourceSynchronizer = sourceSynchronizer1,
+          unassignmentTs = ofEpochSecond(10),
+          contract,
+        )
+
+        val unassignedOffset = Offset.tryFromLong(10)
+        val aliceOffboardedOffset = Offset.tryFromLong(15)
+        val bobOffboardedOffset = Offset.tryFromLong(20)
+
+        val aliceOffboardedTs = ofEpochSecond(aliceOffboardedOffset.unwrap)
+        val bobOffboardedTs = ofEpochSecond(bobOffboardedOffset.unwrap)
+
+        val aliceOffboarded = TestingTopology(
+          // synchronizer does not matter
+          synchronizers = Set(sourceSynchronizer1.value),
+          Map(
+            // Only Bob listed
+            bob -> PartyInfo(
+              PositiveInt.one,
+              Map(
+                DefaultTestIdentities.participant1 -> ParticipantAttributes(
+                  ParticipantPermission.Observation
+                )
+              ),
+            )
+          ),
+        ).build(loggerFactory).topologySnapshot(timestampOfSnapshot = aliceOffboardedTs)
+
+        val aliceAndBobOffboarded = TestingTopology(
+          synchronizers = Set(sourceSynchronizer1.value),
+          // No parties
+          Map(),
+        ).build(loggerFactory).topologySnapshot(timestampOfSnapshot = bobOffboardedTs)
+
+        val reassignmentId = unassignmentData.reassignmentId
+
+        val store = mk(
+          indexedTargetSynchronizer,
+          new TestingOfflineTopologyLookup(
+            Map(aliceOffboardedTs -> aliceOffboarded, bobOffboardedTs -> aliceAndBobOffboarded)
+          ),
+        )
+
+        for {
+          _ <- store
+            .addUnassignmentData(unassignmentData)
+            .valueOrFail("Unable to store unassignment data")
+
+          _ <- store
+            .addReassignmentsOffsets(
+              Map(reassignmentId -> UnassignmentGlobalOffset(unassignedOffset))
+            )
+            .valueOrFail("Reassignment is incomplete")
+
+          incompletesBeforeAliceOffboarding1 <- store.findIncomplete(
+            unassignedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeAliceOffboarding <- store
+            .findReassignmentEntry(reassignmentId)
+            .valueOrFail("Find entry")
+            .map(_.incompleteLastStakeholderOffboardedTargetOffset)
+
+          _ <- store
+            .handlePartiesOffboarding(
+              aliceOffboardedOffset,
+              aliceOffboardedTs,
+              alice,
+            )
+            .valueOrFail("Offboard Alice")
+
+          // Same query than before but after offboarding Alice
+          incompletesBeforeAliceOffboarding2 <- store.findIncomplete(
+            unassignedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeBobOffboarding <- store
+            .findReassignmentEntry(reassignmentId)
+            .valueOrFail("Find entry")
+            .map(_.incompleteLastStakeholderOffboardedTargetOffset)
+
+          _ <- store
+            .handlePartiesOffboarding(
+              bobOffboardedOffset,
+              bobOffboardedTs,
+              bob,
+            )
+            .valueOrFail("Offboard Bob")
+
+          incompleteLastStakeholderOffboardedTargetOffsetAfterBobOffboarding <- store
+            .findReassignmentEntry(reassignmentId)
+            .valueOrFail("Find entry")
+            .map(_.incompleteLastStakeholderOffboardedTargetOffset)
+
+          incompletesAtBobOffboarding <- store.findIncomplete(
+            bobOffboardedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompletesAfterBobOffboarding <- store.findIncomplete(
+            Offset.tryFromLong(bobOffboardedOffset.unwrap + 1),
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+        } yield {
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeAliceOffboarding shouldBe empty
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeBobOffboarding shouldBe empty
+          incompleteLastStakeholderOffboardedTargetOffsetAfterBobOffboarding.value shouldBe bobOffboardedOffset
+
+          incompletesBeforeAliceOffboarding1.loneElement.reassignmentId shouldBe reassignmentId
+          incompletesBeforeAliceOffboarding2.loneElement.reassignmentId shouldBe reassignmentId
+          incompletesAtBobOffboarding.loneElement.reassignmentId shouldBe reassignmentId
+          incompletesAfterBobOffboarding shouldBe empty
+        }
+      }
+
+      "mark incomplete unassigned reassignments as not incomplete anymore" in {
+        /*
+       This test case ensures that all entries are updated.
+       This could be folded in the previous one but would make it difficult to read.
+         */
+
+        val alice = LfPartyId.assertFromString(DefaultTestIdentities.party1.toProtoPrimitive)
+
+        val c1 = ReassignmentStoreTest.contract(ReassignmentStoreTest.coidAbs1, alice)
+        val c2 = ReassignmentStoreTest.contract(ReassignmentStoreTest.coidAbs1, alice)
+
+        val unassignmentData1 = unassignmentDataFor(
+          sourceSynchronizer = sourceSynchronizer1,
+          unassignmentTs = ofEpochSecond(11),
+          c1,
+        )
+        val unassignmentData2 = unassignmentDataFor(
+          sourceSynchronizer = sourceSynchronizer1,
+          unassignmentTs = ofEpochSecond(12),
+          c2,
+        )
+
+        val unassignedOffset1 = Offset.tryFromLong(11)
+        val unassignedOffset2 = Offset.tryFromLong(12)
+        val aliceOffboardedOffset = Offset.tryFromLong(15)
+
+        val aliceOffboardedTs = ofEpochSecond(aliceOffboardedOffset.unwrap)
+
+        val aliceOffboarded = TestingTopology(
+          // synchronizer does not matter
+          synchronizers = Set(sourceSynchronizer1.value),
+          Map(),
+        ).build(loggerFactory).topologySnapshot(timestampOfSnapshot = aliceOffboardedTs)
+
+        val reassignmentId1 = unassignmentData1.reassignmentId
+        val reassignmentId2 = unassignmentData2.reassignmentId
+
+        val store = mk(
+          indexedTargetSynchronizer,
+          new TestingOfflineTopologyLookup(
+            Map(aliceOffboardedTs -> aliceOffboarded)
+          ),
+        )
+
+        for {
+          _ <- store
+            .addUnassignmentData(unassignmentData1)
+            .valueOrFail("Unable to store unassignment data")
+
+          _ <- store
+            .addReassignmentsOffsets(
+              Map(reassignmentId1 -> UnassignmentGlobalOffset(unassignedOffset1))
+            )
+            .valueOrFail("Reassignment is incomplete")
+
+          _ <- store
+            .addUnassignmentData(unassignmentData2)
+            .valueOrFail("Unable to store unassignment data")
+
+          _ <- store
+            .addReassignmentsOffsets(
+              Map(reassignmentId2 -> UnassignmentGlobalOffset(unassignedOffset2))
+            )
+            .valueOrFail("Reassignment is incomplete")
+
+          incompletesBeforeAliceOffboarding1 <- store.findIncomplete(
+            unassignedOffset1,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompletesBeforeAliceOffboarding2 <- store.findIncomplete(
+            unassignedOffset2,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          _ <- store
+            .handlePartiesOffboarding(
+              aliceOffboardedOffset,
+              aliceOffboardedTs,
+              alice,
+            )
+            .valueOrFail("Offboard Alice")
+
+          incompletesAtAliceOffboarding <- store.findIncomplete(
+            aliceOffboardedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompletesAfterAliceOffboarding <- store.findIncomplete(
+            Offset.tryFromLong(aliceOffboardedOffset.unwrap + 1),
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+        } yield {
+
+          incompletesBeforeAliceOffboarding1.loneElement.reassignmentId shouldBe reassignmentId1
+          incompletesBeforeAliceOffboarding2.map(
+            _.reassignmentId
+          ) should contain theSameElementsAs (Seq(reassignmentId1, reassignmentId2))
+          incompletesAtAliceOffboarding.map(_.reassignmentId) should contain theSameElementsAs (Seq(
+            reassignmentId1,
+            reassignmentId2,
+          ))
+          incompletesAfterAliceOffboarding shouldBe empty
+        }
+      }
+
+      "leave incomplete assigned marked as incomplete upon offboarding of the last stakeholder" in {
+        /*
+          Scenario:
+            - Incomplete assigned contract with Alice stakeholder
+            - Alice is offboarded on the target synchronizer
+            - Reassignment is still incomplete
+         */
+
+        val alice = LfPartyId.assertFromString(DefaultTestIdentities.party1.toProtoPrimitive)
+
+        val contract = ReassignmentStoreTest.contract(
+          ReassignmentStoreTest.coidAbs1,
+          alice,
+        )
+
+        val unassignmentData = unassignmentDataFor(
+          sourceSynchronizer = sourceSynchronizer1,
+          unassignmentTs = ofEpochSecond(10),
+          contract,
+        )
+
+        val assignedOffset = Offset.tryFromLong(10)
+        val aliceOffboardedOffset = Offset.tryFromLong(15)
+
+        val aliceOffboardedTs = ofEpochSecond(aliceOffboardedOffset.unwrap)
+
+        val aliceOffboarded = TestingTopology(
+          synchronizers = Set(sourceSynchronizer1.value),
+          Map(),
+        ).build(loggerFactory).topologySnapshot(timestampOfSnapshot = aliceOffboardedTs)
+
+        val reassignmentId = unassignmentData.reassignmentId
+
+        val store = mk(
+          indexedTargetSynchronizer,
+          new TestingOfflineTopologyLookup(Map(aliceOffboardedTs -> aliceOffboarded)),
+        )
+
+        for {
+          _ <- store
+            .addUnassignmentData(unassignmentData)
+            .valueOrFail("Unable to store unassignment data")
+
+          _ <- store
+            .addReassignmentsOffsets(Map(reassignmentId -> AssignmentGlobalOffset(assignedOffset)))
+            .valueOrFail("Reassignment is incomplete")
+
+          incompletesBeforeAliceOffboarding1 <- store.findIncomplete(
+            assignedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeAliceOffboarding <- store
+            .findReassignmentEntry(reassignmentId)
+            .valueOrFail("Find entry")
+            .map(_.incompleteLastStakeholderOffboardedTargetOffset)
+
+          _ <- store
+            .handlePartiesOffboarding(
+              aliceOffboardedOffset,
+              aliceOffboardedTs,
+              alice,
+            )
+            .valueOrFail("Offboard Alice")
+
+          // Same query than before but after offboarding Alice
+          incompletesBeforeAliceOffboarding2 <- store.findIncomplete(
+            assignedOffset,
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+          incompleteLastStakeholderOffboardedTargetOffsetAfterAliceOffboarding <- store
+            .findReassignmentEntry(reassignmentId)
+            .valueOrFail("Find entry")
+            .map(_.incompleteLastStakeholderOffboardedTargetOffset)
+
+          incompletesAferAliceOffboarding <- store.findIncomplete(
+            Offset.tryFromLong(aliceOffboardedOffset.unwrap + 1),
+            alice,
+            NonNegativeInt.maxValue,
+          )
+
+        } yield {
+          incompleteLastStakeholderOffboardedTargetOffsetBeforeAliceOffboarding shouldBe empty
+          incompleteLastStakeholderOffboardedTargetOffsetAfterAliceOffboarding shouldBe empty
+
+          incompletesBeforeAliceOffboarding1.loneElement.reassignmentId shouldBe reassignmentId
+          incompletesBeforeAliceOffboarding2.loneElement.reassignmentId shouldBe reassignmentId
+          incompletesAferAliceOffboarding.loneElement.reassignmentId shouldBe reassignmentId
+        }
+      }
+    }
+
     "find first incomplete" should {
 
       "find incomplete reassignments (unassignment done)" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
 
         val unassignmentOffset = 10L
@@ -986,7 +1285,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "find incomplete reassignments (assignment done)" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
 
         val unassignmentOffset = 10L
@@ -1022,7 +1321,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "returns None when reassignment store is empty or each reassignment is either complete or has no offset information" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId1 = unassignmentData.reassignmentId
         val reassignmentId3 = unassignmentData3.reassignmentId
 
@@ -1083,7 +1382,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "works in complex scenario" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId1 = unassignmentData.reassignmentId
         val reassignmentId2 = unassignmentData2.reassignmentId
         val reassignmentId3 = unassignmentData3.reassignmentId
@@ -1154,7 +1453,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
     "addUnassignmentData" should {
       "be idempotent" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))(
             "first add failed"
@@ -1166,7 +1465,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "detect modified reassignment data" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         val updatedUnassignmentData =
           unassignmentData2.focus(_.unassignmentTs).modify(_.immediateSuccessor)
@@ -1178,11 +1477,11 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           entry <- store
             .findReassignmentEntry(unassignmentData.reassignmentId)
             .valueOrFail("lookup")
-        } yield entry shouldBe ReassignmentEntry(unassignmentData, None, None)
+        } yield entry shouldBe ReassignmentEntry(unassignmentData, None, None, None)
       }
 
       "add several reassignments" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         val unassignmentData10 =
           mkUnassignmentData(sourceSynchronizer1, Epoch, mediator1)
@@ -1219,7 +1518,10 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "complain about reassignments for a different synchronizer" in {
-        val store = mk(IndexedSynchronizer.tryCreate(sourceSynchronizer1.unwrap, 2))
+        val store = mk(
+          IndexedSynchronizer.tryCreate(sourceSynchronizer1.unwrap, 2),
+          new FailingOfflineTopologyLookup(),
+        )
         loggerFactory.assertInternalError[IllegalArgumentException](
           store.addUnassignmentData(unassignmentData),
           _.getMessage shouldBe s"Synchronizer ${Target(sourceSynchronizer1.unwrap.logical)}: Reassignment store cannot store reassignment for synchronizer $targetSynchronizerId",
@@ -1229,7 +1531,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
     "completeReassignment" should {
       "mark the reassignment as completed" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
           _ <- valueOrFail(store.completeReassignment(unassignmentData.reassignmentId, ts))(
@@ -1240,7 +1542,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "be idempotent" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
           _ <- valueOrFail(store.completeReassignment(unassignmentData.reassignmentId, ts))(
@@ -1253,7 +1555,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "be allowed before the result" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
@@ -1272,7 +1574,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "store the first completion" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val ts2 = CantonTimestamp.ofEpochSecond(4)
         val reassignmentId = unassignmentData.reassignmentId
         for {
@@ -1291,7 +1593,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
     "delete" should {
       "remove the reassignment" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
@@ -1301,7 +1603,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "ignore unknown reassignment IDs" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
           () <- store.deleteReassignment(reassignmentId)
@@ -1309,7 +1611,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
       }
 
       "be idempotent" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val reassignmentId = unassignmentData.reassignmentId
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add failed")
@@ -1320,8 +1622,11 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
     }
 
     "reassignment stores should be isolated" in {
-      val storeTarget = mk(indexedTargetSynchronizer)
-      val store1 = mk(IndexedSynchronizer.tryCreate(sourceSynchronizer1.unwrap, 2))
+      val storeTarget = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
+      val store1 = mk(
+        IndexedSynchronizer.tryCreate(sourceSynchronizer1.unwrap, 2),
+        new FailingOfflineTopologyLookup(),
+      )
       for {
         _ <- valueOrFail(storeTarget.addUnassignmentData(unassignmentData))("add failed")
         found <- store1.lookup(unassignmentData.reassignmentId).value
@@ -1330,7 +1635,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
     "deleteCompletionsSince" should {
       "remove the completions from the criterion on" in {
-        val store = mk(indexedTargetSynchronizer)
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
         val ts1 = CantonTimestamp.ofEpochSecond(5)
         val ts2 = CantonTimestamp.ofEpochSecond(7)
 
@@ -1401,12 +1706,20 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
   val alice = LfPartyId.assertFromString("alice")
   val bob = LfPartyId.assertFromString("bob")
 
-  private def contract(id: LfContractId, signatory: LfPartyId): ContractInstance =
+  private def contract(
+      id: LfContractId,
+      signatory: LfPartyId,
+      observer: Option[LfPartyId] = None,
+  ): ContractInstance =
     ExampleTransactionFactory.asContractInstance(
       contractId = id,
       arg = defaultVersionedValue,
       ledgerTime = CreationTime.CreatedAt(LfTimestamp.Epoch),
-      metadata = ContractMetadata.tryCreate(Set(signatory), Set(signatory), None),
+      metadata = ContractMetadata.tryCreate(
+        signatories = Set(signatory),
+        stakeholders = Set(signatory) ++ observer.toList,
+        None,
+      ),
     )
 
   val coidAbs1 = suffixedId(1, 0)

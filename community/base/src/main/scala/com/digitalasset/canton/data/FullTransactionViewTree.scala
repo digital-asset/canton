@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -18,8 +18,7 @@ import scala.annotation.tailrec
   * unblinded if and only if the unblinded view is a root view.
   */
 final case class FullTransactionViewTree private (tree: GenTransactionTree)
-    extends TransactionViewTree
-    with PrettyPrinting {
+    extends TransactionViewTree {
 
   @tailrec
   private[data] override def findTheView(
@@ -44,12 +43,15 @@ final case class FullTransactionViewTree private (tree: GenTransactionTree)
   lazy val tryFlattenToParticipantViews: Seq[ParticipantTransactionView] =
     view.tryFlattenToParticipantViews
 
-  override protected def pretty: Pretty[FullTransactionViewTree] = prettyOfClass(
-    unnamedParam(_.tree)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[FullTransactionViewTree] =
+    FullTransactionViewTree
 }
 
-object FullTransactionViewTree {
+object FullTransactionViewTree extends PrettyPrintingCompanion[FullTransactionViewTree] {
+
+  override protected val pretty: Pretty[FullTransactionViewTree] = prettyOfClass(
+    unnamedParam(_.tree)
+  )
 
   /** @throws TransactionViewTree$.InvalidTransactionViewTree
     *   if tree is not a transaction view tree (i.e. the wrong set of nodes is blinded)

@@ -35,7 +35,6 @@ import scala.collection.immutable.{ArraySeq, TreeSet}
 private[lf] final class TransactionConductor(
     private[speedy] var compiledPackages: CompiledPackages,
     val committers: Set[Ref.Party],
-    val readAs: Set[Ref.Party],
     val preparationTime: Time.Timestamp,
     val contractIdVersion: ContractIdVersion,
     val packageResolution: Map[Ref.PackageName, Ref.PackageId],
@@ -115,6 +114,59 @@ private[lf] final class TransactionConductor(
   // Command-driving entry (host-facing)
   // -----------------------------------------------------------------  ----------
 
+  @scala.annotation.nowarn
+  def handleCommands(cmds: Seq[Command]): Upd.T[Unit] =
+    cmds
+      .traverse {
+        case Command.Create(templateId, argument: SValue.SRecord) =>
+          handleCommand(Question.Cmd.Create(templateId, argument))
+        case Command.ExerciseTemplate(
+              templateId,
+              SValue.SContractId(contractId),
+              choiceId,
+              argument,
+            ) =>
+          handleCommand(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
+        case Command.ExerciseInterface(
+              interfaceId,
+              SValue.SContractId(contractId),
+              choiceId,
+              argument,
+            ) =>
+          handleCommand(
+            Question.Cmd
+              .ExerciseInterface(interfaceId, contractId, choiceId, argument)
+          )
+        case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
+          handleCommand(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
+        case Command.CreateAndExercise(
+              templateId,
+              createArgument: SValue.SRecord,
+              choiceId,
+              choiceArgument,
+            ) =>
+          handleCreateThenExercise(
+            Question.Cmd.Create(templateId, createArgument),
+            Question.Cmd.ExerciseTemplate(templateId, _, choiceId, choiceArgument),
+          )
+        case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
+          handleCommand(Question.Cmd.FetchTemplate(templateId, contractId))
+        case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
+          handleCommand(Question.Cmd.FetchInterface(interfaceId, contractId))
+        case Command.FetchByKey(templateId, key) =>
+          handleCommand(Question.Cmd.FetchByKey(templateId, key))
+      }
+      .map(_ => ())
+
+  def finish: Either[SError.Crash, Result] = ptx.finish.map { case (tx, seeds) =>
+    Result(
+      tx,
+      zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
+      ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
+      ptx.csmJournal.contractOrder,
+    )
+  }
+
   /** Public seam: interpret a single ledger command, yielding a program to drive. */
   def handleCommand(cmd: Question.Cmd): Upd.T[SValue] =
     handleCmd(cmd).valueOrF(raiseFailureWithStatus(_))
@@ -122,7 +174,7 @@ private[lf] final class TransactionConductor(
   /** Runs `create`, then feeds the resulting contract id to `exerciseOn` and runs that command.
     * Used by tests that must set up a contract (e.g. a helper) before exercising it.
     */
-  def createThenExercise(
+  def handleCreateThenExercise(
       create: Question.Cmd.Create,
       exerciseOn: V.ContractId => Question.Cmd,
   ): Upd.T[SValue] =
@@ -269,7 +321,16 @@ private[lf] final class TransactionConductor(
           nothing
       }
 
-    Upd.WithException.liftEither(loop)
+    for {
+      _ <-
+        if (compiledPackages.getDefinition(defRef).isDefined)
+          Upd.WithException.pure(())
+        else
+          Upd.WithException.liftSuccess(
+            needPackage(defRef.packageId, language.Reference.Value(defRef.ref))
+          )
+      result <- Upd.WithException.liftEither(loop)
+    } yield result
   }
 
   private def computeContractSignatories(
@@ -1284,22 +1345,22 @@ private[lf] final class TransactionConductor(
         handleQueryContractKey(tmplId, key, n)
       case Question.Cmd.ExerciseTemplate(
             tmplId,
-            choiceName,
             coid,
+            choiceName,
             choiceArg,
           ) =>
         handleExerciseTemplate(tmplId, choiceName, coid, choiceArg)
       case Question.Cmd.ExerciseByKey(
             tmplId,
-            choiceName,
             key,
+            choiceName,
             choiceArg,
           ) =>
         handleExerciseByKey(tmplId, choiceName, key, choiceArg)
       case Question.Cmd.ExerciseInterface(
             ifaceId,
-            choiceName,
             coid,
+            choiceName,
             choiceArg,
           ) =>
         handleExerciseInterface(ifaceId, choiceName, coid, choiceArg)
@@ -1501,12 +1562,12 @@ private[lf] object TransactionConductor {
     }
   }
 
+  @annotation.unused("cat=unused&msg=parameter interpretationConfig")
   def apply(
       compiledPackages: CompiledPackages,
       preparationTime: Time.Timestamp,
       initialSeeding: InitialSeeding,
       committers: Set[Ref.Party],
-      readAs: Set[Ref.Party],
       logger: MachineLogger,
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
       iterationsBetweenInterruptions: Long = TransactionConductor.iterationsBetweenInterruptions,
@@ -1520,7 +1581,6 @@ private[lf] object TransactionConductor {
     new TransactionConductor(
       compiledPackages = compiledPackages,
       committers = committers,
-      readAs = readAs,
       preparationTime = preparationTime,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
@@ -1529,7 +1589,6 @@ private[lf] object TransactionConductor {
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
       profile = new Profile(),
       ptx = PartialTransaction.initial(
-        interpretationConfig.contractStateMode,
         initialSeeding,
         committers,
         authorizationChecker,
@@ -1543,7 +1602,6 @@ private[lf] object TransactionConductor {
       transactionSeed: crypto.Hash,
       committers: Set[Ref.Party],
       logger: MachineLogger,
-      readAs: Set[Ref.Party] = Set.empty,
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       interpretationConfig: interpretation.InterpretationConfig =
@@ -1555,11 +1613,28 @@ private[lf] object TransactionConductor {
       preparationTime = Time.Timestamp.MinValue,
       initialSeeding = InitialSeeding.TransactionSeed(transactionSeed),
       committers = committers,
-      readAs = readAs,
       logger = logger,
       authorizationChecker = authorizationChecker,
       packageResolution = packageResolution,
       interpretationConfig = interpretationConfig,
       limits = limits,
     )
+
+  private[lf] final case class Result(
+      tx: SubmittedTransaction,
+      seeds: ImmArray[(NodeId, crypto.Hash)],
+      globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
+      contractOrder: List[V.ContractId],
+  )
+
+  @throws[IllegalArgumentException]
+  private def zipSameLength[X, Y](xs: ImmArray[X], ys: ImmArray[Y]): ImmArray[(X, Y)] = {
+    val n1 = xs.length
+    val n2 = ys.length
+    if (n1 != n2) {
+      throw new IllegalArgumentException(s"sameLengthZip, $n1 /= $n2")
+    }
+    xs.zip(ys)
+  }
+
 }

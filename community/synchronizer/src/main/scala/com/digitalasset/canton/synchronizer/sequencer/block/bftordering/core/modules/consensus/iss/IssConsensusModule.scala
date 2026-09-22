@@ -94,6 +94,11 @@ final class IssConsensusModule[E <: Env[E]](
     ],
     private val postponedConsensusMessageQueue: Option[FairBoundedQueue[Consensus.Message[E]]] =
       None,
+    // Monotonic elapsed-time source (nanoseconds) for the retransmission request rate limiter.
+    //  Defaults to `System.nanoTime()` (real, monotonic), which ensures that rate limiting allows retransmissions
+    //  to be sent even if the main clock is a SimClock and is not advancing, which in turn ensures that view
+    //  changes can make progress.
+    rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(
     // Only tests pass the state manager as parameter, and it's convenient to have it as an option
     //  to avoid two different constructor calls depending on whether the test want to customize it or not.
@@ -316,7 +321,7 @@ final class IssConsensusModule[E <: Env[E]](
         if (currentEpochNumber == newEpochNumber) {
           // The output module may re-send the topology for the current epoch upon restart if it didn't store
           //  the first block metadata or if the subscribing sequencer runtime hasn't processed it yet.
-          logger.debug(
+          logger.info(
             s"Received NewEpochTopology event for epoch $newEpochNumber, but the epoch has already started; ignoring it"
           )
         } else if (currentEpochNumber == newEpochNumber - 1) {
@@ -333,7 +338,7 @@ final class IssConsensusModule[E <: Env[E]](
           )
         }
       } else if (latestCompletedEpochNumber < newEpochNumber - 1) {
-        logger.debug(
+        logger.info(
           s"Epoch (${newEpochNumber - 1}) has not yet been completed: remembering the topology and " +
             s"waiting for the completed epoch to be stored; latest completed epoch is $latestCompletedEpochNumber"
         )
@@ -927,6 +932,7 @@ final class IssConsensusModule[E <: Env[E]](
       dependencies,
       loggerFactory,
       timeouts,
+      rateLimiterNanoTime = rateLimiterNanoTime,
     )()
     context.become(newBehavior)
     // It is possible that we were doing state transfer and quickly went back to consensus. And during the time we were

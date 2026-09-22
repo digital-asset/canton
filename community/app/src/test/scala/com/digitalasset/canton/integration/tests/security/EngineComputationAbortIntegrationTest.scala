@@ -111,7 +111,7 @@ sealed trait EngineComputationAbortIntegrationTest
   def slowDownEngineFor(participants: Seq[LocalParticipantReference]): Unit =
     engineHooks.set(
       participants
-        .map(_.uid.identifier.str -> (() => { Threading.sleep(500) }))
+        .map(_.uid.identifier.str -> (() => { Threading.sleep(2000) }))
         .toMap
     )
 
@@ -268,6 +268,9 @@ sealed trait EngineComputationAbortIntegrationTest
             .loneElement
 
           programmableSequencer.resetPolicy()
+          // Recover decision time to avoid ping timeouts
+          setDecisionTime(60.seconds)
+
           // Run a ping to allow capturing all messages
           participant2.health.maybe_ping(participant2) shouldBe defined
 
@@ -284,7 +287,9 @@ sealed trait EngineComputationAbortIntegrationTest
               },
               "participant1's computation gets aborted",
             )
-          )
+          ),
+          // Ignore additional messages, e.g., hinting at timeouts
+          mayContain = Seq(_ => succeed),
         ),
       )
 

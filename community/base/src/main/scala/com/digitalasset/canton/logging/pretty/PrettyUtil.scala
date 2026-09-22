@@ -174,6 +174,8 @@ trait PrettyUtil {
     new Walker {
       override def additionalHandlers: PartialFunction[Any, Tree] = {
         case p: PrettyPrinting if !c.runtimeClass.isInstance(p) => p.prettyInternal.treeOf(p)
+        case p: PrettyPrintingFromCompanion if !c.runtimeClass.isInstance(p) =>
+          p.prettyCompanion.prettyInternal.treeOf(p)
         case p: Product if p.productArity == 0 => treeOfString(p.productPrefix)
       }
     }.treeify(

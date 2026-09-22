@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{LocalRejectError, RequestId, RootHash}
 import com.digitalasset.canton.sequencing.protocol.*
@@ -106,8 +106,11 @@ final class MediatorEventProcessorTest
     val mediatorRequest = mock[MediatorConfirmationRequest]
     when(mediatorRequest.requestUuid).thenReturn(uuid)
     when(mediatorRequest.psid).thenReturn(synchronizerId)
-    when(mediatorRequest.pretty).thenReturn(
-      prettyOfClass[MediatorConfirmationRequest](param("uuid", _.requestUuid))
+    when(mediatorRequest.prettyCompanion).thenReturn(
+      new PrettyPrintingCompanion[MediatorConfirmationRequest] {
+        override protected val pretty: Pretty[MediatorConfirmationRequest] =
+          prettyOfClass[MediatorConfirmationRequest](param("uuid", _.requestUuid))
+      }
     )
 
     mkDefaultOpenEnvelope(mediatorRequest)

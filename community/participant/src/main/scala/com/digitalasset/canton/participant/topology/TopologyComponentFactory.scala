@@ -126,7 +126,7 @@ class TopologyComponentFactory(
         initialRecordTime = recordOrderPublisher.initTimestamp,
         participantId,
         pauseSynchronizerIndexingDuringPartyReplication = alphaOnlinePartyReplicationSupport.exists(
-          _.pauseSynchronizerIndexingDuringPartyReplication
+          _.target.pauseSynchronizerIndexingDuringPartyReplication
         ),
         synchronizerPredecessor = synchronizerPredecessor,
         pendingLsuOperationsStore = pendingLsuOperationsStore,

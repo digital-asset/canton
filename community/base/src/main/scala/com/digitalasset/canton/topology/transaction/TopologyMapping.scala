@@ -20,9 +20,18 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
-import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SequencingParameters, v30}
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
+  SequencingParameters,
+  v30,
+  v31,
+}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -58,7 +67,8 @@ import scala.annotation.nowarn
 import scala.math.Ordering.Implicits.*
 import scala.reflect.ClassTag
 
-sealed trait TopologyMapping extends Product with Serializable with PrettyPrinting { self =>
+sealed trait TopologyMapping extends Product with Serializable with PrettyPrintingFromCompanion {
+  self =>
 
   require(maybeUid.forall(_.namespace == namespace), "namespace is inconsistent")
 
@@ -96,12 +106,19 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
   def restrictedToSynchronizer: Option[SynchronizerId]
 
   def toProtoV30: Either[String, v30.TopologyMapping]
+  def toProtoV31: Either[String, v31.TopologyMapping]
 
   def uniqueKey: MappingHash
 
   final def select[TargetMapping <: TopologyMapping](implicit
       M: ClassTag[TargetMapping]
   ): Option[TargetMapping] = M.unapply(this)
+
+  /** Check whether the mapping can be serialized to the specified proto version without loss of
+    * information.
+    */
+  @nowarn("msg=parameter protoVersion in method canBeSerializedTo is never used")
+  def canBeSerializedTo(protoVersion: ProtoVersion): Either[String, Unit] = ().asRight
 
 }
 
@@ -238,17 +255,20 @@ object TopologyMapping {
   final case class ReferencedAuthorizations(
       namespaces: Set[Namespace] = Set.empty,
       extraKeys: Set[Fingerprint] = Set.empty,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     def isEmpty: Boolean =
       namespaces.isEmpty && extraKeys.isEmpty
 
-    override protected def pretty: Pretty[ReferencedAuthorizations.this.type] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ReferencedAuthorizations] =
+      ReferencedAuthorizations
+  }
+
+  object ReferencedAuthorizations extends PrettyPrintingCompanion[ReferencedAuthorizations] {
+
+    override protected val pretty: Pretty[ReferencedAuthorizations] = prettyOfClass(
       paramIfNonEmpty("namespaces", _.namespaces),
       paramIfNonEmpty("extraKeys", _.extraKeys),
     )
-  }
-
-  object ReferencedAuthorizations {
 
     val empty: ReferencedAuthorizations = ReferencedAuthorizations()
 
@@ -267,7 +287,7 @@ object TopologyMapping {
       }
   }
 
-  sealed trait RequiredAuth extends PrettyPrinting {
+  sealed trait RequiredAuth extends PrettyPrintingFromCompanion {
     def satisfiedByActualAuthorizers(
         provided: ReferencedAuthorizations
     ): Either[ReferencedAuthorizations, Unit]
@@ -315,13 +335,17 @@ object TopologyMapping {
       override lazy val referenced: ReferencedAuthorizations =
         ReferencedAuthorizations(namespaces = namespaces, extraKeys = extraKeys)
 
-      override protected def pretty: Pretty[RequiredNamespaces.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[RequiredNamespaces] =
+        RequiredNamespaces
+    }
+
+    object RequiredNamespaces extends PrettyPrintingCompanion[RequiredNamespaces] {
+
+      override protected val pretty: Pretty[RequiredNamespaces] = prettyOfClass(
         unnamedParam(_.namespaces.toSeq.sortBy(_.toProtoPrimitive)),
         paramIfNonEmpty("extra keys", _.extraKeys.toSeq.sortBy(_.toProtoPrimitive)),
       )
-    }
 
-    object RequiredNamespaces {
       def apply(hasNamespace: HasNamespace*): RequiredNamespaces = RequiredNamespaces(
         hasNamespace.map(_.namespace).toSet
       )
@@ -341,8 +365,12 @@ object TopologyMapping {
       override lazy val referenced: ReferencedAuthorizations =
         ReferencedAuthorizations.monoid.combine(first.referenced, second.referenced)
 
-      override protected def pretty: Pretty[Or.this.type] =
-        prettyOfString(_ => show"($first || $second)")
+      override def prettyCompanion: PrettyPrintingCompanion[Or] = Or
+    }
+
+    private[topology] object Or extends PrettyPrintingCompanion[Or] {
+      override protected val pretty: Pretty[Or] =
+        prettyOfString(inst => show"(${inst.first} || ${inst.second})")
     }
 
     private[topology] final case class And(
@@ -361,8 +389,12 @@ object TopologyMapping {
       override def referenced: ReferencedAuthorizations =
         ReferencedAuthorizations.monoid.combine(first.referenced, second.referenced)
 
-      override protected def pretty: Pretty[And.this.type] =
-        prettyOfString(_ => show"($first && $second)")
+      override def prettyCompanion: PrettyPrintingCompanion[And] = And
+    }
+
+    private[topology] object And extends PrettyPrintingCompanion[And] {
+      override protected val pretty: Pretty[And] =
+        prettyOfString(inst => show"(${inst.first} && ${inst.second})")
     }
 
   }
@@ -404,6 +436,46 @@ object TopologyMapping {
       case v30.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(value) =>
         LsuAnnouncement.fromProtoV30(pvv, value)
       case v30.TopologyMapping.Mapping.SequencerConnectionSuccessor(value) =>
+        LsuSequencerConnectionSuccessor.fromProtoV30(pvv, value)
+    }
+
+  @nowarn("cat=deprecation")
+  def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      proto: v31.TopologyMapping,
+  ): ParsingResult[TopologyMapping] =
+    proto.mapping match {
+      case v31.TopologyMapping.Mapping.Empty =>
+        FieldNotSet("mapping").asLeft
+      case v31.TopologyMapping.Mapping.NamespaceDelegation(value) =>
+        NamespaceDelegation.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(value) =>
+        DecentralizedNamespaceDefinition.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.OwnerToKeyMapping(value) =>
+        OwnerToKeyMapping.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.PartyToKeyMapping(value) =>
+        PartyToKeyMapping.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.SynchronizerTrustCertificate(value) =>
+        SynchronizerTrustCertificate.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.PartyHostingLimits(value) =>
+        PartyHostingLimits.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.ParticipantPermission(value) =>
+        ParticipantSynchronizerPermission.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.VettedPackages(value) =>
+        VettedPackages.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.PartyToParticipant(value) =>
+        PartyToParticipant.fromProtoV31(pvv, value)
+      case v31.TopologyMapping.Mapping.SynchronizerParametersState(value) =>
+        SynchronizerParametersState.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.SequencingDynamicParametersState(value) =>
+        SequencingParametersState.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.MediatorSynchronizerState(value) =>
+        MediatorSynchronizerState.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.SequencerSynchronizerState(value) =>
+        SequencerSynchronizerState.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(value) =>
+        LsuAnnouncement.fromProtoV30(pvv, value)
+      case v31.TopologyMapping.Mapping.SequencerConnectionSuccessor(value) =>
         LsuSequencerConnectionSuccessor.fromProtoV30(pvv, value)
     }
 
@@ -542,20 +614,7 @@ final case class NamespaceDelegation private (
 
   override def companion: NamespaceDelegation.type = NamespaceDelegation
 
-  override protected def pretty: Pretty[NamespaceDelegation] =
-    prettyOfClass(
-      param("namespace", _.namespace),
-      param("target", _.target),
-      param(
-        "restriction",
-        x =>
-          (x.restriction match {
-            case DelegationRestriction.CanSignAllMappings => "none"
-            case DelegationRestriction.CanSignAllButNamespaceDelegations => "not-nsd"
-            case DelegationRestriction.CanSignSpecificMappings(mappings) => mappings.mkString(",")
-          }).unquoted,
-      ),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[NamespaceDelegation] = NamespaceDelegation
 
   def toProtoNamespaceDelegationV30: Either[String, v30.NamespaceDelegation] =
     target.toProtoV30.map { targetP =>
@@ -580,6 +639,13 @@ final case class NamespaceDelegation private (
       )
     )
 
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    toProtoNamespaceDelegationV30.map(mappingP =>
+      v31.TopologyMapping(
+        v31.TopologyMapping.Mapping.NamespaceDelegation(mappingP)
+      )
+    )
+
   override def maybeUid: Option[UniqueIdentifier] = None
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
@@ -599,7 +665,23 @@ final case class NamespaceDelegation private (
   ) = new NamespaceDelegation(namespace, target, restriction)
 }
 
-object NamespaceDelegation extends TopologyMappingCompanion {
+object NamespaceDelegation
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[NamespaceDelegation] {
+
+  override protected val pretty: Pretty[NamespaceDelegation] = prettyOfClass(
+    param("namespace", _.namespace),
+    param("target", _.target),
+    param(
+      "restriction",
+      x =>
+        (x.restriction match {
+          case DelegationRestriction.CanSignAllMappings => "none"
+          case DelegationRestriction.CanSignAllButNamespaceDelegations => "not-nsd"
+          case DelegationRestriction.CanSignSpecificMappings(mappings) => mappings.mkString(",")
+        }).unquoted,
+    ),
+  )
 
   def uniqueKey(namespace: Namespace, target: Fingerprint): MappingHash =
     TopologyMapping.buildUniqueKey(code)(
@@ -719,11 +801,8 @@ final case class DecentralizedNamespaceDefinition private (
 
   override def companion: DecentralizedNamespaceDefinition.type = DecentralizedNamespaceDefinition
 
-  override protected def pretty: Pretty[DecentralizedNamespaceDefinition] = prettyOfClass(
-    param("namespace", _.namespace),
-    param("threshold", _.threshold),
-    param("owners", _.owners.toSeq.sorted(Namespace.namespaceOrder.toOrdering)),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[DecentralizedNamespaceDefinition] =
+    DecentralizedNamespaceDefinition
 
   def toProto: v30.DecentralizedNamespaceDefinition =
     v30.DecentralizedNamespaceDefinition(
@@ -736,6 +815,13 @@ final case class DecentralizedNamespaceDefinition private (
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
+      )
+      .asRight
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
       )
       .asRight
 
@@ -763,7 +849,15 @@ final case class DecentralizedNamespaceDefinition private (
   override def uniqueKey: MappingHash = DecentralizedNamespaceDefinition.uniqueKey(namespace)
 }
 
-object DecentralizedNamespaceDefinition extends TopologyMappingCompanion {
+object DecentralizedNamespaceDefinition
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[DecentralizedNamespaceDefinition] {
+
+  override protected val pretty: Pretty[DecentralizedNamespaceDefinition] = prettyOfClass(
+    param("namespace", _.namespace),
+    param("threshold", _.threshold),
+    param("owners", _.owners.toSeq.sorted(Namespace.namespaceOrder.toOrdering)),
+  )
 
   def uniqueKey(namespace: Namespace): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(namespace.fingerprint.unwrap))
@@ -893,14 +987,7 @@ final case class OwnerToKeyMapping private (
 
   override def companion: OwnerToKeyMapping.type = OwnerToKeyMapping
 
-  override protected def pretty: Pretty[OwnerToKeyMapping] = prettyOfClass(
-    param("member", _.member),
-    param("signingKeys", _.keys.filter(_.isSigning).map(_.fingerprint).sortBy(_.toProtoPrimitive)),
-    paramIfNonEmpty(
-      "encryptionKeys",
-      _.keys.filterNot(_.isSigning).map(_.fingerprint).sortBy(_.toProtoPrimitive),
-    ),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[OwnerToKeyMapping] = OwnerToKeyMapping
 
   def toProtoOwnerToKeyMappingV30: Either[String, v30.OwnerToKeyMapping] =
     keys.forgetNE.traverse(_.toProtoPublicKeyV30).map { keysP =>
@@ -914,6 +1001,15 @@ final case class OwnerToKeyMapping private (
     toProtoOwnerToKeyMappingV30.map(mappingP =>
       v30.TopologyMapping(
         v30.TopologyMapping.Mapping.OwnerToKeyMapping(
+          mappingP
+        )
+      )
+    )
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    toProtoOwnerToKeyMappingV30.map(mappingP =>
+      v31.TopologyMapping(
+        v31.TopologyMapping.Mapping.OwnerToKeyMapping(
           mappingP
         )
       )
@@ -946,7 +1042,18 @@ final case class OwnerToKeyMapping private (
     new OwnerToKeyMapping(member, keys)
 }
 
-object OwnerToKeyMapping extends TopologyMappingCompanion {
+object OwnerToKeyMapping
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[OwnerToKeyMapping] {
+
+  override protected val pretty: Pretty[OwnerToKeyMapping] = prettyOfClass(
+    param("member", _.member),
+    param("signingKeys", _.keys.filter(_.isSigning).map(_.fingerprint).sortBy(_.toProtoPrimitive)),
+    paramIfNonEmpty(
+      "encryptionKeys",
+      _.keys.filterNot(_.isSigning).map(_.fingerprint).sortBy(_.toProtoPrimitive),
+    ),
+  )
 
   val MaxKeys: Int = KeyMapping.MaxKeys
 
@@ -1006,15 +1113,7 @@ final case class PartyToKeyMapping private (
 ) extends TopologyMapping
     with KeyMapping {
 
-  override protected def pretty: Pretty[PartyToKeyMapping] =
-    prettyOfClass(
-      param("party", _.party),
-      param(
-        "signingKeys",
-        _.signingKeysWithThreshold.keys.forgetNE.map(_.fingerprint).toSeq.sortBy(_.toProtoPrimitive),
-      ),
-      paramIfDefined("threshold", x => Option.when(x.threshold > PositiveInt.one)(x.threshold)),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[PartyToKeyMapping] = PartyToKeyMapping
   override def companion: PartyToKeyMapping.type = PartyToKeyMapping
 
   def toProtoPartyToKeyMappingV30: Either[String, v30.PartyToKeyMapping] =
@@ -1031,6 +1130,15 @@ final case class PartyToKeyMapping private (
     toProtoPartyToKeyMappingV30.map(mappingP =>
       v30.TopologyMapping(
         v30.TopologyMapping.Mapping.PartyToKeyMapping(
+          mappingP
+        )
+      )
+    )
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    toProtoPartyToKeyMappingV30.map(mappingP =>
+      v31.TopologyMapping(
+        v31.TopologyMapping.Mapping.PartyToKeyMapping(
           mappingP
         )
       )
@@ -1090,7 +1198,18 @@ final case class PartyToKeyMapping private (
 }
 
 @nowarn("cat=deprecation")
-object PartyToKeyMapping extends TopologyMappingCompanion {
+object PartyToKeyMapping
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[PartyToKeyMapping] {
+
+  override protected val pretty: Pretty[PartyToKeyMapping] = prettyOfClass(
+    param("party", _.party),
+    param(
+      "signingKeys",
+      _.signingKeysWithThreshold.keys.forgetNE.map(_.fingerprint).toSeq.sortBy(_.toProtoPrimitive),
+    ),
+    paramIfDefined("threshold", x => Option.when(x.threshold > PositiveInt.one)(x.threshold)),
+  )
 
   val MaxKeys: Int = KeyMapping.MaxKeys
 
@@ -1161,14 +1280,8 @@ final case class SynchronizerTrustCertificate(
 
   override def companion: SynchronizerTrustCertificate.type = SynchronizerTrustCertificate
 
-  override protected def pretty: Pretty[SynchronizerTrustCertificate] = prettyOfClass(
-    param("participantId", _.participantId),
-    param("synchronizerId", _.synchronizerId),
-    paramIfNonEmpty(
-      "featureFlags",
-      _.featureFlags.map(_.toString.unquoted),
-    ),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerTrustCertificate] =
+    SynchronizerTrustCertificate
 
   def toProto: v30.SynchronizerTrustCertificate =
     v30.SynchronizerTrustCertificate(
@@ -1181,6 +1294,15 @@ final case class SynchronizerTrustCertificate(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.SynchronizerTrustCertificate(
+          toProto
+        )
+      )
+      .asRight
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.SynchronizerTrustCertificate(
           toProto
         )
       )
@@ -1201,7 +1323,18 @@ final case class SynchronizerTrustCertificate(
     SynchronizerTrustCertificate.uniqueKey(participantId, synchronizerId)
 }
 
-object SynchronizerTrustCertificate extends TopologyMappingCompanion {
+object SynchronizerTrustCertificate
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[SynchronizerTrustCertificate] {
+
+  override protected val pretty: Pretty[SynchronizerTrustCertificate] = prettyOfClass(
+    param("participantId", _.participantId),
+    param("synchronizerId", _.synchronizerId),
+    paramIfNonEmpty(
+      "featureFlags",
+      _.featureFlags.map(_.toString.unquoted),
+    ),
+  )
   final case class ParticipantTopologyFeatureFlag private (value: Int)(
       name: Option[String] = None
   ) {
@@ -1351,17 +1484,20 @@ object ParticipantPermission {
   */
 final case class ParticipantSynchronizerLimits(
     confirmationRequestsMaxRate: NonNegativeInt
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[ParticipantSynchronizerLimits] =
-    prettyOfClass(
-      param("confirmation requests max rate", _.confirmationRequestsMaxRate)
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[ParticipantSynchronizerLimits] =
+    ParticipantSynchronizerLimits
 
   def toProto: v30.ParticipantSynchronizerLimits =
     v30.ParticipantSynchronizerLimits(confirmationRequestsMaxRate.unwrap)
 }
-object ParticipantSynchronizerLimits {
+object ParticipantSynchronizerLimits
+    extends PrettyPrintingCompanion[ParticipantSynchronizerLimits] {
+
+  override protected val pretty: Pretty[ParticipantSynchronizerLimits] = prettyOfClass(
+    param("confirmation requests max rate", _.confirmationRequestsMaxRate)
+  )
   def fromProtoV30(
       value: v30.ParticipantSynchronizerLimits
   ): ParsingResult[ParticipantSynchronizerLimits] =
@@ -1380,13 +1516,8 @@ final case class ParticipantSynchronizerPermission(
 ) extends TopologyMapping {
 
   override def companion: ParticipantSynchronizerPermission.type = ParticipantSynchronizerPermission
-  override protected def pretty: Pretty[ParticipantSynchronizerPermission] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("participantId", _.participantId),
-    param("permission", _.permission.toString.unquoted),
-    paramIfDefined("limits", _.limits),
-    paramIfDefined("loginAfter", _.loginAfter),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ParticipantSynchronizerPermission] =
+    ParticipantSynchronizerPermission
 
   def toProto: v30.ParticipantSynchronizerPermission =
     v30.ParticipantSynchronizerPermission(
@@ -1401,6 +1532,15 @@ final case class ParticipantSynchronizerPermission(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.ParticipantPermission(
+          toProto
+        )
+      )
+      .asRight
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.ParticipantPermission(
           toProto
         )
       )
@@ -1435,7 +1575,17 @@ final case class ParticipantSynchronizerPermission(
       )
 }
 
-object ParticipantSynchronizerPermission extends TopologyMappingCompanion {
+object ParticipantSynchronizerPermission
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[ParticipantSynchronizerPermission] {
+
+  override protected val pretty: Pretty[ParticipantSynchronizerPermission] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("participantId", _.participantId),
+    param("permission", _.permission.toString.unquoted),
+    paramIfDefined("limits", _.limits),
+    paramIfDefined("loginAfter", _.loginAfter),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId, participantId: ParticipantId): MappingHash =
     TopologyMapping.buildUniqueKey(
@@ -1490,10 +1640,7 @@ final case class PartyHostingLimits(
 ) extends TopologyMapping {
 
   override def companion: PartyHostingLimits.type = PartyHostingLimits
-  override protected def pretty: Pretty[PartyHostingLimits] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("partyId", _.partyId),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[PartyHostingLimits] = PartyHostingLimits
   def toProto: v30.PartyHostingLimits =
     v30.PartyHostingLimits(
       synchronizerId = synchronizerId.toProtoPrimitive,
@@ -1504,6 +1651,15 @@ final case class PartyHostingLimits(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.PartyHostingLimits(
+          toProto
+        )
+      )
+      .asRight
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.PartyHostingLimits(
           toProto
         )
       )
@@ -1523,7 +1679,14 @@ final case class PartyHostingLimits(
   override def uniqueKey: MappingHash = PartyHostingLimits.uniqueKey(synchronizerId, partyId)
 }
 
-object PartyHostingLimits extends TopologyMappingCompanion {
+object PartyHostingLimits
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[PartyHostingLimits] {
+
+  override protected val pretty: Pretty[PartyHostingLimits] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("partyId", _.partyId),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId, partyId: PartyId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(
@@ -1565,7 +1728,7 @@ final case class VettedPackage(
     packageId: LfPackageId,
     validFromInclusive: Option[CantonTimestamp],
     validUntilExclusive: Option[CantonTimestamp],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   private def isUnbounded: Boolean = validFromInclusive.isEmpty && validUntilExclusive.isEmpty
   def asUnbounded: VettedPackage = if (isUnbounded) this else VettedPackage(packageId, None, None)
@@ -1579,15 +1742,17 @@ final case class VettedPackage(
     validUntilExclusive = validUntilExclusive.map(_.toProtoTimestamp),
   )
 
-  override protected def pretty: Pretty[VettedPackage.this.type] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[VettedPackage] = VettedPackage
+}
+
+object VettedPackage extends PrettyPrintingCompanion[VettedPackage] {
+
+  override protected val pretty: Pretty[VettedPackage] = prettyOfClass(
     param("packageId", _.packageId),
     paramIfDefined("validFromInclusive", _.validFromInclusive),
     paramIfDefined("validUntilExclusive", _.validUntilExclusive),
     paramIfTrue("unbounded", vp => vp.validFromInclusive.isEmpty && vp.validUntilExclusive.isEmpty),
   )
-}
-
-object VettedPackage {
   def unbounded(packageIds: Seq[LfPackageId]): Seq[VettedPackage] =
     packageIds.map(VettedPackage(_, None, None))
 
@@ -1610,10 +1775,7 @@ final case class VettedPackages private (
 ) extends TopologyMapping {
 
   override def companion: VettedPackages.type = VettedPackages
-  override protected def pretty: Pretty[VettedPackages] = prettyOfClass(
-    param("participantId", _.participantId),
-    param("packages", _.packages.limit(5).mkShow(",")),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[VettedPackages] = VettedPackages
 
   def toProto: v30.VettedPackages =
     v30.VettedPackages(
@@ -1626,6 +1788,15 @@ final case class VettedPackages private (
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.VettedPackages(
+          toProto
+        )
+      )
+      .asRight
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.VettedPackages(
           toProto
         )
       )
@@ -1645,7 +1816,14 @@ final case class VettedPackages private (
   override def uniqueKey: MappingHash = VettedPackages.uniqueKey(participantId)
 }
 
-object VettedPackages extends TopologyMappingCompanion {
+object VettedPackages
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[VettedPackages] {
+
+  override protected val pretty: Pretty[VettedPackages] = prettyOfClass(
+    param("participantId", _.participantId),
+    param("packages", _.packages.limit(5).mkShow(",")),
+  )
 
   def uniqueKey(participantId: ParticipantId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(participantId.toProtoPrimitive))
@@ -1773,43 +1951,68 @@ final case class PartyToParticipant private (
     threshold: PositiveInt,
     participants: Seq[HostingParticipant],
     partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
+    isOffline: Boolean,
 ) extends TopologyMapping
     with KeyMapping {
 
   override def companion: PartyToParticipant.type = PartyToParticipant
-  override lazy val pretty: Pretty[PartyToParticipant] = prettyOfClass(
-    param("partyId", _.partyId),
-    paramIfDefined(
-      "threshold",
-      x => Option.when(x.threshold > PositiveInt.one)(x.threshold.unwrap),
-    ),
-    param(
-      "participants",
-      _.participants
-        .map { c =>
-          (
-            c.participantId,
-            (c.permission.toString + (if (c.onboarding) "(onboarding)" else "")).unquoted,
-          )
-        }
-        .toMap,
-    ),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[PartyToParticipant] = PartyToParticipant
 
-  def toProtoPartyToParticipantV30: Either[String, v30.PartyToParticipant] =
-    partySigningKeysWithThreshold.traverse(_.toProtoV30).map { partySigningKeysWithThreshold =>
-      v30.PartyToParticipant(
-        party = partyId.toProtoPrimitive,
-        threshold = threshold.value,
-        participants = participants.map(_.toProto),
-        partySigningKeys = partySigningKeysWithThreshold,
+  override def canBeSerializedTo(protoVersion: ProtoVersion): Either[String, Unit] =
+    if (protoVersion.v >= 31) ().asRight
+    else {
+      Either.cond(
+        !isOffline,
+        (),
+        s"Unable to serialize PartyToParticipant mapping to v30 because isOffline is true",
       )
     }
+
+  def toProtoPartyToParticipantV30: Either[String, v30.PartyToParticipant] =
+    for {
+      _ <- canBeSerializedTo(ProtoVersion(30))
+      partySigningKeysWithThresholdP <- partySigningKeysWithThreshold.traverse(_.toProtoV30)
+    } yield v30.PartyToParticipant(
+      party = partyId.toProtoPrimitive,
+      threshold = threshold.value,
+      participants = participants.map(_.toProto),
+      partySigningKeys = partySigningKeysWithThresholdP,
+    )
 
   override def toProtoV30: Either[String, v30.TopologyMapping] =
     toProtoPartyToParticipantV30.map(mappingP =>
       v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToParticipant(mappingP))
     )
+
+  def toProtoPartyToParticipantV31: Either[String, v31.PartyToParticipant] =
+    for {
+      _ <- canBeSerializedTo(ProtoVersion(31))
+      partySigningKeysWithThresholdP <- partySigningKeysWithThreshold.traverse(_.toProtoV30)
+    } yield v31.PartyToParticipant(
+      party = partyId.toProtoPrimitive,
+      threshold = threshold.value,
+      participants = participants.map(_.toProto),
+      partySigningKeys = partySigningKeysWithThresholdP,
+      isOffline = isOffline,
+    )
+
+  override def toProtoV31: Either[String, v31.TopologyMapping] =
+    toProtoPartyToParticipantV31.map(mappingP =>
+      v31.TopologyMapping(v31.TopologyMapping.Mapping.PartyToParticipant(mappingP))
+    )
+
+  def foldProtoVersioned[T](
+      protoVersion: ProtoVersion
+  )(
+      v30f: v30.PartyToParticipant => T,
+      v31f: v31.PartyToParticipant => T,
+  ): Either[String, T] =
+    protoVersion.v match {
+      case 30 => toProtoPartyToParticipantV30.map(v30f)
+      case 31 => toProtoPartyToParticipantV31.map(v31f)
+      case _ =>
+        "unsupported version".asLeft
+    }
 
   @VisibleForTesting
   def tryCopy(
@@ -1818,12 +2021,14 @@ final case class PartyToParticipant private (
       participants: Seq[HostingParticipant] = participants,
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold] =
         partySigningKeysWithThreshold,
+      isOffline: Boolean = isOffline,
   ): PartyToParticipant =
     PartyToParticipant.tryCreate(
       party,
       threshold,
       participants,
       partySigningKeysWithThreshold,
+      isOffline,
     )
 
   override def namespace: Namespace = partyId.namespace
@@ -1966,7 +2171,28 @@ final case class PartyToParticipant private (
 
 }
 
-object PartyToParticipant extends TopologyMappingCompanion {
+object PartyToParticipant
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[PartyToParticipant] {
+
+  override protected val pretty: Pretty[PartyToParticipant] = prettyOfClass(
+    param("partyId", _.partyId),
+    paramIfDefined(
+      "threshold",
+      x => Option.when(x.threshold > PositiveInt.one)(x.threshold.unwrap),
+    ),
+    param(
+      "participants",
+      _.participants
+        .map { c =>
+          (
+            c.participantId,
+            (c.permission.toString + (if (c.onboarding) "(onboarding)" else "")).unquoted,
+          )
+        }
+        .toMap,
+    ),
+  )
 
   val MaxKeys: Int = KeyMapping.MaxKeys
 
@@ -1975,6 +2201,7 @@ object PartyToParticipant extends TopologyMappingCompanion {
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
+      isOffline: Boolean,
   ): Either[String, PartyToParticipant] = {
 
     // If a participant is listed several times with different permissions, take the one with the higher
@@ -2007,6 +2234,7 @@ object PartyToParticipant extends TopologyMappingCompanion {
       threshold,
       deduplicateParticipantsWithDifferentPermissions,
       partySigningKeysWithThreshold,
+      isOffline,
     )
   }
 
@@ -2016,11 +2244,13 @@ object PartyToParticipant extends TopologyMappingCompanion {
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
+      isOffline: Boolean = false,
   ): PartyToParticipant = PartyToParticipant(
     partyId,
     threshold,
     participants,
     partySigningKeysWithThreshold,
+    isOffline,
   )
 
   def tryCreate(
@@ -2028,10 +2258,10 @@ object PartyToParticipant extends TopologyMappingCompanion {
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold] = None,
+      isOffline: Boolean,
   ): PartyToParticipant =
-    create(partyId, threshold, participants, partySigningKeysWithThreshold).valueOr(err =>
-      throw new IllegalArgumentException(err)
-    )
+    create(partyId, threshold, participants, partySigningKeysWithThreshold, isOffline = isOffline)
+      .valueOr(err => throw new IllegalArgumentException(err))
 
   def uniqueKey(partyId: PartyId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(partyId.toProtoPrimitive))
@@ -2058,10 +2288,33 @@ object PartyToParticipant extends TopologyMappingCompanion {
         SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
       )
       partyToParticipant <- PartyToParticipant
-        .create(partyId, threshold, participants, partySigningKeys)
+        .create(partyId, threshold, participants, partySigningKeys, isOffline = false)
         .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield partyToParticipant
 
+  def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      value: v31.PartyToParticipant,
+  ): ParsingResult[PartyToParticipant] =
+    for {
+      partyId <- ProtoValidation.validateThen(value.party, "party", pvv)(
+        PartyId.fromProtoPrimitive
+      )
+      threshold <- ProtoConverter.parsePositiveInt("threshold", value.threshold)
+      participants <- ProtoValidation
+        .validateLengthThen(
+          value.participants,
+          "participants",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => HostingParticipant.fromProtoV30(pvv, element))
+      partySigningKeys <- value.partySigningKeys.traverse(protoValue =>
+        SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
+      )
+      partyToParticipant <- PartyToParticipant
+        .create(partyId, threshold, participants, partySigningKeys, isOffline = value.isOffline)
+        .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
+    } yield partyToParticipant
 }
 
 /** Dynamic synchronizer parameter settings for the synchronizer
@@ -2075,10 +2328,8 @@ final case class SynchronizerParametersState(
 ) extends TopologyMapping {
 
   override def companion: SynchronizerParametersState.type = SynchronizerParametersState
-  override protected def pretty: Pretty[SynchronizerParametersState] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("parameters", _.parameters),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerParametersState] =
+    SynchronizerParametersState
 
   def toProtoSynchronizerParametersStateV30: v30.SynchronizerParametersState =
     v30.SynchronizerParametersState(
@@ -2090,6 +2341,14 @@ final case class SynchronizerParametersState(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping
+          .SynchronizerParametersState(toProtoSynchronizerParametersStateV30)
+      )
+      .asRight
+
+  def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping
           .SynchronizerParametersState(toProtoSynchronizerParametersStateV30)
       )
       .asRight
@@ -2107,7 +2366,14 @@ final case class SynchronizerParametersState(
     SynchronizerParametersState.uniqueKey(synchronizerId)
 }
 
-object SynchronizerParametersState extends TopologyMappingCompanion {
+object SynchronizerParametersState
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[SynchronizerParametersState] {
+
+  override protected val pretty: Pretty[SynchronizerParametersState] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("parameters", _.parameters),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
@@ -2146,10 +2412,8 @@ final case class SequencingParametersState(
 ) extends TopologyMapping {
 
   override def companion: SequencingParametersState.type = SequencingParametersState
-  override protected def pretty: Pretty[SequencingParametersState] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("parameters", _.parameters),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencingParametersState] =
+    SequencingParametersState
 
   def toProto: v30.DynamicSequencingParametersState =
     v30.DynamicSequencingParametersState(
@@ -2160,6 +2424,11 @@ final case class SequencingParametersState(
   def toProtoV30: Either[String, v30.TopologyMapping] =
     v30
       .TopologyMapping(v30.TopologyMapping.Mapping.SequencingDynamicParametersState(toProto))
+      .asRight
+
+  def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(v31.TopologyMapping.Mapping.SequencingDynamicParametersState(toProto))
       .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
@@ -2175,7 +2444,14 @@ final case class SequencingParametersState(
   override def uniqueKey: MappingHash = SequencingParametersState.uniqueKey(synchronizerId)
 }
 
-object SequencingParametersState extends TopologyMappingCompanion {
+object SequencingParametersState
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[SequencingParametersState] {
+
+  override protected val pretty: Pretty[SequencingParametersState] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("parameters", _.parameters),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
@@ -2218,13 +2494,8 @@ final case class MediatorSynchronizerState private (
 ) extends TopologyMapping {
 
   override def companion: MediatorSynchronizerState.type = MediatorSynchronizerState
-  override protected def pretty: Pretty[MediatorSynchronizerState] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("group", _.group),
-    param("threshold", _.threshold),
-    param("active", _.active),
-    paramIfNonEmpty("observers", _.observers),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[MediatorSynchronizerState] =
+    MediatorSynchronizerState
   lazy val allMediatorsInGroup: NonEmpty[Seq[MediatorId]] = active ++ observers
 
   def toProto: v30.MediatorSynchronizerState =
@@ -2245,6 +2516,15 @@ final case class MediatorSynchronizerState private (
       )
       .asRight
 
+  def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.MediatorSynchronizerState(
+          toProto
+        )
+      )
+      .asRight
+
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] =
@@ -2259,7 +2539,17 @@ final case class MediatorSynchronizerState private (
   override def uniqueKey: MappingHash = MediatorSynchronizerState.uniqueKey(synchronizerId, group)
 }
 
-object MediatorSynchronizerState extends TopologyMappingCompanion {
+object MediatorSynchronizerState
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[MediatorSynchronizerState] {
+
+  override protected val pretty: Pretty[MediatorSynchronizerState] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("group", _.group),
+    param("threshold", _.threshold),
+    param("active", _.active),
+    paramIfNonEmpty("observers", _.observers),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId, group: MediatorGroupIndex): MappingHash =
     TopologyMapping.buildUniqueKey(code)(
@@ -2365,12 +2655,8 @@ final case class SequencerSynchronizerState private (
 
   override def companion: SequencerSynchronizerState.type = SequencerSynchronizerState
 
-  override protected def pretty: Pretty[SequencerSynchronizerState] = prettyOfClass(
-    param("synchronizerId", _.synchronizerId),
-    param("threshold", _.threshold),
-    param("active", _.active),
-    paramIfNonEmpty("observers", _.observers),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerSynchronizerState] =
+    SequencerSynchronizerState
   lazy val allSequencers: NonEmpty[Seq[SequencerId]] = active ++ observers
 
   def toProto: v30.SequencerSynchronizerState =
@@ -2390,6 +2676,15 @@ final case class SequencerSynchronizerState private (
       )
       .asRight
 
+  def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.SequencerSynchronizerState(
+          toProto
+        )
+      )
+      .asRight
+
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] =
@@ -2403,7 +2698,16 @@ final case class SequencerSynchronizerState private (
   override def uniqueKey: MappingHash = SequencerSynchronizerState.uniqueKey(synchronizerId)
 }
 
-object SequencerSynchronizerState extends TopologyMappingCompanion {
+object SequencerSynchronizerState
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[SequencerSynchronizerState] {
+
+  override protected val pretty: Pretty[SequencerSynchronizerState] = prettyOfClass(
+    param("synchronizerId", _.synchronizerId),
+    param("threshold", _.threshold),
+    param("active", _.active),
+    paramIfNonEmpty("observers", _.observers),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
@@ -2495,7 +2799,7 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
 // Indicates the beginning of synchronizer upgrade. Only topology transactions related to synchronizer upgrades are permitted
 // after this transaction has become effective. Removing this mapping effectively unfreezes the topology state again.
 final case class LsuAnnouncement(
-    successorSynchronizerId: PhysicalSynchronizerId,
+    successorSynchronizerId: OpaquePhysicalSynchronizerId,
     upgradeTime: CantonTimestamp,
 ) extends TopologyMapping {
 
@@ -2503,10 +2807,7 @@ final case class LsuAnnouncement(
 
   override def companion: LsuAnnouncement.type = LsuAnnouncement
 
-  override protected def pretty: Pretty[LsuAnnouncement] = prettyOfClass(
-    param("successorSynchronizerId", _.successorSynchronizerId),
-    param("upgradeTime", _.upgradeTime),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[LsuAnnouncement] = LsuAnnouncement
 
   def toProto: v30.LsuAnnouncement =
     v30.LsuAnnouncement(
@@ -2521,7 +2822,14 @@ final case class LsuAnnouncement(
       )
       .asRight
 
-  override def namespace: Namespace = successorSynchronizerId.namespace
+  def toProtoV31: Either[String, v31.TopologyMapping] =
+    v31
+      .TopologyMapping(
+        v31.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(toProto)
+      )
+      .asRight
+
+  override def namespace: Namespace = successorSynchronizerId.logical.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(successorSynchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] = Set(successorSynchronizerId.uid)
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(
@@ -2530,13 +2838,20 @@ final case class LsuAnnouncement(
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = RequiredNamespaces(successorSynchronizerId)
+  ): RequiredAuth = RequiredNamespaces(successorSynchronizerId.logical)
 
   override def uniqueKey: MappingHash =
     LsuAnnouncement.uniqueKey(successorSynchronizerId.logical)
 }
 
-object LsuAnnouncement extends TopologyMappingCompanion {
+object LsuAnnouncement
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[LsuAnnouncement] {
+
+  override protected val pretty: Pretty[LsuAnnouncement] = prettyOfClass(
+    param("successorSynchronizerId", _.successorSynchronizerId),
+    param("upgradeTime", _.upgradeTime),
+  )
 
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
@@ -2552,7 +2867,7 @@ object LsuAnnouncement extends TopologyMappingCompanion {
         value.successorPhysicalSynchronizerId,
         "successor_physical_synchronizer_id",
         pvv,
-      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      )(OpaquePhysicalSynchronizerId.fromProtoPrimitive)
       upgradeTime <- ProtoConverter
         .parseRequired(
           CantonTimestamp.fromProtoTimestamp,
@@ -2605,16 +2920,12 @@ object GrpcConnection {
 
 final case class LsuSequencerConnectionSuccessor(
     sequencerId: SequencerId,
-    successorPsid: PhysicalSynchronizerId,
+    successorPsid: OpaquePhysicalSynchronizerId,
     connection: GrpcConnection,
 ) extends TopologyMapping {
   override def companion: TopologyMappingCompanion = LsuSequencerConnectionSuccessor
-  override protected def pretty: Pretty[LsuSequencerConnectionSuccessor] = prettyOfClass(
-    param("sequencerId", _.sequencerId),
-    param("successorPsid", _.successorPsid),
-    param("connection", _.connection.endpoints.forgetNE.map(_.toString.unquoted)),
-    paramIfDefined("tls", x => Option.when(x.connection.transportSecurity)("enabled".unquoted)),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[LsuSequencerConnectionSuccessor] =
+    LsuSequencerConnectionSuccessor
   override def namespace: Namespace = sequencerId.namespace
 
   override def maybeUid: Option[UniqueIdentifier] = Some(sequencerId.uid)
@@ -2648,11 +2959,28 @@ final case class LsuSequencerConnectionSuccessor(
     )
     .asRight
 
+  override def toProtoV31: Either[String, v31.TopologyMapping] = v31
+    .TopologyMapping(
+      v31.TopologyMapping.Mapping.SequencerConnectionSuccessor(
+        toProto
+      )
+    )
+    .asRight
+
   override def uniqueKey: MappingHash =
     LsuSequencerConnectionSuccessor.uniqueKey(sequencerId, successorPsid.logical)
 }
 
-object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
+object LsuSequencerConnectionSuccessor
+    extends TopologyMappingCompanion
+    with PrettyPrintingCompanion[LsuSequencerConnectionSuccessor] {
+
+  override protected val pretty: Pretty[LsuSequencerConnectionSuccessor] = prettyOfClass(
+    param("sequencerId", _.sequencerId),
+    param("successorPsid", _.successorPsid),
+    param("connection", _.connection.endpoints.forgetNE.map(_.toString.unquoted)),
+    paramIfDefined("tls", x => Option.when(x.connection.transportSecurity)("enabled".unquoted)),
+  )
 
   override def code: Code = Code.LsuSequencerConnectionSuccessor
   def uniqueKey(sequencerId: SequencerId, synchronizerId: SynchronizerId): MappingHash =
@@ -2674,7 +3002,7 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
         value.successorPhysicalSynchronizerId,
         "successor_physical_synchronizer_id",
         pvv,
-      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      )(OpaquePhysicalSynchronizerId.fromProtoPrimitive)
       connection <- ProtoConverter.parseRequired(
         GrpcConnection.fromProtoV30(pvv, _),
         "connection",

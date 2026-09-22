@@ -12,7 +12,6 @@ import com.digitalasset.base.error.{
   Explanation,
   Resolution,
 }
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.LoadSequencerEndpointInformationResult
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
@@ -232,10 +231,10 @@ object SyncServiceError extends SyncServiceErrorGroup {
         "SYNC_SERVICE_BAD_CONNECTIVITY",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Error(errors: Seq[LoadSequencerEndpointInformationResult.NotValid])(implicit
+    final case class Error(error: SynchronizerRegistryError)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"The provided sequencer connections are inconsistent: $errors."
+          cause = s"Failed to validate synchronizer connection: $error."
         )
         with SyncServiceError
   }

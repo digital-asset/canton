@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.{ContractDeserializationError, OtherError}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -24,7 +28,7 @@ final case class CreatedContract private (
     contract: NewContractInstance,
     consumedInCore: Boolean,
     rolledBack: Boolean,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   def toProtoV30: v30.CreatedContract =
     v30.CreatedContract(
@@ -39,15 +43,18 @@ final case class CreatedContract private (
       consumedInCore = consumedInCore,
     )
 
-  override protected def pretty: Pretty[CreatedContract] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[CreatedContract] = CreatedContract
+
+}
+
+object CreatedContract extends PrettyPrintingCompanion[CreatedContract] {
+
+  override protected val pretty: Pretty[CreatedContract] = prettyOfClass(
     unnamedParam(_.contract),
     paramIfTrue("consumed in core", _.consumedInCore),
     paramIfTrue("rolled back", _.rolledBack),
   )
 
-}
-
-object CreatedContract {
   def create(
       contract: NewContractInstance,
       consumedInCore: Boolean,

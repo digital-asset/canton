@@ -22,6 +22,7 @@ import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
   UpdateVettedPackagesOpts,
   UploadDarVettingChange,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
@@ -259,7 +260,7 @@ object ApiPackageManagementServiceSpec {
         opts: ListVettedPackagesOpts
     )(implicit
         traceContext: TraceContext
-    ): Future[Seq[EnrichedVettedPackages]] =
+    ): Future[VettedPackagesPage[EnrichedVettedPackages]] =
       throw new UnsupportedOperationException()
 
     override def updateVettedPackages(

@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.*
@@ -25,15 +29,13 @@ final case class SequencingParameters(payload: Option[ByteString])(
       SequencingParameters.type
     ]
 ) extends HasProtocolVersionedWrapper[SequencingParameters]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   @transient override protected lazy val companionObj: SequencingParameters.type =
     SequencingParameters
 
-  override protected def pretty: Pretty[SequencingParameters] =
-    prettyOfClass(
-      paramWithoutValue("payload", _.payload.isDefined)
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencingParameters] =
+    SequencingParameters
 
   def toProtoV30: v30.DynamicSequencingParameters =
     v30.DynamicSequencingParameters(
@@ -41,7 +43,14 @@ final case class SequencingParameters(payload: Option[ByteString])(
     )
 }
 
-object SequencingParameters extends VersioningCompanion[SequencingParameters] {
+object SequencingParameters
+    extends VersioningCompanion[SequencingParameters]
+    with PrettyPrintingCompanion[SequencingParameters] {
+
+  override protected val pretty: Pretty[SequencingParameters] =
+    prettyOfClass(
+      paramWithoutValue("payload", _.payload.isDefined)
+    )
 
   final case class MaxRequestSize(value: NonNegativeInt) extends AnyVal {
     def unwrap: Int = value.unwrap

@@ -13,7 +13,7 @@ import datetime
 import time
 import json
 import tempfile
-from typing import Final
+from typing import Final, Optional
 from unittest.mock import patch
 
 metric_short_version = "canton.failed_test_grouped"
@@ -118,7 +118,10 @@ def get_ci_commit_hash() -> str:
 
 def get_ci_parallel_run_url(build_url: str, node_index: str) -> str:
     if is_github_actions_ci():
-        return build_url
+        # On GHA every matrix shard is its own job, so the job's own page points
+        # straight at the shard that failed. Resolve it, falling back to the
+        # run-attempt `build_url` when the job id can't be determined.
+        return resolve_gha_job_url(build_url)
     if is_circle_ci():
         return f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
     return f"{build_url.replace('circleci.com/gh/', 'app.circleci.com/jobs/github/')}/parallel-runs/{node_index}"
@@ -146,6 +149,17 @@ def is_nightly_job(job: str) -> bool:
     return bool(job) and (job.startswith("nightly_") or job in NIGHTLY_JOBS_WITHOUT_PREFIX)
 
 
+def is_unstable_job(job: str) -> bool:
+    """`unstable_test` and `unstable_test_slow` run the intentionally-flaky
+    UnstableTest lanes (see .circleci/config/jobs/@test.yml).
+
+    They use the lenient CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE, so match on the
+    `unstable_test` prefix rather than the exact name, otherwise `unstable_test_slow`
+    silently inherits the strict per-commit threshold and alerts far too eagerly.
+    """
+    return bool(job) and job.startswith("unstable_test")
+
+
 # --- gh CLI wrapper -------------------------------------------------------
 
 
@@ -165,6 +179,78 @@ def run_gh_with_retries(
         time.sleep(GH_RETRY_DELAY_SECONDS)
         return run_gh_with_retries(args, attempts - 1)
     return result
+
+
+# Resolved once per process. The repository/run/attempt/runner tuple is constant
+# for a job's lifetime, but create_issue_table_row runs once per failing test
+# (up to failing_tests_max), so without this the paginated jobs API would be hit
+# once per row. `None` means "not resolved yet". _reset_gha_job_url_cache lets the
+# self-tests exercise each scenario from a clean slate.
+_gha_job_url_cache: Optional[str] = None
+
+
+def _reset_gha_job_url_cache() -> None:
+    global _gha_job_url_cache
+    _gha_job_url_cache = None
+
+
+def resolve_gha_job_url(fallback_url: str) -> str:
+    """Resolve the current GHA job's own page URL so the flaky-issue Build link
+    opens the exact job (and therefore shard) that failed, not just the run
+    summary. Each matrix shard is a separate job, so its `html_url` points
+    straight at that shard.
+
+    The numeric job id lives in no environment variable, so we ask the Actions
+    API for the jobs of this run attempt and pick the one currently running on
+    this runner. The flaky report is a step of the failing job itself, so that
+    job is the only `in_progress` one on this runner even if the runner was
+    reused earlier in the attempt, which makes the match unambiguous without
+    relying on the order the API lists jobs in.
+
+    Any failure to resolve (missing token, API error, no match) falls back to
+    `fallback_url` (the run-attempt URL), so the link is never worse than
+    before. We log when that happens so it is visible in the CI step output.
+    """
+    global _gha_job_url_cache
+    if _gha_job_url_cache is None:
+        _gha_job_url_cache = _resolve_gha_job_url_uncached(fallback_url)
+    return _gha_job_url_cache
+
+
+def _resolve_gha_job_url_uncached(fallback_url: str) -> str:
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    runner_name = os.environ.get("RUNNER_NAME", "")
+    if not (repository and run_id and run_attempt and runner_name):
+        print(
+            "Cannot resolve GHA job URL (missing repository/run id/run attempt/runner "
+            f"name), falling back to run URL {fallback_url}"
+        )
+        return fallback_url
+    result = run_gh_with_retries(
+        [
+            "api",
+            f"/repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}/jobs",
+            "--paginate",
+            "--jq",
+            f'.jobs[] | select(.runner_name == "{runner_name}" and .status == "in_progress") | .html_url',
+        ]
+    )
+    if result.returncode != 0:
+        print(
+            f"Could not resolve GHA job URL (gh api failed: {result.stderr.strip()}), "
+            f"falling back to run URL {fallback_url}"
+        )
+        return fallback_url
+    urls = [line for line in result.stdout.splitlines() if line.strip()]
+    if not urls:
+        print(
+            f"Could not resolve GHA job URL (no in-progress job matched runner {runner_name}), "
+            f"falling back to run URL {fallback_url}"
+        )
+        return fallback_url
+    return urls[0]
 
 
 def check_result(result):
@@ -382,6 +468,7 @@ def self_test():
     test_format_test_name_collapses_shards()
     test_create_issue_table_row()
     test_is_nightly_job()
+    test_is_unstable_job()
     print("flaky_common self-checks passed")
 
 
@@ -486,20 +573,53 @@ def test_create_issue_table_row():
         'GITHUB_SERVER_URL': 'https://github.com',
         'GITHUB_SHA': 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
     }
-    with patch.dict(os.environ, env_gha, clear=False):
+    # With a runner name and a resolvable job, the Build link points at the
+    # specific job (and therefore shard), while the label stays the run id. A
+    # second row in the same process reuses the resolved URL without asking the
+    # jobs API again, so a job with many failing tests spends one API call.
+    job_url = 'https://github.com/DACH-NY/canton/actions/runs/9876543210/job/555000111'
+    ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=job_url + '\n', stderr='')
+    _reset_gha_job_url_cache()
+    with (
+        patch.dict(os.environ, {**env_gha, 'RUNNER_NAME': 'canton-runner-abc'}, clear=True),
+        patch(f'{__name__}.run_gh_with_retries', return_value=ok) as resolve_mock,
+    ):
         line = create_issue_table_row()
+        create_issue_table_row()
+        assert resolve_mock.call_count == 1, (
+            f"Expected the job URL to be resolved once per process, not {resolve_mock.call_count}x"
+        )
         assert '| integration-tests-shard-2 |' in line, f"Missing GHA job name in: {line}"
         assert '| 2 |' in line, f"Missing GHA matrix shard in: {line}"
-        # The link points at the specific attempt so it survives an auto-rerun,
-        # while the label stays the run id rather than the attempt number.
-        assert (
-            '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210/attempts/2)'
-            in line
-        ), f"Missing GHA build link with attempt in: {line}"
+        assert f'[9876543210]({job_url})' in line, f"Missing GHA per-job build link in: {line}"
         assert (
             '[c3d4e5f6](https://github.com/DACH-NY/canton/commit/c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4)'
             in line
         ), f"Missing GHA commit in: {line}"
+
+    # When the job id can't be resolved (API error), fall back to the
+    # run-attempt URL so the link survives an auto-rerun and is never worse.
+    failed = subprocess.CompletedProcess(args=[], returncode=1, stdout='', stderr='HTTP 500')
+    _reset_gha_job_url_cache()
+    with (
+        patch.dict(os.environ, {**env_gha, 'RUNNER_NAME': 'canton-runner-abc'}, clear=True),
+        patch(f'{__name__}.run_gh_with_retries', return_value=failed),
+    ):
+        line = create_issue_table_row()
+        assert (
+            '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210/attempts/2)'
+            in line
+        ), f"Expected fallback to run-attempt URL on resolve failure, got: {line}"
+
+    # Without a runner name we can't resolve a job, so fall back the same way
+    # (and make no API call).
+    _reset_gha_job_url_cache()
+    with patch.dict(os.environ, env_gha, clear=True):
+        line = create_issue_table_row()
+        assert (
+            '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210/attempts/2)'
+            in line
+        ), f"Expected fallback to run-attempt URL without a runner name, got: {line}"
 
     # GHA without a run attempt in the environment falls back to the bare run URL.
     env_gha_no_attempt = {k: v for k, v in env_gha.items() if k != 'GITHUB_RUN_ATTEMPT'}
@@ -518,6 +638,14 @@ def test_is_nightly_job():
     assert not is_nightly_job("unstable_test")  # intentionally unstable, excluded
     assert not is_nightly_job("unstable_test_slow")  # intentionally unstable, excluded
     assert not is_nightly_job("")
+
+
+def test_is_unstable_job():
+    assert is_unstable_job("unstable_test")
+    assert is_unstable_job("unstable_test_slow")  # the prefix must catch the slow lane too
+    assert not is_unstable_job("test_with_java17")
+    assert not is_unstable_job("nightly_integration_test")
+    assert not is_unstable_job("")
 
 
 if __name__ == "__main__":

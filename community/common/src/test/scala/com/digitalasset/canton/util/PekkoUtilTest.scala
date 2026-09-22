@@ -2140,7 +2140,7 @@ class PekkoUtilTest
                 if (Random.nextLong(6) > 0) throw new Exception("initialization boom")
                 val (sourceQueue, sourceDone) = Source
                   .queue[(Long, Int)](20, OverflowStrategy.backpressure, 1)
-                  .via(BatchN(5, 3))
+                  .via(BatchN.forMaxConcurrency(5, 3))
                   .mapAsync(3) { batch =>
                     Future {
                       if (sleepy) Threading.sleep(Random.nextLong(4) / 4)
@@ -2248,7 +2248,7 @@ class PekkoUtilTest
             Future.successful(Future {
               val (sourceQueue, sourceDone) = Source
                 .queue[(Long, Int)](20, OverflowStrategy.backpressure, 1)
-                .via(BatchN(5, 3))
+                .via(BatchN.forMaxConcurrency(5, 3))
                 .mapAsync(3) { batch =>
                   Future {
                     batch
@@ -2394,11 +2394,11 @@ class PekkoUtilTest
         indexerReady.success(Done)
         eventually() {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+          healthStateCollector.get shouldEqual List[ComponentHealthState](
+            ComponentHealthState.failed("Initializing indexer"),
+            ComponentHealthState.Ok(),
+          )
         }
-        healthStateCollector.get shouldEqual List[ComponentHealthState](
-          ComponentHealthState.failed("Initializing indexer"),
-          ComponentHealthState.Ok(),
-        )
       }
     }
 
@@ -2426,9 +2426,11 @@ class PekkoUtilTest
           always(durationOfSuccess = 100.millis) {
             recoveringQueue.componentHealthState should beAnExpectedHealthFailureState
           }
-          val states = healthStateCollector.get
-          states should not be empty
-          all(states) should beAnExpectedHealthFailureState
+          eventually() {
+            val states = healthStateCollector.get
+            states should not be empty
+            all(states) should beAnExpectedHealthFailureState
+          }
         }
       }
     }
@@ -2529,13 +2531,15 @@ class PekkoUtilTest
         eventually(retryOnTestFailuresOnly = false) { // Retry on mockito verify fail as well
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Should be unhealthy before indexer closed
           verify(futureQueueMock).shutdown()
+          healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         futureQueueDone.success(Done)
         always(durationOfSuccess = 200.millis) {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Still unhealthy after indexer closed
+          healthStateCollector.get should equal(
+            List(ComponentHealthState.ShutdownState)
+          ) // We ensure that no state transition happened in the meantime
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
       }
     }
 
@@ -2589,8 +2593,8 @@ class PekkoUtilTest
 
         eventually() {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
+          healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
 
         commitPromise.success(Done)
 
@@ -2599,7 +2603,11 @@ class PekkoUtilTest
         }
         healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         futureQueueDone.success(Done)
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
+        always(durationOfSuccess = 200.millis) {
+          healthStateCollector.get should equal(
+            List(ComponentHealthState.ShutdownState)
+          ) // Ensure that no other state changes happened
+        }
       }
     }
   }
@@ -3531,6 +3539,129 @@ class PekkoUtilTest
           "NAME failed with error. Failed to recover as maximum attempts reached (19). Propagating failure."
         ),
       )
+    }
+  }
+
+  "optionalTake" when {
+    "limit is Some(5)" should {
+      "not change empty stream" in {
+        Source.empty[Int].optionalTake(Some(5)).runWith(Sink.seq).futureValue shouldBe empty
+      }
+
+      "limit number of elements of 20 element stream" in {
+        val contents = Seq.tabulate(20)(identity)
+        Source(contents).optionalTake(Some(5)).runWith(Sink.seq).futureValue shouldEqual Seq(0, 1,
+          2, 3, 4)
+      }
+
+      "not limit number of elements of 3 element stream" in {
+        val contents = Seq.tabulate(3)(identity)
+        Source(contents).optionalTake(Some(5)).runWith(Sink.seq).futureValue shouldEqual Seq(
+          0,
+          1,
+          2,
+        )
+      }
+
+      "propagate cancellation to source" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(Some(5))
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        sink.cancel()
+        source.expectCancellation()
+      }
+
+      "propagate exception to source" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(Some(5))
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        val ex = new Exception("Consumer failed")
+        sink.cancel(ex)
+        source.expectCancellationWithCause(ex)
+      }
+
+      "propagate exception to sink" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(Some(5))
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        val ex = new Exception("Producer failed")
+        source.sendError(ex)
+        sink.expectSubscriptionAndError(ex)
+      }
+
+      "not propagate exception after limit of elements" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(Some(5))
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        source.sendNext(1)
+        source.sendNext(2)
+        source.sendNext(3)
+
+        sink.requestNext() shouldBe 1
+        sink.requestNext() shouldBe 2
+        sink.requestNext() shouldBe 3
+        val ex = new Exception("Producer failed")
+        source.sendError(ex)
+        sink.expectError(ex)
+      }
+    }
+
+    "limit is None" should {
+      "not change empty stream" in {
+        Source.empty[Int].optionalTake(None).runWith(Sink.seq).futureValue shouldBe empty
+      }
+
+      "not limit number of elements of 20 element stream" in {
+        val contents = Seq.tabulate(20)(identity)
+        Source(contents).optionalTake(None).runWith(Sink.seq).futureValue shouldEqual contents
+      }
+
+      "propagate cancellation to source" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(None)
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        sink.cancel()
+        source.expectCancellation()
+      }
+
+      "propagate exception to source" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(None)
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        val ex = new Exception("Consumer failed")
+        sink.cancel(ex)
+        source.expectCancellationWithCause(ex)
+      }
+
+      "propagate exception to sink" in {
+        val (source, sink) = TestSource
+          .probe[Int]
+          .optionalTake(None)
+          .toMat(TestSink.probe)(Keep.both)
+          .run()
+
+        val ex = new Exception("Producer failed")
+        source.sendError(ex)
+        sink.expectSubscriptionAndError() shouldBe (ex)
+      }
     }
   }
 }

@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.BaseTest.CantonLfV21
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference, ParticipantReference}
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -357,7 +356,6 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
-@UnstableTest // TODO(i27868): Remove as soon as this test has been fixed
 class OnlinePartyReplicationCascadingRepetitionsTestPostgres
     extends OnlinePartyReplicationCascadingRepetitionsTest {
   registerPlugin(new UsePostgres(loggerFactory))

@@ -2311,6 +2311,18 @@ private[lf] object SBuiltinFun {
       Control.Error(IE.UserError(getSText(args, 0)))
   }
 
+  final class NotImplement(description: String, arity: Int) extends SBuiltinFun(arity) {
+
+    /** Execute the builtin with 'arity' number of arguments in 'args'. Updates the machine state
+      * accordingly.
+      */
+    override private[speedy] def execute[Q](
+        args: ArraySeq[SValue],
+        machine: Machine[Q],
+    ): Control[Q] =
+      crash(s"$description not implemented")
+  }
+
   /** $templatePreconditionViolated[T] :: T -> Error */
   final case class SBTemplatePreconditionViolated(templateId: Identifier) extends SBuiltinFun(1) {
 
@@ -2554,7 +2566,7 @@ private[lf] object SBuiltinFun {
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
       val arg = args(1)
-      Question.Cmd.ExerciseTemplate(ifaceId, choiceName, coid, arg)
+      Question.Cmd.ExerciseTemplate(ifaceId, coid, choiceName, arg)
     }
   }
 
@@ -2574,12 +2586,7 @@ private[lf] object SBuiltinFun {
     ): Question.Cmd = {
       val coid = getSContractId(args, 0)
       val arg = args(1)
-      Question.Cmd.ExerciseInterface(
-        ifaceId,
-        choiceName,
-        coid,
-        arg,
-      )
+      Question.Cmd.ExerciseInterface(ifaceId, coid, choiceName, arg)
     }
   }
 
@@ -2602,7 +2609,7 @@ private[lf] object SBuiltinFun {
     ): Question.Cmd = {
       val key = args(0)
       val arg = args(1)
-      Question.Cmd.ExerciseByKey(tmplId, choiceName, key, arg)
+      Question.Cmd.ExerciseByKey(tmplId, key, choiceName, arg)
     }
   }
 

@@ -110,6 +110,12 @@ class GrpcSequencerConnectService(
               Parameters.V31(staticSynchronizerParameters.toProtoV31)
             )
           )
+        case ProtoVersion(32) =>
+          Right(
+            GetSynchronizerParametersResponse(
+              Parameters.V32(staticSynchronizerParameters.toProtoV32)
+            )
+          )
         case unsupported =>
           // If we hit this branch, something is severely broken. Therefore the extra error logging.
           logger.error(

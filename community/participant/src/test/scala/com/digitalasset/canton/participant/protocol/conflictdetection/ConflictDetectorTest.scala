@@ -45,6 +45,7 @@ import com.digitalasset.canton.participant.store.memory.{
   ReassignmentCache,
   ReassignmentCacheTest,
 }
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange, TimeOfRequest}
 import com.digitalasset.canton.protocol.{
   ExampleTransactionFactory,
@@ -52,6 +53,7 @@ import com.digitalasset.canton.protocol.{
   LfContractId,
   ReassignmentId,
 }
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -102,7 +104,12 @@ final class ConflictDetectorTest
 
   private def defaultReassignmentCache: ReassignmentCache =
     new ReassignmentCache(
-      new InMemoryReassignmentStore(targetSynchronizerId, loggerFactory),
+      new InMemoryReassignmentStore(
+        targetSynchronizerId,
+        DefaultTestIdentities.participant1,
+        new FailingOfflineTopologyLookup(),
+        loggerFactory,
+      ),
       futureSupervisor,
       timeouts,
       loggerFactory,
@@ -1683,6 +1690,8 @@ final class ConflictDetectorTest
       val reassignmentStore =
         new InMemoryReassignmentStore(
           Target(ReassignmentStoreTest.indexedTargetSynchronizer.synchronizerId),
+          DefaultTestIdentities.participant1,
+          new FailingOfflineTopologyLookup(),
           loggerFactory,
         )
       val hookedStore = new ReassignmentCacheTest.HookReassignmentStore(reassignmentStore)

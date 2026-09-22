@@ -11,6 +11,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.repair.RepairServiceIntegrationTest
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient
+import com.digitalasset.canton.sequencing.protocol.Deliver
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import monocle.syntax.all.*
 
@@ -74,7 +75,7 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
       // the last event is the topology transaction, so we need to delay the SequencerIndexMoved event.
       // Setting up the sequencer client of participant1 to block on processing the specified event.
       // The counter is set to 1, meaning that it should block events after one processed successfully
-      val releaseClient = setupDelayedSequencerClientForParticipant1(daId, participant1, 1)
+      val releaseClient = setupDelayedSequencerClientToBlockOnEmptyBatch(daId, participant1)
       val newParty = participant1.parties.testing.enable(
         "NewParty",
         synchronizeParticipants = List(participant1, participant2),
@@ -96,30 +97,33 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
       (repairContract, releaseClient)
     }
 
-    logger.debug("repair event must fail")
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant1.repair.add(daId, testedProtocolVersion, Seq(repairContract)),
-      _.commandFailureMessage should include(
-        "Cannot apply a repair command as the last event is a topology offset."
-      ),
-    )
+    clue("repair event must fail") {
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.repair.add(daId, testedProtocolVersion, Seq(repairContract)),
+        _.commandFailureMessage should include(
+          "Cannot apply a repair command as the last event is a topology offset."
+        ),
+      )
+    }
 
     logger.debug("releasing sequencer client")
     releaseClient1.success(())
 
-    logger.debug("reconnecting and running a transaction")
-    withSynchronizerConnected(daName) {
-      IouSyntax.createIous(participant1, alice, alice, 1 to 1)
+    clue("reconnecting and running a transaction") {
+      withSynchronizerConnected(daName) {
+        IouSyntax.createIous(participant1, alice, alice, 1 to 1)
+      }
     }
 
-    logger.debug("retrying repair should succeed")
-    participant1.repair.add(daId, testedProtocolVersion, Seq(repairContract))
+    clue("retrying repair should succeed") {
+      participant1.repair.add(daId, testedProtocolVersion, Seq(repairContract))
+    }
 
     // same scenario again, but this time using the force flag
     val releaseClient2 = withSynchronizerConnected(daName) {
       val startOffset = participant1.ledger_api.state.end()
       logger.debug("Creating the second topology event")
-      val releaseClient = setupDelayedSequencerClientForParticipant1(daId, participant1, 1)
+      val releaseClient = setupDelayedSequencerClientToBlockOnEmptyBatch(daId, participant1)
       val newParty = participant1.parties.testing.enable(
         "NewParty2",
         synchronizeParticipants = List(participant1, participant2),
@@ -133,38 +137,48 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
       releaseClient
     }
 
-    logger.debug("resubmitting with force flag")
-    participant1.repair.add(
-      daId,
-      testedProtocolVersion,
-      Seq(repairContract),
-      forceRepairWhenTopologyTransactionAtLedgerEnd = true,
-    )
-    releaseClient2.success(())
+    clue("resubmitting with force flag") {
+      participant1.repair.add(
+        daId,
+        testedProtocolVersion,
+        Seq(repairContract),
+        forceRepairWhenTopologyTransactionAtLedgerEnd = true,
+      )
+      releaseClient2.success(())
+    }
 
-    logger.debug("reconnecting and running a transaction, showing that the repair was successful")
-    withSynchronizerConnected(daName) {
-      IouSyntax.createIous(participant1, alice, alice, 1 to 1)
+    clue("reconnecting and running a transaction, showing that the repair was successful") {
+      withSynchronizerConnected(daName) {
+        IouSyntax.createIous(participant1, alice, alice, 1 to 1)
+      }
     }
   }
 
-  private def setupDelayedSequencerClientForParticipant1(
+  // This tries to find the SequencerIndexMoved event by the heuristic, that its envelope is empty
+  // First it observes a non-empty batch (which should be the topology transaction), and then it blocks on the next
+  // empty batch (which should be the SequencerIndexMoved event)
+  private def setupDelayedSequencerClientToBlockOnEmptyBatch(
       sync: PhysicalSynchronizerId,
       participant: LocalParticipantReference,
-      count: Int,
   ): Promise[Unit] = {
-    @volatile var blockAfterSequencerEvents = count
+    @volatile var expectedTransactionObserved = false
+    @volatile var blocking = false
     val releaseClient = Promise[Unit]()
-    val participant2SequencerClientInterceptor = DelayedSequencerClient
+    val participantSequencerClientInterceptor = DelayedSequencerClient
       .delayedSequencerClient(this.getClass.getSimpleName, sync, participant.id.uid.toString)
       .value
-    participant2SequencerClientInterceptor.setDelayPolicy { _ =>
-      if (blockAfterSequencerEvents > 0) {
-        blockAfterSequencerEvents = blockAfterSequencerEvents - 1
-        DelayedSequencerClient.Immediate
-      } else {
+    participantSequencerClientInterceptor.setDelayPolicy { sse =>
+      val isEmpty = sse.signedEvent.content match {
+        case d: Deliver[?] => d.batch.envelopes.isEmpty
+        case _ => false
+      }
+      blocking = expectedTransactionObserved && (blocking || isEmpty)
+      if (blocking) {
         logger.debug("Delaying sequencer batch")
         DelayedSequencerClient.DelayUntil(releaseClient.future)
+      } else {
+        expectedTransactionObserved = true
+        DelayedSequencerClient.Immediate
       }
     }
     releaseClient

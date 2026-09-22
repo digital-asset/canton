@@ -22,8 +22,6 @@ final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtoc
 }
 
 object SynchronizerLimits {
-  lazy val default: SynchronizerLimits =
-    SynchronizerLimitsInternal.default.transformInto[SynchronizerLimits]
   lazy val max: SynchronizerLimits =
     SynchronizerLimitsInternal.max.transformInto[SynchronizerLimits]
 

@@ -22,7 +22,7 @@ import com.digitalasset.canton.data.TransactionView.{
   validateViewParticipantData,
 }
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -129,12 +129,7 @@ final case class TransactionView private (
   def allSubviewsWithPosition(rootPos: ViewPosition): Seq[(TransactionView, ViewPosition)] =
     allSubviewsWithPositionTree(rootPos).preorder.toSeq
 
-  override protected def pretty: Pretty[TransactionView] = prettyOfClass(
-    param("root hash", _.rootHash),
-    param("view common data", _.viewCommonData),
-    param("view participant data", _.viewParticipantData),
-    param("subviews", _.subviews),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TransactionView] = TransactionView
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
@@ -388,8 +383,16 @@ object TransactionView
     extends VersioningCompanionContext[
       TransactionView,
       (HashOps, DepthCounter, ProtocolVersion),
-    ] {
+    ]
+    with PrettyPrintingCompanion[TransactionView] {
   override def name: String = "TransactionView"
+
+  override protected val pretty: Pretty[TransactionView] = prettyOfClass(
+    param("root hash", _.rootHash),
+    param("view common data", _.viewCommonData),
+    param("view participant data", _.viewParticipantData),
+    param("subviews", _.subviews),
+  )
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewNode)(
       supportedProtoVersion(_)(fromProtoV30),

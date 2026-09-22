@@ -16,7 +16,11 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{v30, v31, v32}
@@ -48,7 +52,7 @@ sealed trait ProtocolMessage
     extends Product
     with Serializable
     with HasPhysicalSynchronizerId
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with HasRepresentativeProtocolVersion {
 
   override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type]
@@ -60,10 +64,12 @@ sealed trait ProtocolMessage
     * confidential data. Sub-classes may override the pretty instance to print more information.
     */
   @VisibleForTesting
-  override def pretty: Pretty[this.type] = prettyOfObject[ProtocolMessage]
+  override def prettyCompanion: PrettyPrintingCompanion[this.type] = ProtocolMessage
 }
 
-object ProtocolMessage {
+object ProtocolMessage extends PrettyPrintingCompanion[ProtocolMessage] {
+
+  override protected val pretty: Pretty[ProtocolMessage] = prettyOfObject[ProtocolMessage]
 
   /** Returns the envelopes from the batch that match the given synchronizer id. If any other
     * messages exist, it gives them to the provided callback
@@ -194,13 +200,18 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
       else this.copy(typedMessage = newTypedMessage)
     }
 
-  override def pretty: Pretty[this.type] =
-    prettyOfClass(unnamedParam(_.message), param("signatures", _.signatures))
+  override def prettyCompanion
+      : PrettyPrintingCompanion[SignedProtocolMessage[SignedProtocolMessageContent]] =
+    SignedProtocolMessage
 }
 
 object SignedProtocolMessage
-    extends VersioningCompanion[SignedProtocolMessage[SignedProtocolMessageContent]] {
+    extends VersioningCompanion[SignedProtocolMessage[SignedProtocolMessageContent]]
+    with PrettyPrintingCompanion[SignedProtocolMessage[SignedProtocolMessageContent]] {
   override val name: String = "SignedProtocolMessage"
+
+  override protected val pretty: Pretty[SignedProtocolMessage[SignedProtocolMessageContent]] =
+    prettyOfClass(unnamedParam(_.message), param("signatures", _.signatures))
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(

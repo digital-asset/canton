@@ -9,10 +9,10 @@ import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
-import com.digitalasset.canton.participant.protocol.party.{
-  OnboardingClearanceOperation,
-  PartyReplicationSourceParticipantMessage,
-  PartyReplicationTargetParticipantMessage,
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.acsreplication.{
+  AcsReplicationSourceParticipantMessage,
+  AcsReplicationTargetParticipantMessage,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
 import com.digitalasset.canton.participant.synchronizer.{
@@ -75,18 +75,16 @@ final class SerializationDeserializationTest
         generators.transaction,
         generators.generatorsProtocolSeq,
         generators.protocol,
-        generators.crypto,
       )
     val participantGenerators =
       new GeneratorsParticipant(
         generators.topology,
         generators.transaction,
         generators.lf,
-        generators.crypto,
         version,
       )
 
-    import generators.crypto.*
+    import com.digitalasset.canton.crypto.GeneratorsCrypto.*
     import generators.data.*
     import generators.generatorsMessages.*
     import generators.generatorsProtocolSeq.*
@@ -240,8 +238,9 @@ final class SerializationDeserializationTest
           test(SequencerChannelSessionKeyAck, version)
 
           test(PartyReplicationStatus, version)
-          test(PartyReplicationSourceParticipantMessage, version)
-          test(PartyReplicationTargetParticipantMessage, version)
+          test(AcsReplicationSourceParticipantMessage.AcsDigest, version)
+          testContext(AcsReplicationSourceParticipantMessage, version, version)
+          test(AcsReplicationTargetParticipantMessage, version)
         }
 
         // Generated sequenced events get quite big because each batched envelope has recipient trees
@@ -325,7 +324,7 @@ final class SerializationDeserializationTest
     }
 
     forAll(Table("contract ID version", CantonContractIdVersion.all*)) { contractIdVersion =>
-      val generatorContract = new GeneratorsContract(contractIdVersion, generators.crypto)
+      val generatorContract = new GeneratorsContract(contractIdVersion)
       import generatorContract.*
 
       s"Serialization and deserialization methods for contract ID version $contractIdVersion and protocol version $version" should {

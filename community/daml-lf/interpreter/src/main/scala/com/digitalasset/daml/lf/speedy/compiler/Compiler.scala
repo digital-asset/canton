@@ -8,6 +8,7 @@ package compiler
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct, Time}
+import com.digitalasset.daml.lf.interpretation.ExecutionMode
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, LookupError, PackageInterface}
 import com.digitalasset.daml.lf.speedy.Profile.LabelModule
@@ -66,20 +67,12 @@ private[lf] object Compiler {
   case object NoPackageValidation extends PackageValidationMode
   case object FullPackageValidation extends PackageValidationMode
 
-  sealed abstract class ExecutionMode extends Product with Serializable
-  object ExecutionMode {
-    // run using Update Machine
-    case object Upd extends ExecutionMode
-    // run using Cmd Machine and Transaction Conductor
-    case object Cmd extends ExecutionMode
-  }
-
   final case class Config(
       allowedLanguageVersions: Seq[LanguageVersion],
       packageValidation: PackageValidationMode,
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
-      cmdMode: ExecutionMode = ExecutionMode.Upd,
+      cmdMode: ExecutionMode = ExecutionMode.UpdateMachine,
   )
 
   object Config {
@@ -386,10 +379,10 @@ private[lf] final class Compiler(
       addDef(compileObservers(tmplId, tmpl))
       addDef(compileToContractInfo(tmplId, tmpl))
       config.cmdMode match {
-        case ExecutionMode.Cmd =>
+        case ExecutionMode.Conductor =>
           addDef(compileCmdCreate(tmplId))
           addDef(compileCmdFetchTemplate(tmplId))
-        case ExecutionMode.Upd =>
+        case ExecutionMode.UpdateMachine =>
       }
       tmpl.implements.values.foreach { impl =>
         compileInterfaceInstance(
@@ -407,10 +400,10 @@ private[lf] final class Compiler(
         addDef(compileChoiceObserver(tmplId, tmpl.param, choice))
         addDef(compileChoiceAuthorizers(tmplId, tmpl.param, choice))
         config.cmdMode match {
-          case ExecutionMode.Cmd =>
+          case ExecutionMode.Conductor =>
             addDef(compileCmdExerciseTemplate(tmplId, choice))
             addDef(compileCmdChoiceBody(tmplId, tmpl, choice))
-          case ExecutionMode.Upd =>
+          case ExecutionMode.UpdateMachine =>
         }
       }
 
@@ -419,18 +412,18 @@ private[lf] final class Compiler(
         addDef(compileContractKey(tmplId, tmpl, tmplKey))
         addDef(compileKeyMaintainers(tmplId, tmplKey))
         config.cmdMode match {
-          case ExecutionMode.Cmd =>
+          case ExecutionMode.Conductor =>
             addDef(compileCmdFetchByKey(tmplId))
             addDef(compileCmdQueryNByKey(tmplId))
-          case ExecutionMode.Upd =>
+          case ExecutionMode.UpdateMachine =>
             addDef(compileFetchByKey(tmplId, tmplKey))
             addDef(compileQueryNByKey(tmplId, tmplKey))
         }
         tmpl.choices.values.foreach { x =>
           config.cmdMode match {
-            case ExecutionMode.Cmd =>
+            case ExecutionMode.Conductor =>
               addDef(compileCmdExerciseByKey(tmplId, x))
-            case ExecutionMode.Upd =>
+            case ExecutionMode.UpdateMachine =>
               addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
           }
         }
@@ -440,9 +433,9 @@ private[lf] final class Compiler(
     module.interfaces.foreach { case (ifaceName, iface) =>
       val ifaceId = Identifier(pkgId, QualifiedName(module.name, ifaceName))
       config.cmdMode match {
-        case ExecutionMode.Cmd =>
+        case ExecutionMode.Conductor =>
           addDef(compileCmdFetchInterface(ifaceId))
-        case ExecutionMode.Upd =>
+        case ExecutionMode.UpdateMachine =>
           addDef(compileFetchInterface(ifaceId))
       }
       iface.choices.values.foreach { choice =>
@@ -450,11 +443,11 @@ private[lf] final class Compiler(
         addDef(compileChoiceController(ifaceId, iface.param, choice))
         addDef(compileChoiceObserver(ifaceId, iface.param, choice))
         config.cmdMode match {
-          case ExecutionMode.Cmd =>
+          case ExecutionMode.Conductor =>
             addDef(compileChoiceAuthorizers(ifaceId, iface.param, choice))
             addDef(compileCmdInterfaceChoiceBody(ifaceId, iface.param, choice))
             addDef(compileCmdExerciseInterface(ifaceId, choice))
-          case ExecutionMode.Upd =>
+          case ExecutionMode.UpdateMachine =>
         }
       }
       iface.coImplements.values.foreach { coimpl =>
@@ -473,7 +466,7 @@ private[lf] final class Compiler(
 
   private def preventCatchUnlessCmdMode(expr: s.SExpr): s.SExpr =
     config.cmdMode match {
-      case ExecutionMode.Cmd => expr
+      case ExecutionMode.Conductor => expr
       case _ => s.SEPreventCatch(expr)
     }
 

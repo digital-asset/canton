@@ -355,10 +355,26 @@ class FutureSupervisorImplTest extends FutureSupervisorTest {
           )
 
           Threading.sleep(FutureSupervisor.Impl.defaultCheckMs + warnLimit.duration.toMillis)
-          // Make sure that we have seen a log entry for each
+
           val logs1 = eventually() {
             val entries = loggerFactory.fetchRecordedLogEntries
             entries.filter(isInitialWarn) should have size 5
+
+            // Flake prevention (Assertion Failure): Wait for the first round of summaries to log
+            // before adding tc3. If we do not synchronize here, the test thread can race ahead
+            // of the background supervisor, causing tc3 to contaminate the first log summary.
+            // Explicitly checking for both tc1 and tc2 ensures we are capturing a complete
+            // summary batch, not a partial round.
+            val summaries = entries.filter(isSummary)
+            val tc1Id = tc1.traceId.getOrElse("")
+            val tc2Id = tc2.traceId.getOrElse("")
+
+            Seq(Level.WARN, Level.ERROR).forall { level =>
+              summaries.exists(e =>
+                e.level == level && e.message.contains(tc1Id) && e.message.contains(tc2Id)
+              )
+            } shouldBe true
+
             entries.size
           }
 
@@ -393,6 +409,15 @@ class FutureSupervisorImplTest extends FutureSupervisorTest {
             newEntries.count(isSummary) should be >= 2
           }
 
+          // Flake prevention (Leaked WARNs): Complete the remaining futures and wait for the
+          // supervisor's queue to empty. This guarantees the background thread finishes
+          // processing and logging before the test lifts the `assertLogsSeq` log suppression,
+          // preventing late summaries from leaking into standard output.
+          incompletePromise.trySuccess(())
+          eventually() {
+            supervisor.inspectApproximateSize shouldBe 0
+          }
+
           supervisor.stop()
         },
         entries => {
@@ -411,7 +436,7 @@ class FutureSupervisorImplTest extends FutureSupervisorTest {
               include: Boolean = true,
           ): Int =
             summaries.count(
-              _.message.contains(traceContext.traceId.getOrElse("<no trace id>")) == include
+              _.message.contains(traceContext.traceId.getOrElse("")) == include
             )
 
           countSummaryForTraceId(errorSummaries, tc1) should be >= 2

@@ -4,7 +4,11 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.data.ExternalCallPayloadDescription.hexPayloadSize
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 
 /** Deterministic external-call identity. Config and input are engine-emitted canonical hex strings.
@@ -15,16 +19,18 @@ final case class ExternalCallKey(
     functionId: String,
     config: String,
     input: String,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[ExternalCallKey] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ExternalCallKey] = ExternalCallKey
+}
+
+object ExternalCallKey extends PrettyPrintingCompanion[ExternalCallKey] {
+
+  override protected val pretty: Pretty[ExternalCallKey] = prettyOfClass(
     param("extension id", _.extensionId.doubleQuoted),
     param("function id", _.functionId.doubleQuoted),
     param("config bytes", key => hexPayloadSize(key.config).doubleQuoted),
     param("input bytes", key => hexPayloadSize(key.input).doubleQuoted),
   )
-}
-
-object ExternalCallKey {
 
   /** Orders by the semantic identity fields, lexicographically. */
   implicit val externalCallKeyOrdering: Ordering[ExternalCallKey] =

@@ -18,20 +18,21 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData.InternalIncompleteReassignmentData
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
   IncompleteReassignmentData,
+  ReassignmentData,
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.store.ReassignmentStore.*
 import com.digitalasset.canton.participant.store.db.DbReassignmentStore.ReassignmentEntryRaw
+import com.digitalasset.canton.participant.topology.OfflineTopologyLookup
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedSynchronizer}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -50,6 +51,8 @@ class DbReassignmentStore(
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
     batchingConfig: BatchingConfig,
+    participantId: ParticipantId,
+    offlineTopologyLookup: OfflineTopologyLookup,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -135,6 +138,7 @@ class DbReassignmentStore(
             r.nextLongOption().map(Offset.tryFromLong),
           )
           .valueOr(err => throw new DbDeserializationException(err)),
+        incompleteLastStakeholderOffboardedTargetOffset = GetResult[Option[Offset]].apply(r),
         GetResult[Option[CantonTimestamp]].apply(r),
       )
   }
@@ -223,7 +227,7 @@ class DbReassignmentStore(
           $indexedTargetSynchronizer,
           $indexedSourceSynchronizer,
           ${assignmentData.reassignmentId},
-          ${assignmentData.unassignmentDecisionTime},
+          ${CantonTimestamp.Epoch},
           NULL, -- unassignmentRequest
           NULL, -- unassignment_global_offset
           NULL, -- assignment_global_offset
@@ -250,9 +254,9 @@ class DbReassignmentStore(
   ): EitherT[FutureUnlessShutdown, ReassignmentStore.ReassignmentLookupError, UnassignmentData] = {
     logger.debug(s"Looking up reassignment $reassignmentId in store")
     findReassignmentEntry(reassignmentId).flatMap {
-      case ReassignmentEntry(_, _, _, None, _, _, None) =>
+      case ReassignmentEntry(_, _, _, None, _, _, _, None) =>
         EitherT.leftT(AssignmentStartingBeforeUnassignment(reassignmentId))
-      case ReassignmentEntry(_, _, _, _, _, _, Some(tsCompletion)) =>
+      case ReassignmentEntry(_, _, _, _, _, _, _, Some(tsCompletion)) =>
         EitherT.leftT(ReassignmentCompleted(reassignmentId, tsCompletion))
       case ReassignmentEntry(
             _reassignmentId,
@@ -260,6 +264,7 @@ class DbReassignmentStore(
             _contract,
             Some(unassignmentData),
             _reassignmentGlobalOffset,
+            _incompleteLastStakeholderOffboardedTargetOffset,
             _unassignmentTs,
             _,
           ) =>
@@ -272,7 +277,7 @@ class DbReassignmentStore(
   ): DbAction.ReadOnly[Option[ReassignmentEntryRaw]] =
     sql"""
      select source_synchronizer_idx, reassignment_id, unassignment_timestamp, stakeholders, unassignment_data,
-     unassignment_global_offset, assignment_global_offset, assignment_timestamp
+     unassignment_global_offset, assignment_global_offset, incomplete_last_stakeholder_offboarded_target_offset, assignment_timestamp
      from par_reassignments
      where target_synchronizer_idx=$indexedTargetSynchronizer and reassignment_id=$reassignmentId
     """.as[ReassignmentEntryRaw].headOption
@@ -287,6 +292,113 @@ class DbReassignmentStore(
         offsets => addReassignmentsOffsetsInternal(NonEmptyUtil.fromUnsafe(offsets))
       )
     }
+
+  override def handlePartiesOffboarding(
+      offset: Offset,
+      ts: CantonTimestamp,
+      parties: NonEmpty[Set[LfPartyId]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
+
+    val queryFrom = (lastReassignmentIdO: Option[ReassignmentId]) =>
+      storage
+        .query(
+          {
+            import DbStorage.Implicits.BuilderChain.*
+
+            // Find incompletes unassigned that don't have the incomplete_last_stakeholder_offboarded_target_offset set
+            val unassignmentCompleted =
+              sql"""(unassignment_global_offset is not null and unassignment_global_offset <= $offset) and (assignment_global_offset is null or assignment_global_offset > $offset)"""
+
+            val incomplete =
+              sql" and " ++ unassignmentCompleted ++ sql" and incomplete_last_stakeholder_offboarded_target_offset is null"
+
+            // Cursor for the pagination loop in `queryWithFiltering`
+            val cursorFilter =
+              lastReassignmentIdO.fold(sql"")(lastId => sql" and reassignment_id > $lastId")
+
+            val order = sql" order by reassignment_id "
+
+            val limitSql = storage.limitSql(batchingConfig.maxItemsInBatch.unwrap)
+
+            val base: SQLActionBuilder =
+              sql"""select reassignment_id, stakeholders from par_reassignments where target_synchronizer_idx=$indexedTargetSynchronizer"""
+
+            (base ++ incomplete ++ cursorFilter ++ order ++ limitSql)
+              .as[ReassignmentData.IdAndStakeholders]
+          },
+          functionFullName,
+        )
+
+    for {
+      allIncompletes <- EitherT.right[ReassignmentStoreError](
+        queryWithFiltering(
+          stakeholders = Some(parties),
+          limit = NonNegativeInt.maxValue,
+          queryFrom = queryFrom,
+        )
+      )
+
+      allStakeholders = allIncompletes.flatMap {
+        case ReassignmentData.IdAndStakeholders(_, stakeholders) => stakeholders
+      }.toSet
+
+      lsid = indexedTargetSynchronizer.value.synchronizerId
+      snapshot <- offlineTopologyLookup
+        .offlineAwaitTopologySnapshot(lsid, ts)
+        .leftMap(err => TopologyLookupError(lsid, ts, err.toString))
+
+      hostingParticipants <- EitherT.right[ReassignmentStoreError](
+        snapshot.activeParticipantsOfParties(allStakeholders.toSeq)
+      )
+      locallyHostedStakeholders = hostingParticipants
+        .collect {
+          case (party, participants) if participants.contains(participantId) => party
+        }
+        .toSet
+        .diff(parties)
+
+      notIncompletesAnymore = allIncompletes.collect {
+        case ReassignmentData.IdAndStakeholders(reassignmentId, stakeholders)
+            if stakeholders.intersect(locallyHostedStakeholders).isEmpty =>
+          reassignmentId
+      }
+
+      _ = logger.debug(
+        s"Marking last stakeholder offboarded for reassignments: $notIncompletesAnymore"
+      )
+
+      _ <- EitherT.right[ReassignmentStoreError](
+        MonadUtil.batchedSequentialTraverse_(
+          batchingConfig.parallelism,
+          batchingConfig.maxItemsInBatch,
+        )(notIncompletesAnymore)(markLastStakeholderOffboarded(_, offset))
+      )
+
+    } yield ()
+  }
+
+  private def markLastStakeholderOffboarded(
+      reassignments: Seq[ReassignmentId],
+      offset: Offset,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+
+    val updateQuery =
+      """update par_reassignments
+       set incomplete_last_stakeholder_offboarded_target_offset = ?
+       where target_synchronizer_idx = ? and reassignment_id = ? and incomplete_last_stakeholder_offboarded_target_offset is null
+    """
+
+    val batchUpdate = DbStorage.bulkOperation_(updateQuery, reassignments, storage.profile) {
+      pp => reassignmentId =>
+        pp >> offset
+        pp >> indexedTargetSynchronizer
+        pp >> reassignmentId
+    }
+
+    storage.queryAndUpdate(batchUpdate, functionFullName)
+  }
 
   /*
     Requires:
@@ -444,7 +556,7 @@ class DbReassignmentStore(
 
     val base: SQLActionBuilder = sql"""
      select source_synchronizer_idx, reassignment_id, unassignment_timestamp, stakeholders, unassignment_data,
-     unassignment_global_offset, assignment_global_offset, assignment_timestamp
+     unassignment_global_offset, assignment_global_offset, incomplete_last_stakeholder_offboarded_target_offset, assignment_timestamp
      from par_reassignments
      where
    """
@@ -490,106 +602,102 @@ class DbReassignmentStore(
     res = entries.flatMap(_.unassignmentData)
   } yield res
 
+  /** Finds some incomplete reassignments that are incomplete at offset `validAt`. The result is
+    * paginated by the last reassignment id (`lastReassignmentIdO`) that was returned in the
+    * previous call.
+    *
+    * @param validAt
+    *   Offset at which the reassignments are incomplete
+    * @param lastReassignmentIdO
+    *   Continuation token for the pagination
+    */
   private def findIncomplete(
-      sourceSynchronizer: Option[Source[SynchronizerId]],
       validAt: Offset,
       lastReassignmentIdO: Option[ReassignmentId],
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[InternalIncompleteReassignmentData]] =
-    for {
-      indexedSourceSynchronizerO <- sourceSynchronizer.fold(
-        FutureUnlessShutdown.pure(Option.empty[Source[IndexedSynchronizer]])
-      )(sd => indexedSynchronizerF(sd).map(Some(_)))
-      res <- storage
-        .query(
-          {
-            import DbStorage.Implicits.BuilderChain.*
+  ): FutureUnlessShutdown[Seq[ReassignmentData.IncompleteReassignment]] =
+    storage
+      .query(
+        {
+          import DbStorage.Implicits.BuilderChain.*
 
-            val unassignmentCompleted =
-              sql"(unassignment_global_offset is not null and unassignment_global_offset <= $validAt) and (assignment_global_offset is null or assignment_global_offset > $validAt)"
-            val assignmentCompleted =
-              sql"(assignment_global_offset is not null and assignment_global_offset <= $validAt) and (unassignment_global_offset is null or unassignment_global_offset > $validAt)"
-            val incomplete =
-              sql" and (" ++ unassignmentCompleted ++ sql" or " ++ assignmentCompleted ++ sql")"
+          val unassignmentCompleted =
+            sql"""(unassignment_global_offset is not null and unassignment_global_offset <= $validAt) and (assignment_global_offset is null or assignment_global_offset > $validAt)
+                 and (incomplete_last_stakeholder_offboarded_target_offset is null or incomplete_last_stakeholder_offboarded_target_offset >= $validAt)
+               """
 
-            val sourceSynchronizerFilter =
-              indexedSourceSynchronizerO.fold(sql"")(indexedSourceSynchronizer =>
-                sql" and source_synchronizer_idx=$indexedSourceSynchronizer"
-              )
+          val assignmentCompleted =
+            sql"(assignment_global_offset is not null and assignment_global_offset <= $validAt) and (unassignment_global_offset is null or unassignment_global_offset > $validAt)"
 
-            // Cursor for the pagination loop in `queryWithFiltering`
-            val cursorFilter =
-              lastReassignmentIdO.fold(sql"")(lastId => sql" and reassignment_id > $lastId")
+          val incomplete =
+            sql" and (" ++ unassignmentCompleted ++ sql" or " ++ assignmentCompleted ++ sql")"
 
-            val order = sql" order by reassignment_id "
+          // Cursor for the pagination loop in `queryWithFiltering`
+          val cursorFilter =
+            lastReassignmentIdO.fold(sql"")(lastId => sql" and reassignment_id > $lastId")
 
-            val limitSql = storage.limitSql(batchingConfig.maxItemsInBatch.unwrap)
+          val order = sql" order by reassignment_id "
 
-            val base: SQLActionBuilder =
-              sql"""select reassignment_id, unassignment_data, stakeholders, unassignment_global_offset, assignment_global_offset
+          val limitSql = storage.limitSql(batchingConfig.maxItemsInBatch.unwrap)
+
+          val base: SQLActionBuilder =
+            sql"""select reassignment_id, unassignment_data, stakeholders, unassignment_global_offset, assignment_global_offset
               from par_reassignments
               where target_synchronizer_idx=$indexedTargetSynchronizer"""
 
-            (base ++ incomplete ++ sourceSynchronizerFilter ++ cursorFilter ++ order ++ limitSql)
-              .as[
-                (
-                    ReassignmentId,
-                    Option[UnassignmentData],
-                    NonEmpty[Set[LfPartyId]],
-                    Option[ReassignmentGlobalOffset],
-                )
-              ]
-          },
-          functionFullName,
-        )
-
-      incompletes = res.map {
+          (base ++ incomplete ++ cursorFilter ++ order ++ limitSql)
+            .as[
+              (
+                  ReassignmentId,
+                  Option[UnassignmentData],
+                  NonEmpty[Set[LfPartyId]],
+                  Option[ReassignmentGlobalOffset],
+              )
+            ]
+        },
+        functionFullName,
+      )
+      .map(_.map {
         case (
               reassignmentId,
               unassignmentData,
               stakeholders,
               reassignmentGlobalOffset,
             ) =>
-          InternalIncompleteReassignmentData(
+          ReassignmentData.IncompleteReassignment(
             reassignmentId,
             unassignmentData,
             reassignmentGlobalOffset,
             stakeholders,
           )
-      }
-    } yield incompletes
+      })
 
   /*
     We cannot do the stakeholders filtering in the DB, so we may need to query the
     DB several times in order to be able to return `limit` elements.
     TODO(#11735)
    */
-  private def queryWithFiltering(
+  private def queryWithFiltering[T <: ReassignmentData](
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
-      queryFrom: (
-          Option[ReassignmentId],
-          TraceContext,
-      ) => FutureUnlessShutdown[Seq[InternalIncompleteReassignmentData]],
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Vector[InternalIncompleteReassignmentData]] = {
+      queryFrom: Option[ReassignmentId] => FutureUnlessShutdown[Seq[T]],
+  ): FutureUnlessShutdown[Vector[T]] = {
 
-    def stakeholderFilter(data: InternalIncompleteReassignmentData): Boolean = {
+    def stakeholderFilter(data: T): Boolean = {
       val dataStakeholders = data.stakeholders
-      stakeholders.forall(_.exists(dataStakeholders.contains(_)))
+      stakeholders.forall(_.exists(dataStakeholders.contains))
     }
 
     Monad[FutureUnlessShutdown].tailRecM(
-      (Vector.empty[InternalIncompleteReassignmentData], 0, Option.empty[ReassignmentId])
+      (Vector.empty[T], 0, Option.empty[ReassignmentId])
     ) { case (acc, accSize, lastReassignmentIdO) =>
       val missing = limit.unwrap - accSize
 
       if (missing <= 0)
         FutureUnlessShutdown.pure(Right(acc))
       else {
-        queryFrom(lastReassignmentIdO, traceContext).map { result =>
+        queryFrom(lastReassignmentIdO).map { result =>
           val filteredResult = result.filter(stakeholderFilter).take(missing)
           val newAcc = acc ++ filteredResult
 
@@ -609,14 +717,12 @@ class DbReassignmentStore(
   }
 
   override def findIncomplete(
-      sourceSynchronizer: Option[Source[SynchronizerId]],
       validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] = {
-    val queryFrom = (lastReassignmentIdO: Option[ReassignmentId], traceContext: TraceContext) =>
+    val queryFrom = (lastReassignmentIdO: Option[ReassignmentId]) =>
       findIncomplete(
-        sourceSynchronizer = sourceSynchronizer,
         validAt = validAt,
         lastReassignmentIdO = lastReassignmentIdO,
       )(traceContext)
@@ -760,6 +866,7 @@ object DbReassignmentStore {
       stakeholders: NonEmpty[Set[LfPartyId]],
       unassignmentData: Option[UnassignmentData],
       reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
+      incompleteLastStakeholderOffboardedTargetOffset: Option[Offset],
       assignmentTs: Option[CantonTimestamp],
   ) {
 
@@ -770,6 +877,7 @@ object DbReassignmentStore {
         stakeholders,
         unassignmentData,
         reassignmentGlobalOffset,
+        incompleteLastStakeholderOffboardedTargetOffset,
         unassignmentTs,
         assignmentTs,
       )

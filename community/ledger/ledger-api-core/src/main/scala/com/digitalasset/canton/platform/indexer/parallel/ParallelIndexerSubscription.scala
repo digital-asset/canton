@@ -328,7 +328,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
                   populationParallelism = achsCfg.populationParallelism.unwrap,
                   removalParallelism = achsCfg.removalParallelism.unwrap,
                   aggregationThreshold = achsCfg.aggregationThreshold,
-                  metrics = metrics,
+                  metrics = metrics.indexer.achsProcessing.maintenance,
                   executionContext = executionContext,
                   logger = logger,
                   fullDrain = false,
@@ -1276,6 +1276,9 @@ object ParallelIndexerSubscription {
 }
 
 trait ReassignmentOffsetPersistence {
+
+  /** Performs updates of the reassignment store based on the specified `updates`.
+    */
   def persist(
       updates: Seq[(Offset, Update)],
       tracedLogger: TracedLogger,

@@ -716,7 +716,7 @@ trait SynchronizerUpgradeClient {
   /** Returns the known sequencer connection details for the successor synchronizer as published by
     * the sequencers.
     */
-  def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
+  def sequencerConnectionSuccessors(successorPsid: OpaquePhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
     Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]

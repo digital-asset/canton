@@ -88,7 +88,7 @@ A few jobs depend on the normal test jobs via `needs:`, so they only start once 
 finished, including up to the four executions described above. The external-KMS jobs are the
 main example. `test_requires_external_kms` has `needs: [pick_runner, test]`, so it starts
 only after the `test` job (and its quick rerun) completes. The same holds for
-`crash_recovery_test_requires_external_kms`, `test_protocol_version_36_requires_external_kms`,
+`crash_recovery_test_requires_external_kms`, `test_protocol_version_35_requires_external_kms`,
 and `toxiproxy_test_fast_requires_external_kms`.
 
 The exact placement of the external-KMS tests is still under discussion and the execution

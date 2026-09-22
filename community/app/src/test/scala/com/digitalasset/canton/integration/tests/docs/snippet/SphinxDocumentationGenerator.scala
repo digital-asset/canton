@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.docs.snippet
 import better.files.*
 import better.files.Dsl.{ln_s, mkdirs, rm}
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -475,17 +474,13 @@ class PocDocumentationIntegrationTest
     extends SphinxDocumentationGenerator(
       File("community/app/src/test/resources/docs/poc.txt"),
       File("community/app/target/poc.txt.result"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     )
 
 class ExternalSigningTopologyTransactionIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/sdk/tutorials/app-dev/external_signing_topology_transaction.rst"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     )
 
 class ExternalSigningOnboardingLapiIntegrationTest
@@ -515,9 +510,7 @@ class ExternalSigningOnboardingLapiIntegrationTest
 class ExternalSigningSubmissionIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/sdk/tutorials/app-dev/external_signing_submission.rst"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     )
 
 class ExternalMultiHostedPartyOnboardingDocsIntegrationTest
@@ -546,12 +539,8 @@ class ExternalMultiHostedPartyOnboardingDocsIntegrationTest
 
 class SynchronizerTroubleshootDocsIntegrationTest
     extends SnippetGenerator(
-      File(
-        "docs-open/src/sphinx/synchronizer/howtos/troubleshoot/index.rst"
-      ),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("docs-open/src/sphinx/synchronizer/howtos/troubleshoot/index.rst"),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     ) {
   override def makeEnvironment: EnvironmentDefinition = super.makeEnvironment
     .addConfigTransform(ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing))
@@ -565,9 +554,7 @@ class SynchronizerTroubleshootDocsIntegrationTest
 class OfflineRootNamespaceIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/secure/keys/namespace_key.rst"),
-      File(
-        "community/app/src/test/resources/manual-init-example.conf"
-      ),
+      File("community/app/src/test/resources/manual-init-example.conf"),
     ) {
   override final def useStaticIdentity: Boolean = false
 
@@ -583,9 +570,7 @@ class OfflineRootNamespaceIntegrationTest
 class GettingStartedDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/tutorials/getting_started.rst"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     ) {
 
   override protected def beforeAll(): Unit = {
@@ -603,12 +588,8 @@ class GettingStartedDocumentationIntegrationTest
 class PackageDarManagementDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/operate/packages/packages.rst"),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
-      File(
-        "community/app/src/test/resources/examples/07-repair/enable-preview-commands.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File("community/app/src/test/resources/examples/07-repair/enable-preview-commands.conf"),
     ) {
 
   override protected def beforeAll(): Unit = {
@@ -623,7 +604,6 @@ class PackageDarManagementDocumentationIntegrationTest
   }
 }
 
-@UnstableTest // TODO(i35114): Remove as soon as this test has been fixed
 class SynchronizerInstallationManual
     extends SnippetGenerator(
       source = File("docs-open/src/sphinx/synchronizer/howtos/operate/bootstrap.rst"),
@@ -683,9 +663,7 @@ private object DocsGenerationSynchronization {
 class UpgradingDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/upgrade/index.rst"),
-      File(
-        "community/app/src/test/resources/upgrade-example-topology.conf"
-      ),
+      File("community/app/src/test/resources/upgrade-example-topology.conf"),
     ) {
 
   // this test does not like static identities
@@ -727,9 +705,7 @@ class UpgradingDocumentationIntegrationTest
           )
         )(env).bootstrap()
       }
-      .addConfigTransform(
-        ConfigTransforms.setExitOnFatalFailures(false)
-      )
+      .addConfigTransform(ConfigTransforms.setExitOnFatalFailures(false))
 
   private val fakeMigrationPath = File("tmp/fake-migration")
 
@@ -849,9 +825,7 @@ class PartyReplicationDocumentationIntegrationTest
 class SequencerConnectivityDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/operate/synchronizers/connectivity.rst"),
-      File(
-        "community/app/src/test/resources/sequencer-connectivity-documentation.conf"
-      ),
+      File("community/app/src/test/resources/sequencer-connectivity-documentation.conf"),
     ) {
 
   registerPlugin(new UsePostgres(loggerFactory))
@@ -920,25 +894,16 @@ class KeyRestrictionsDocumentationIntegrationTest
 class SequencerNodeHealthSnippetGeneratorTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/synchronizer/howtos/observe/sequencer_health.rst"),
-      File(
-        "community/app/src/test/resources/sequencer-mediator-health-documentation.conf"
-      ),
+      File("community/app/src/test/resources/sequencer-mediator-health-documentation.conf"),
     ) {
-
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory
-    )
-  )
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
 class MediatorNodeHealthSnippetGeneratorTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/synchronizer/howtos/observe/mediator_health.rst"),
-      File(
-        "community/app/src/test/resources/sequencer-mediator-health-documentation.conf"
-      ),
+      File("community/app/src/test/resources/sequencer-mediator-health-documentation.conf"),
     ) {
   registerPlugin(new UsePostgres(loggerFactory))
 }
@@ -946,9 +911,7 @@ class MediatorNodeHealthSnippetGeneratorTest
 class OperateTrafficSnippetGeneratorTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/synchronizer/howtos/operate/traffic.rst"),
-      File(
-        "community/app/src/test/resources/sequencer-mediator-health-documentation.conf"
-      ),
+      File("community/app/src/test/resources/sequencer-mediator-health-documentation.conf"),
     ) {
 
   override def makeEnvironment: EnvironmentDefinition =
@@ -1022,8 +985,8 @@ class PartyManagmentSnippetGeneratorTest
         "community/app/src/test/resources/examples/02-multiple-sequencers-and-mediators/multiple-sequencers-and-mediators.conf"
       ),
     ) {
-
   registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
 class ExportKeysSnippetGeneratorTest
@@ -1031,9 +994,7 @@ class ExportKeysSnippetGeneratorTest
       File(
         "docs-open/src/sphinx/participant/howtos/secure/kms/migration/external_key_storage_migration_export_keys.rst"
       ),
-      File(
-        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
-      ),
+      File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     )
 
 // ─── Canton Network documentation snippet tests ────────────────────────────
@@ -1276,7 +1237,10 @@ class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersLinkingValidatorM
       File(
         "community/app/src/test/resources/examples/02-multiple-sequencers-and-mediators/multiple-sequencers-and-mediators.conf"
       ),
-    )
+    ) {
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+}
 
 class DocsCantonNetworkGlobalSynchronizerExtensionSynchronizersPrivateSynchronizersTest
     extends SnippetGenerator(

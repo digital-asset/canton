@@ -734,7 +734,6 @@ object AcsDigestStore {
     // NOTICE: when adding a new checkpoint type, the debug.checkpoint_type function
     // needs to be re-created in a new SQL migration file with the added checkpoint.
 
-    @VisibleForTesting
     def all: Set[CheckpointType] = ids.values.map { case (tpe, _) => tpe }.toSet
 
     /** For constructing a checkpoint from an integer. Throws an exception in case the provided

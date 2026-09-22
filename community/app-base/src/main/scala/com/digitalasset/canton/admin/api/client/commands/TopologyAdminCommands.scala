@@ -41,7 +41,12 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ProtoVersion,
+  ProtocolVersion,
+  ProtocolVersionValidation,
+  ReleaseVersion,
+}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.Context.CancellableContext
@@ -1043,6 +1048,105 @@ object TopologyAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
+    /** Serializes a [[TopologyMapping]] into a versioned Protobuf request, prioritizing the highest
+      * supported [[ProtoVersion]].
+      *
+      * To add a new version (e.g., v32):
+      *   1. Add the type parameter (`ProtoV32`), conversion arg (`toProtoV32`), and wrapper arg
+      *      (`wrapV32`).
+      *   1. Add an `.attemptVersion` block below with the target version and its feature flag.
+      */
+    private def serializeTopologyMapping[T, ProtoV30, ProtoV31](
+        mapping: TopologyMapping,
+        serverVersion: Option[ReleaseVersion],
+        toProtoV30: TopologyMapping => Either[String, ProtoV30],
+        toProtoV31: TopologyMapping => Either[String, ProtoV31],
+    )(
+        wrapV30: ProtoV30 => T,
+        wrapV31: ProtoV31 => T,
+    ): Either[String, T] = {
+
+      // TODO(#32231): Revise when the feature (signingKeyUsageProtoV31) is actually implemented.
+      // TODO(#36051): Revise when PTP.isOffline is replaced with PTP.HostingParticipant
+      // We force to v31 ONLY if v30 validation explicitly fails (PartyToParticipant.isOffline == true)
+      val useV31 = mapping
+        .canBeSerializedTo(ProtoVersion(30))
+        .isLeft || ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion)
+
+      ProposalMappingSerializer[T](mapping)
+        .attemptVersion(
+          version = ProtoVersion(31),
+          isSupported = useV31,
+          serializeAttempt = toProtoV31(_).map(wrapV31),
+        )
+        .attemptVersion(
+          version = ProtoVersion(30),
+          isSupported = true,
+          serializeAttempt = toProtoV30(_).map(wrapV30),
+        )
+        .serialize
+    }
+
+    /** Builder to attempt serializing a TopologyMapping into a specific Protobuf wrapper type `T`.
+      *
+      * Ensures that serialization attempts are executed in descending order of the protocol version
+      * (e.g., v32 -> v31 -> v30); higher versions are always prioritized regardless of the order in
+      * which `.attemptVersion` is called.
+      *
+      * The highest version that is both supported by the server and successfully serializes will
+      * short-circuit the remaining attempts.
+      */
+    private final class ProposalMappingSerializer[T] private (
+        mapping: TopologyMapping,
+        attempts: List[ProposalMappingSerializer.Attempt[T]],
+    ) {
+      def attemptVersion(
+          version: ProtoVersion,
+          isSupported: Boolean,
+          serializeAttempt: TopologyMapping => Either[String, T],
+      ): ProposalMappingSerializer[T] =
+        new ProposalMappingSerializer(
+          mapping,
+          ProposalMappingSerializer.Attempt(version, isSupported, serializeAttempt) :: attempts,
+        )
+
+      def serialize: Either[String, T] = {
+        // Sort so the highest version (e.g., 32, then 31, then 30) is always first
+        val sortedAttempts = attempts.sortBy(_.version.v)(Ordering[Int].reverse)
+
+        val executionResult = sortedAttempts.foldLeft[Either[List[String], T]](Left(Nil)) {
+          // If an earlier (higher) version succeeded, do nothing
+          case (success @ Right(_), _) => success
+
+          // If the server doesn't support this version, keep existing errors and skip
+          case (Left(errors), attempt) if !attempt.isSupported => Left(errors)
+
+          // Try serializing, keeping the success or prepending the new error
+          case (Left(errors), attempt) =>
+            mapping
+              .canBeSerializedTo(attempt.version)
+              .flatMap(_ => attempt.serialize(mapping))
+              .leftMap(err => s"v${attempt.version.v}=$err" :: errors)
+        }
+
+        // Reverse the accumulated errors once at the very end
+        executionResult.leftMap(errors =>
+          s"Cannot serialize mapping: ${errors.reverse.mkString(", ")}"
+        )
+      }
+    }
+
+    private object ProposalMappingSerializer {
+      private final case class Attempt[T](
+          version: ProtoVersion,
+          isSupported: Boolean,
+          serialize: TopologyMapping => Either[String, T],
+      )
+
+      def apply[T](mapping: TopologyMapping): ProposalMappingSerializer[T] =
+        new ProposalMappingSerializer(mapping, Nil)
+    }
+
     final case class AddTransactions(
         transactions: Seq[GenericSignedTopologyTransaction],
         store: TopologyStoreId,
@@ -1238,6 +1342,7 @@ object TopologyAdminCommands {
           }
           .leftMap(_.message)
     }
+
     object GenerateTransactions {
       final case class Proposal(
           mapping: TopologyMapping,
@@ -1248,15 +1353,19 @@ object TopologyAdminCommands {
         def toGenerateTransactionProposal(
             serverVersion: Option[ReleaseVersion]
         ): Either[String, GenerateTransactionsRequest.Proposal] =
-          mapping.toProtoV30.map(serializedMapping =>
+          serializeTopologyMapping(
+            mapping,
+            serverVersion,
+            _.toProtoV30,
+            _.toProtoV31,
+          )(
+            GenerateTransactionsRequest.Proposal.Mapping.V30(_),
+            GenerateTransactionsRequest.Proposal.Mapping.V31(_),
+          ).map(protoMapping =>
             GenerateTransactionsRequest.Proposal(
               change.toProto,
               serial.map(_.value).getOrElse(0),
-              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                // TODO(#32231) Switch to v31
-                GenerateTransactionsRequest.Proposal.Mapping.V30(serializedMapping)
-              else
-                GenerateTransactionsRequest.Proposal.Mapping.V30(serializedMapping),
+              protoMapping,
               Some(store.toProtoV30),
             )
           )
@@ -1280,29 +1389,35 @@ object TopologyAdminCommands {
           SignedTopologyTransaction[TopologyChangeOp, M],
         ] {
 
-      override protected def createRequest(): Either[String, AuthorizeRequest] = mapping
-        .flatMap(_.toProtoV30)
-        .map(serializedMapping =>
-          AuthorizeRequest(
-            Proposal(
-              AuthorizeRequest.Proposal(
-                change.toProto,
-                serial.map(_.value).getOrElse(0),
-                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                  // TODO(#32231) Switch to v31
-                  AuthorizeRequest.Proposal.Mapping.V30(serializedMapping)
-                else
-                  AuthorizeRequest.Proposal.Mapping.V30(serializedMapping),
-              )
-            ),
-            mustFullyAuthorize = mustFullyAuthorize,
-            forceChanges = forceChanges.toProtoV30,
-            signedBy = signedBy.map(_.toProtoPrimitive.toProtoUnvalidated),
-            store = Some(store.toProtoV30),
-            waitToBecomeEffective =
-              waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
+      override protected def createRequest(): Either[String, AuthorizeRequest] = mapping.flatMap {
+        m =>
+          serializeTopologyMapping(
+            m,
+            serverVersion,
+            _.toProtoV30,
+            _.toProtoV31,
+          )(
+            AuthorizeRequest.Proposal.Mapping.V30(_),
+            AuthorizeRequest.Proposal.Mapping.V31(_),
+          ).map(protoMapping =>
+            AuthorizeRequest(
+              Proposal(
+                AuthorizeRequest.Proposal(
+                  change.toProto,
+                  serial.map(_.value).getOrElse(0),
+                  protoMapping,
+                )
+              ),
+              mustFullyAuthorize = mustFullyAuthorize,
+              forceChanges = forceChanges.toProtoV30,
+              signedBy = signedBy.map(_.toProtoPrimitive.toProtoUnvalidated),
+              store = Some(store.toProtoV30),
+              waitToBecomeEffective =
+                waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
+            )
           )
-        )
+      }
+
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
           request: AuthorizeRequest,

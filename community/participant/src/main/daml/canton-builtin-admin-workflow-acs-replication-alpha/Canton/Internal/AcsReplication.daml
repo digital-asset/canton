@@ -1,0 +1,70 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Canton.Internal.AcsReplication where
+
+data ParticipantPermission = Submission | Confirmation | Observation deriving (Eq, Show)
+
+-- An AcsReplicationProposal is created by the target participant to reach an agreement with the source participant
+-- to replicate the specified party ACS via one of the specified sequencers.
+template AcsReplicationProposal
+  with
+    acsReplicationId : Text
+    partyId : Party
+    sourceParticipant : Party -- participant admin party
+    targetParticipant : Party -- participant admin party
+    sequencerUids : [Text]
+    -- TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
+    topologySerial : Int
+    participantPermission : ParticipantPermission
+    operationName : Text
+  where
+    signatory targetParticipant
+    observer sourceParticipant
+
+    -- sequencerUids needs to be non-empty as otherwise it is impossible to accept the proposal
+    ensure length sequencerUids > 0
+
+    -- The source participant decides whether to accept the party replication proposal
+    -- and if so, indicates one of the sequencer UIDs to communicate via
+    choice Accept : ContractId AcsReplicationAgreement
+      with
+        sequencerUid : Text
+      controller sourceParticipant
+        do
+          assertMsg "sequencerUid needs to be one of sequencerUids" (sequencerUid `elem` sequencerUids)
+          acsReplicationAgreement <- create AcsReplicationAgreement with ..
+          return acsReplicationAgreement
+
+    -- Or the source participant rejects the party ACS replication proposal
+    choice Reject : ()
+      with
+        reason : Text
+      controller sourceParticipant
+        do
+          return ()
+
+-- An AcsReplicationAgreement represents an agreement between the source and target participants to replicate the
+-- specified party ACS via the specified sequencer.
+template AcsReplicationAgreement
+  with
+    acsReplicationId : Text
+    partyId : Party
+    sourceParticipant : Party -- participant admin party
+    targetParticipant : Party -- participant admin party
+    sequencerUid : Text
+    -- TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
+    topologySerial : Int
+    participantPermission : ParticipantPermission
+    operationName : Text
+  where
+    signatory targetParticipant, sourceParticipant
+
+    -- The source or target participant can declare the ACS replication agreement as done
+    choice Done : ()
+      with
+        participant : Party
+      controller participant
+        do
+          assertMsg "participant needs to be a signatory" (participant `elem` [sourceParticipant, targetParticipant])
+          return ()

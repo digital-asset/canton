@@ -71,7 +71,7 @@ object Dependencies {
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.3.0"
-  lazy val munit_version = "1.3.4"
+  lazy val munit_version = "1.3.6"
   lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
 
   lazy val pekko_http_backend_version = "3.11.0"
@@ -223,7 +223,7 @@ object Dependencies {
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
   lazy val scalatestTestNG =
-    "org.scalatestplus" %% "testng-7-5" % "3.2.11.0"
+    "org.scalatestplus" %% "testng-7-5" % "3.2.17.0"
 
   lazy val scalatest_compatible = "org.scalatest" % "scalatest-compatible" % "3.2.20"
   lazy val scalatest_wordspec = "org.scalatest" %% "scalatest-wordspec" % "3.2.11"

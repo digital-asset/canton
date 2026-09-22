@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
+import com.digitalasset.canton.logging.ErrorLoggingContext
+
 object Utils {
 
   /** @param n
@@ -10,5 +12,20 @@ object Utils {
     */
   def largestSmallerOrEqualPowerOfTwo(n: Int): Int =
     Integer.highestOneBit(n)
+
+  def elapsedMillis(started: Long): Long = (System.nanoTime() - started) / 1000000
+
+  def wrapDbQuery[In, Out](
+      f: In => Out
+  )(
+      log: Out => String
+  )(implicit errorLoggingContext: ErrorLoggingContext): In => Out = { in =>
+    val started = System.nanoTime()
+    val result = f(in)
+    errorLoggingContext.debug(
+      s"DB Query for ${log(result)} took: ${elapsedMillis(started)}ms"
+    )
+    result
+  }
 
 }

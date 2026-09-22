@@ -11,7 +11,13 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.{InitialPageToken, ListVettedPackagesOpts, PageToken}
+import com.digitalasset.canton.ledger.api.{
+  InitialPageToken,
+  ListVettedPackagesOpts,
+  PageToken,
+  ParticipantVettedPackages,
+  VettedPackagesPage,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
@@ -36,10 +42,12 @@ import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
   TopologyStore,
+  ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
@@ -119,6 +127,7 @@ trait PackageOpsTestBase extends AsyncWordSpec with BaseTest with ArgumentMatche
     val stateManager = mock[SyncPersistentStateManager]
     val participantId1 = ParticipantId(UniqueIdentifier.tryCreate("participant", "one"))
     val participantId2 = ParticipantId(UniqueIdentifier.tryCreate("participant", "two"))
+    val participantId3 = ParticipantId(UniqueIdentifier.tryCreate("participant", "three"))
 
     private val anotherSynchronizerTopologySnapshot = mock[TopologySnapshot]
 
@@ -337,25 +346,32 @@ class PackageOpsTest extends PackageOpsTestBase {
   }
 
   s"$sutName.getVettedPackages" should {
-    "query synchronizers in the correct order" in withTestSetupSync2 { env =>
+    "page through all synchronizers in scan order" in withTestSetupSync2 { env =>
       import env.*
 
-      arrangeCurrentlyVetted(List(pkgId1), queryAtApproximateTime = true)
-      packageOps
-        .getVettedPackages(
-          ListVettedPackagesOpts(None, None, InitialPageToken, PositiveInt.tryCreate(100))
-        )
-        .value
-        .unwrap
-        .map(inside(_) { case UnlessShutdown.Outcome(Right(vettedPackages)) =>
-          vettedPackages should have length 6
-          vettedPackages.sorted(PageToken.orderingVettedPackages) should equal(
-            vettedPackages
-          )
-          vettedPackages.sortBy(vp =>
-            vp.synchronizerId.toProtoPrimitive -> vp.participantId.toProtoPrimitive
-          ) should not equal vettedPackages
-        })
+      populateVettedPackagesStores()
+      for {
+        page1 <- query(InitialPageToken, pageSize = 2)
+        page2 <- query(page1.nextPageToken.value, pageSize = 2)
+        page3 <- query(page2.nextPageToken.value, pageSize = 2)
+      } yield {
+        page1 shouldBe VettedPackagesPage(Seq(row1, row2), Some(row2.toBoundedPageToken))
+        page2 shouldBe VettedPackagesPage(Seq(row3, row4), Some(row4.toBoundedPageToken))
+        page3 shouldBe VettedPackagesPage(Seq(row5), None)
+      }
+    }
+
+    "still return a token when the last row exactly fills the page" in withTestSetupSync2 { env =>
+      import env.*
+
+      populateVettedPackagesStores()
+      for {
+        lastPage <- query(row4.toBoundedPageToken, pageSize = 1)
+        emptyPage <- query(lastPage.nextPageToken.value, pageSize = 1)
+      } yield {
+        lastPage shouldBe VettedPackagesPage(Seq(row5), Some(row5.toBoundedPageToken))
+        emptyPage shouldBe VettedPackagesPage(Seq.empty, None)
+      }
     }
   }
 
@@ -421,21 +437,24 @@ class PackageOpsTest extends PackageOpsTestBase {
       futureSupervisor = futureSupervisor,
     )
 
-    def arrangeCurrentlyVetted(
-        currentlyVettedPackages: List[LfPackageId],
-        queryAtApproximateTime: Boolean = false,
-    ) =
-      for {
-        (psId, (topologyManager, persistentState, topologyClient, approxTime)) <- topologyTestSetup
-      } yield {
-        when(persistentState.topologyStore).thenReturn(mock[TopologyStore[SynchronizerStore]])
-        when(persistentState.psid).thenReturn(psId)
-        when(topologyManager.psid).thenReturn(psId)
-        when(topologyClient.approximateTimestamp).thenReturn(approxTime)
-        val asOfExpectedTime = if (queryAtApproximateTime) approxTime else CantonTimestamp.MaxValue
+    private def wireSynchronizers(
+        storeFor: PhysicalSynchronizerId => TopologyStore[SynchronizerStore]
+    ): Unit =
+      topologyTestSetup.foreach {
+        case (psId, (topologyManager, persistentState, topologyClient, approxTime)) =>
+          when(persistentState.psid).thenReturn(psId)
+          when(topologyManager.psid).thenReturn(psId)
+          when(topologyClient.approximateTimestamp).thenReturn(approxTime)
+          val store = storeFor(psId)
+          when(persistentState.topologyStore).thenReturn(store)
+      }
+
+    def arrangeCurrentlyVetted(currentlyVettedPackages: List[LfPackageId]): Unit =
+      wireSynchronizers { _ =>
+        val topologyStore = mock[TopologyStore[SynchronizerStore]]
         when(
-          persistentState.topologyStore.findPositiveTransactions(
-            eqTo(asOfExpectedTime),
+          topologyStore.findPositiveTransactions(
+            eqTo(CantonTimestamp.MaxValue),
             eqTo(false),
             eqTo(false),
             eqTo(Seq(VettedPackages.code)),
@@ -448,25 +467,66 @@ class PackageOpsTest extends PackageOpsTestBase {
             packagesVettedStoredTx(currentlyVettedPackages, Seq(participantId1))
           )
         )
+        topologyStore
+      }
 
-        when(
-          persistentState.topologyStore.findPositiveTransactions(
-            eqTo(asOfExpectedTime),
-            eqTo(false),
-            eqTo(false),
-            eqTo(Seq(VettedPackages.code)),
-            eqTo(None),
-            eqTo(None),
-            any[Option[(Option[UniqueIdentifier], Int)]],
-          )(anyTraceContext)
-        ).thenReturn(
-          FutureUnlessShutdown.pure(
-            packagesVettedStoredTx(currentlyVettedPackages, Seq(participantId1, participantId2))
-          )
+    def populateVettedPackagesStores(): Unit =
+      wireSynchronizers { psId =>
+        val topologyStore = new InMemoryTopologyStore[SynchronizerStore](
+          SynchronizerStore(psId),
+          predecessor = None,
+          testedProtocolVersion,
+          loggerFactory,
+          timeouts,
         )
+        def addAt(ts: CantonTimestamp, rows: Seq[ParticipantVettedPackages]) =
+          topologyStore
+            .update(
+              SequencedTime(ts),
+              EffectiveTime(ts),
+              removals = Map.empty,
+              rows.filter(_.synchronizerId == psId.logical).map { row =>
+                ValidatedTopologyTransaction(
+                  signedTopologyTransaction(List(pkgId1), row.participantId)
+                )
+              },
+            )
+            .futureValueUS
+        addAt(CantonTimestamp.MinValue, allRows)
+        addAt(futureTs, Seq(futureRow))
+        topologyStore
       }
 
     val txSerial = PositiveInt.tryCreate(1)
+
+    private def row(synchronizerId: PhysicalSynchronizerId, participantId: ParticipantId) =
+      ParticipantVettedPackages(
+        // All rows vet pkgId1, because PackageOps never looks at packages.
+        VettedPackage.unbounded(List(pkgId1)),
+        participantId,
+        synchronizerId.logical,
+        txSerial,
+      )
+
+    // Scan order (identifier, then namespace): synchronizer < synchronizer1 < synchronizerA,
+    // one < three < two.
+    val row1 = row(synchronizerId3, participantId1)
+    val row2 = row(synchronizerId3, participantId3)
+    val row3 = row(synchronizerId3, participantId2)
+    val row4 = row(synchronizerId2, participantId1)
+    val row5 = row(synchronizerId1, participantId3)
+    val allRows = Seq(row1, row2, row3, row4, row5)
+
+    // This should never show up in a page.
+    val futureTs = CantonTimestamp.assertFromLong(2000L)
+    val futureRow = row(synchronizerId2, participantId2)
+
+    def query(pageToken: PageToken, pageSize: Int) =
+      packageOps
+        .getVettedPackages(
+          ListVettedPackagesOpts(None, None, pageToken, PositiveInt.tryCreate(pageSize))
+        )
+        .valueOrFailShutdown("getVettedPackages")
 
     def expectNewVettingState(newVettedPackagesState: List[LfPackageId]) =
       when(

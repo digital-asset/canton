@@ -28,6 +28,8 @@ class RestartParticipantPerformanceIntegrationTest
     with BasePerformanceIntegrationTest
     with ReplicatedNodeHelper {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "restart the participants while the runners are running".taggedAs(
     ReliabilityTest(
       Component(name = "Ping application", setting = "connected to non-replicated participant"),

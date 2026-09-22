@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client.channel
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -140,6 +141,9 @@ trait SequencerChannelProtocolProcessor extends FlagCloseable with NamedLogging 
         EitherT.leftT[FutureUnlessShutdown, Unit](errSend)
       }(_.sendError(error).map(_ => hasCompleted.set(true)))
     }
+
+  protected def getCryptoClient: Option[SynchronizerCryptoClient] =
+    channelEndpoint.get.map(_.synchronizerCryptoApi)
 
   /** Handles end of channel endpoint (successful or error) */
   final private[channel] def handleClose(

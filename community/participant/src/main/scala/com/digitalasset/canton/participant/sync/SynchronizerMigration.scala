@@ -12,11 +12,10 @@ import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError, ParentCantonError}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.{
@@ -37,10 +36,8 @@ import com.digitalasset.canton.participant.sync.SynchronizerMigrationError.Inval
 import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasManager,
   SynchronizerConnectionConfig,
-  SynchronizerRegistryError,
   SynchronizerRegistryHelpers,
 }
-import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
   KnownPhysicalSynchronizerId,
@@ -65,6 +62,7 @@ sealed trait SynchronizerMigrationError
   */
 class SynchronizerMigration(
     aliasManager: SynchronizerAliasManager,
+    connectionsManager: SynchronizerConnectionsManager,
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     inspection: SyncStateInspection,
     repair: RepairService,
@@ -73,7 +71,6 @@ class SynchronizerMigration(
       SynchronizerMigrationError,
       Unit,
     ],
-    sequencerInfoLoader: SequencerInfoLoader,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -189,34 +186,17 @@ class SynchronizerMigration(
   ): EitherT[
     FutureUnlessShutdown,
     SyncServiceError,
-    Target[SequencerInfoLoader.SequencerAggregatedInfo],
+    Target[PhysicalSynchronizerId],
   ] =
     for {
-      targetSynchronizerInfo <- target.traverse(synchronizerConnectionConfig =>
-        synchronizeWithClosing(functionFullName)(
-          sequencerInfoLoader
-            .loadAndAggregateSequencerEndpoints(
-              synchronizerConnectionConfig.synchronizerAlias,
-              synchronizerConnectionConfig.psid,
-              synchronizerConnectionConfig.sequencerConnections,
-              SequencerConnectionValidation.Active,
-            )(traceContext, CloseContext(this))
-            .leftMap[SyncServiceError] { err =>
-              val error = SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer
-                .Error(SynchronizerRegistryError.fromSequencerInfoLoaderError(err).cause)
-              SyncServiceError
-                .SyncServiceFailedSynchronizerConnection(
-                  synchronizerConnectionConfig.synchronizerAlias,
-                  error,
-                )
-            }
-        )
+      targetPsid <- target.traverse(synchronizerConnectionConfig =>
+        connectionsManager.getPsid(synchronizerConnectionConfig)
       )
       _ <- synchronizeWithClosing(functionFullName)(
         aliasManager
           .processHandshake(
             target.unwrap.synchronizerAlias,
-            targetSynchronizerInfo.unwrap.psid,
+            targetPsid.unwrap,
           )
           .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
           .leftMap[SyncServiceError](err =>
@@ -250,7 +230,7 @@ class SynchronizerMigration(
                 .Error(source.unwrap),
             )
             .leftWiden[SyncServiceError]
-    } yield targetSynchronizerInfo
+    } yield targetPsid
 
   /** Count all in-flight transactions for the given alias. To be on the safe side, we sum over all
     * physical instances.

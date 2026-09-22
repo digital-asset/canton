@@ -7,17 +7,16 @@ import cats.data.EitherT
 import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
-import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
+import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.store.AcsReplicationProgress
-import com.digitalasset.canton.participant.store.memory.InMemoryPartyReplicationIndexingStore
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
-import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, RepairCounter}
 import com.digitalasset.nonempty.NonEmpty
@@ -28,6 +27,8 @@ import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
+
+import scala.concurrent.ExecutionContext
 
 /** Component test for [[PartyReplicationFileImporter]] focusing on stream resiliency.
   *
@@ -64,27 +65,20 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
   "PartyReplicationFileImporter" should {
 
     "restart from the beginning of a failed stream correctly" in {
+      val psid =
+        PhysicalSynchronizerId.tryFromString(s"da::dummy-psid::${testedProtocolVersion.toString}-0")
       val requestId = Hash.digest(
         HashPurpose.OnlinePartyReplicationId,
         ByteString.copyFromUtf8("dummy-request-id-for-testing"),
         HashAlgorithm.Sha256,
       )
-      val psid =
-        PhysicalSynchronizerId.tryFromString(s"da::dummy-psid::${testedProtocolVersion.toString}-0")
-      val effectiveTime = EffectiveTime.MinValue
-      val persistsContracts = mock[TargetParticipantAcsPersistence.PersistsContracts]
-      val requestTracker = mock[RequestTracker]
-      val indexingStore = new InMemoryPartyReplicationIndexingStore(
-        pauseIndexingDuringOnPR = true,
-        loggerFactory = loggerFactory,
-      )(executionContext)
-
       val fakeProgress = new FakeAcsReplicationProgress()
 
       fakeProgress.state = Some(
         PartyReplicationStatus.EphemeralFileImporterProgress(
           NonNegativeLong.zero,
           RepairCounter.Genesis,
+          acsHashO = None,
           fullyProcessedAcs = false,
           mock[PartyReplicationFileImporter],
         )
@@ -105,34 +99,40 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
       def createImporter(source: Source[ActiveContract, NotUsed]) = {
         // Because of SyncEphemeralStateFactory.cleanupPersistentState, the importer starts from zero on every invocation
         var runningTotal = 0L
-
-        new PartyReplicationFileImporter(
-          requestId,
-          psid,
-          effectiveTime,
-          fakeProgress,
-          persistsContracts,
-          requestTracker,
-          source,
-          indexingStore,
-          None,
-          isClosing = () => false,
-          loggerFactory,
-        )(executionContext, Materializer(actorSystem)) {
-          // Bypass real Daml-LF validation and pretend we successfully imported the chunk
-          override def importContracts(
-              contracts: NonEmpty[Seq[ActiveContract]]
+        val acsContractHandler = new AcsTransferContractHandler {
+          override def handleContracts(
+              contracts: NonEmpty[Seq[ActiveContract]],
+              checkpoint: AcsTransferCheckpoint,
+              synchronizerId: SynchronizerId,
           )(implicit
-              traceContext: TraceContext
-          ): EitherT[FutureUnlessShutdown, String, NonNegativeLong] = {
-            // Accumulate the count just like the real stream processing would
+              executionContext: ExecutionContext,
+              traceContext: TraceContext,
+          ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = {
             runningTotal += contracts.size.toLong
 
             EitherT.pure[FutureUnlessShutdown, String](
-              NonNegativeLong.tryCreate(runningTotal)
+              checkpoint.copy(processedContractCount = NonNegativeLong.tryCreate(runningTotal))
             )
           }
+
+          override def handleValidatedContracts(
+              validatedActivations: NonEmpty[Seq[ContractReassignment]],
+              checkpoint: AcsTransferCheckpoint,
+          )(implicit
+              traceContext: TraceContext
+          ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = ???
         }
+
+        new PartyReplicationFileImporter(
+          psid.logical,
+          requestId,
+          fakeProgress,
+          acsContractHandler,
+          source,
+          None,
+          isClosing = () => false,
+          loggerFactory,
+        )(executionContext, Materializer(actorSystem))
       }
 
       val crashingImporter = createImporter(failingSource)

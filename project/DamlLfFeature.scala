@@ -55,6 +55,12 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
+  val featureUnpack = DamlLfFeature(
+    name = "Unpack",
+    cppFlag = "DAML_UNPACK",
+    versionRange = VersionRange.From(v2_dev),
+  )
+
   val featureBigNumeric = DamlLfFeature(
     name = "BigNumeric type",
     cppFlag = "DAML_BIGNUMERIC",
@@ -176,6 +182,7 @@ object DamlLfFeature {
     "featureStableCallStack" -> featureStableCallStack,
     "featurePV34" -> featurePV34,
     "featurePV35" -> featurePV35,
+    "featureUnpack" -> featureUnpack,
   )
 
   def generateFeaturesScala = Def.task {

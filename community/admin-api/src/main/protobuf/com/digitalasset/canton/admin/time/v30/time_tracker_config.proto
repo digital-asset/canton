@@ -16,6 +16,7 @@ message TimeProofRequestConfig {
   google.protobuf.Duration initial_retry_delay = 1;
   google.protobuf.Duration max_retry_delay = 2;
   google.protobuf.Duration max_sequencing_delay = 3;
+  google.protobuf.Duration request_timeout = 4;
 }
 
 message SynchronizerTimeTrackerConfig {

@@ -44,25 +44,26 @@ object SendResult {
     */
   def log(sendDescription: String, logger: TracedLogger)(
       result: UnlessShutdown[SendResult]
-  )(implicit traceContext: TraceContext): Unit = result match {
-    case UnlessShutdown.Outcome(SendResult.Success(deliver)) =>
-      logger.trace(s"$sendDescription was sequenced at ${deliver.timestamp}")
-    case UnlessShutdown.Outcome(SendResult.Error(error)) =>
-      error match {
-        case DeliverError(_, _, _, _, SequencerErrors.AggregateSubmissionAlreadySent(_), _) =>
-          logger.info(
-            s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
-          )
-        case _ =>
-          logger.warn(
-            s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
-          )
-      }
-    case UnlessShutdown.Outcome(SendResult.Timeout(sequencerTime)) =>
-      logger.warn(s"$sendDescription timed out at $sequencerTime")
-    case UnlessShutdown.AbortedDueToShutdown =>
-      logger.debug(s"$sendDescription aborted due to shutdown")
-  }
+  )(implicit traceContext: TraceContext): Unit =
+    result match {
+      case UnlessShutdown.Outcome(SendResult.Success(deliver)) =>
+        logger.trace(s"$sendDescription was sequenced at ${deliver.timestamp}")
+      case UnlessShutdown.Outcome(SendResult.Error(error)) =>
+        error match {
+          case DeliverError(_, _, _, _, SequencerErrors.AggregateSubmissionAlreadySent(_), _) =>
+            logger.info(
+              s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
+            )
+          case _ =>
+            logger.warn(
+              s"$sendDescription was rejected by the sequencer at ${error.timestamp} because [${error.reason}]"
+            )
+        }
+      case UnlessShutdown.Outcome(SendResult.Timeout(sequencerTime)) =>
+        logger.warn(s"$sendDescription timed out at $sequencerTime")
+      case UnlessShutdown.AbortedDueToShutdown =>
+        logger.debug(s"$sendDescription aborted due to shutdown")
+    }
 
   def toFutureUnlessShutdown(
       sendDescription: String

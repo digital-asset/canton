@@ -13,7 +13,6 @@ import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
-import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.ReassigningParticipantsMismatch
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidation.{
   CommonUnassignmentValidator,
   ReassigningParticipantUnassignmentValidator,
@@ -215,9 +214,8 @@ private[reassignment] object UnassignmentValidation {
         synchronizerId = fullTree.targetSynchronizer.unwrap,
       )
 
-    // check the reassigning participants from the request match the computed reassigning participants
+    // check the declared reassigning participants are included in the computed ones and sufficient
     // check all stakeholders are hosted on active participants
-    // check the recipients from the request match the computed recipients
     private def checkReassigningParticipants(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree],
         targetTopology: Target[TopologySnapshot],
@@ -228,23 +226,12 @@ private[reassignment] object UnassignmentValidation {
             parsedRequest.fullViewTree.contracts.stakeholders,
             Source(parsedRequest.snapshot.ipsSnapshot),
             targetTopology,
-          ).compute.value
+          ).checkSufficient(
+            parsedRequest.fullViewTree.reassigningParticipants,
+            ReassignmentRef(parsedRequest.fullViewTree.contracts.contractIds.toSet),
+          ).value
         )
-        .map {
-          case Right(contractReassigningParticipants) =>
-            val fullViewTree = parsedRequest.fullViewTree
-            val requestReassigningParticipants = fullViewTree.reassigningParticipants
-            Option.when(contractReassigningParticipants != requestReassigningParticipants)(
-              ReassigningParticipantsMismatch(
-                reassignmentRef =
-                  ReassignmentRef.ContractIdRef(fullViewTree.contracts.contractIds.toSet),
-                expected = contractReassigningParticipants,
-                declared = requestReassigningParticipants,
-              )
-            )
-          case Left(rve) =>
-            Some(rve)
-        }
+        .map(_.swap.toOption)
 
     private def computeReassigningParticipantValidationResult(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree],

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import better.files.File
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -18,9 +17,9 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
-import monocle.macros.syntax.lens.*
 
 import java.time.Duration
+import scala.concurrent.duration.DurationInt
 
 /** This test ensures that the repair service can be used at upgrade time. We test an ACS import:
   * replicate Alice from p1 to p2.
@@ -55,13 +54,12 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
         new NetworkBootstrapper(S1M1)
       }
       .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          /*
+        /*
           The first connect with the new synchronizer will timeout because the new sequencer is stopped and
           we want the failure to be fast. However, a value that is too low could make the test flaky (if the
           subsequent/successful connect is too slow).
-           */
-          .replace(NonNegativeDuration.ofSeconds(2))
+         */
+        ConfigTransforms.setSequencerInfoTimeout(2.second)
       )
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>

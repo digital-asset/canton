@@ -483,6 +483,10 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
           UpdateFetchTemplate(T.tycon, e"e"),
         "fetch_interface @Mod:I e" ->
           UpdateFetchInterface(I.tycon, e"e"),
+        "unpack_template @Mod:T e" ->
+          UpdateUnpackTemplate(T.tycon, e"e"),
+        "unpack_interface @Mod:I e" ->
+          UpdateUnpackInterface(I.tycon, e"e"),
         "exercise @Mod:T Choice cid arg" ->
           UpdateExercise(T.tycon, n"Choice", e"cid", e"arg"),
         "exercise_interface @Mod:I Choice cid arg" ->

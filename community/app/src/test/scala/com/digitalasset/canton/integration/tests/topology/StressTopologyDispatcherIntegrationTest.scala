@@ -86,6 +86,7 @@ trait StressTopologyDispatcherIntegrationTest
                 ParticipantPermission.Submission,
               )
             ),
+            isOffline = false,
           ),
           signedBy = Seq(participant.fingerprint),
           store = TopologyStoreId.Authorized,

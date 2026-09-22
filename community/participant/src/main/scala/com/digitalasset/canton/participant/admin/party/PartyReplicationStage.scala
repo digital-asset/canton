@@ -23,23 +23,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
 sealed trait PartyReplicationStage
 
 object PartyReplicationStage {
-
-  /** No sequencer channel agreement has been proposed yet.
-    *
-    * Stage applies to target participant in the following cases
-    *   - PartyToParticipant topology transaction has been authorized and effective on TP and SP
-    *     (beginning of the party replication)
-    */
-  final case class NeedsToProposePartyReplicationSequencerChannel(
-      params: ReplicationParams,
-      errorMessage: Option[String],
-  ) extends PartyReplicationStage
-
-  /** The sequencer channel agreement has been proposed, but the agreement hasn't been reached yet.
-    */
-  final case class PartyReplicationSequencerChannelAgreementProposed(params: ReplicationParams)
-      extends PartyReplicationStage
-
+  // Stages listed in order of occurrence
   /** The first step of the online party replication. The PartyToParticipant topology transaction
     * with the TP-side onboarding flag needs to be authorized by the party and TP and become visible
     * on the Ledger API on the SP and TP.
@@ -47,19 +31,16 @@ object PartyReplicationStage {
   final case class ObtainingOnboardingTopologyAuthorization(params: ReplicationParams)
       extends PartyReplicationStage
 
-  /** The sequencer-channel agreement exists and the PartyToParticipant topology transaction with
-    * the TP-side onboarding flag is authorized, but the SP and TP still need to request building
-    * and connect to the sequencer channel.
-    */
-  case object NeedToConnectToSequencerChannel extends PartyReplicationStage
+  final case class NeedsToReplicatePartyAcs(
+      params: ReplicationParams
+  ) extends PartyReplicationStage
 
-  /** The SP or TP is currently disconnected from the sequencer channel
-    *
-    * @param message
-    *   message upon disconnecting used for logging
+  /** ACS replication via sequencer channel has been triggered but is not running yet because the
+    * channel negotiation hasn't been finished yet.
     */
-  final case class NeedToReconnectToDisconnectedSequencerChannel(message: String)
-      extends PartyReplicationStage
+  final case class TriggeredPartyAcsReplication(
+      params: ReplicationParams
+  ) extends PartyReplicationStage
 
   /** The party's ACS is being replicated via file import (stage applies to TP) or sequencer channel
     * (applies to SP export and TP import).
@@ -68,8 +49,10 @@ object PartyReplicationStage {
     *   party replication progress state (persisted and ephemeral, e.g. protocol processor or file
     *   importer)
     */
-  final case class ReplicatingPartyAcs(params: ReplicationParams, progress: AcsReplicationProgress)
-      extends PartyReplicationStage
+  final case class AcsReplicationInProgress(
+      params: ReplicationParams,
+      progress: AcsReplicationProgress,
+  ) extends PartyReplicationStage
 
   /** The party's ACS and concurrent contract activations are being fed to the indexer for
     * visibility via the Ledger API. This stage ends when all contract activation changes have been
@@ -103,51 +86,55 @@ object PartyReplicationStage {
     */
   def fromPartyReplicationStatus(status: PartyReplicationStatus): Option[PartyReplicationStage] =
     (status match {
-      case status @ PartyReplicationStatus(p, agreement, auO, reO, inO, _, errO) =>
+      case status @ PartyReplicationStatus(p, agreement, auO, reO, acsReplicationO, inO, _, errO) =>
         errO match {
-          case None => Option.when(status.isProgressExpected)((p, agreement, auO, reO, inO, None))
+          case None =>
+            Option.when(status.isProgressExpected)(
+              (p, agreement, auO, reO, acsReplicationO, inO, None)
+            )
           case Some(d: Disconnected) =>
-            Option.when(status.isProgressExpected)((p, agreement, auO, reO, inO, Some(d)))
+            Option.when(status.isProgressExpected)(
+              (p, agreement, auO, reO, acsReplicationO, inO, Some(d))
+            )
           case Some(PartyReplicationFailed(_)) => None
         }
     }).flatMap {
-      case (params, _, None, _, _, _) =>
+      case (params, _, None, _, _, _, _) =>
         Some(ObtainingOnboardingTopologyAuthorization(params))
-      case (
-            _,
-            _: AgreementStatus.Exists,
-            Some(_),
-            _,
-            _,
-            Some(Disconnected(message)),
-          ) =>
-        Some(NeedToReconnectToDisconnectedSequencerChannel(message))
       // File-based replication only
       case (
             params,
             AgreementStatus.NotNeeded,
             Some(_),
             Some(replicationProgress),
+            _,
             None,
             None,
           ) =>
-        Some(ReplicatingPartyAcs(params, replicationProgress))
-      case (params, AgreementStatus.NotProposed, Some(_), _, _, None) =>
-        Some(NeedsToProposePartyReplicationSequencerChannel(params, None))
-      case (params, AgreementStatus.Proposed, Some(_), _, _, None) =>
-        Some(PartyReplicationSequencerChannelAgreementProposed(params))
+        Some(AcsReplicationInProgress(params, replicationProgress))
+      case (params, AgreementStatus.NotProposed, Some(_), _, None, _, None) =>
+        Some(NeedsToReplicatePartyAcs(params))
       case (
+            params,
             _,
-            _: AgreementStatus.Exists,
             Some(_),
-            None,
             _,
+            Some(PartyReplicationStatus(_, _, _, None, _, _, _, _)),
+            None,
             None,
           ) =>
-        Some(NeedToConnectToSequencerChannel)
-      case (params, _, Some(_), Some(replicationProgress), None, None) =>
-        Some(ReplicatingPartyAcs(params, replicationProgress))
-      case (params, _, Some(_), _, Some(indexingProgress), None) =>
+        Some(TriggeredPartyAcsReplication(params))
+      case (
+            params,
+            _,
+            Some(_),
+            _,
+            Some(PartyReplicationStatus(_, _, _, Some(replicationProgress), _, _, _, _)),
+            None,
+            None,
+          ) =>
+        Some(AcsReplicationInProgress(params, replicationProgress))
+      case (params, _, Some(_), _, _, Some(indexingProgress), None) =>
         Some(
           if (!indexingProgress.isIndexingCurrentlyAlmostDone)
             IndexingContractActivationChanges(params)

@@ -161,7 +161,7 @@ trait CommitmentTestUtil
   ): Iou.Contract = {
     import env.*
 
-    logger.info(s"Deploying the iou contract on both participants")
+    logger.info(s"Deploying the iou contract on both participants on $synchronizerId")
     val iou = IouSyntax
       .createIou(firstParticipant, Some(synchronizerId))(
         firstParticipant.adminParty,

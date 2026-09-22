@@ -1,0 +1,34 @@
+name: Tag New Releases
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+jobs:
+  tag_new_releases:
+    name: Tag New Releases
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Authorize git
+        uses: ./.github/actions/git/authorize_git
+
+      - name: Tag new releases
+        shell: bash
+        run: |
+          ./release/tag-new-releases.sh
+
+      - name: Reset origin URL
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          git remote set-url origin "${{ github.server_url }}/${{ github.repository }}.git"

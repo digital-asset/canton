@@ -7,6 +7,7 @@ package speedy
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.data.Freer.Step
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.interpretation.ExecutionMode
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy
 import com.digitalasset.daml.lf.speedy.TransactionConductor.Upd
@@ -72,7 +73,7 @@ object TestPkg {
 class TestPkg(
     withKey: Boolean,
     languageVersion: LanguageVersion,
-    cmdMode: Compiler.ExecutionMode,
+    cmdMode: ExecutionMode,
 ) {
   import TestPkg.packageId
 
@@ -261,13 +262,12 @@ $ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {main
 
 trait CmdFlowRunner {
   import TestPkg.*
-  protected def cmdMode: Compiler.ExecutionMode
+  protected def cmdMode: ExecutionMode
   protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue] = CmdFlow.pure(SValue.SUnit),
       test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
-      readAs: Set[Ref.Party] = Set.empty,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
@@ -283,13 +283,12 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
 
   import TestPkg.*
 
-  final override protected def cmdMode = Compiler.ExecutionMode.Upd
+  final override protected def cmdMode = ExecutionMode.UpdateMachine
   final override protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue],
       test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
-      readAs: Set[Ref.Party],
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
@@ -303,7 +302,6 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
       initialSeeding = InitialSeeding.TransactionSeed(seed),
       expr = SExpr.SEValue(SValue.SUnit),
       committers = parties,
-      readAs = readAs,
       packageResolution = packageResolution,
       limits = interpretation.Limits.Lenient,
       authorizationChecker = authorizationChecker(recordingLogger),
@@ -370,14 +368,13 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
 
   import TestPkg.*
 
-  final override protected def cmdMode = Compiler.ExecutionMode.Cmd
+  final override protected def cmdMode = ExecutionMode.Conductor
 
   final override protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue],
       test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
-      readAs: Set[Ref.Party],
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
@@ -390,7 +387,6 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
       preparationTime = Time.Timestamp.MinValue,
       initialSeeding = InitialSeeding.TransactionSeed(seed),
       committers = parties,
-      readAs = readAs,
       packageResolution = packageResolution,
       limits = interpretation.Limits.Lenient,
       authorizationChecker = authorizationChecker(recordingLogger),
@@ -453,16 +449,16 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
                   )
                 case Command.ExerciseTemplate(templateId, contractId, choiceId, argument) =>
                   conductor.handleCommand(
-                    Question.Cmd.ExerciseTemplate(templateId, choiceId, contractId.value, argument)
+                    Question.Cmd.ExerciseTemplate(templateId, contractId.value, choiceId, argument)
                   )
                 case Command.ExerciseInterface(interfaceId, contractId, choiceId, argument) =>
                   conductor.handleCommand(
                     Question.Cmd
-                      .ExerciseInterface(interfaceId, choiceId, contractId.value, argument)
+                      .ExerciseInterface(interfaceId, contractId.value, choiceId, argument)
                   )
                 case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
                   conductor.handleCommand(
-                    Question.Cmd.ExerciseByKey(templateId, choiceId, contractKey, argument)
+                    Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument)
                   )
                 case Command.CreateAndExercise(
                       templateId,
@@ -476,7 +472,7 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
                     )
                     res <- conductor.handleCommand(
                       Question.Cmd
-                        .ExerciseTemplate(templateId, choiceId, asSCid(cid).value, choiceArgument)
+                        .ExerciseTemplate(templateId, asSCid(cid).value, choiceId, choiceArgument)
                     )
                   } yield res
                 case Command.FetchTemplate(templateId, coid) =>

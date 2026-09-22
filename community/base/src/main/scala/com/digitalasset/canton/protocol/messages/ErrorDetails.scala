@@ -4,8 +4,13 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.LocalError
+import com.digitalasset.canton.util.ShowUtil.*
 
 /** localError: when set, the method `logRejection` will log the `localError` at ERROR level. You
   * should set the localError in phase 3 and if the verdict is approved but the validation from
@@ -15,12 +20,9 @@ final case class ErrorDetails(
     reason: com.google.rpc.status.Status,
     isMalformed: Boolean,
     localError: Option[LocalError] = None,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[ErrorDetails.this.type] = prettyOfClass(
-    unnamedParam(_.reason),
-    param("isMalformed", _.isMalformed),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ErrorDetails] = ErrorDetails
 
   /** Logs the [[localError]] if defined. Otherwise, logs the [[reason]] at INFO level.
     * @param extra
@@ -40,7 +42,13 @@ final case class ErrorDetails(
     }
 }
 
-object ErrorDetails {
+object ErrorDetails extends PrettyPrintingCompanion[ErrorDetails] {
+
+  override protected val pretty: Pretty[ErrorDetails] = prettyOfClass(
+    unnamedParam(_.reason),
+    param("isMalformed", _.isMalformed),
+  )
+
   def fromLocalError(localError: LocalError): ErrorDetails =
     ErrorDetails(localError.reason(), localError.isMalformed, Some(localError))
 }

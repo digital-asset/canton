@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
@@ -24,15 +28,19 @@ final case class RelativeContractIdSuffixV2(
     contractIdVersion: CantonContractIdV2Version,
     suffix: Bytes,
 ) extends RelativeContractIdSuffix
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   override def toBytes: Bytes = contractIdVersion.versionPrefixBytesRelative ++ suffix
 
-  override protected def pretty: Pretty[RelativeContractIdSuffixV2] = prettyOfClass(
-    unnamedParam(_.toBytes.toHexString)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[RelativeContractIdSuffixV2] =
+    RelativeContractIdSuffixV2
 }
 
-object RelativeContractIdSuffixV2 {
+object RelativeContractIdSuffixV2 extends PrettyPrintingCompanion[RelativeContractIdSuffixV2] {
+
+  override protected val pretty: Pretty[RelativeContractIdSuffixV2] = prettyOfClass(
+    unnamedParam(_.toBytes.toHexString)
+  )
+
   implicit val orderingRelativeContractIdSuffixV2: Ordering[RelativeContractIdSuffixV2] =
     Ordering.by[RelativeContractIdSuffixV2, ByteString](_.toBytes.toByteString)(
       ByteStringUtil.orderingByteString

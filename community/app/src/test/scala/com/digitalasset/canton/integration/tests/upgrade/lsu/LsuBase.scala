@@ -34,6 +34,7 @@ import com.digitalasset.canton.metrics.MetricValue.LongPoint
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.topology.{
   Member,
+  OpaquePhysicalSynchronizerId,
   ParticipantId,
   PhysicalSynchronizerId,
   SynchronizerId,
@@ -281,7 +282,7 @@ private[lsu] trait LsuBase
       forAll(fixture.oldSynchronizerNodes.all)(
         _.topology.lsu.announcement
           .list(store = Some(fixture.currentPsid))
-          .filter(_.item.successorSynchronizerId == fixture.newPsid)
+          .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
           .loneElement
       )
     }
@@ -407,10 +408,10 @@ object LsuBase {
   // Return the status of the LSU, per successor psid
   def getLsuStatusMetricValues(
       node: LocalInstanceReference
-  ): Map[PhysicalSynchronizerId, NonNegativeInt] = {
+  ): Map[OpaquePhysicalSynchronizerId, NonNegativeInt] = {
     getMetricValues(node, "daml.participant.lsu_status").toList.flatMap(_.collect {
       case l: LongPoint =>
-        PhysicalSynchronizerId.tryFromString(
+        OpaquePhysicalSynchronizerId.tryFromString(
           l.attributes.get("successor_psid").value
         ) -> NonNegativeInt.tryCreate(l.value.toInt)
     })
@@ -419,10 +420,10 @@ object LsuBase {
   // Return the status of the contact of the successor per psid
   def getLsuSuccessorContactStatusMetricValues(
       node: LocalSequencerReference
-  ): Map[PhysicalSynchronizerId, Int] = {
+  ): Map[OpaquePhysicalSynchronizerId, Int] = {
     getMetricValues(node, "daml.sequencer.lsu_contact_successor_status").toList.flatMap(_.collect {
       case l: LongPoint =>
-        PhysicalSynchronizerId.tryFromString(
+        OpaquePhysicalSynchronizerId.tryFromString(
           l.attributes.get("successor_psid").value
         ) -> l.value.toInt
     })
@@ -465,6 +466,7 @@ object LsuBase {
         )
       )
 
-    val synchronizerSuccessor: SynchronizerSuccessor = SynchronizerSuccessor(newPsid, upgradeTime)
+    val synchronizerSuccessor: SynchronizerSuccessor =
+      SynchronizerSuccessor(newPsid.opaque, upgradeTime)
   }
 }

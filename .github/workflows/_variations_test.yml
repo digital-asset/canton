@@ -6,6 +6,10 @@ on:
         required: false
       DATADOG_API_KEY:
         required: false
+      SLACK_BOT_QA_NOTIFICATIONS:
+        required: false
+      GCLOUD_SHEETS_SA_KEY:
+        required: false
     inputs:
       only_for_selected_users:
         default: false
@@ -123,6 +127,11 @@ jobs:
     env:
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      # Slack creds for the flaky consecutive-failure alert (alert_slack.py), set at job level so they reach the nix child process.
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS }}
+      # Sheet key the alert's rota mention needs (select_rota.py), same job-level reason.
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
       EXECUTOR_JVM_HEAP_SIZE: 14000M
     steps:
       - name: Checkout
@@ -163,6 +172,12 @@ jobs:
           shard_index: ${{ matrix.shard }}
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
 
   aggregate_shard_outputs:
     name: Aggregate Shard Outputs

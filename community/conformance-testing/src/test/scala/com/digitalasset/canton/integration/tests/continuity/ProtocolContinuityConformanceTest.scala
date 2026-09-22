@@ -13,22 +13,15 @@ import com.digitalasset.canton.integration.bootstrap.{
 }
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseExternalProcess.ReleasePath
-import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   ApiUserManagementServiceSuppressionRule,
   DbActiveContractStoreConsistencyCheckSuppressionRule,
-}
-import com.digitalasset.canton.integration.tests.ledgerapi.{
-  ExcludedTests,
-  LedgerApiConformanceBase,
-  ProtocolType,
 }
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
   IsolatedEnvironments,
-  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
@@ -41,82 +34,6 @@ import monocle.macros.syntax.lens.*
 import org.scalatest.concurrent.PatienceConfiguration
 
 import scala.concurrent.duration.DurationInt
-
-trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
-
-  protected def testedReleases: List[TestedRelease]
-
-  protected val oldestVersionToCheck = ReleaseVersion(3, 4, 10, Some("snapshot"))
-
-  protected val numberOfVersionsToCheck = 2
-
-  protected def versionShouldBeChecked(v: ReleaseVersion): Boolean =
-    v >= oldestVersionToCheck
-
-  protected val ledgerApiTestToolPlugins: Map[ReleaseVersion, UseLedgerApiTestTool] =
-    testedReleases
-      .filter { tested =>
-        // This is initial filtering of versions -> done to prevent downloading of too many historic versions
-        versionShouldBeChecked(tested.releaseVersion)
-      }
-      .map { tested =>
-        tested.releaseVersion -> new UseLedgerApiTestTool(
-          loggerFactory = loggerFactory,
-          connectedSynchronizersCount = connectedSynchronizersCount,
-          version = LAPITTVersion.Explicit(tested.releaseVersion),
-        )
-      }
-      .toMap
-
-  ledgerApiTestToolPlugins.values.foreach(registerPlugin)
-
-  // The tests that are limited to a single participant are not relevant for protocol continuity testing,
-  // as they do not test any cross-participant interactions. The versions of the other participants are not relevant.
-  // Likewise single-participant tests are not sensitive to the sequencer/mediator version.
-  protected def onlyMultiParticipantTests: Boolean = true
-
-  def runShardedTests(
-      version: ReleaseVersion,
-      useJsonApi: Boolean,
-  )(shard: Int, numShards: Int)(
-      env: TestConsoleEnvironment
-  ): Unit = {
-    val jsonExclusions = ExcludedTests.findExcludedTests(useJsonApi)
-    ledgerApiTestToolPlugins(version)
-      .runShardedSuites(
-        shard,
-        numShards,
-        exclude = excludedTests(version, ProtocolType.fromUseJson(useJsonApi)) ++ jsonExclusions,
-        useJson = useJsonApi,
-        onlyMultiParticipantTests = onlyMultiParticipantTests,
-      )(env)
-  }
-  def excludedTests(version: ReleaseVersion, protocolType: ProtocolType): Seq[String] = {
-    val removedGetPreferredPackageVersionTests =
-      Seq(
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionKnown",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownParty",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownPackageName",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownSynchronizerId",
-      )
-    val perReleaseExclusions =
-      if (version.majorMinor == (3, 4))
-        Seq(
-          // 3.5 changed the invalid synchronizer-id error message; the 3.4 test tool still expects
-          // the old "Invalid unique identifier ... with missing namespace" wording.
-          "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionInvalidSynchronizerId",
-          "InteractiveSubmissionServiceIT:ISSExecuteAndWaitInvalidSynchronizerId",
-          // 3.5 accepts duplicate disclosed contracts with the same payload (idempotence);
-          // the 3.4 test tool still expects them to be rejected.
-          "ExplicitDisclosureIT:EDDuplicates",
-        )
-      else Seq.empty
-
-    removedGetPreferredPackageVersionTests ++ perReleaseExclusions ++ LedgerApiConformanceBase
-      .excludedTests(testedProtocolVersion, protocolType)
-  }
-
-}
 
 /** The Protocol continuity tests test that we don't accidentally break protocol compatibility with
   * respect to the Ledger API.

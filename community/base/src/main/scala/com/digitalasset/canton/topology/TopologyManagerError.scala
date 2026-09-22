@@ -754,7 +754,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
 
     final case class UnexpectedPhysicalSynchronizerId(
         fromParameters: PhysicalSynchronizerId,
-        fromAnnouncement: PhysicalSynchronizerId,
+        fromAnnouncement: OpaquePhysicalSynchronizerId,
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause =
@@ -1022,7 +1022,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         InvalidIndependentOfSystemState,
       ) {
     final case class Reject(
-        successorSynchronizerId: PhysicalSynchronizerId,
+        successorSynchronizerId: OpaquePhysicalSynchronizerId,
         details: String,
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
@@ -1034,7 +1034,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     object Reject {
       def conflictWithCurrentPsid(
           currentSynchronizerId: PhysicalSynchronizerId,
-          successorSynchronizerId: PhysicalSynchronizerId,
+          successorSynchronizerId: OpaquePhysicalSynchronizerId,
       )(implicit loggingContext: ErrorLoggingContext): Reject =
         Reject(
           successorSynchronizerId,
@@ -1042,8 +1042,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         )
 
       def conflictWithPreviousAnnouncement(
-          successorSynchronizerId: PhysicalSynchronizerId,
-          previouslyAnnouncedSuccessor: PhysicalSynchronizerId,
+          successorSynchronizerId: OpaquePhysicalSynchronizerId,
+          previouslyAnnouncedSuccessor: OpaquePhysicalSynchronizerId,
       )(implicit loggingContext: ErrorLoggingContext): Reject =
         Reject(
           successorSynchronizerId = successorSynchronizerId,
@@ -1066,8 +1066,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
       ) {
     final case class Reject(
         sequencerId: SequencerId,
-        successorPsid: PhysicalSynchronizerId,
-        expectedSuccessorPsid: PhysicalSynchronizerId,
+        successorPsid: OpaquePhysicalSynchronizerId,
+        expectedSuccessorPsid: OpaquePhysicalSynchronizerId,
     )(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause =

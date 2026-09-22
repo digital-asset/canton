@@ -108,6 +108,8 @@ object SequencerPublicCommands {
           ConsoleStaticSynchronizerParameters.fromProtoV30(value).leftMap(_.message)
         case Parameters.V31(value) =>
           ConsoleStaticSynchronizerParameters.fromProtoV31(value).leftMap(_.message)
+        case Parameters.V32(value) =>
+          ConsoleStaticSynchronizerParameters.fromProtoV32(value).leftMap(_.message)
       }
   }
 

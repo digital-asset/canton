@@ -49,8 +49,9 @@ import com.digitalasset.canton.participant.admin.data.{
   PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
-import com.digitalasset.canton.participant.admin.party.PartyParticipantPermission
+import com.digitalasset.canton.participant.admin.party.acsreplication.PartyParticipantPermission
 import com.digitalasset.canton.participant.admin.traffic.TrafficStateAdmin
+import com.digitalasset.canton.participant.commitment.DigestConsistencyCheckProcessor
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
   ReceivedCmtState,
   SentCmtState,
@@ -2484,6 +2485,68 @@ object ParticipantAdminCommands {
         response.lastCompletedReinitializationTime
           .traverse(CantonTimestamp.fromProtoTimestamp)
           .map(DigestCommitmentReinitializationStatusInfo(_))
+          .leftMap(_.toString)
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+    }
+
+    final case class RunDigestConsistencyCheck(synchronizerId: SynchronizerId)
+        extends Base[
+          v30.RunDigestConsistencyCheckRequest,
+          v30.RunDigestConsistencyCheckResponse,
+          Unit,
+        ] {
+
+      override protected def createRequest(): Right[String, v30.RunDigestConsistencyCheckRequest] =
+        Right(
+          v30.RunDigestConsistencyCheckRequest(
+            synchronizerId.toProtoPrimitive
+          )
+        )
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.RunDigestConsistencyCheckRequest,
+      ): Future[v30.RunDigestConsistencyCheckResponse] =
+        service.runDigestConsistencyCheck(request)
+
+      override protected def handleResponse(
+          response: v30.RunDigestConsistencyCheckResponse
+      ): Either[String, Unit] =
+        Either.unit
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+    }
+
+    final case class DigestConsistencyCheckStatus(synchronizerId: SynchronizerId)
+        extends Base[
+          v30.DigestConsistencyCheckStatusRequest,
+          v30.DigestConsistencyCheckStatusResponse,
+          DigestConsistencyCheckProcessor.Status,
+        ] {
+
+      override protected def createRequest()
+          : Right[String, v30.DigestConsistencyCheckStatusRequest] =
+        Right(
+          v30.DigestConsistencyCheckStatusRequest(
+            synchronizerId.toProtoPrimitive
+          )
+        )
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.DigestConsistencyCheckStatusRequest,
+      ): Future[v30.DigestConsistencyCheckStatusResponse] =
+        service.digestConsistencyCheckStatus(request)
+
+      override protected def handleResponse(
+          response: v30.DigestConsistencyCheckStatusResponse
+      ): Either[String, DigestConsistencyCheckProcessor.Status] =
+        response.lastStartedCheckTime
+          .traverse(CantonTimestamp.fromProtoTimestamp)
+          .map { startTime =>
+            DigestConsistencyCheckProcessor.Status(response.isRunning, startTime)
+          }
           .leftMap(_.toString)
 
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout

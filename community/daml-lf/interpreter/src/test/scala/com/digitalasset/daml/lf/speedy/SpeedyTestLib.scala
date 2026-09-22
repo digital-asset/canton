@@ -9,6 +9,7 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.Time
+import com.digitalasset.daml.lf.interpretation.ExecutionMode
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.stablepackages.StablePackages
@@ -142,7 +143,7 @@ private[speedy] object SpeedyTestLib {
   def typeAndCompile_(
       majorLanguageVersion: LanguageVersion.Major,
       pkgs: Map[PackageId, Ast.Package],
-      cmdMode: Compiler.ExecutionMode = Compiler.ExecutionMode.Upd,
+      cmdMode: ExecutionMode = ExecutionMode.UpdateMachine,
   ): PureCompiledPackages = {
     require(
       pkgs.values.forall(pkg => pkg.languageVersion.major == majorLanguageVersion), {
@@ -170,7 +171,7 @@ private[speedy] object SpeedyTestLib {
   @throws[ValidationError]
   def typeAndCompile[X](
       pkg: Ast.Package,
-      cmdMode: Compiler.ExecutionMode = Compiler.ExecutionMode.Upd,
+      cmdMode: ExecutionMode = ExecutionMode.UpdateMachine,
   )(implicit
       parserParameter: ParserParameters[X]
   ): PureCompiledPackages =

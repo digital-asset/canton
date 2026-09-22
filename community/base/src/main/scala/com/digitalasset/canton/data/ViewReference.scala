@@ -5,7 +5,11 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.ViewHash
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
@@ -15,7 +19,7 @@ import com.google.protobuf.ByteString
   * A view can be addressed either by its view hash or by a ciphertext-based identifier (PV36+)
   * (ciphertext hash plus index of the view in the list that is encrypted).
   */
-sealed trait ViewReference extends PrettyPrinting with Product with Serializable
+sealed trait ViewReference extends PrettyPrintingFromCompanion with Product with Serializable
 
 /** A transaction view identifier composed of the hash of the transaction view. This reference type
   * is used for PV35-.
@@ -26,10 +30,13 @@ sealed trait ViewReference extends PrettyPrinting with Product with Serializable
 final case class ByViewHash(private val viewHash: ViewHash) extends ViewReference {
   def toProtoPrimitive: ByteString = viewHash.toProtoPrimitive
 
-  override def pretty: Pretty[ByViewHash] = prettyOfClass(param("viewHash", _.viewHash))
+  override def prettyCompanion: PrettyPrintingCompanion[ByViewHash] = ByViewHash
 }
 
-object ByViewHash {
+object ByViewHash extends PrettyPrintingCompanion[ByViewHash] {
+
+  override protected val pretty: Pretty[ByViewHash] = prettyOfClass(param("viewHash", _.viewHash))
+
   def fromProtoPrimitive(viewHashBytes: ByteString): ParsingResult[ByViewHash] =
     ViewHash.fromProtoPrimitive(viewHashBytes).map(ByViewHash(_))
 }
@@ -46,7 +53,11 @@ object ByViewHash {
 final case class ByCiphertextId(private val ciphertextId: Hash, index: NonNegativeInt)
     extends ViewReference {
 
-  override def pretty: Pretty[ByCiphertextId] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[ByCiphertextId] = ByCiphertextId
+}
+
+object ByCiphertextId extends PrettyPrintingCompanion[ByCiphertextId] {
+  override protected val pretty: Pretty[ByCiphertextId] = prettyOfClass(
     param("ciphertextId", _.ciphertextId),
     param("index", _.index),
   )

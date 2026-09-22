@@ -77,7 +77,9 @@ class GrpcInternalSequencerConnectionTest
     }
 
     "fail validation if the returned API is not for a sequencer" in {
-      val errorMessage = "Validation failure: Bad API: this is not a valid API info"
+      val errorMessage =
+        "Validation failure: Endpoint 'does-not-exist-0:0' provides 'this is not a valid API info', expected 'sequencer-public-api'." +
+          " This message indicates a possible mistake in configuration, please check node connection settings'."
       val responses = TestResponses(
         apiResponses = Seq(incorrectApiResponse)
       )

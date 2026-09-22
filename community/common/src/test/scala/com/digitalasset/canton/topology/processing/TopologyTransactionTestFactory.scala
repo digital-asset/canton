@@ -121,6 +121,7 @@ class TopologyTransactionTestFactory(
         party1b,
         threshold = PositiveInt.one,
         Seq(HostingParticipant(participant1, ParticipantPermission.Submission)),
+        isOffline = false,
       ),
       key2,
     )
@@ -130,6 +131,7 @@ class TopologyTransactionTestFactory(
         party1b,
         threshold = PositiveInt.one,
         Seq(HostingParticipant(participant6, ParticipantPermission.Submission)),
+        isOffline = false,
       ),
       key2,
       isProposal = true,
@@ -140,6 +142,7 @@ class TopologyTransactionTestFactory(
         party1b,
         threshold = PositiveInt.one,
         Seq(HostingParticipant(participant6, ParticipantPermission.Submission)),
+        isOffline = false,
       ),
       NonEmpty(Set, key1, key6),
       isProposal = true,
@@ -150,6 +153,7 @@ class TopologyTransactionTestFactory(
         party1b,
         threshold = PositiveInt.one,
         Seq(HostingParticipant(participant6, ParticipantPermission.Submission)),
+        isOffline = false,
       ),
       NonEmpty(Set, key2, key6),
     )
@@ -160,6 +164,7 @@ class TopologyTransactionTestFactory(
         party1b,
         threshold = PositiveInt.one,
         Seq(HostingParticipant(participant6, ParticipantPermission.Submission)),
+        isOffline = false,
       ),
       key3,
     )

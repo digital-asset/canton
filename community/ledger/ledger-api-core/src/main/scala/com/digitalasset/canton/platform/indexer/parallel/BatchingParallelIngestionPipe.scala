@@ -30,7 +30,12 @@ object BatchingParallelIngestionPipe {
     // The stream coming from ReadService, involves deserialization and translation to Update-s
     Flow[In]
       // Batching plus mapping to Database DTOs encapsulates all the CPU intensive computation of the ingestion. Executed in parallel.
-      .via(BatchN(submissionBatchSize.toInt, inputMappingParallelism))
+      .via(
+        BatchN.forMaxConcurrency(
+          maxBatchSize = submissionBatchSize.toInt,
+          maxBatchCount = inputMappingParallelism,
+        )
+      )
       .mapAsync(inputMappingParallelism)(contractReInsertion)
       .mapAsync(inputMappingParallelism)(inputMapper)
       // Encapsulates sequential/stateful computation (generation of sequential IDs for events)

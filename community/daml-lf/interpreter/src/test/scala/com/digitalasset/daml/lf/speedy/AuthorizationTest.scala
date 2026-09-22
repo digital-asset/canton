@@ -190,7 +190,6 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
               )
           ),
         parties = Set(charlie),
-        readAs = Set(alice),
         packageResolution = packageNameMap,
         getContract = getContract,
         authorizationChecker = realAuthorizationChecker,

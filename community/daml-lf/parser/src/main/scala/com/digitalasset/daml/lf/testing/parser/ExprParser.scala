@@ -461,6 +461,16 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       UpdateFetchInterface(iface, e)
     }
 
+  private lazy val updateUnpackTemplate =
+    Id("unpack_template") ~! `@` ~> fullIdentifier ~ expr0 ^^ { case t ~ e =>
+      UpdateUnpackTemplate(t, e)
+    }
+
+  private lazy val updateUnpackInterface =
+    Id("unpack_interface") ~! `@` ~> fullIdentifier ~ expr0 ^^ { case iface ~ e =>
+      UpdateUnpackInterface(iface, e)
+    }
+
   private lazy val updateExercise =
     Id("exercise") ~! `@` ~> fullIdentifier ~ id ~ expr0 ~ expr0 ^^ { case t ~ choice ~ cid ~ arg =>
       UpdateExercise(t, choice, cid, arg)
@@ -516,6 +526,8 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       updateCreateInterface |
       updateFetch |
       updateFetchInterface |
+      updateUnpackTemplate |
+      updateUnpackInterface |
       updateExercise |
       updateExerciseInterface |
       updateExerciseInterfaceWithGuard |

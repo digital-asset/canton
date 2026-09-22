@@ -90,7 +90,7 @@ class NextGenTransactionTreeFactory(
       contractOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
-      limitConfig: TransactionViewLimitConfig,
+      protocolLimits: TransactionProtocolLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] = {
@@ -116,6 +116,7 @@ class NextGenTransactionTreeFactory(
       protocolVersion,
     )
 
+    val limitConfig = TransactionViewLimitConfig(protocolLimits)
     val rootViewDecompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
@@ -154,6 +155,7 @@ class NextGenTransactionTreeFactory(
               protocolVersion,
             )
           ),
+          protocolLimits = protocolLimits,
           protocolVersion = protocolVersion,
         )
         .leftMap(SubmitterMetadataError.apply)

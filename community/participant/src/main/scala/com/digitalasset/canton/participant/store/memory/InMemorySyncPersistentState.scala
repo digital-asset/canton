@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.store.{
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
 }
+import com.digitalasset.canton.participant.topology.OfflineTopologyLookup
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.store.memory.{
   InMemoryPendingOperationStore,
@@ -36,6 +37,7 @@ import com.digitalasset.canton.store.{
   IndexedStringStore,
   IndexedSynchronizer,
 }
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.tracing.TraceContext
@@ -50,6 +52,8 @@ class InMemoryLogicalSyncPersistentState(
     contractStore: ContractStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     ledgerApiStore: Eval[LedgerApiStore],
+    participantId: ParticipantId,
+    offlineTopologyLookup: OfflineTopologyLookup,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -103,7 +107,12 @@ class InMemoryLogicalSyncPersistentState(
     )
 
   override val reassignmentStore =
-    new InMemoryReassignmentStore(Target(synchronizerIdx.item), loggerFactory)
+    new InMemoryReassignmentStore(
+      Target(synchronizerIdx.item),
+      participantId,
+      offlineTopologyLookup,
+      loggerFactory,
+    )
 
   override val pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     new InMemoryPendingOperationStore(OnboardingClearanceOperation, loggerFactory)
@@ -112,7 +121,7 @@ class InMemoryLogicalSyncPersistentState(
       : Option[InMemoryPartyReplicationIndexingStore] =
     parameters.alphaOnlinePartyReplicationSupport.map(cfg =>
       new InMemoryPartyReplicationIndexingStore(
-        cfg.pauseSynchronizerIndexingDuringPartyReplication,
+        cfg.target.pauseSynchronizerIndexingDuringPartyReplication,
         loggerFactory,
       )
     )

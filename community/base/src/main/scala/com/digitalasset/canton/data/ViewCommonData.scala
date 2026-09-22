@@ -9,7 +9,11 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewConfirmationParameters.InvalidViewConfirmationParameters
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
@@ -67,10 +71,7 @@ final case class ViewCommonData private (
 
   override val hashPurpose: HashPurpose = HashPurpose.ViewCommonData
 
-  override protected def pretty: Pretty[ViewCommonData] = prettyOfClass(
-    param("view confirmation parameters", _.viewConfirmationParameters),
-    param("salt", _.salt),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ViewCommonData] = ViewCommonData
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
@@ -89,8 +90,14 @@ object ViewCommonData
     extends VersioningCompanionContextMemoization[
       ViewCommonData,
       HashOps,
-    ] {
+    ]
+    with PrettyPrintingCompanion[ViewCommonData] {
   override val name: String = "ViewCommonData"
+
+  override protected val pretty: Pretty[ViewCommonData] = prettyOfClass(
+    param("view confirmation parameters", _.viewConfirmationParameters),
+    param("salt", _.salt),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewCommonData)(
@@ -176,18 +183,21 @@ object ViewCommonData
 final case class ViewConfirmationParameters private (
     informees: Set[LfPartyId],
     quorums: Seq[Quorum],
-) extends PrettyPrinting
+) extends PrettyPrintingFromCompanion
     with NoCopy {
 
-  override protected def pretty: Pretty[ViewConfirmationParameters] = prettyOfClass(
-    param("informees", _.informees),
-    param("quorums", _.quorums),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ViewConfirmationParameters] =
+    ViewConfirmationParameters
 
   lazy val confirmers: Set[LfPartyId] = quorums.flatMap(_.confirmers.keys).toSet
 }
 
-object ViewConfirmationParameters {
+object ViewConfirmationParameters extends PrettyPrintingCompanion[ViewConfirmationParameters] {
+
+  override protected val pretty: Pretty[ViewConfirmationParameters] = prettyOfClass(
+    param("informees", _.informees),
+    param("quorums", _.quorums),
+  )
 
   /** Indicates an attempt to create an invalid [[ViewConfirmationParameters]]. */
   final case class InvalidViewConfirmationParameters(message: String)

@@ -21,7 +21,6 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   Node,
-  NextGenContractStateMachine as ContractStateMachine,
   SubmittedTransaction as SubmittedTx,
   TransactionOuterClass as TxOuterClass,
 }
@@ -68,15 +67,14 @@ final case class TransactionSnapshot(
   def replay(): Either[Error, Speedy.Metrics] =
     engine
       .replayAndCollectMetrics(
-        submitters,
-        transaction,
-        ledgerTime,
-        participantId,
-        preparationTime,
-        submissionSeed,
-        contractIdVersion,
-        interpretationConfig =
-          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
+        submitters = submitters,
+        tx = transaction,
+        ledgerEffectiveTime = ledgerTime,
+        participantId = participantId,
+        preparationTime = preparationTime,
+        submissionSeed = submissionSeed,
+        contractIdVersion = contractIdVersion,
+        interpretationConfig = InterpretationConfig.Default,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))
@@ -85,15 +83,14 @@ final case class TransactionSnapshot(
   def validate(): Either[Error, Unit] =
     engine
       .validate(
-        submitters,
-        transaction,
-        ledgerTime,
-        participantId,
-        preparationTime,
-        submissionSeed,
-        contractIdVersion,
-        interpretationConfig =
-          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
+        submitters = submitters,
+        tx = transaction,
+        ledgerEffectiveTime = ledgerTime,
+        participantId = participantId,
+        preparationTime = preparationTime,
+        submissionSeed = submissionSeed,
+        contractIdVersion = contractIdVersion,
+        interpretationConfig = InterpretationConfig.Default,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))

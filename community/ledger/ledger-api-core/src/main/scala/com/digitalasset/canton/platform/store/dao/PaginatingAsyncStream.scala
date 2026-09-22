@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.dao
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
-import com.digitalasset.canton.platform.store.dao.events.IdPageSizing
+import com.digitalasset.canton.platform.store.dao.events.{IdPageSizing, Utils}
 import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.OverflowStrategy
@@ -76,12 +76,13 @@ private[platform] class PaginatingAsyncStream(
     assert(idPageBufferSize > 0)
     def fetchPageQuery(paginationInput: PaginationInput): Connection => IdPage =
       c =>
-        wrapIdDbQuery(
-          in = paginationInput,
-          f = fetchPageDbQuery.fetchPage(c),
-        )(result =>
-          s"[$idStreamName] for next ID page returned: limit:${paginationInput.limit} range:${paginationInput.fromTo.eventSeqIdRange}  #IDs:${result.ids.size}"
-        )
+        Utils.wrapDbQuery(fetchPageDbQuery.fetchPage(c)) { result =>
+          val limit = paginationInput.limit
+          val range = paginationInput.fromTo.eventSeqIdRange
+          val resultSize = result.ids.size
+          s"ID query [$idStreamName] for next ID page returned: limit:$limit range:$range  #IDs:$resultSize"
+        }(implicitly)(paginationInput)
+
     val initialFromTo = PaginationFromTo.of(
       eventSeqIdRange = initialEventSeqIdRange,
       descending = descendingOrder,
@@ -164,23 +165,23 @@ private[platform] class PaginatingAsyncStream(
         paginationInput: PaginationInput
     ): Connection => Option[IdPageBounds] =
       c =>
-        wrapIdDbQuery(
-          in = paginationInput,
-          f = fetchPageDbQuery.fetchPageBounds(c),
-        )(result =>
-          s"[$idStreamName] for next ID page bounds returned: limit:${paginationInput.limit} from:${paginationInput.fromTo.eventSeqIdRange.startInclusive} to:${result
-              .map(_.fromTo.eventSeqIdRange.endInclusive)}"
-        )
+        Utils.wrapDbQuery(fetchPageDbQuery.fetchPageBounds(c)) { result =>
+          val limit = paginationInput.limit
+          val from = paginationInput.fromTo.eventSeqIdRange.startInclusive
+          val to = result.map(_.fromTo.eventSeqIdRange.endInclusive)
+          s"ID query [$idStreamName] for next ID page bounds returned: limit:$limit from:$from to:$to"
+        }(implicitly)(paginationInput)
+
     def fetchPageQuery(
         paginationFromTo: PaginationFromTo
     ): Connection => Vector[Long] =
       c =>
-        wrapIdDbQuery(
-          in = paginationFromTo,
-          f = fetchPageDbQuery.fetchPage(c),
-        )(result =>
-          s"[$idStreamName] for next ID page returned: ${paginationFromTo.eventSeqIdRange} #IDs:${result.size}"
-        )
+        Utils.wrapDbQuery(fetchPageDbQuery.fetchPage(c)) { result =>
+          val range = paginationFromTo.eventSeqIdRange
+          val resultSize = result.size
+          s"ID query [$idStreamName] for next ID page returned: range:$range #IDs:$resultSize"
+        }(implicitly)(paginationFromTo)
+
     val initialFromTo = PaginationFromTo.of(
       eventSeqIdRange = initialEventSeqIdRange,
       descending = descendingOrder,
@@ -224,21 +225,6 @@ private[platform] class PaginatingAsyncStream(
           fetchPageQuery(paginationInput.fromTo)
         ).map(paginationInput -> _)(directEc)
       )
-  }
-
-  def wrapIdDbQuery[In, Out](
-      in: In,
-      f: In => Out,
-  )(
-      log: Out => String
-  )(implicit traceContext: TraceContext): Out = {
-    val started = System.nanoTime()
-    val result = f(in)
-    def elapsedMillis: Long = (System.nanoTime() - started) / 1000000
-    logger.debug(
-      s"ID query for ${log(result)} DB query took: ${elapsedMillis}ms"
-    )
-    result
   }
 }
 

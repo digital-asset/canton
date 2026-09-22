@@ -302,7 +302,10 @@ class GrpcInternalSequencerConnection private[sequencing] (
       _ <- EitherT.cond[FutureUnlessShutdown](
         apiName == CantonGrpcUtil.ApiName.SequencerPublicApi,
         (),
-        SequencerConnectionInternalError.ValidationError(s"Bad API: $apiName"),
+        SequencerConnectionInternalError.ValidationError(
+          s"Endpoint '${config.endpoint}' provides '$apiName', expected '${CantonGrpcUtil.ApiName.SequencerPublicApi}'. " +
+            "This message indicates a possible mistake in configuration, please check node connection settings'."
+        ),
       )
 
       handshakeResponse <- stub

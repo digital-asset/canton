@@ -9,7 +9,6 @@ import cats.implicits.catsSyntaxOptionId
 import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.metrics.Timed
@@ -33,6 +32,7 @@ import com.digitalasset.canton.health.{
   HealthQuasiComponent,
 }
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.pretty.{CantonPrettyPrinter, Pretty, PrettyPrinting}
@@ -73,9 +73,9 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnection,
   SequencerConnectionPool,
   SequencerConnectionWithPekkoSubscribe,
-  SequencerSubscriptionFactoryImpl,
   SequencerSubscriptionPool,
   SequencerSubscriptionPoolFactoryImpl,
+  SequencerSubscriptionWrapperFactoryImpl,
   SubscriptionHandlerFactoryImpl,
 }
 import com.digitalasset.canton.sequencing.client.time.fetcher.SequencingTimeFetcher.TimeSourcesPool
@@ -85,8 +85,8 @@ import com.digitalasset.canton.sequencing.client.time.fetcher.{
   SequencingTimeFetcher,
 }
 import com.digitalasset.canton.sequencing.client.transports.replay.{
-  NullSequencerSubscriptionFactory,
-  ReplaySequencerSubscriptionFactory,
+  NoOpSequencerSubscriptionWrapperFactory,
+  ReplaySequencerSubscriptionWrapperFactory,
 }
 import com.digitalasset.canton.sequencing.handlers.{
   CleanSequencerCounterTracker,
@@ -658,23 +658,52 @@ abstract class SequencerClientImpl(
       }
       .thereafter {
         case scala.util.Success(UnlessShutdown.Outcome(Left(err))) =>
-          err match {
-            case SendAsyncClientError.RequestRefused(error) if error.isOverload =>
-              metrics.submissions.overloaded.inc()
-            case _ =>
+          processSyncRejection(messageId, err)
+
+        // While debugging a weird issue where time-proofs piled up, I noticed
+        // that depending on the error and the amplification state, we can get the
+        // rejection as well on the second one of the nested Either.
+        // The whole construction of the sequencer client send part with its amplification
+        // logic and nested EitherT's would warrant a refactoring.
+        case scala.util.Success(UnlessShutdown.Outcome(Right(result))) =>
+          result match {
+            case scala.util.Success(UnlessShutdown.Outcome(Left(err))) =>
+              processSyncRejection(messageId, err)
+            case scala.util.Success(UnlessShutdown.Outcome(Right(()))) =>
+            case scala.util.Success(AbortedDueToShutdown) =>
+            case scala.util.Failure(ex) =>
+              logger.info(s"Send of $messageId failed (inner condition)", ex)
           }
-
-          // cancel pending send now as we know the request will never cause a sequenced result
-          logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
-          sendTracker.cancelPendingSend(messageId)
-
+        case scala.util.Success(AbortedDueToShutdown) =>
         case scala.util.Failure(ex) =>
           logger.info(s"Send of $messageId failed", ex)
-
-        case scala.util.Success(UnlessShutdown.Outcome(Right(_))) |
-            scala.util.Success(AbortedDueToShutdown) =>
       }
 
+  }
+
+  private def processSyncRejection(messageId: MessageId, error: SendAsyncClientError)(implicit
+      traceContext: TraceContext
+  ) = {
+    val (typ, cause, warn) = error match {
+      case SendAsyncClientError.RequestRefused(error) =>
+        if (error.isOverload)
+          metrics.submissions.overloaded.inc()
+        ("refused", error.shortMessage, false)
+      case SendAsyncClientError.RequestAlreadyExists(error) => ("already-exists", error, false)
+      case SendAsyncClientError.RequestFailed(failed) => ("failed", failed, false)
+      case SendAsyncClientError.DuplicateMessageId =>
+        ("duplicate", "message id already registered with send tracker", true)
+      case SendAsyncClientError.RequestInvalid(invalid) => ("invalid", invalid, true)
+      case SendAsyncClientError.TrafficEnforcementRejected(rpc) => ("traffic", rpc.cause, true)
+    }
+    // cancel pending send now as we know the request will never cause a sequenced result
+    def message =
+      s"Cancelling the pending send as submission failed synchronously with $typ error: $cause"
+    if (warn)
+      logger.warn(message)
+    else
+      logger.debug(message)
+    sendTracker.cancelPendingSend(messageId)
   }
 
   /** Send the `signedRequest` via `firstLinkDetailsO`, which may be undefined if there is currently
@@ -791,17 +820,17 @@ abstract class SequencerClientImpl(
               nextState(sendInFlight = sendInFlight),
             )
 
-          case _: SendAsyncClientError.RequestRefused =>
+          case error: SendAsyncClientError.RequestRefused =>
             logger.debug(
-              s"Send request with message id $messageId was refused by $sequencerId: $error"
+              s"Send request with message id $messageId was refused by $sequencerId"
             )
             // Trust the single sequencer to determine whether the request should indeed be refused and give up.
             // TODO(#12377) Do not trust the sequencer and instead retry sensibly
             Right(Left(error))
 
-          case err: SendAsyncClientError.RequestAlreadyExists =>
+          case _: SendAsyncClientError.RequestAlreadyExists =>
             logger.debug(
-              s"Send request with message id $messageId was deduped by $sequencerId: ${err.message}"
+              s"Send request with message id $messageId was refused with already exists by $sequencerId"
             )
             // Trust the single sequencer to determine whether the request should indeed be refused and give up.
             // TODO(#12377) Do not trust the sequencer (I wouldn't retry but I would track the
@@ -1538,10 +1567,10 @@ class RichSequencerClientImpl(
           .putIfAbsent(sequencerAggregator)
           .foreach(_ => ErrorUtil.invalidState("Sequencer aggregator already exists"))
 
-        val sequencerSubscriptionFactory = replayConfigO match {
+        val subscriptionWrapperFactory = replayConfigO match {
           case Some(ReplayConfig(recordingConfig, SequencerEvents)) =>
             logger.debug(s"using ReplaySequencerSubscription due to replay action SequencerEvents")
-            new ReplaySequencerSubscriptionFactory(
+            new ReplaySequencerSubscriptionWrapperFactory(
               eventValidatorFactory,
               recordingConfig.fullFilePath,
               timeouts,
@@ -1550,11 +1579,11 @@ class RichSequencerClientImpl(
 
           case Some(ReplayConfig(_recordingConfig, _action: SequencerSends)) =>
             logger.debug(s"using NullSequencerSubscription due to replay action SequencerSends")
-            new NullSequencerSubscriptionFactory(timeouts, loggerFactory)
+            new NoOpSequencerSubscriptionWrapperFactory(timeouts, loggerFactory)
 
           case None =>
             // Regular subscription factory
-            new SequencerSubscriptionFactoryImpl(
+            new SequencerSubscriptionWrapperFactoryImpl(
               eventValidatorFactory,
               timeouts,
               loggerFactory,
@@ -1572,7 +1601,7 @@ class RichSequencerClientImpl(
         )
 
         val sequencerSubscriptionPoolFactory = new SequencerSubscriptionPoolFactoryImpl(
-          sequencerSubscriptionFactory,
+          subscriptionWrapperFactory,
           subscriptionHandlerFactory,
           metrics.connectionPool,
           connectionPool.metricsContext,
@@ -2149,7 +2178,7 @@ class SequencerClientImplPekko[E: Pretty](
             val (subscriptionKillSwitch, (doneF, health)) = subscriptionMat
             val combinedKillSwitch =
               new CombinedKillSwitch(replayedKillSwitch, subscriptionKillSwitch)
-            (combinedKillSwitch, FutureUnlessShutdown.outcomeF(doneF), health)
+            (combinedKillSwitch, FutureUnlessShutdown.recoverFromAbortException(doneF), health)
         }
 
         type F2[+X] = WithKillSwitch[F1[X]]
@@ -2189,19 +2218,23 @@ class SequencerClientImplPekko[E: Pretty](
               error
           }
           .toMat(Sink.lastOption) { (matEventSource, lastF) =>
-            val extractedFailureF = lastF.map {
+            val extractedFailureF = FutureUnlessShutdown.recoverFromAbortException(lastF).flatMap {
               case None =>
                 logger.debug("sequencer subscription stream terminated normally")
-                AbortedDueToShutdown
+                FutureUnlessShutdown.abortedDueToShutdown
               case Some(error) =>
                 logger.debug(s"sequencer subscription stream terminated abnormally: $error")
-                Outcome(error)
+                FutureUnlessShutdown.pure(error)
             }
-            matEventSource -> FutureUnlessShutdown(extractedFailureF)
+            matEventSource -> extractedFailureF
           }
 
         val ((killSwitch, subscriptionDoneF, health), completion) =
-          PekkoUtil.runSupervised(stream, errorLogMessagePrefix = "Sequencer subscription failed")
+          PekkoUtil.runSupervised(
+            stream,
+            errorLogMessagePrefix = "Sequencer subscription failed",
+            reportExceptionAtInfo = UnlessShutdown.isAbortedDueToShutdownException,
+          )
         val handle = SubscriptionHandle(killSwitch, subscriptionDoneF, completion)
         subscriptionHandle.getAndSet(Some(handle)).foreach { _ =>
           // TODO(#13789) Clean up the error logging.
@@ -2241,7 +2274,7 @@ class SequencerClientImplPekko[E: Pretty](
       traceContext: TraceContext
   ): Flow[Either[A, B], Either[A, Traced[Seq[B]]], NotUsed] =
     Flow[Either[A, B]]
-      .batchN(config.eventInboxSize.unwrap, 1)
+      .batchNForMaxBatchSize(maxBatchSize = config.eventInboxSize.unwrap, maxBatchCount = 1)
       .mapConcat { batchBuffer =>
         val batchesOrError =
           IterableUtil.spansBy(batchBuffer.toSeq)(_.isRight).flatMap { case (_, block) =>

@@ -31,12 +31,6 @@ import scala.collection.immutable.HashMap
 
 private[lf] object PartialTransaction {
 
-  sealed abstract class KeyConflict extends Product with Serializable
-  object KeyConflict {
-    final case object None extends KeyConflict
-    final case object Duplicate extends KeyConflict
-  }
-
   import Value.NodeIdx
 
   sealed abstract class ContextInfo {
@@ -193,7 +187,6 @@ private[lf] object PartialTransaction {
   }
 
   def initial(
-      csmMode: ContractStateMachine.Mode,
       initialSeeds: InitialSeeding,
       committers: Set[Party],
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
@@ -202,7 +195,7 @@ private[lf] object PartialTransaction {
     nodes = HashMap.empty,
     actionNodeSeeds = BackStack.empty,
     context = Context(initialSeeds, committers),
-    csmJournal = ContractStateMachine.empty(csmMode),
+    csmJournal = ContractStateMachine.empty(),
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
     externalCallResults = HashMap.empty,

@@ -27,7 +27,8 @@ import scala.concurrent.ExecutionContext
   * @param reassigningParticipants
   *   The list of reassigning participants
   * @param targetTimestamp
-  *   The timestamp of the topology at the target synchronizer to be used for validation.
+  *   The timestamp of the target synchronizer topology on which the submitter declares it built the
+  *   request.
   */
 final case class UnassignmentRequest(
     submitterMetadata: ReassignmentSubmitterMetadata,

@@ -37,7 +37,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, LoggerUtil, Mutex}
+import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, LoggerUtil, Mutex}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import scala.collection.mutable
@@ -46,7 +46,7 @@ import scala.util.{Failure, Success, Try}
 
 final class SequencerSubscriptionPoolImpl private[sequencing] (
     private val initialConfig: SequencerSubscriptionPoolConfig,
-    sequencerSubscriptionFactory: SequencerSubscriptionFactory,
+    subscriptionWrapperFactory: SequencerSubscriptionWrapperFactory,
     subscriptionHandlerFactory: SubscriptionHandlerFactory,
     pool: SequencerConnectionPool,
     member: Member,
@@ -158,9 +158,9 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
               val newSubscriptions = newConnections.flatMap { connection =>
                 val sequencerId = connection.attributes.sequencerId
-                val subscription = createSubscription(connection)
+                val subscriptionWrapper = createSubscriptionWrapper(connection)
                 for {
-                  _ <- subscription
+                  _ <- subscriptionWrapper
                     .start()
                     .leftMap(error =>
                       logger.warn(s"Failed to start subscription for $sequencerId: $error")
@@ -171,7 +171,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
                   metrics
                     .subscriptionHealth(mc.withExtraLabels("connection" -> connection.config.name))
                     .updateValue(1)
-                  new SubscriptionManager(subscription)
+                  new SubscriptionManager(subscriptionWrapper)
                 }
               }
 
@@ -196,7 +196,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
             case Left(_) if nbToRequest < 0 =>
               val toRemove = trackedSubscriptions.take(-nbToRequest)
               logger.info(
-                s"Dropping ${toRemove.size} extra subscription(s): ${toRemove.map(_.subscription.connection.name).mkString(", ")}"
+                s"Dropping ${toRemove.size} extra subscription(s): ${toRemove.map(_.subscriptionWrapper.connection.name).mkString(", ")}"
               )
               removeSubscriptionsFromPool(toRemove.toSeq*)
 
@@ -228,16 +228,16 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     adjustInternal()
   }
 
-  private def createSubscription(connection: SequencerConnection)(implicit
+  private def createSubscriptionWrapper(connection: SequencerConnection)(implicit
       traceContext: TraceContext
-  ): SequencerSubscription[SequencerClientSubscriptionError] = {
+  ): SequencerSubscriptionWrapper = {
     val preSubscriptionEventO = subscriptionStartProvider.getLatestProcessedEventO.orElse(
       // The aggregator has not yet seen any event, the first one it will see and propagate will be 1.
       // We subscribe to the previous event, so we set its ordinal to 0.
       initialSubscriptionEventO.map(EventAndOrdinal.zero)
     )
 
-    sequencerSubscriptionFactory.create(
+    subscriptionWrapperFactory.create(
       connection,
       member,
       preSubscriptionEventO,
@@ -336,20 +336,14 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
       case Success(SubscriptionCloseReason.Shutdown) =>
         complete(Success(SequencerClient.CloseReason.ClientShutdown))
 
-      case Success(SubscriptionCloseReason.TransportChange) =>
-        ErrorUtil.invalidState(
-          s"Close reason 'TransportChange' cannot happen on a pool connection"
-        )
-
       case Failure(throwable) => complete(Failure(throwable))
     }
   }
 
-  private class SubscriptionManager(
-      val subscription: SequencerSubscription[SequencerClientSubscriptionError]
-  ) extends NamedLogging
+  private class SubscriptionManager(val subscriptionWrapper: SequencerSubscriptionWrapper)
+      extends NamedLogging
       with AutoCloseable {
-    val connection: SequencerConnection = subscription.connection
+    val connection: SequencerConnection = subscriptionWrapper.connection
 
     protected override val loggerFactory: NamedLoggerFactory =
       SequencerSubscriptionPoolImpl.this.loggerFactory
@@ -374,17 +368,17 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
     def register()(implicit traceContext: TraceContext): Unit = {
       connection.health.registerOnHealthChange(connectionListener).discard[Boolean]
-      subscription.closeReason.onComplete(closeWithSubscriptionReason(this))
+      subscriptionWrapper.closeReason.onComplete(closeWithSubscriptionReason(this))
     }
 
     def close(): Unit = {
       // If the connection comes back, the listener will be a different instance,
       // so we need to unregister to prevent the listeners to accumulate
       connection.health.unregisterOnHealthChange(connectionListener).discard[Boolean]
-      LifeCycle.close(subscription)(logger)
+      LifeCycle.close(subscriptionWrapper)(logger)
     }
 
-    override def toString: String = s"SubscriptionManager for $subscription"
+    override def toString: String = s"SubscriptionManager for $subscriptionWrapper"
   }
 
   private def updateHealth()(implicit traceContext: TraceContext): Unit = {
@@ -426,8 +420,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     super.onClosed()
   }
 
-  override def subscriptions: Set[SequencerSubscription[SequencerClientSubscriptionError]] =
-    lock.exclusive(trackedSubscriptions.toSet).map(_.subscription)
+  override def subscriptions: Set[SequencerSubscriptionWrapper] =
+    lock.exclusive(trackedSubscriptions.toSet).map(_.subscriptionWrapper)
 
   override def checkLiveness(
       eventAndCounter: EventAndOrdinal
@@ -437,7 +431,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
       lock
         .exclusive(trackedSubscriptions.toSet)
         .foreach(
-          _.subscription
+          _.subscriptionWrapper
             .checkLiveness(eventAndCounter, conf.maxTimestampDelta, conf.maxOrdinalDelta)
         )
   }
@@ -486,7 +480,7 @@ object SequencerSubscriptionPoolImpl {
 }
 
 class SequencerSubscriptionPoolFactoryImpl(
-    sequencerSubscriptionFactory: SequencerSubscriptionFactory,
+    subscriptionWrapperFactory: SequencerSubscriptionWrapperFactory,
     subscriptionHandlerFactory: SubscriptionHandlerFactory,
     metrics: SequencerConnectionPoolMetrics,
     metricsContext: MetricsContext,
@@ -505,7 +499,7 @@ class SequencerSubscriptionPoolFactoryImpl(
   )(implicit ec: ExecutionContext): SequencerSubscriptionPool =
     new SequencerSubscriptionPoolImpl(
       initialConfig,
-      sequencerSubscriptionFactory,
+      subscriptionWrapperFactory,
       subscriptionHandlerFactory,
       connectionPool,
       member,

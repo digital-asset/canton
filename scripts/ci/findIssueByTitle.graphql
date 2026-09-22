@@ -8,6 +8,13 @@ search(query: $searchstr, type: ISSUE, first: 10) {
             assignees(first: 0) {
                 totalCount
             }
+            timelineItems(last: 100, itemTypes: [ASSIGNED_EVENT]) {
+                nodes {
+                    ... on AssignedEvent {
+                        createdAt
+                    }
+                }
+            }
             projectItems(first:10, includeArchived:true) {
                 nodes {
                     id

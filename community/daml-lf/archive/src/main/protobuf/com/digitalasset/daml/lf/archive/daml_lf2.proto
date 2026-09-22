@@ -1043,6 +1043,16 @@ message Update {
     Expr cid = 2;
   }
 
+  message UnpackTemplate {
+    TypeConId template = 1;
+    Expr cid = 2;
+  }
+
+  message UnpackInterface {
+    TypeConId interface = 1;
+    Expr cid = 2;
+  }
+
   // Embedded Expression Update
   message EmbedExpr {
     // Expression type
@@ -1093,6 +1103,10 @@ message Update {
     Expr ledger_time_lt = 15;
 
     // Next id is 17.
+
+    // from 2.dev
+    UnpackTemplate unpack_template = 1000;
+    UnpackInterface unpack_interface = 1001;
   }
 
   reserved 8; // was RetrieveByKey lookup_by_key = 8

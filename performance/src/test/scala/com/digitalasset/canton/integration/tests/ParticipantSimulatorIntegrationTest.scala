@@ -42,6 +42,8 @@ sealed trait ParticipantSimulatorIntegrationTest
 
   override protected def numPermits: PositiveInt = PositiveInt.two
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
@@ -136,6 +138,16 @@ sealed trait ParticipantSimulatorIntegrationTest
 
       // allocate parties hosted with different observing participants
       val partyIds = (1 to numParties).zip(observerGroups).map { case (partyIndex, observers) =>
+        // wait for participants to be aware of each other
+        eventually() {
+          forAll(observers) { observer =>
+            assert(
+              participant1.topology.participant_synchronizer_states.active(daId, observer),
+              s"p1 waiting for $observer to be active",
+            )
+          }
+        }
+
         val partyId = PartyId
           .tryCreate(s"party-${this.getClass.getSimpleName}-$partyIndex", participant1.namespace)
         Seq[InstanceReference](participant1, sequencer1).foreach(

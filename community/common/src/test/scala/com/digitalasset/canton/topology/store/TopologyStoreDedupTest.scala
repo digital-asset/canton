@@ -266,7 +266,6 @@ private[canton] class DummyCopyTopologyStore(
   override def findStoredForVersion(
       asOfExclusive: CantonTimestamp,
       transaction: GenericTopologyTransaction,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = ???

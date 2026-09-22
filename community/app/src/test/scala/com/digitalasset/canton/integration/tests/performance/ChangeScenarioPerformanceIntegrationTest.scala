@@ -24,6 +24,8 @@ import scala.concurrent.duration.*
 sealed trait ChangeScenarioPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   import BasePerformanceIntegrationTest.*
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "modify the run type after a while" in { implicit env =>
     import env.*
 

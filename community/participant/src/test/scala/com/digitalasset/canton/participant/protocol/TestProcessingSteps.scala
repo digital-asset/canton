@@ -21,7 +21,7 @@ import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError
@@ -368,10 +368,15 @@ object TestProcessingSteps {
       with HasToByteString {
 
     def toBeSigned: Option[RootHash] = None
-    override protected def pretty: Pretty[TestViewTree] = adHocPrettyInstance
+
+    override def prettyCompanion: PrettyPrintingCompanion[TestViewTree] = TestViewTree
 
     override def toByteString: ByteString =
       throw new UnsupportedOperationException("TestViewTree cannot be serialized")
+  }
+
+  object TestViewTree extends PrettyPrintingCompanion[TestViewTree] {
+    override protected val pretty: Pretty[TestViewTree] = adHocPrettyInstance
   }
 
   case object TestViewType extends ViewTypeTest {

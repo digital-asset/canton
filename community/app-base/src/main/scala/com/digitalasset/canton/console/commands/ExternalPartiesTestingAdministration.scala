@@ -439,6 +439,7 @@ private[canton] class ExternalPartiesTestingAdministration(
                   keys = protocolSigningKeys,
                 )
               ),
+              isOffline = false,
             ),
             protocolVersion,
           )
@@ -593,6 +594,7 @@ private[canton] class ExternalPartiesTestingAdministration(
             threshold = confirmationThreshold,
             participants = hostingConfirming ++ hostingObserving,
             partySigningKeysWithThreshold = Some(signingKeys),
+            isOffline = false,
           ),
           protocolVersion,
         )

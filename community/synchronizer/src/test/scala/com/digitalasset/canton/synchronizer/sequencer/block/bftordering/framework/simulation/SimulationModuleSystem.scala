@@ -131,6 +131,13 @@ object SimulationModuleSystem {
     override def pureFuture[X](x: X): SimulationFuture[X] =
       new SimulationFuture.Pure(s"pure($x)", () => Try(x))
 
+    override def runAsync[X](
+        action: String,
+        compute: () => X,
+        orderingStage: Option[String] = None,
+    ): SimulationFuture[X] =
+      new SimulationFuture.Pure(action, () => Try(compute()))
+
     override def mapFuture[X, Y](
         future: SimulationFuture[X]
     )(fun: PureFun[X, Y], orderingStage: Option[String] = None): SimulationFuture[Y] =

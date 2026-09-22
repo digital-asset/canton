@@ -3,14 +3,18 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 
 /** Super trait to both [[BufferedAcsCommitment]] and
   * [[com.digitalasset.canton.protocol.messages.LegacyAcsCommitment]].
   */
-trait LegacyAcsCommitmentData extends PrettyPrinting {
+trait LegacyAcsCommitmentData extends PrettyPrintingFromCompanion {
   def sender: ParticipantId
   def counterParticipant: ParticipantId
   def period: LegacyCommitmentPeriod
@@ -31,7 +35,12 @@ final case class BufferedAcsCommitment(
     period: LegacyCommitmentPeriod,
     commitment: Digest.HashedDigestType,
 ) extends LegacyAcsCommitmentData {
-  override lazy val pretty: Pretty[BufferedAcsCommitment] =
+  override def prettyCompanion: PrettyPrintingCompanion[BufferedAcsCommitment] =
+    BufferedAcsCommitment
+}
+
+object BufferedAcsCommitment extends PrettyPrintingCompanion[BufferedAcsCommitment] {
+  override protected val pretty: Pretty[BufferedAcsCommitment] =
     prettyOfClass(
       param("synchronizerId", _.synchronizerId),
       param("sender", _.sender),

@@ -35,6 +35,42 @@ def test_collapse_log_records_merges_indented_benchmark_continuation_lines():
     ]
 
 
+def test_collapse_log_records_merges_indented_benchmark_continuation_lines_after_ansi_prefix():
+    records = list(
+        collapse_log_records(
+            [
+                "\x1b[0;39m\x1b[31mWARN  c.d.c.s.c.PeriodicAcknowledgements:MediatorReplayBenchmark/foo - Failed to acknowledge clean timestamp (usually because sequencer is down): ConnectionError(TransportError(Request failed for server-sequencer1-0.\n",
+                "  GrpcClientGaveUp: CANCELLED/RST_STREAM closed stream. HTTP/2 error code: CANCEL\n",
+                "  Request: acknowledge-signed/2026-08-27T23:18:45.408584Z))\n",
+                "\x1b[0m[info] All tests passed.\n",
+            ]
+        )
+    )
+
+    assert records == [
+        "\x1b[0;39m\x1b[31mWARN  c.d.c.s.c.PeriodicAcknowledgements:MediatorReplayBenchmark/foo - Failed to acknowledge clean timestamp (usually because sequencer is down): ConnectionError(TransportError(Request failed for server-sequencer1-0. GrpcClientGaveUp: CANCELLED/RST_STREAM closed stream. HTTP/2 error code: CANCEL Request: acknowledge-signed/2026-08-27T23:18:45.408584Z))",
+        "\x1b[0m[info] All tests passed.",
+    ]
+
+
+def test_collapse_log_records_merges_ansi_prefixed_continuation_lines():
+    records = list(
+        collapse_log_records(
+            [
+                "WARN  c.d.c.s.c.PeriodicAcknowledgements:MediatorReplayBenchmark/foo - Failed to acknowledge clean timestamp (usually because sequencer is down): ConnectionError(TransportError(Request failed for server-sequencer1-0.\n",
+                "\x1b[0m  GrpcClientGaveUp: CANCELLED/RST_STREAM closed stream. HTTP/2 error code: CANCEL\n",
+                "\x1b[0m  Request: acknowledge-signed/2026-08-27T23:18:45.408584Z))\n",
+                "[info] All tests passed.\n",
+            ]
+        )
+    )
+
+    assert records == [
+        "WARN  c.d.c.s.c.PeriodicAcknowledgements:MediatorReplayBenchmark/foo - Failed to acknowledge clean timestamp (usually because sequencer is down): ConnectionError(TransportError(Request failed for server-sequencer1-0. GrpcClientGaveUp: CANCELLED/RST_STREAM closed stream. HTTP/2 error code: CANCEL Request: acknowledge-signed/2026-08-27T23:18:45.408584Z))",
+        "[info] All tests passed.",
+    ]
+
+
 def test_collapse_log_records_keeps_separate_non_indented_records():
     records = list(
         collapse_log_records(

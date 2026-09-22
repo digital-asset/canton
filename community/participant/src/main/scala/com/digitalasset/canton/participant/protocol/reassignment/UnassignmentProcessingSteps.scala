@@ -658,7 +658,7 @@ private[reassignment] class UnassignmentProcessingSteps(
               unassignmentValidationResult.reassignmentId,
               unassignmentValidationResult.sourceSynchronizer,
             )
-            _ = if (isReassigningParticipant)
+            _ = if (storedInReassignmentStore)
               reassignmentMetrics.finalized.inc()(
                 ReassignmentMetrics.unassignment(
                   unassignmentValidationResult.sourceSynchronizer.map(_.logical),
@@ -677,7 +677,7 @@ private[reassignment] class UnassignmentProcessingSteps(
                 participantId,
                 requestId.unwrap,
                 trafficCost,
-                isReassigningParticipantOverride = Some(storedInReassignmentStore),
+                storedInReassignmentStore = storedInReassignmentStore,
               )
           } yield CommitAndStoreContractsAndPublishEvent(
             commitSetFO,

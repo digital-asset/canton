@@ -13,11 +13,12 @@ import com.digitalasset.canton.data.ActionDescription.{
   FetchActionDescription,
 }
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.{
   ProtoUnvalidatedSeq,
@@ -399,21 +400,8 @@ final case class ViewParticipantData private (
 
   override def hashPurpose: HashPurpose = HashPurpose.ViewParticipantData
 
-  override protected def pretty: Pretty[ViewParticipantData] = prettyOfClass(
-    paramIfNonEmpty("core inputs", _.coreInputs),
-    paramIfNonEmpty("created core", _.createdCore),
-    paramIfNonEmpty("created in subview, archived in core", _.createdInSubviewArchivedInCore),
-    paramIfNonEmpty("resolved keys", _.keyResolution),
-    param("action description", _.actionDescription),
-    paramIfTrue("rolled back", _.rollbackContext.inRollback),
-    param("salt", _.salt),
-    paramIfNonEmpty(
-      "external call results",
-      _.externalCallResults.map(result =>
-        s"${result.result.extensionId}:${result.result.functionId}@${result.exerciseIndex.unwrap}.${result.callIndex.unwrap}".unquoted
-      ),
-    ),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ViewParticipantData] =
+    ViewParticipantData
 
   /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
   @VisibleForTesting
@@ -442,8 +430,25 @@ final case class ViewParticipantData private (
 }
 
 object ViewParticipantData
-    extends VersioningCompanionContextMemoization[ViewParticipantData, (HashOps, ProtocolVersion)] {
+    extends VersioningCompanionContextMemoization[ViewParticipantData, (HashOps, ProtocolVersion)]
+    with PrettyPrintingCompanion[ViewParticipantData] {
   override val name: String = "ViewParticipantData"
+
+  override protected val pretty: Pretty[ViewParticipantData] = prettyOfClass(
+    paramIfNonEmpty("core inputs", _.coreInputs),
+    paramIfNonEmpty("created core", _.createdCore),
+    paramIfNonEmpty("created in subview, archived in core", _.createdInSubviewArchivedInCore),
+    paramIfNonEmpty("resolved keys", _.keyResolution),
+    param("action description", _.actionDescription),
+    paramIfTrue("rolled back", _.rollbackContext.inRollback),
+    param("salt", _.salt),
+    paramIfNonEmpty(
+      "external call results",
+      _.externalCallResults.map(result =>
+        s"${result.result.extensionId}:${result.result.functionId}@${result.exerciseIndex.unwrap}.${result.callIndex.unwrap}".unquoted
+      ),
+    ),
+  )
 
   // Inline context helper: forwards the negotiated pv (for content validation) alongside the
   // deserialization context (HashOps, ProtocolVersion).

@@ -9,7 +9,6 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.*
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{
@@ -31,12 +30,12 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.participant.synchronizer.*
+import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryHelpers.SequencerAggregatedInfo
 import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
 import com.digitalasset.canton.sequencing.client.pool.{
@@ -48,6 +47,7 @@ import com.digitalasset.canton.sequencing.client.{
   ReplayConfig,
   RichSequencerClient,
 }
+import com.digitalasset.canton.sequencing.{SequencerConnectionValidation, SequencerConnections}
 import com.digitalasset.canton.time.{Clock, WallClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
@@ -151,7 +151,11 @@ class GrpcSynchronizerRegistry(
     Either[SynchronizerRegistryError, SynchronizerHandle]
   ] = {
 
-    val connectionPoolE = getConnectionPool(storedConfig)
+    val connectionPoolE = getConnectionPool(
+      storedConfig.config,
+      storedConfig.configuredPsid.toOption,
+      poolName = "main",
+    )
 
     val runE = for {
       info <- connectHandshakeGeneric(
@@ -200,22 +204,26 @@ class GrpcSynchronizerRegistry(
     }.value
   }
 
-  private def getConnectionPool(storedConfig: StoredSynchronizerConnectionConfig)(implicit
+  private def getConnectionPool(
+      config: SynchronizerConnectionConfig,
+      psidO: Option[PhysicalSynchronizerId],
+      poolName: String,
+  )(implicit
       traceContext: TraceContext
   ): Either[SynchronizerRegistryError, SequencerConnectionPool] = {
-    val synchronizerLoggerFactory = storedConfig.configuredPsid.toOption match {
+    val synchronizerLoggerFactory = psidO match {
       case Some(psid) =>
         /*
          If the psid is known, we use it.
          Around LSU, it removes ambiguity in the logs when the pool is used to perform the handshake with the successor
          (that has the same alias).
          */
-        loggerFactory.append("psid", psid.toProtoPrimitive)
+        loggerFactory.append("psid", psid.toString)
 
       case None =>
         loggerFactory.append(
           "synchronizerAlias",
-          storedConfig.config.synchronizerAlias.toString,
+          config.synchronizerAlias.toString,
         )
 
     }
@@ -233,10 +241,10 @@ class GrpcSynchronizerRegistry(
       crypto = cryptoApiProvider.crypto,
       seedForRandomnessO = testingConfig.sequencerTransportSeed,
       metrics = metrics
-        .connectedSynchronizerMetrics(storedConfig.config.synchronizerAlias, participantId)
+        .connectedSynchronizerMetrics(config.synchronizerAlias, participantId)
         .sequencerClient
         .connectionPool,
-      metricsContext = storedConfig.configuredPsid.toOption
+      metricsContext = psidO
         .map(psid => MetricsContext("psid" -> psid.toProtoPrimitive))
         .getOrElse(MetricsContext.Empty),
       futureSupervisor = futureSupervisor,
@@ -246,15 +254,74 @@ class GrpcSynchronizerRegistry(
 
     connectionPoolFactory
       .createFromOldConfig(
-        sequencerConnections = storedConfig.config.sequencerConnections,
-        expectedPsidO = storedConfig.config.psid,
+        sequencerConnections = config.sequencerConnections,
+        expectedPsidO = config.psid,
         tracingConfig = participantNodeParameters.tracing,
-        name = "main",
+        name = poolName,
       )
       .leftMap[SynchronizerRegistryError](error =>
         SynchronizerRegistryError.SynchronizerRegistryInternalError.InvalidState(error.toString)
       )
   }
+
+  override def validateConfig(
+      newConfig: SynchronizerConnectionConfig,
+      sequencerConnectionValidation: SequencerConnectionValidation,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[SynchronizerRegistryError, Unit]] = {
+    val res = sequencerConnectionValidation match {
+      case SequencerConnectionValidation.Disabled =>
+        EitherT.pure[FutureUnlessShutdown, SynchronizerRegistryError](())
+      case _ => // All other validation modes map to the equivalent of `THRESHOLD_ACTIVE` implemented by the pool
+        initializeTemporaryPool(newConfig).map(_.close())
+    }
+
+    res.value
+  }
+
+  override def getPsid(config: SynchronizerConnectionConfig)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[SynchronizerRegistryError, PhysicalSynchronizerId]] = {
+    val res = initializeTemporaryPool(config).map { connectionPool =>
+      val psid = connectionPool.physicalSynchronizerIdO.getOrElse(
+        ErrorUtil.invalidState(
+          "A successfully started connection pool must have a synchronizer ID"
+        )
+      )
+      connectionPool.close()
+
+      psid
+    }
+
+    res.value
+  }
+
+  /** Create a temporary sequencer connection pool with the provided configuration and start it.
+    *
+    * WARNING: It is the reponsibility of the caller to close the returned connection pool.
+    *
+    * @return
+    *   The pool if initialization is successful, an error otherwise.
+    */
+  private def initializeTemporaryPool(config: SynchronizerConnectionConfig)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SequencerConnectionPool] =
+    for {
+      connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
+        getConnectionPool(config, psidO = None, poolName = "temp")
+      )
+      _ <- connectionPool.start().leftMap[SynchronizerRegistryError] {
+        case error: SequencerConnectionPoolError.TimeoutError =>
+          SynchronizerRegistryError.ConnectionErrors.SynchronizerIsNotAvailable
+            .Error(config.synchronizerAlias, error.toString)
+
+        case error @ (_: SequencerConnectionPoolError.ThresholdUnreachableError |
+            _: SequencerConnectionPoolError.InvalidConfigurationError) =>
+          SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencers
+            .Error(error.toString)
+      }
+    } yield connectionPool
 
   /** Performs the handshake with the synchronizer. Is used as part of the connection to a
     * synchronizer as well as pure handshake.
@@ -391,7 +458,11 @@ class GrpcSynchronizerRegistry(
   ] = {
     val expectedSequencers = storedConfig.config.sequencerConnections.aliasToConnection.keySet
 
-    val connectionPoolE = getConnectionPool(storedConfig)
+    val connectionPoolE = getConnectionPool(
+      storedConfig.config,
+      storedConfig.configuredPsid.toOption,
+      poolName = "main",
+    )
 
     /*
     Wait until one of the following conditions is met:

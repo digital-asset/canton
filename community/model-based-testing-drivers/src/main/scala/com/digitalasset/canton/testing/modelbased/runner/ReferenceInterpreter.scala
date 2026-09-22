@@ -21,10 +21,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  NextGenContractStateMachine as ContractStateMachine,
-}
+import com.digitalasset.daml.lf.transaction.FatContractInstance
 
 import java.io.File
 import scala.annotation.tailrec
@@ -42,12 +39,11 @@ object ReferenceInterpreter {
 
   /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath. */
   def apply(
-      loggerFactory: NamedLoggerFactory,
-      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.Key,
+      loggerFactory: NamedLoggerFactory
   ): ReferenceInterpreter = {
     val url = getClass.getClassLoader.getResource("universal.dar")
     require(url != null, s"universal.dar not found on the classpath")
-    new ReferenceInterpreter(new File(url.toURI), csmMode, loggerFactory)
+    new ReferenceInterpreter(new File(url.toURI), loggerFactory)
   }
 }
 
@@ -58,7 +54,6 @@ object ReferenceInterpreter {
   */
 class ReferenceInterpreter(
     darFile: File,
-    csmMode: ContractStateMachine.Mode,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
   import ReferenceInterpreter.*
@@ -77,7 +72,7 @@ class ReferenceInterpreter(
   // -- Ledger state --
 
   private val initialLedgerState: LedgerState = LedgerState(
-    IdeLedger.initialLedger(Time.Timestamp.Epoch, csmMode),
+    IdeLedger.initialLedger(Time.Timestamp.Epoch),
     com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey("ReferenceInterpreter"),
   )
 

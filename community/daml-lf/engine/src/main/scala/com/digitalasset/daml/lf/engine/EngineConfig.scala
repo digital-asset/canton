@@ -60,12 +60,13 @@ final case class EngineConfig(
     paranoid: Boolean = false,
     useDefensiveContractLookup: Boolean = false,
     gasBudget: Option[Long] = None,
+    executionMode: interpretation.ExecutionMode = interpretation.ExecutionMode.UpdateMachine,
     submissionPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
     validationPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(),
 ) {
   private[lf] def getCompilerConfig: speedy.Compiler.Config =
     speedy.Compiler.Config(
-      allowedLanguageVersions,
+      allowedLanguageVersions = allowedLanguageVersions,
       packageValidation =
         if (packageValidation)
           speedy.Compiler.FullPackageValidation
@@ -81,6 +82,7 @@ final case class EngineConfig(
           speedy.Compiler.FullProfile
         else
           speedy.Compiler.NoProfile,
+      cmdMode = executionMode,
     )
 
   private[lf] def authorizationChecker: AuthorizationChecker =

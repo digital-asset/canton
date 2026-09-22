@@ -19,7 +19,11 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -75,7 +79,7 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.reflect.ClassTag
 
-sealed trait TopologyStoreId extends PrettyPrinting with Product with Serializable {
+sealed trait TopologyStoreId extends PrettyPrintingFromCompanion with Product with Serializable {
   def isAuthorizedStore: Boolean = false
   def isSynchronizerStore: Boolean = false
   def isTemporaryStore: Boolean = false
@@ -91,33 +95,45 @@ object TopologyStoreId {
     */
   final case class SynchronizerStore(psid: PhysicalSynchronizerId) extends TopologyStoreId {
 
-    override protected def pretty: Pretty[this.type] =
-      prettyOfParam(_.psid)
+    override def prettyCompanion: PrettyPrintingCompanion[SynchronizerStore] = SynchronizerStore
 
     override def isSynchronizerStore: Boolean = true
 
     override def forSynchronizer: Option[PhysicalSynchronizerId] = Some(psid)
   }
 
+  object SynchronizerStore extends PrettyPrintingCompanion[SynchronizerStore] {
+    override protected val pretty: Pretty[SynchronizerStore] =
+      prettyOfParam(_.psid)
+  }
+
   // authorized transactions (the topology managers store)
   type AuthorizedStore = AuthorizedStore.type
   case object AuthorizedStore extends TopologyStoreId {
 
-    override protected def pretty: Pretty[AuthorizedStore.this.type] =
-      prettyOfString(_ => "Authorized")
+    override def prettyCompanion: PrettyPrintingCompanion[AuthorizedStore.type] =
+      AuthorizedStorePrettyPrintingCompanion
 
     override def isAuthorizedStore: Boolean = true
+  }
+
+  private object AuthorizedStorePrettyPrintingCompanion
+      extends PrettyPrintingCompanion[AuthorizedStore.type] {
+    override protected val pretty: Pretty[AuthorizedStore.type] =
+      prettyOfString(_ => "Authorized")
   }
 
   final case class TemporaryStore(name: String185) extends TopologyStoreId {
 
     override def isTemporaryStore: Boolean = true
 
-    override protected def pretty: Pretty[TemporaryStore.this.type] =
-      prettyOfString(_.name.unwrap)
+    override def prettyCompanion: PrettyPrintingCompanion[TemporaryStore] = TemporaryStore
   }
 
-  object TemporaryStore {
+  object TemporaryStore extends PrettyPrintingCompanion[TemporaryStore] {
+
+    override protected val pretty: Pretty[TemporaryStore] =
+      prettyOfString(_.name.unwrap)
 
     def create(name: String): Either[String, TemporaryStore] =
       String185.create(name).map(TemporaryStore(_))
@@ -152,7 +168,7 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
     rejectionReason: Option[String300],
 ) extends DelegatedTopologyTransactionLike[Op, M]
     with HasVersionedWrapper[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override protected def companionObj: StoredTopologyTransaction.type = StoredTopologyTransaction
 
@@ -167,14 +183,9 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
 
   override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
 
-  override protected def pretty: Pretty[StoredTopologyTransaction.this.type] =
-    prettyOfClass(
-      unnamedParam(_.transaction),
-      param("sequenced", _.sequenced.value),
-      param("validFrom", _.validFrom.value),
-      paramIfDefined("validUntil", _.validUntil.map(_.value)),
-      paramIfDefined("rejectionReason", _.rejectionReason.map(_.str.singleQuoted)),
-    )
+  override def prettyCompanion
+      : PrettyPrintingCompanion[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    StoredTopologyTransaction
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def selectMapping[TargetMapping <: TopologyMapping: ClassTag] = transaction
@@ -197,7 +208,20 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
 object StoredTopologyTransaction
     extends HasVersionedMessageCompanion[
       StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]
+    ]
+    with PrettyPrintingCompanion[
+      StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]
     ] {
+
+  override protected val pretty
+      : Pretty[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    prettyOfClass(
+      unnamedParam(_.transaction),
+      param("sequenced", _.sequenced.value),
+      param("validFrom", _.validFrom.value),
+      paramIfDefined("validUntil", _.validUntil.map(_.value)),
+      paramIfDefined("rejectionReason", _.rejectionReason.map(_.str.singleQuoted)),
+    )
 
   override def name: String = "stored topology transaction"
 
@@ -235,7 +259,7 @@ final case class ValidatedTopologyTransaction[+Op <: TopologyChangeOp, +M <: Top
     rejectionReason: Option[TopologyTransactionRejection] = None,
     expireImmediately: Boolean = false,
 ) extends DelegatedTopologyTransactionLike[Op, M]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
 
@@ -243,15 +267,24 @@ final case class ValidatedTopologyTransaction[+Op <: TopologyChangeOp, +M <: Top
       : Option[ValidatedTopologyTransaction[Op, TargetM]] =
     transaction.selectMapping[TargetM].map(tx => copy[Op, TargetM](transaction = tx))
 
-  override protected def pretty: Pretty[ValidatedTopologyTransaction.this.type] =
+  override def prettyCompanion
+      : PrettyPrintingCompanion[ValidatedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    ValidatedTopologyTransaction
+}
+
+object ValidatedTopologyTransaction
+    extends PrettyPrintingCompanion[
+      ValidatedTopologyTransaction[TopologyChangeOp, TopologyMapping]
+    ] {
+
+  override protected val pretty
+      : Pretty[ValidatedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
     prettyOfClass(
       unnamedParam(_.transaction),
       paramIfDefined("rejectionReason", _.rejectionReason),
       paramIfTrue("expireImmediately", _.expireImmediately),
     )
-}
 
-object ValidatedTopologyTransaction {
   type GenericValidatedTopologyTransaction =
     ValidatedTopologyTransaction[TopologyChangeOp, TopologyMapping]
 }
@@ -364,7 +397,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       namespaceFilter = Some(currentPsid.namespace.toProtoPrimitive),
     ).map(
       _.collectOfMapping[LsuAnnouncement]
-        .filter(_.mapping.successor.psid == currentPsid)
+        .filter(_.mapping.successor.psid == currentPsid.opaque)
         .result
         .maxByOption(_.serial)
         .map(_.mapping.upgradeTime)
@@ -570,13 +603,11 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions]
 
   /** Finds the last (i.e. highest id) stored transaction with `validFrom` strictly before
-    * `asOfExclusive` that has the same hash as `transaction` and the representative protocol
-    * version for the given `protocolVersion`. Excludes rejected transactions.
+    * `asOfExclusive` that has the same hash as `transaction`. Excludes rejected transactions.
     */
   def findStoredForVersion(
       asOfExclusive: CantonTimestamp,
       transaction: GenericTopologyTransaction,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]]
@@ -905,14 +936,12 @@ object TopologyStore {
       namespace: Namespace,
       identifier: Option[String185],
       validUntilCutoff: EffectiveTime,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[StateKeyFetch] = StateKeyFetch.pretty
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[StateKeyFetch] = StateKeyFetch
   }
-  object StateKeyFetch {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    import com.digitalasset.canton.util.ShowUtil.*
+  object StateKeyFetch extends PrettyPrintingCompanion[StateKeyFetch] {
 
-    val pretty: Pretty[StateKeyFetch] = prettyOfClass[StateKeyFetch](
+    override val pretty: Pretty[StateKeyFetch] = prettyOfClass[StateKeyFetch](
       param("code", _.code.code.unquoted),
       param("namespace", _.namespace),
       paramIfDefined("identifier", _.identifier.map(_.str.unquoted)),

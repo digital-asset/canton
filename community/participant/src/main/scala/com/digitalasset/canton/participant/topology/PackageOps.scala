@@ -25,6 +25,7 @@ import com.digitalasset.canton.ledger.api.{
   PriorTopologySerialNone,
   SinglePackageTargetVetting,
   UpdateVettedPackagesForceFlags,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
@@ -111,7 +112,9 @@ trait PackageOps extends NamedLogging {
       opts: ListVettedPackagesOpts
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[ParticipantVettedPackages]]
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, VettedPackagesPage[
+    ParticipantVettedPackages
+  ]]
 }
 
 class PackageOpsImpl(
@@ -290,7 +293,9 @@ class PackageOpsImpl(
 
   override def getVettedPackages(
       opts: ListVettedPackagesOpts
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[
+  )(implicit
+      tc: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, VettedPackagesPage[
     ParticipantVettedPackages
   ]] = {
     val synchronizers =
@@ -320,7 +325,13 @@ class PackageOpsImpl(
               (newRemainingPageSize, newResultsSoFar)
             }
       }
-      .map(_._2)
+      .map { case (remainingPageSize, results) =>
+        // If any `remainingPageSize` left, it means we ran out of synchronizers, so we're done.
+        val nextPageToken =
+          if (remainingPageSize > 0) None
+          else results.lastOption.map(_.toBoundedPageToken)
+        VettedPackagesPage(results, nextPageToken)
+      }
   }
 
   private def getVettedPackagesForSynchronizer(

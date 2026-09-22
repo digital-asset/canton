@@ -8,6 +8,7 @@ package com.digitalasset.canton.sequencer.admin.v30;
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
 import "com/digitalasset/canton/protocol/v31/sequencing.proto";
+import "com/digitalasset/canton/protocol/v32/sequencing.proto";
 import "com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_snapshot.proto";
 import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/duration.proto";
@@ -223,6 +224,7 @@ message OnboardingStateForSequencer {
   oneof parameters {
     com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 4;
+    com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 5;
   }
   SequencerSnapshot sequencer_snapshot = 3;
 }

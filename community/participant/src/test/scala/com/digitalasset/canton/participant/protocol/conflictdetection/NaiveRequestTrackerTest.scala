@@ -13,11 +13,13 @@ import com.digitalasset.canton.participant.store.memory.{
   ReassignmentCache,
 }
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ReassignmentStoreTest}
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
-class NaiveRequestTrackerTest
+final class NaiveRequestTrackerTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutorService
@@ -35,6 +37,8 @@ class NaiveRequestTrackerTest
       new ReassignmentCache(
         new InMemoryReassignmentStore(
           ReassignmentStoreTest.targetSynchronizerId,
+          DefaultTestIdentities.participant1,
+          new FailingOfflineTopologyLookup(),
           loggerFactory,
         ),
         FutureSupervisor.Noop,

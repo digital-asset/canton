@@ -8,7 +8,10 @@ import com.digitalasset.canton.ledger.api.UpdateFormat
 import com.google.protobuf.ByteString
 
 final case class GetUpdatesPageRequest(
-    startExclusive: Option[Option[Offset]], // Outer None == dynamic bound, inner None ==
+    // Outer None == dynamic bound, inner None == before ledger offset 1 (begin).
+    startExclusive: Option[
+      Option[Offset]
+    ],
     endInclusive: Option[Offset],
     continueStreamFromIncl: Option[Offset],
     maxPageSize: Int,

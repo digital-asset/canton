@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.PathRollbackContext.{RollbackSibling, firstChild}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.EitherUtil.*
@@ -38,7 +42,7 @@ object RollbackScope {
 
 final case class WithRollbackScope[T](rbScope: RollbackScope, unwrap: T)
 
-sealed trait RollbackContext extends PrettyPrinting {
+sealed trait RollbackContext extends PrettyPrintingFromCompanion {
   def rollbackScope: RollbackScope
   def inRollback: Boolean
 }
@@ -46,12 +50,16 @@ sealed trait RollbackContext extends PrettyPrinting {
 final case class NoPathRollbackScope(inRollback: Boolean) extends RollbackScope
 final case class NoPathRollbackContext(inRollback: Boolean) extends RollbackContext {
   override def rollbackScope: RollbackScope = NoPathRollbackScope(inRollback = inRollback)
-  override protected def pretty: Pretty[NoPathRollbackContext] =
+  override def prettyCompanion: PrettyPrintingCompanion[NoPathRollbackContext] =
+    NoPathRollbackContext
+}
+object NoPathRollbackContext extends PrettyPrintingCompanion[NoPathRollbackContext] {
+
+  override protected val pretty: Pretty[NoPathRollbackContext] =
     prettyOfClass(
       paramIfTrue("in rollback", _.inRollback)
     )
-}
-object NoPathRollbackContext {
+
   val empty: NoPathRollbackContext = NoPathRollbackContext(inRollback = false)
 }
 
@@ -97,7 +105,6 @@ final case class PathRollbackContext(
     path: Vector[RollbackSibling],
     nextChild: RollbackSibling,
 ) extends RollbackContext
-    with PrettyPrinting
     with Ordered[PathRollbackContext] {
 
   def enterRollback: PathRollbackContext = PathRollbackContext(path :+ nextChild, firstChild)
@@ -130,17 +137,21 @@ final case class PathRollbackContext(
       nextChild = nextChild.unwrap,
     )
 
-  override protected def pretty: Pretty[PathRollbackContext] = prettyOfClass(
-    param("rollback scope", _.rollbackScope.path),
-    param("next child", _.nextChild),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[PathRollbackContext] =
+    PathRollbackContext
 
   private lazy val sortKey: Vector[PositiveInt] = path :+ nextChild
   override def compare(that: PathRollbackContext): Int = sortKey.compare(that.sortKey)
 
 }
 
-object PathRollbackContext {
+object PathRollbackContext extends PrettyPrintingCompanion[PathRollbackContext] {
+
+  override protected val pretty: Pretty[PathRollbackContext] = prettyOfClass(
+    param("rollback scope", _.rollbackScope.path),
+    param("next child", _.nextChild),
+  )
+
   type RollbackSibling = PositiveInt
   val firstChild: RollbackSibling = PositiveInt.one
 

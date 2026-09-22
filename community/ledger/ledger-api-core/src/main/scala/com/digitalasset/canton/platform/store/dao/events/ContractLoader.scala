@@ -57,7 +57,7 @@ class PekkoStreamParallelBatchedLoader[Key, Value](
     with NamedLogging {
 
   private val (queue, done) = createQueue()
-    .batchN(
+    .batchNForMaxConcurrency(
       maxBatchSize = maxBatchSize,
       maxBatchCount = parallelism,
     )

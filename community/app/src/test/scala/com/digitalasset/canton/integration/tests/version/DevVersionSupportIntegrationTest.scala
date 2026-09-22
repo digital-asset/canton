@@ -4,7 +4,11 @@
 package com.digitalasset.canton.integration.tests.version
 
 import com.digitalasset.canton.HasExecutionContext
-import com.digitalasset.canton.console.{LocalParticipantReference, LocalSequencerReference}
+import com.digitalasset.canton.console.{
+  CommandFailure,
+  LocalParticipantReference,
+  LocalSequencerReference,
+}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -120,13 +124,15 @@ sealed trait DevVersionSupportIntegrationTest
     }
 
     "not be able to connect to a synchronizer with dev" onlyRunWhen (!_.isDev) in { env =>
-      assertThrowsAndLogsCommandFailures(
+      val expectedMessage =
+        s"The protocol version required by the server (${ProtocolVersion.dev}) is not among the supported protocol versions by the client"
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
         env.participant2.synchronizers.connect(env.sequencer1, env.daName),
+        _.warningMessage should include(expectedMessage),
         entry => {
           entry.shouldBeCantonErrorCode(SyncServiceInconsistentConnectivity)
-          entry.message should include(
-            s"The protocol version required by the server (${ProtocolVersion.dev}) is not among the supported protocol versions by the client"
-          )
+          entry.commandFailureMessage should include(expectedMessage)
         },
       )
     }

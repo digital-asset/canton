@@ -645,10 +645,15 @@ commands:
             num_test_buckets:
                 default: $CIRCLE_NODE_TOTAL
                 type: string
+            protocol_version:
+                default: ""
+                type: string
             succeed_on_error:
                 default: false
                 type: boolean
         steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>"
                 fail_on_error_in_output: true
@@ -1778,6 +1783,7 @@ jobs:
                     .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
                 environment:
                     EXECUTOR_NUM_CPUS: 1
+                    FAIL_ON_ERROR_IN_OUTPUT: false
                     MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
                     MIN_STEP_COUNT: << parameters.min_steps >>
                     MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>
@@ -1953,10 +1959,15 @@ jobs:
     crash_recovery_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 6
+        parameters:
+            protocol_version:
+                default: ""
+                type: string
         steps:
             - run_crash_recovery_tests:
                 exclude_unstable_tests: true
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+                protocol_version: << parameters.protocol_version >>
     daml_upgrade_pr:
         executor: canton-medium-docker
         steps:

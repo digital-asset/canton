@@ -185,7 +185,7 @@ object CantonPackageServiceError extends PackageServiceErrorGroup {
 
   }
 
-  @Resolution("Connect to a synchronzer before vetting a package.")
+  @Resolution("Connect to a synchronizer before vetting a package.")
   object NotConnectedToSynchronizer
       extends ErrorCode(
         id = "PACKAGE_SERVICE_NOT_CONNECTED_TO_SYNCHRONIZER",

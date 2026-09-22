@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
 import com.daml.metrics.api.testing.MetricValues.*
-import com.digitalasset.canton.annotations.UnstableTest
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters as ConsoleSequencingParameters
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
@@ -15,13 +15,24 @@ import com.digitalasset.canton.integration.bootstrap.{
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.{
+  HowLongToBlacklist,
+  HowManyCanWeBlacklist,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  BlacklistLeaderSelectionPolicyConfig,
+  SequencingParameters,
+}
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait BftSynchronizerSequencerConnectionManipulationTest
     extends CommunityIntegrationTest
@@ -43,13 +54,33 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
           )
         )
       }
-      .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(config.NonNegativeDuration.ofSeconds(1))
-      )
+      .addConfigTransform(ConfigTransforms.setSequencerInfoTimeout(1.second))
 
   "Basic synchronizer startup with 1 out of 2 sequencers threshold" in { implicit env =>
     import env.*
+
+    val newSequencingParameters = SequencingParameters
+      .Default(testedProtocolVersion)
+      .update(
+        // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
+        // The default timeout is 10s which can make some blocks be delayed by much, triggering DelayLogger to warn
+        // that wall-clock and bft-time diverges too much. So we lower the view-change timeout to 1s.
+        pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+        // define no blacklisting to avoid flakiness in this test where sequencer that got momentarily stopped gets blacklisted and cause failures in the test
+        blacklistLeaderSelectionPolicyConfig = BlacklistLeaderSelectionPolicyConfig(
+          howLongToBlacklist = HowLongToBlacklist.NoBlacklisting,
+          howManyCanWeBlacklist = HowManyCanWeBlacklist.NoBlacklisting,
+        ),
+      )
+    sequencer1.topology.sequencing_parameters.propose(
+      synchronizer1Id.logical,
+      ConsoleSequencingParameters(Some(newSequencingParameters.toByteString)),
+    )
+    eventually() {
+      sequencer1.bft
+        .get_ordering_topology()
+        .sequencingParameters shouldBe newSequencingParameters
+    }
 
     // STEP 1: connect participants for the synchronizer via "their" sequencers
     clue("participant1 connects to sequencer1, sequencer2") {
@@ -181,17 +212,8 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
   }
 }
 
-@UnstableTest // TODO(i25444): remove once the test is no longer flaky
 final class BftSynchronizerSequencerConnectionManipulationTestPostgres
     extends BftSynchronizerSequencerConnectionManipulationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
-      // The default timeout is 10s which can make some blocks be delayed by much, triggering DelayLogger to warn
-      // that wall-clock and bft-time diverges too much. So we lower the view-change timeout to 1s.
-      viewChangeTimeoutOverride = Some(1.second),
-    )
-  )
+  registerPlugin(new UseBftSequencer(loggerFactory))
 }

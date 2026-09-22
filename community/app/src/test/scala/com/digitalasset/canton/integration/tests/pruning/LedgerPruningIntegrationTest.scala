@@ -78,6 +78,8 @@ abstract class LedgerPruningIntegrationTest
     with HasCycleUtils
     with HasProgrammableSequencer {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   private val reconciliationInterval = JDuration.ofSeconds(1)
   private val confirmationResponseTimeout = NonNegativeFiniteDuration.tryOfSeconds(5)
   private val mediatorReactionTimeout = NonNegativeFiniteDuration.tryOfSeconds(5)

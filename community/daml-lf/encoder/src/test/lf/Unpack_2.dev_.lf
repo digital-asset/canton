@@ -1,0 +1,14 @@
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+module UnpackMod {
+
+  val unpackTemplate: ContractId TemplateMod:Person -> Update TemplateMod:Person =
+    \(cid: ContractId TemplateMod:Person) ->
+      unpack_template @TemplateMod:Person cid;
+
+  val unpackInterface: ContractId InterfaceExtMod:Boxy -> Update InterfaceExtMod:Boxy =
+    \(cid: ContractId InterfaceExtMod:Boxy) ->
+      unpack_interface @InterfaceExtMod:Boxy cid;
+
+}

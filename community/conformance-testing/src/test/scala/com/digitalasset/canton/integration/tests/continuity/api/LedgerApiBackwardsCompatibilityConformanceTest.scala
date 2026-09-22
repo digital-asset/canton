@@ -80,8 +80,6 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
 
     // Fails on TT 3.4.12 and 3.5.0  FAILED_PRECONDITION: AUTOMATIC_REASSIGNMENT_FOR_TRANSACTION_FAILED(9,7f2edb88): Automatically reassigning contracts to a common synchronizer failed.[0m
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
-    // Unknown reason TT 3.4.12 never ends
-    "DeduplicationMixedClients",
   )
 }
 

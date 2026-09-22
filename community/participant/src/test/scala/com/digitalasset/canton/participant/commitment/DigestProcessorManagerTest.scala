@@ -183,7 +183,7 @@ class DigestProcessorManagerTest
       // stop the new processor to not hang during shutdown
       val exception = new RuntimeException("expected failure")
 
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
         {
           proc2.startingPromise.failure(exception)
           a[ShutdownFailedException] should be thrownBy (mgr.close())
@@ -415,6 +415,11 @@ class DigestProcessorManagerTest
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] = FutureUnlessShutdown.pure(false)
+
+    override def createConsistencyCheckProcessor(
+        synchronizerAlias: SynchronizerAlias,
+        synchronizerId: SynchronizerId,
+    )(implicit traceContext: TraceContext): DigestConsistencyCheckProcessorImpl = ???
   }
 }
 

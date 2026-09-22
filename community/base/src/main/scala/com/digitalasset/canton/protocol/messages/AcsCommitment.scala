@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.option.*
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter.{
   ParsingResult,
@@ -39,7 +43,7 @@ final case class AcsCommitment private (
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitment]
     with ProtocolVersionedMemoizedEvidence
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with NoCopy {
 
   @transient override protected lazy val companionObj: AcsCommitment.type = AcsCommitment
@@ -52,7 +56,18 @@ final case class AcsCommitment private (
     digest = digest,
   )
 
-  override lazy val pretty: Pretty[AcsCommitment] =
+  override def prettyCompanion: PrettyPrintingCompanion[AcsCommitment] = AcsCommitment
+
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
+}
+
+object AcsCommitment
+    extends VersioningCompanionMemoization[AcsCommitment]
+    with PrettyPrintingCompanion[AcsCommitment] {
+  override val name: String = "AcsCommitment"
+
+  override protected val pretty: Pretty[AcsCommitment] =
     prettyOfClass(
       param("psid", _.psid),
       param("sender", _.sender),
@@ -60,13 +75,6 @@ final case class AcsCommitment private (
       param("period", _.period),
       param("commitment", _.digest),
     )
-
-  override protected[this] def toByteStringUnmemoized: ByteString =
-    super[HasProtocolVersionedWrapper].toByteString
-}
-
-object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
-  override val name: String = "AcsCommitment"
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),

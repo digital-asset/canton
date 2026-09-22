@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.{GeneratorsCrypto, Salt, TestHash}
+import com.digitalasset.canton.crypto.{Salt, TestHash}
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
   ExerciseActionDescription,
@@ -38,16 +38,15 @@ final class GeneratorsData(
     generatorsLf: GeneratorsLf,
     generatorsProtocol: GeneratorsProtocol,
     generatorsTopology: GeneratorsTopology,
-    generatorsCrypto: GeneratorsCrypto,
 ) {
   import com.digitalasset.canton.Generators.*
   import generatorsLf.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.data.GeneratorsDataTime.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
   import generatorsTopology.*
   import generatorsProtocol.*
-  import generatorsCrypto.*
 
   // If this pattern match is not exhaustive anymore, update the generator below
   {

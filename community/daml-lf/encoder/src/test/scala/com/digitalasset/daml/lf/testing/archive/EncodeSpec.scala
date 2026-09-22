@@ -173,10 +173,23 @@ ${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))("""
            val anExercise: (ContractId Mod:Person) -> Update Unit = \(cId: ContractId Mod:Person) ->
              exercise @Mod:Person Sleep (Mod:identity @(ContractId Mod:Person) cId) ();
 
+           val aFetchTemplate: (ContractId Mod:Person) -> Update Mod:Person = \(cId: ContractId Mod:Person) ->
+             fetch_template @Mod:Person cId;
+           val aFetchInterface: (ContractId Mod:Human) -> Update Mod:Human = \(cId: ContractId Mod:Human) ->
+             fetch_interface @Mod:Human cId;
+
 ${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))(s"""
            val aFecthByKey: Party -> Update ($tuple2TyCon (ContractId Mod:Person) Mod:Person) = \\(party: Party) ->
              fetch_by_key @Mod:Person party;
 """)}
+
+${onlyIf(LanguageVersion.featureUnpack.enabledIn(languageVersion))("""
+           val anUnpackTemplate: (ContractId Mod:Person) -> Update Mod:Person = \(cId: ContractId Mod:Person) ->
+             unpack_template @Mod:Person cId;
+           val anUnpackInterface: (ContractId Mod:Human) -> Update Mod:Human = \(cId: ContractId Mod:Human) ->
+             unpack_interface @Mod:Human cId;
+""")}
+
            val aGetTime: Update Timestamp =
              uget_time;
            val aLedgerTimeLT: Timestamp -> Update Bool = \(time: Timestamp) ->

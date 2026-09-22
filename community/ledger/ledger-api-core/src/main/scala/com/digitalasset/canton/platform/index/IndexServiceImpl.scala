@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.platform.index
 
+import cats.instances.option.*
+import cats.syntax.all.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamResponse,
   GetCompletionByHashResponse,
@@ -36,6 +38,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse.ProtoUpdates
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.{
   UpdateResponse,
@@ -148,7 +151,7 @@ private[index] class IndexServiceImpl(
     val contextualizedErrorLogger = ErrorLoggingContext(logger, loggingContext)
     val isTailingStream = endInclusive.isEmpty
 
-    withValidatedUpdateFormat(
+    withValidatedUpdateFormatSource[UpdatesResponse](
       updateFormat,
       getPackageMetadataSnapshot(contextualizedErrorLogger),
     ) {
@@ -182,6 +185,7 @@ private[index] class IndexServiceImpl(
                           internalUpdateFormat = internalUpdateFormat,
                           descendingOrder = descendingOrder,
                           skipPruningChecks = skipPruningChecks,
+                          limit = None,
                         )
                     }
 
@@ -234,7 +238,7 @@ private[index] class IndexServiceImpl(
           }
         case _ => ()
       }
-    }(contextualizedErrorLogger)
+    }
   }
 
   override def acs(
@@ -729,23 +733,40 @@ private[index] class IndexServiceImpl(
       calculatedEndInclusive: Option[Offset],
       skipPruningChecks: Boolean,
   )(implicit
-      loggingContext: LoggingContextWithTrace,
-      executionContext: ExecutionContext,
-  ): Future[Seq[GetUpdateResponse]] =
-    if (calculatedEndInclusive <= calculatedBeginExclusive) { // It can be strictly less in case of pruning offset being used
-      Future.successful(Vector.empty)
-    } else {
-      updates(
-        startExclusive = calculatedBeginExclusive,
-        endInclusive = calculatedEndInclusive,
-        updateFormat = getUpdatesPageRequest.updateFormat,
-        descendingOrder = getUpdatesPageRequest.descendingOrder,
-        skipPruningChecks = skipPruningChecks,
-      ).take(limit.toLong)
-        .collect { case ProtoUpdates(Some(response), _) => response }
-        .runWith(Sink.seq)(materializer)
-        .map(_.flatMap(getUpdatesResponseToGetUpdateResponse))
-    }
+      loggingContext: LoggingContextWithTrace
+  ): Future[Seq[GetUpdateResponse]] = {
+    val interfaceViewPackageUpgrade = createViewUpgradeMemoized
+    val contextualizedErrorLogger = ErrorLoggingContext(logger, loggingContext)
+    val beginInclusive = calculatedBeginExclusive.fold(Offset.firstOffset)(_.increment)
+    withValidatedUpdateFormatFuture(
+      getUpdatesPageRequest.updateFormat,
+      getPackageMetadataSnapshot(contextualizedErrorLogger),
+    )(
+      (
+        calculatedEndInclusive.filter(_ >= beginInclusive),
+        memoizedInternalUpdateFormat(
+          getPackageMetadataSnapshot = getPackageMetadataSnapshot,
+          updateFormat = getUpdatesPageRequest.updateFormat,
+          interfaceViewPackageUpgrade,
+        )(contextualizedErrorLogger)(),
+      ).tupled match {
+        case None => Future.successful(Seq.empty)
+        case Some((endInclusive, internalUpdateFormat)) =>
+          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetFrom, beginInclusive.toDecimalString)
+          Spans.setCurrentSpanAttribute(SpanAttribute.OffsetTo, endInclusive.toDecimalString)
+          updatesReader
+            .getUpdates(
+              offsetRange = OffsetRange(beginInclusive, endInclusive),
+              internalUpdateFormat = internalUpdateFormat,
+              descendingOrder = getUpdatesPageRequest.descendingOrder,
+              skipPruningChecks = skipPruningChecks,
+              limit = Some(limit),
+            )
+            .collect { case (_, ProtoUpdate(Some(response), _)) => response }
+            .runWith(Sink.seq)(materializer)
+      }
+    )
+  }
 
   def updatesPage(
       getUpdatesPageRequest: GetUpdatesPageRequest
@@ -989,7 +1010,14 @@ object IndexServiceImpl {
       either: Either[StatusRuntimeException, Source[A, NotUsed]]
   ): Source[A, NotUsed] = either.fold(Source.failed, identity)
 
-  private[index] def withValidatedUpdateFormat[T](
+  private[index] def validateUpdateFormat(
+      apiUpdateFormat: UpdateFormat,
+      metadata: PackageMetadata,
+  )(implicit errorLogger: ErrorLoggingContext): Either[StatusRuntimeException, Unit] =
+    checkUnknownIdentifiers(apiUpdateFormat, metadata)(errorLogger).left
+      .map(_.asGrpcError)
+
+  private[index] def withValidatedUpdateFormatSource[T](
       apiUpdateFormat: UpdateFormat,
       metadata: PackageMetadata,
   )(
@@ -997,10 +1025,19 @@ object IndexServiceImpl {
   )(implicit errorLogger: ErrorLoggingContext): Source[T, NotUsed] =
     foldToSource(
       for {
-        _ <- checkUnknownIdentifiers(apiUpdateFormat, metadata)(errorLogger).left
-          .map(_.asGrpcError)
+        _ <- validateUpdateFormat(apiUpdateFormat, metadata)
       } yield source
     )
+
+  private[index] def withValidatedUpdateFormatFuture[T](
+      apiUpdateFormat: UpdateFormat,
+      metadata: PackageMetadata,
+  )(
+      future: => Future[T]
+  )(implicit errorLogger: ErrorLoggingContext): Future[T] =
+    (for {
+      _ <- validateUpdateFormat(apiUpdateFormat, metadata)
+    } yield future).fold(Future.failed, identity)
 
   private[index] def validatedAcsActiveAtOffset[T](
       activeAt: Option[Offset],
@@ -1349,21 +1386,6 @@ object IndexServiceImpl {
       case Update.Transaction(value) => Offset.tryFromLong(value.offset)
       case Update.Reassignment(value) => Offset.tryFromLong(value.offset)
       case Update.TopologyTransaction(value) => Offset.tryFromLong(value.offset)
-    }
-
-  private def getUpdatesResponseToGetUpdateResponse(
-      getUpdatesResponse: GetUpdatesResponse
-  ): Option[GetUpdateResponse] =
-    getUpdatesResponse.update match {
-      case GetUpdatesResponse.Update.Empty =>
-        Some(GetUpdateResponse(GetUpdateResponse.Update.Empty))
-      case GetUpdatesResponse.Update.Transaction(value) =>
-        Some(GetUpdateResponse(GetUpdateResponse.Update.Transaction(value)))
-      case GetUpdatesResponse.Update.Reassignment(value) =>
-        Some(GetUpdateResponse(GetUpdateResponse.Update.Reassignment(value)))
-      case GetUpdatesResponse.Update.OffsetCheckpoint(_) => None
-      case GetUpdatesResponse.Update.TopologyTransaction(value) =>
-        Some(GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(value)))
     }
 
   def processAscendingPageData(

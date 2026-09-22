@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.ledger.error
 
-import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.base.error.{
   BaseError,
   DamlErrorWithDefiniteAnswer,
@@ -98,75 +97,6 @@ object LedgerApiErrors extends LedgerApiErrorGroup {
             "memoryPool" -> memoryPool,
             "limit" -> limit,
             "metricPrefix" -> metricPrefix,
-            "fullMethodName" -> fullMethodName,
-          ),
-        )
-  }
-
-  @Explanation(
-    "This error happens when the number of concurrent gRPC streaming requests exceeds the configured limit."
-  )
-  @Resolution(
-    """The following actions can be taken:
-      |1. Review the historical need for concurrent streaming by inspecting the metric given in the message.
-      |2. Review the maximum streams limit configured in the rate limiting configuration.
-      |3. Try to space out streaming requests such that they do not need to run in parallel with each other."""
-  )
-  object MaximumNumberOfStreams
-      extends ErrorCode(
-        id = "MAXIMUM_NUMBER_OF_STREAMS",
-        ErrorCategory.ContentionOnSharedResources,
-      ) {
-    final case class Rejection(
-        value: Long,
-        limit: Int,
-        metricPrefix: String,
-        fullMethodName: String,
-    )(implicit
-        errorLogger: ErrorLoggingContext
-    ) extends DamlErrorWithDefiniteAnswer(
-          cause =
-            s"The number of streams in use ($value) has reached or exceeded the limit ($limit). Metrics are available at $metricPrefix.",
-          extraContext = Map(
-            "value" -> value,
-            "limit" -> limit,
-            "metricPrefix" -> metricPrefix,
-            "fullMethodName" -> fullMethodName,
-          ),
-        )
-  }
-
-  @Explanation(
-    "This happens when the rate of submitted gRPC requests requires more CPU or database power than is available."
-  )
-  @Resolution(
-    """The following actions can be taken:
-      |Here the 'queue size' for the threadpool is considered as reported by the executor itself.
-      |1. Review the historical 'queue size' growth by inspecting the metric given in the message.
-      |2. Review the maximum 'queue size' limits configured in the rate limiting configuration.
-      |3. Try to space out requests that are likely to require a lot of CPU or database power.
-     """
-  )
-  object ThreadpoolOverloaded
-      extends ErrorCode(
-        id = "THREADPOOL_OVERLOADED",
-        ErrorCategory.ContentionOnSharedResources,
-      ) {
-    final case class Rejection(
-        name: String,
-        metricNameLabel: String,
-        queued: Long,
-        limit: Int,
-        fullMethodName: String,
-    )(implicit errorLogger: ErrorLoggingContext)
-        extends DamlErrorWithDefiniteAnswer(
-          s"The $metricNameLabel ($name) queue size ($queued) has exceeded the maximum ($limit).",
-          extraContext = Map(
-            "name" -> name,
-            "queued" -> queued,
-            "limit" -> limit,
-            "name_label" -> metricNameLabel,
-            "metrics" -> ExecutorServiceMetrics.CommonMetricsName.QueuedTasks,
             "fullMethodName" -> fullMethodName,
           ),
         )

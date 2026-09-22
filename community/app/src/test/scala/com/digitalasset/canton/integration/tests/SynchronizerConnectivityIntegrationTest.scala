@@ -14,7 +14,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{
@@ -54,14 +53,11 @@ sealed trait SynchronizerConnectivityIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1_S1M1
-      .addConfigTransform(
+      .addConfigTransforms(
         ConfigTransforms.updateAllSequencerClientConfigs_(
           _.focus(_.maxConnectionRetryDelay).replace(config.NonNegativeFiniteDuration.ofSeconds(1))
-        )
-      )
-      .addConfigTransform(x =>
-        x.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(NonNegativeDuration.tryFromDuration(2.seconds))
+        ),
+        ConfigTransforms.setSequencerInfoTimeout(2.second),
       )
       .withSetup { env =>
         import env.*
@@ -400,7 +396,12 @@ sealed trait SynchronizerConnectivityIntegrationTest
             ),
             validation = SequencerConnectionValidation.ThresholdActive,
           ),
-          _.shouldBeCantonErrorCode(SyncServiceError.SyncServiceInconsistentConnectivity),
+          _.warningMessage should include(
+            "Connection is not on expected sequencer"
+          ), // Connection warning
+          _.shouldBeCantonErrorCode(
+            SyncServiceError.SyncServiceInconsistentConnectivity
+          ), // Command error
         )
 
       def testPartialSequencerIdUpdate() = {

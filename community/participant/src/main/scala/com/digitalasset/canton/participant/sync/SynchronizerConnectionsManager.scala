@@ -11,7 +11,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
@@ -143,7 +142,6 @@ private[sync] class SynchronizerConnectionsManager(
     pendingLsuOperationsStore: PendingLsuOperation.Store,
     pendingOnboardingTransactionsStore: PendingOnboardingTransactions.Store,
     metrics: ParticipantMetrics,
-    sequencerInfoLoader: SequencerInfoLoader,
     isActive: () => Boolean,
     declarativeChangeTrigger: () => Unit,
     futureSupervisor: FutureSupervisor,
@@ -301,13 +299,13 @@ private[sync] class SynchronizerConnectionsManager(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    sequencerInfoLoader // TODO(i27622): use the connection pool to validate the config
-      .validateSequencerConnection(
-        config.synchronizerAlias,
-        config.psid,
-        config.sequencerConnections,
-        sequencerConnectionValidation,
-      )
+    EitherT(synchronizerRegistry.validateConfig(config, sequencerConnectionValidation))
+      .leftMap(SyncServiceError.SyncServiceInconsistentConnectivity.Error(_): SyncServiceError)
+
+  def getPsid(config: SynchronizerConnectionConfig)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
+    EitherT(synchronizerRegistry.getPsid(config))
       .leftMap(SyncServiceError.SyncServiceInconsistentConnectivity.Error(_): SyncServiceError)
 
   /** Reconnect configured synchronizers
@@ -922,7 +920,8 @@ private[sync] class SynchronizerConnectionsManager(
                 )
               )
 
-            _ = if (isLsu) metrics.setLsuStatus(ParticipantMetrics.LsuStatus.HandshakeDone, psid)
+            _ = if (isLsu)
+              metrics.setLsuStatus(ParticipantMetrics.LsuStatus.HandshakeDone, psid.opaque)
 
           } yield connectionInfo.staticSynchronizerParameters
       },
@@ -1552,6 +1551,15 @@ private[sync] class SynchronizerConnectionsManager(
         ),
       )
 
+      successorPsid <- EitherT.fromEither[FutureUnlessShutdown](
+        synchronizerSuccessor.psid.parseAsPhysical.leftMap(err =>
+          // Internal error because preconditions of the method have been violated
+          LsuError.Internal.Error(
+            OpaquePhysicalSynchronizerId.unparseablePSIdMessage(synchronizerSuccessor, err)
+          )
+        )
+      )
+
       upgrader = new AutomaticLogicalSynchronizerUpgrade(
         synchronizerConnectionConfigStore,
         ledgerApiIndexer,
@@ -1577,7 +1585,7 @@ private[sync] class SynchronizerConnectionsManager(
         parameters.lsuConfig,
         loggerFactory.append("lsu", synchronizerSuccessor.psid.suffix),
         parameters.acsCommitments.disableOldAcsCommitmentProcessor,
-      )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor))
+      )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor, successorPsid))
 
       _ <- upgrader.upgrade()
     } yield ()

@@ -123,7 +123,7 @@ final class LsuExhaustiveHandshakeIntegrationTest extends LsuBase {
         forAll(fixture.oldSynchronizerNodes.all ++ participants.local)(
           _.topology.lsu.announcement
             .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
             .loneElement
         )
       }
@@ -149,7 +149,7 @@ final class LsuExhaustiveHandshakeIntegrationTest extends LsuBase {
       eventually() {
         forAll(participants.local) { p =>
           getLsuStatusMetricValues(p)
-            .get(fixture.newPsid)
+            .get(fixture.newPsid.opaque)
             .value should be >= ParticipantMetrics.LsuStatus.LocalCopyDone
         }
       }

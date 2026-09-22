@@ -29,6 +29,7 @@ import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
   v30,
   v31,
+  v32,
   AcsCommitmentsCatchUpParameters as AcsCommitmentsCatchUpParametersInternal,
   DynamicSynchronizerParameters as DynamicSynchronizerParametersInternal,
   OnboardingRestriction as OnboardingRestrictionInternal,
@@ -392,6 +393,108 @@ object StaticSynchronizerParameters {
       serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
       synchronizerLimits <- parseRequired(
         InternalSynchronizerLimits.fromProtoV31,
+        "synchronizer_limits",
+        synchronizerLimitsP,
+      )
+
+      staticSynchronizerParameters <- StaticSynchronizerParametersInternal
+        .create(
+          SynchronizerCrypto
+            .RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
+          SynchronizerCrypto
+            .RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
+          requiredSymmetricKeySchemes,
+          requiredHashAlgorithms,
+          requiredCryptoKeyFormats,
+          requiredSignatureFormats,
+          topologyChangeDelay.toInternal,
+          enableTransparencyChecks,
+          protocolVersion,
+          serial,
+          synchronizerLimits,
+        )
+        .leftMap(_.toProtoDeserializationError)
+    } yield StaticSynchronizerParameters(staticSynchronizerParameters)
+  }
+
+  def fromProtoV32(
+      synchronizerParametersP: v32.StaticSynchronizerParameters
+  ): ParsingResult[StaticSynchronizerParameters] = {
+    val v32.StaticSynchronizerParameters(
+      requiredSigningSpecsOP,
+      requiredEncryptionSpecsOP,
+      requiredSymmetricKeySchemesP,
+      requiredHashAlgorithmsP,
+      requiredCryptoKeyFormatsP,
+      requiredSignatureFormatsP,
+      protocolVersionP,
+      serialP,
+      enableTransparencyChecks,
+      topologyChangeDelayP,
+      synchronizerLimitsP,
+    ) = synchronizerParametersP
+
+    for {
+      requiredSigningSpecsP <- requiredSigningSpecsOP.toRight(
+        ProtoDeserializationError.FieldNotSet(
+          "required_signing_specs"
+        )
+      )
+      requiredSigningAlgorithmSpecs <- parseRequiredSet(
+        "required_signing_algorithm_specs",
+        requiredSigningSpecsP.algorithms,
+        SynchronizerCrypto.SigningAlgorithmSpec.fromProtoEnum,
+      )
+      requiredSigningKeySpecs <- parseRequiredSet(
+        "required_signing_key_specs",
+        requiredSigningSpecsP.keys,
+        SynchronizerCrypto.SigningKeySpec.fromProtoEnum,
+      )
+      requiredEncryptionSpecsP <- requiredEncryptionSpecsOP.toRight(
+        ProtoDeserializationError.FieldNotSet(
+          "required_encryption_specs"
+        )
+      )
+      requiredEncryptionAlgorithmSpecs <- parseRequiredSet(
+        "required_encryption_algorithm_specs",
+        requiredEncryptionSpecsP.algorithms,
+        SynchronizerCrypto.EncryptionAlgorithmSpec.fromProtoEnum,
+      )
+      requiredEncryptionKeySpecs <- parseRequiredSet(
+        "required_encryption_key_specs",
+        requiredEncryptionSpecsP.keys,
+        SynchronizerCrypto.EncryptionKeySpec.fromProtoEnum,
+      )
+      requiredSymmetricKeySchemes <- parseRequiredSet(
+        "required_symmetric_key_schemes",
+        requiredSymmetricKeySchemesP,
+        SynchronizerCrypto.SymmetricKeyScheme.fromProtoEnum,
+      )
+      requiredHashAlgorithms <- parseRequiredSet(
+        "required_hash_algorithms",
+        requiredHashAlgorithmsP,
+        SynchronizerCrypto.HashAlgorithm.fromProtoEnum,
+      )
+      requiredCryptoKeyFormats <- parseRequiredSet(
+        "required_crypto_key_formats",
+        requiredCryptoKeyFormatsP,
+        SynchronizerCrypto.CryptoKeyFormat.fromProtoEnum,
+      )
+      requiredSignatureFormats <- parseRequiredSet(
+        "required_signature_formats",
+        requiredSignatureFormatsP,
+        SynchronizerCrypto.SignatureFormat.fromProtoEnum,
+      )
+      topologyChangeDelay <- ProtoConverter.parseRequired(
+        config.NonNegativeFiniteDuration.fromProtoPrimitive("topology_change_delay")(_),
+        "topology_change_delay",
+        topologyChangeDelayP,
+      )
+      // Data in the console is not really validated, so we allow for deleted
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP, allowDeleted = true)
+      serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
+      synchronizerLimits <- parseRequired(
+        InternalSynchronizerLimits.fromProtoV32,
         "synchronizer_limits",
         synchronizerLimitsP,
       )

@@ -33,6 +33,10 @@ while [[ "$#" -gt 0 ]]; do
             PRIVATE_KEY_FILE="$2"
             shift
             ;;
+        -v|--protocol-version)
+            PROTOCOL_VERSION="$2"
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             exit 1

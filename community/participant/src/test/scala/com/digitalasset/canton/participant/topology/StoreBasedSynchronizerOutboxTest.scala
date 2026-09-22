@@ -84,6 +84,7 @@ class StoreBasedSynchronizerOutboxTest
     PartyId(UniqueIdentifier.tryCreate(name, namespace)),
     PositiveInt.one,
     Seq.empty,
+    isOffline = false,
   )
   private val rootCert = txAddFromMapping(
     NamespaceDelegation.tryCreate(namespace, publicKey, CanSignAllMappings)

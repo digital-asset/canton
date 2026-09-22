@@ -14,6 +14,7 @@ import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
@@ -69,6 +70,8 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
     *   The logging context.
     * @param descendingOrder
     *   If true then events will be streamed from the most recent ones to the oldest.
+    * @param limit
+    *   If Some(x), stream at most x elements, used by paging
     * @tparam BufferOut
     *   The output type of elements retrieved from the buffer.
     * @return
@@ -81,11 +84,10 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
       toApiResponse: BufferOut => Future[ApiResponse],
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
+      limit: Option[Int],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, ApiResponse), NotUsed] = {
-    val startInclusive = offsetRange.startInclusive
-    val endInclusive = offsetRange.endInclusive
     def toApiResponseStream(
         slice: Vector[(Offset, BufferOut)]
     ): Source[(Offset, ApiResponse), NotUsed] =
@@ -102,94 +104,104 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
             )
           }
 
-    val source = if (descendingOrder) {
-      Source
-        .unfoldAsync(endInclusive.some) {
-          case Some(end) if startInclusive <= end =>
-            Future {
-              val bufferSlice = Timed.value(
-                bufferReaderMetrics.slice,
-                inMemoryFanoutBuffer.sliceBackwards(
-                  startInclusive = startInclusive,
-                  endInclusive = end,
-                  filter = bufferFilter,
-                ),
-              )
-
-              Some(bufferSlice match {
-                case InMemoryFanoutBuffer.BackwardSlice(slice, InMemoryFanoutBuffer.NoContinue) =>
-                  (None, toApiResponseStream(slice))
-                case InMemoryFanoutBuffer
-                      .BackwardSlice(slice, InMemoryFanoutBuffer.ContinueFromImfo(offset)) =>
-                  (Some(offset), toApiResponseStream(slice))
-                case InMemoryFanoutBuffer.BackwardSlice(
-                      slice,
-                      InMemoryFanoutBuffer.ContinueFromPersistence(endInclusive),
-                    ) => // empty vector
+    val source = Source
+      .unfoldAsync(offsetRange.some) {
+        case Some(currentRange) =>
+          Future {
+            val bufferSlice = Timed.value(
+              bufferReaderMetrics.slice,
+              inMemoryFanoutBuffer.slice(
+                range = currentRange,
+                filter = bufferFilter,
+                limit = limit,
+                reverseOrder = descendingOrder,
+              ),
+            )
+            bufferSlice match {
+              case None =>
+                Some(
                   (
                     None,
-                    toApiResponseStream(slice).concat(
-                      fetchFromPersistence(
-                        offsetRange = OffsetRange(
-                          startInclusive = startInclusive,
-                          endInclusive = endInclusive,
-                        ),
-                        filter = persistenceFetchArgs,
-                        descendingOrder = true,
-                        skipPruningChecks = skipPruningChecks,
-                      )
+                    fetchFromPersistence(
+                      offsetRange = currentRange,
+                      filter = persistenceFetchArgs,
+                      descendingOrder = descendingOrder,
+                      skipPruningChecks = skipPruningChecks,
+                      limit = limit,
                     ),
                   )
-              })
-            }
-          case _ => Future.successful(None)
-        }
-        .flatten
-    } else {
-      Source
-        .unfoldAsync(startInclusive) {
-          case scanFrom if scanFrom <= endInclusive =>
-            Future {
-              val bufferSlice = Timed.value(
-                bufferReaderMetrics.slice,
-                inMemoryFanoutBuffer.sliceForward(
-                  startInclusive = scanFrom,
-                  endInclusive = endInclusive,
-                  filter = bufferFilter,
-                ),
-              )
+                )
+              case Some(slice) =>
+                bufferReaderMetrics.sliceSize.update(slice.fromImfo.size)(MetricsContext.Empty)
 
-              bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
-              bufferSlice.checkPersistenceToIncl match {
-                case None =>
-                  val apiResponseSource = toApiResponseStream(bufferSlice.slice)
-                  val nextSliceStart =
-                    bufferSlice.slice.lastOption.map(_._1.increment)
-                  Some(nextSliceStart.getOrElse(endInclusive.increment) -> apiResponseSource)
+                if (descendingOrder) {
+                  limit match {
+                    case Some(l) =>
+                      val remainingRange = currentRange.before(slice.offsetRange)
+                      Some(
+                        (
+                          None,
+                          remainingRange match {
+                            case Some(persistenceRange) if slice.fromImfo.sizeIs < l =>
+                              toApiResponseStream(slice.fromImfo).concat(
+                                fetchFromPersistence(
+                                  offsetRange = persistenceRange,
+                                  filter = persistenceFetchArgs,
+                                  descendingOrder = descendingOrder,
+                                  skipPruningChecks = skipPruningChecks,
+                                  limit = Some(l - slice.fromImfo.size),
+                                )
+                              )
+                            case _ => toApiResponseStream(slice.fromImfo)
+                          },
+                        )
+                      )
+                    case _ =>
+                      Some(
+                        (
+                          currentRange.before(slice.offsetRange),
+                          toApiResponseStream(slice.fromImfo),
+                        )
+                      )
+                  }
+                } else {
+                  val sourceFromPersistence = currentRange.before(slice.offsetRange) match {
+                    case None =>
+                      Source.empty
+                    case Some(persistenceRange) =>
+                      fetchFromPersistence(
+                        offsetRange = persistenceRange,
+                        filter = persistenceFetchArgs,
+                        descendingOrder = descendingOrder,
+                        skipPruningChecks = skipPruningChecks,
+                        limit = limit,
+                      )
+                  }
 
-                case Some(checkPersistenceToIncl) =>
-                  val sourceFromBuffer =
-                    fetchFromPersistence(
-                      offsetRange = OffsetRange(
-                        startInclusive = scanFrom,
-                        endInclusive = checkPersistenceToIncl,
-                      ),
-                      filter = persistenceFetchArgs,
-                      descendingOrder = false,
-                      skipPruningChecks = skipPruningChecks,
-                    )(loggingContext)
-                      .concat(toApiResponseStream(bufferSlice.slice))
-                  Some(
-                    bufferSlice.slice.lastOption
-                      .map(offset => offset._1.increment)
-                      .getOrElse(endInclusive.increment) -> sourceFromBuffer
-                  )
-              }
+                  limit match {
+                    case None =>
+                      Some(
+                        (
+                          currentRange.after(slice.offsetRange),
+                          sourceFromPersistence.concat(toApiResponseStream(slice.fromImfo)),
+                        )
+                      )
+                    case Some(l) =>
+                      Some(
+                        (
+                          None,
+                          sourceFromPersistence.foldConcat(0)((count, _) => count + 1)(count =>
+                            toApiResponseStream(slice.fromImfo.take(l - count))
+                          ),
+                        )
+                      )
+                  }
+                }
             }
-          case _ => Future.successful(None)
-        }
-        .flatMapConcat(identity)
-    }
+          }
+        case _ => Future.successful(None)
+      }
+      .flatten
 
     Timed
       .source(bufferReaderMetrics.fetchTimer, source)
@@ -198,6 +210,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
         tx
       }
   }
+
 }
 
 private[platform] object BufferedStreamsReader {
@@ -207,6 +220,7 @@ private[platform] object BufferedStreamsReader {
         descendingOrder: Boolean,
         filter: FILTER,
         skipPruningChecks: Boolean,
+        limit: Option[Int],
     )(implicit
         loggingContext: LoggingContextWithTrace
     ): Source[(Offset, ApiResponse), NotUsed]

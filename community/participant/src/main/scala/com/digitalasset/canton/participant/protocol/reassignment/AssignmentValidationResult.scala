@@ -73,20 +73,36 @@ final case class AssignmentValidationResult private[reassignment] (
     commonValidationResult.activenessResult.isSuccessful || isReassignmentActive
   }
 
-  private[reassignment] def commitSet = CommitSet.createForAssignment(
-    reassignmentId,
-    contracts.contracts,
-    sourcePsid.map(_.logical),
-    completeReassignmentInStore = isReassigningParticipant,
-  )
+  private[reassignment] def commitSet(storedInReassignmentStore: Boolean) =
+    CommitSet.createForAssignment(
+      reassignmentId,
+      contracts.contracts,
+      sourcePsid.map(_.logical),
+      completeReassignmentInStore = storedInReassignmentStore,
+    )
 
-  // Assigning the internal contract ids to the contracts requires that all the contracts are
-  // already persisted in the contract store.
+  /** Returns a factory for the assignment event. The factory must only be applied once the assigned
+    * contracts are persisted in the contract store, since the event carries their internal contract
+    * ids.
+    *
+    * @param targetSynchronizer
+    *   the synchronizer the contracts are assigned to
+    * @param participantId
+    *   the id of the local participant
+    * @param recordTime
+    *   record time of the assignment
+    * @param trafficCost
+    *   traffic cost of the assignment
+    * @param storedInReassignmentStore
+    *   whether the reassignment was recorded in the reassignment store, emitted as
+    *   `isReassigningParticipant`
+    */
   private[reassignment] def createReassignmentAccepted(
       targetSynchronizer: Target[SynchronizerId],
       participantId: ParticipantId,
       recordTime: CantonTimestamp,
       trafficCost: NonNegativeLong,
+      storedInReassignmentStore: Boolean,
   )(implicit
       traceContext: TraceContext
   ): AcsChangeFactory => InternalContractIds => SequencedEventUpdate = {
@@ -131,7 +147,7 @@ final case class AssignmentValidationResult private[reassignment] (
             targetSynchronizer = targetSynchronizer,
             submitter = Option(submitterMetadata.submitter),
             reassignmentId = reassignmentId,
-            isReassigningParticipant = isReassigningParticipant,
+            isReassigningParticipant = storedInReassignmentStore,
           ),
           reassignment = Reassignment.Batch(reassignment),
           recordTime = recordTime,

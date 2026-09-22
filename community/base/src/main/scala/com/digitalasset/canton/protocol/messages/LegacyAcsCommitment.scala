@@ -12,7 +12,7 @@ import com.digitalasset.canton.data.{
   CantonTimestampSecond,
   LegacyAcsCommitmentData,
 }
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -83,7 +83,20 @@ abstract sealed case class LegacyAcsCommitment private (
       getCryptographicEvidence
     )
 
-  override lazy val pretty: Pretty[LegacyAcsCommitment] =
+  override def prettyCompanion: PrettyPrintingCompanion[LegacyAcsCommitment] =
+    LegacyAcsCommitment
+
+  def toQueuedAcsCommitment: BufferedAcsCommitment = this
+    .into[BufferedAcsCommitment]
+    .withFieldComputed(_.synchronizerId, _.psid.logical)
+    .transform
+}
+
+object LegacyAcsCommitment
+    extends VersioningCompanionMemoization[LegacyAcsCommitment]
+    with PrettyPrintingCompanion[LegacyAcsCommitment] {
+
+  override protected val pretty: Pretty[LegacyAcsCommitment] =
     prettyOfClassWithName("AscCommitment")(
       param("psid", _.psid),
       param("sender", _.sender),
@@ -92,13 +105,6 @@ abstract sealed case class LegacyAcsCommitment private (
       param("commitment", _.commitment),
     )
 
-  def toQueuedAcsCommitment: BufferedAcsCommitment = this
-    .into[BufferedAcsCommitment]
-    .withFieldComputed(_.synchronizerId, _.psid.logical)
-    .transform
-}
-
-object LegacyAcsCommitment extends VersioningCompanionMemoization[LegacyAcsCommitment] {
   override val name: String = "LegacyAcsCommitment"
 
   val versioningTable: VersioningTable = VersioningTable(

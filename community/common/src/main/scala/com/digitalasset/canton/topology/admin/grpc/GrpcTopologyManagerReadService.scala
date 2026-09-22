@@ -365,15 +365,8 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          val itemE = if (protoVersion == 30) {
-            elem.toProtoNamespaceDelegationV30.map(
-              ListNamespaceDelegationResponse.Result.Item.V30(_)
-            )
-          } else {
-            s"Not supported".asLeft
-          }
-
-          itemE
+          elem.toProtoNamespaceDelegationV30
+            .map(ListNamespaceDelegationResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
@@ -444,13 +437,8 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          val itemE = if (protoVersion == 30) {
-            elem.toProtoOwnerToKeyMappingV30.map(ListOwnerToKeyMappingResponse.Result.Item.V30(_))
-          } else {
-            s"Not supported".asLeft
-          }
-
-          itemE
+          elem.toProtoOwnerToKeyMappingV30
+            .map(ListOwnerToKeyMappingResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
@@ -485,13 +473,8 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          val itemE = if (protoVersion == 30) {
-            elem.toProtoPartyToKeyMappingV30.map(ListPartyToKeyMappingResponse.Result.Item.V30(_))
-          } else {
-            s"Not supported".asLeft
-          }
-
-          itemE
+          elem.toProtoPartyToKeyMappingV30
+            .map(ListPartyToKeyMappingResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
@@ -636,19 +619,17 @@ class GrpcTopologyManagerReadService(
         }
         .traverse { case (context, elem) =>
           val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion)
 
-          val itemE = if (protoVersion == 30) {
-            elem.toProtoPartyToParticipantV30.map(ListPartyToParticipantResponse.Result.Item.V30(_))
-          } else {
-            s"Not supported".asLeft
-          }
-
-          itemE
+          elem
+            .foldProtoVersioned(protoVersion)(
+              ListPartyToParticipantResponse.Result.Item.V30(_),
+              ListPartyToParticipantResponse.Result.Item.V31(_),
+            )
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
-                  s"Cannot serialize party to participant mappings using proto version $protoVersion: $err"
+                  s"Cannot serialize party to participant mapping to proto version ${protoVersion.v}: $err"
                 )
             )
             .map(item =>
@@ -1384,7 +1365,7 @@ class GrpcTopologyManagerReadService(
         }
 
         temporaryTopologyManager = generateOnboardingTransactions
-          .createTemporaryTopologyManager(temporaryTopologyStore)
+          .createTemporaryTopologyManager(temporaryTopologyStore, protocolVersion)
 
         _ <- generateOnboardingTransactions.generate(
           topologyStore = temporaryTopologyStore,

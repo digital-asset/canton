@@ -219,7 +219,8 @@ object OfflinePartyReplication {
           )
           .map(_.item)
           .collectFirst {
-            case PartyToParticipant(partyId, _, participants, _)
+            // TODO(#35664): Possibly consider _isOffline flag
+            case PartyToParticipant(partyId, _, participants, _, _isOffline)
                 if partyId.uid.toProtoPrimitive.contains(partyHint) && participants.exists(
                   _.participantId == sourceParticipant.id
                 ) && !participants

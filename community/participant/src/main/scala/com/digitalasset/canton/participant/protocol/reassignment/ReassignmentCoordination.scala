@@ -60,11 +60,16 @@ trait GetTopologyAtTimestamp {
   ]
 }
 
+/** @param isKnownSynchronizer
+  *   whether a persistent state exists for the synchronizer, which holds once the participant has
+  *   connected and handshaked with it. Being registered is not enough.
+  */
 class ReassignmentCoordination(
     reassignmentStoreFor: Target[SynchronizerId] => Either[
       ReassignmentProcessorError,
       ReassignmentStore,
     ],
+    isKnownSynchronizer: SynchronizerId => Boolean,
     reassignmentSubmissionFor: PhysicalSynchronizerId => Option[ReassignmentSubmissionHandle],
     pendingUnassignments: Source[SynchronizerId] => Option[ReassignmentSynchronizer],
     staticSynchronizerParametersGetter: StaticSynchronizerParametersGetter,
@@ -308,6 +313,11 @@ class ReassignmentCoordination(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
     for {
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        isKnownSynchronizer(source.unwrap),
+        (),
+        UnknownSynchronizer(source.unwrap, "storing assignment data"): ReassignmentProcessorError,
+      )
       reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
         reassignmentStoreFor(target)
       )
@@ -344,6 +354,8 @@ object ReassignmentCoordination {
 
     new ReassignmentCoordination(
       reassignmentStoreFor = reassignmentStoreFor,
+      isKnownSynchronizer = synchronizerId =>
+        syncPersistentStateManager.reassignmentStore(synchronizerId).isDefined,
       reassignmentSubmissionFor = submissionHandles,
       pendingUnassignments = pendingUnassignments,
       staticSynchronizerParametersGetter = syncPersistentStateManager,

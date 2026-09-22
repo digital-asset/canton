@@ -621,6 +621,7 @@ class TestingIdentityFactory(
             participants =
               Seq(HostingParticipant(participantId, ParticipantPermission.Confirmation)),
             partySigningKeysWithThreshold = Some(signingKeys),
+            isOffline = false,
           )
         )
     }
@@ -816,6 +817,7 @@ class TestingIdentityFactory(
             participantsForParty.map { case (id, attributes) =>
               HostingParticipant(id, attributes.permission)
             }.toSeq,
+            isOffline = false,
           )
         )
       }

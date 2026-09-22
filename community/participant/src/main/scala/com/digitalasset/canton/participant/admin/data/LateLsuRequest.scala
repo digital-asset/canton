@@ -25,7 +25,8 @@ final case class LateLsuRequest private (
     successorConfig: SynchronizerConnectionConfig,
     successorConnectionValidation: SequencerConnectionValidation,
 ) {
-  def successor: SynchronizerSuccessor = SynchronizerSuccessor(successorPsid, upgradeTime)
+  def successor: SynchronizerSuccessor =
+    SynchronizerSuccessor(successorPsid.opaque, upgradeTime)
 }
 
 object LateLsuRequest {

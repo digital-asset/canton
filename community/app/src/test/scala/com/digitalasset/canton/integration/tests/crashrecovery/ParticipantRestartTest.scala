@@ -108,6 +108,7 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasResolution,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
@@ -487,6 +488,7 @@ abstract class ParticipantRestartTest
             env.environment.clock,
             Eval.now(pnps.ledgerApiStore),
             Eval.now(pnps.contractStore),
+            new FailingOfflineTopologyLookup(),
             futureSupervisor,
             loggerFactory,
           )
@@ -1124,7 +1126,6 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     assertActiveContractsMatchBetweenCantonAndLedgerApiServer(participant1)
   }
 
-  // TODO(#35830): Investigate why this does not pass on PV36
   "successfully restart during a bong" taggedAs
     ReliabilityTest(
       Component("Bong application", "connected to single non-replicated participant"),
@@ -1137,7 +1138,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
         action = "retries on timeouts and connection issues",
       ),
       outcome = "bong can progress whenever the participant is running",
-    ) ignore { implicit env =>
+    ) in { implicit env =>
       import env.*
 
       console.set_command_timeout(
@@ -1230,12 +1231,15 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
           .filter(_._1) shouldBe empty
       }
 
-      eventually(20.seconds) {
-        val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
-        if (!optSafeTs.exists(_.toInstant > afterRestartTs))
-          fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
-        else {
-          logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+      // TODO(#34818): Enable this test to also run for PV36 onwards
+      if (testedProtocolVersion <= ProtocolVersion.v35) {
+        eventually(20.seconds) {
+          val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
+          if (!optSafeTs.exists(_.toInstant > afterRestartTs))
+            fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
+          else {
+            logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+          }
         }
       }
 

@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.pruning
 
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
@@ -34,6 +32,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   ContractStakeholdersAndReassignmentCounter,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.metrics.{

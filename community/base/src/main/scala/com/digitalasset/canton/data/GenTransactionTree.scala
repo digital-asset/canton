@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndexFromRoot
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -250,12 +250,7 @@ final case class GenTransactionTree private (
   def mapUnblindedRootViews(f: TransactionView => TransactionView): GenTransactionTree =
     this.copy(rootViews = rootViews.mapM(f))
 
-  override protected def pretty: Pretty[GenTransactionTree] = prettyOfClass(
-    param("submitter metadata", _.submitterMetadata),
-    param("common metadata", _.commonMetadata),
-    param("participant metadata", _.participantMetadata),
-    param("roots", _.rootViews),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[GenTransactionTree] = GenTransactionTree
 }
 
 final case class GenTransactionTreeDeserializationContext(
@@ -263,7 +258,14 @@ final case class GenTransactionTreeDeserializationContext(
     synchronizerLimits: SynchronizerLimits,
 )
 
-object GenTransactionTree {
+object GenTransactionTree extends PrettyPrintingCompanion[GenTransactionTree] {
+
+  override protected val pretty: Pretty[GenTransactionTree] = prettyOfClass(
+    param("submitter metadata", _.submitterMetadata),
+    param("common metadata", _.commonMetadata),
+    param("participant metadata", _.participantMetadata),
+    param("roots", _.rootViews),
+  )
 
   /** @throws GenTransactionTree$.InvalidGenTransactionTree
     *   if two subtrees have the same root hash

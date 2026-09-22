@@ -16,6 +16,7 @@ import com.digitalasset.canton.crypto.store.db.DbCryptoPrivateStore
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, KeyPurpose, SigningKeyUsage}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -58,8 +59,13 @@ import scala.concurrent.Future
 import scala.concurrent.duration.*
 import scala.util.Try
 
-@SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
-trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
+final class IgnoreSequencedEventsIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with TopologyTransactionReSignHelpers {
+
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
@@ -435,8 +441,12 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
             .result
             .map(_.transaction)
             .filter(_.mapping.code == NamespaceDelegation.code)
+
+          val resignedDelegations =
+            reSignForTestedProtocolVersion(participant1, delegations, testedProtocolVersion)
+
           participant2.topology.transactions.load(
-            delegations,
+            resignedDelegations,
             TopologyStoreId.Authorized,
             ForceFlag.AlienMember,
           )
@@ -524,7 +534,7 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
             clue("pinging to halt") {
               pokeAndAdvance(Future {
                 participant2.health.maybe_ping(participant1)
-              })
+              }(env.executionContext))
             } shouldBe None
 
             eventually() {
@@ -667,9 +677,4 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
       }
     }
   }
-}
-
-class IgnoreSequencedEventsIntegrationTestH2 extends IgnoreSequencedEventsIntegrationTest {
-  registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
 }

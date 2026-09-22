@@ -6,7 +6,11 @@ package com.digitalasset.canton.protocol
 import cats.implicits.toTraverseOps
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30.ExternalPartyAuthorization
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
@@ -22,11 +26,10 @@ final case class ExternalAuthorization(
       ExternalAuthorization.type
     ]
 ) extends HasProtocolVersionedWrapper[ExternalAuthorization]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[ExternalAuthorization] = prettyOfClass(
-    param("signatures", _.signatures)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ExternalAuthorization] =
+    ExternalAuthorization
 
   private def authenticationsV30: Seq[ExternalPartyAuthorization] =
     signatures.map { case (party, partySignatures) =>
@@ -54,7 +57,12 @@ final case class ExternalAuthorization(
 
 object ExternalAuthorization
     extends VersioningCompanion[ExternalAuthorization]
-    with ProtocolVersionedCompanionDbHelpers[ExternalAuthorization] {
+    with ProtocolVersionedCompanionDbHelpers[ExternalAuthorization]
+    with PrettyPrintingCompanion[ExternalAuthorization] {
+
+  override protected val pretty: Pretty[ExternalAuthorization] = prettyOfClass(
+    param("signatures", _.signatures)
+  )
 
   def create(
       signatures: Map[PartyId, Seq[Signature]],

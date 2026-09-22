@@ -12,11 +12,7 @@ import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{
-  Node,
-  NodeId,
-  NextGenContractStateMachine as ContractStateMachine,
-}
+import com.digitalasset.daml.lf.transaction.{Node, NodeId}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -45,7 +41,6 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
 
   val engine = Engine.DevEngine(loggerFactory)
   val contractIdVersion = ContractIdVersion.V1
-  val contractStateMode = ContractStateMachine.Mode.devDefault
 
   val operator = Ref.Party.assertFromString("operator")
   val investor = Ref.Party.assertFromString("investor")
@@ -86,7 +81,6 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
     engine
       .submit(
         submitters = Set(operator),
-        readAs = Set.empty,
         cmds = command.ApiCommands(
           ImmArray(
             command.ApiCommand.Exercise(
@@ -102,8 +96,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
         participantId = Ref.ParticipantId.assertFromString("participant"),
         submissionSeed = crypto.Hash.hashPrivateKey(getClass.getName + time.toString),
         contractIdVersion = contractIdVersion,
-        interpretationConfig =
-          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+        interpretationConfig = InterpretationConfig.Default,
         prefetchKeys = Seq.empty,
       )
       .consume(lookupHandler(pcs = contracts, pkgs = packages))
@@ -165,14 +158,13 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
     val Right((rTx, _)) =
       engine
         .reinterpret(
-          Set(operator),
-          cmd,
-          nodeSeeds.get(nodeId),
-          time,
-          time,
+          submitters = Set(operator),
+          command = cmd,
+          nodeSeed = nodeSeeds.get(nodeId),
+          preparationTime = time,
+          ledgerEffectiveTime = time,
           contractIdVersion = contractIdVersion,
-          interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(lookupHandler(pcs = contracts, pkgs = packages))
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet

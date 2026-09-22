@@ -8,7 +8,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.console.{FeatureFlag, LocalParticipantReference}
+import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.integration.plugins.{UseH2, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -19,7 +19,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.synchronizer.PendingOnboardingTransactions
-import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
 
 /** Checks registering and connecting with explicitly provided onboarding transactions.
@@ -30,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
   */
 final class ParticipantOnboardingTransactionsIntegrationTestH2
     extends CommunityIntegrationTest
+    with TopologyTransactionReSignHelpers
     with SharedEnvironment {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
@@ -46,22 +46,17 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
     )
   }
 
-  private def onboardingTransactionsOf(participant: LocalParticipantReference) =
-    participant.topology.transactions
-      .list(filterMappings = TopologyStore.initialParticipantDispatchingSet.forgetNE.toSeq)
-      .result
-      .map(_.transaction)
-
   "Registering with provided onboarding transactions" should {
     "reject a provided set that does not contain all the transactions required to onboard" in {
       implicit env =>
         import env.*
 
         // Only the NamespaceDelegation
-        val incompleteOnboardingTransactions = participant1.topology.transactions
-          .list(filterMappings = Seq(NamespaceDelegation.code))
-          .result
-          .map(_.transaction)
+        val incompleteOnboardingTransactions = reSignTopologyStoredTransactionsOf(
+          participant1,
+          Seq(NamespaceDelegation.code),
+          testedProtocolVersion,
+        )
 
         assertThrowsAndLogsCommandFailures(
           participant1.synchronizers.register_by_config(
@@ -81,7 +76,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
     "reject a provided set that contains several owner-to-key mappings" in { implicit env =>
       import env.*
 
-      val onboardingTransactions = onboardingTransactionsOf(participant1)
+      val onboardingTransactions = onboardingTransactionsOf(participant1, testedProtocolVersion)
       val duplicatedOtk = onboardingTransactions.filter(_.mapping.code == OwnerToKeyMapping.code)
       duplicatedOtk should not be empty
 
@@ -106,7 +101,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
 
         participant1.topology.synchronizer_trust_certificates.propose(participant1.id, daId)
 
-        val onboardingTransactions = onboardingTransactionsOf(participant1)
+        val onboardingTransactions = onboardingTransactionsOf(participant1, testedProtocolVersion)
         onboardingTransactions should have size 3
 
         participant1.synchronizers.register(
@@ -143,7 +138,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
 
         participant4.topology.synchronizer_trust_certificates.propose(participant4.id, daId)
 
-        val onboardingTransactions = onboardingTransactionsOf(participant4)
+        val onboardingTransactions = onboardingTransactionsOf(participant4, testedProtocolVersion)
         onboardingTransactions should have size 3
 
         def pendingOnboardingEntries =
@@ -186,7 +181,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
 
       participant2.topology.synchronizer_trust_certificates.propose(participant2.id, daId)
 
-      val onboardingTransactions = onboardingTransactionsOf(participant2)
+      val onboardingTransactions = onboardingTransactionsOf(participant2, testedProtocolVersion)
       onboardingTransactions should have size 3
 
       participant2.synchronizers
@@ -200,7 +195,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
 
       participant3.topology.synchronizer_trust_certificates.propose(participant3.id, daId)
 
-      val onboardingTransactions = onboardingTransactionsOf(participant3)
+      val onboardingTransactions = onboardingTransactionsOf(participant3, testedProtocolVersion)
       onboardingTransactions should have size 3
 
       // reversed on purpose (trust certificate first, namespace delegation last): sending the

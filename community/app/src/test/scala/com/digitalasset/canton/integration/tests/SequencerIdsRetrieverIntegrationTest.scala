@@ -12,8 +12,8 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.config.ExponentialBackoffConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{ExponentialBackoffConfig, NonNegativeDuration}
 import com.digitalasset.canton.console.MediatorReference
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
@@ -32,6 +32,8 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
+
+import scala.concurrent.duration.DurationInt
 
 /** Checks that the background task that retrieves and stores sequencer ids work correctly.
   */
@@ -79,7 +81,7 @@ final class SequencerIdsRetrieverIntegrationTest
         )
       }
       // Retry more aggressively
-      .addConfigTransform(
+      .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.lsu.sequencerIdsRetrievalRetry).replace(
             ExponentialBackoffConfig(
@@ -88,12 +90,9 @@ final class SequencerIdsRetrieverIntegrationTest
               maxRetries = Int.MaxValue,
             )
           )
-        )
-      )
-      .addConfigTransform(
+        ),
         // speed up the test
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(NonNegativeDuration.ofSeconds(2))
+        ConfigTransforms.setSequencerInfoTimeout(2.second),
       )
 
   private def getAliasToId()(implicit

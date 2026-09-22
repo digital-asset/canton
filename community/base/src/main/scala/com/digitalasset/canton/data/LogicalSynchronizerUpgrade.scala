@@ -6,8 +6,8 @@ package com.digitalasset.canton.data
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.v30.SynchronizerPredecessor as SynchronizerPredecessorProto
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.SequencedTime
+import com.digitalasset.canton.topology.{OpaquePhysicalSynchronizerId, PhysicalSynchronizerId}
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
@@ -112,7 +112,7 @@ object SynchronizerPredecessor
   *   When the migration is supposed to happen.
   */
 final case class SynchronizerSuccessor(
-    psid: PhysicalSynchronizerId,
+    psid: OpaquePhysicalSynchronizerId,
     upgradeTime: CantonTimestamp,
 )
 

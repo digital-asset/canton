@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.BlindingCommand
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndexFromRoot}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{RootHash, ViewHash, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -25,7 +29,7 @@ import monocle.macros.GenLens
   */
 final case class TransactionSubviews private[data] (
     subviews: MerkleSeq[TransactionView]
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def toProtoV30: v30.MerkleSeq = subviews.toProtoV30
 
   lazy val unblindedElementsWithIndex: Seq[(TransactionView, MerklePathElement)] =
@@ -76,9 +80,8 @@ final case class TransactionSubviews private[data] (
   def mapUnblinded(f: TransactionView => TransactionView): TransactionSubviews =
     TransactionSubviews(subviews.mapM(f))
 
-  def pretty: Pretty[TransactionSubviews.this.type] = prettyOfClass(
-    unnamedParam(_.subviews)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TransactionSubviews] =
+    TransactionSubviews
 
   /** Return the view hashes of the contained subviews
     *
@@ -106,7 +109,12 @@ final case class TransactionSubviews private[data] (
 
 }
 
-object TransactionSubviews {
+object TransactionSubviews extends PrettyPrintingCompanion[TransactionSubviews] {
+
+  override protected val pretty: Pretty[TransactionSubviews] = prettyOfClass(
+    unnamedParam(_.subviews)
+  )
+
   private[data] def fromProtoV30(
       context: (HashOps, ProtocolVersion),
       depthCounter: DepthCounter,
