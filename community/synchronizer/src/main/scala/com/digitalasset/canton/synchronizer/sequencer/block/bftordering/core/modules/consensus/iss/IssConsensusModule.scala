@@ -94,6 +94,11 @@ final class IssConsensusModule[E <: Env[E]](
     ],
     private val postponedConsensusMessageQueue: Option[FairBoundedQueue[Consensus.Message[E]]] =
       None,
+    // Monotonic elapsed-time source (nanoseconds) for the retransmission request rate limiter.
+    //  Defaults to `System.nanoTime()` (real, monotonic), which ensures that rate limiting allows retransmissions
+    //  to be sent even if the main clock is a SimClock and is not advancing, which in turn ensures that view
+    //  changes can make progress.
+    rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(
     // Only tests pass the state manager as parameter, and it's convenient to have it as an option
     //  to avoid two different constructor calls depending on whether the test want to customize it or not.
@@ -927,6 +932,7 @@ final class IssConsensusModule[E <: Env[E]](
       dependencies,
       loggerFactory,
       timeouts,
+      rateLimiterNanoTime = rateLimiterNanoTime,
     )()
     context.become(newBehavior)
     // It is possible that we were doing state transfer and quickly went back to consensus. And during the time we were

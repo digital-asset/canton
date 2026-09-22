@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -191,6 +192,43 @@ class RunningDigestProcessorTest
     )
   }
 
+  private val dummyAcsChange =
+    InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+
+  private val dummyAcsCommitment =
+    InternalIndexService.AcsUpdate.AcsCommitment(ByteString.empty)
+
+  private val partyHostingChange =
+    InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+      Set(PartyToParticipantAuthorization(alice, p2.toLf, Added(Submission))),
+      None,
+    )
+
+  private val offsetCheckpoint = InternalIndexService.AcsUpdate.OffsetCheckpoint
+
+  private val topologyReconciliationIntervalChange =
+    InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+      Set.empty,
+      GenericTopologyEvent
+        .SynchronizerParametersState(
+          TopologyTransaction
+            .tryCreate(
+              Replace,
+              PositiveInt.one,
+              SynchronizerParametersState(
+                DefaultTestIdentities.synchronizerId,
+                DynamicSynchronizerParameters
+                  .defaultValues(testedProtocolVersion)
+                  // Any value that's different from the previous value
+                  .update(reconciliationInterval = PositiveSeconds.tryOfSeconds(5000)),
+              ),
+              testedProtocolVersion,
+            )
+            .toByteStringChecked
+        )
+        .some,
+    )
+
   def mkTickSignaller(): TickSignaller =
     new LocalEventSignaller[TickListener, Offset]("subscriber", timeouts, loggerFactory)
 
@@ -202,8 +240,6 @@ class RunningDigestProcessorTest
           reconciliationInterval = 5.seconds
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val result = Source(
           Seq(
             ProcessingContext(tp(2), dummyAcsChange),
@@ -236,14 +272,8 @@ class RunningDigestProcessorTest
           reconciliationInterval = 1.hour,
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val dummyTopologyUpdate =
           InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(Set.empty, None)
-        val dummyAcsCommitment =
-          InternalIndexService.AcsUpdate.AcsCommitment(ByteString.empty)
-        val dummyCheckpoint =
-          InternalIndexService.AcsUpdate.OffsetCheckpoint
         val result = Source(
           Seq(
             ProcessingContext(Timepoint(off(2))(ts(2)), dummyAcsChange),
@@ -263,10 +293,10 @@ class RunningDigestProcessorTest
             // received acs commitments don't trigger by themselves, but should count towards processed events
             ProcessingContext(tp(16), dummyAcsCommitment),
             // a checkpoint should be injected here
-            ProcessingContext(tp(18), dummyCheckpoint),
-            ProcessingContext(tp(20), dummyCheckpoint),
+            ProcessingContext(tp(18), offsetCheckpoint),
+            ProcessingContext(tp(20), offsetCheckpoint),
             // a checkpoint should be injected here
-            ProcessingContext(tp(21), dummyCheckpoint),
+            ProcessingContext(tp(21), offsetCheckpoint),
           )
         ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
@@ -315,13 +345,6 @@ class RunningDigestProcessorTest
           reconciliationInterval = 5.seconds,
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
-        val partyHostingChange =
-          InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
-            Set(PartyToParticipantAuthorization(alice, p2.toLf, Added(Submission))),
-            None,
-          )
         val result = Source(
           Seq(
             ProcessingContext(tp(2), dummyAcsChange),
@@ -398,8 +421,6 @@ class RunningDigestProcessorTest
       }
 
       "emit a checkpoint fence for synchronizer parameter changes" in {
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val inputEvents = Seq(
           ProcessingContext(tp(1), dummyAcsChange),
           ProcessingContext(
@@ -457,10 +478,6 @@ class RunningDigestProcessorTest
       }
 
       "emit a checkpoint for received ACS commitments" in {
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
-        val dummyAcsCommitment =
-          InternalIndexService.AcsUpdate.AcsCommitment(ByteString.empty)
         val inputEvents = Seq(
           ProcessingContext(tp(1), dummyAcsChange),
           ProcessingContext(tp(2), dummyAcsCommitment),
@@ -497,8 +514,6 @@ class RunningDigestProcessorTest
           reconciliationInterval = 5.seconds
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val result = Source(
           Seq(
             ProcessingContext(tp(6), dummyAcsChange),
@@ -526,8 +541,6 @@ class RunningDigestProcessorTest
           reconciliationInterval = 5.seconds
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
         val result = Source(
           Seq(
             ProcessingContext(tp(7), dummyAcsChange),
@@ -1238,11 +1251,6 @@ class RunningDigestProcessorTest
           metrics = metrics,
         )
 
-        val dummyAcsChange =
-          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
-        val dummyAcsCommitment =
-          InternalIndexService.AcsUpdate.AcsCommitment(ByteString.empty)
-
         val emittedTicksF =
           signaller.readSignals(TickListener.TickOnlyListener, "tick subscriber").runWith(Sink.seq)
         val emittedTicksAndOffsetCheckpointsF = signaller
@@ -1315,6 +1323,88 @@ class RunningDigestProcessorTest
           },
         )
       }
+
+      "filter out OffsetCheckpoint updates with the same offset as previous update" in {
+        val signaller = mkTickSignaller()
+        val metrics = TestCommitmentMetrics()
+        val rdp = mkRunningDigestProcessor(
+          participant = thisParticipant,
+          tickSignaller = signaller,
+          reconciliationInterval = 200.seconds,
+          maxNumUpdatesBetweenCheckpoints = PositiveInt.one,
+          metrics = metrics,
+        )
+
+        val events = Source(
+          Seq(
+            ProcessingContext(tp(1), partyHostingChange),
+            ProcessingContext(tp(3), partyHostingChange),
+            ProcessingContext(tp(8), partyHostingChange),
+            ProcessingContext(tp(19), topologyReconciliationIntervalChange),
+            ProcessingContext(tp(19), offsetCheckpoint), // Duplicated offset on purpose
+            ProcessingContext(tp(22), partyHostingChange),
+            ProcessingContext(tp(26), dummyAcsChange),
+            ProcessingContext(tp(29), dummyAcsChange),
+          )
+        )
+
+        val checkpointsFromPipeline = events
+          .via(rdp.pipeline(None, None))
+          .runWith(Sink.seq)
+          .futureValue
+
+        checkpointsFromPipeline shouldBe Seq(
+          CheckpointWritten(ts(1), off(1), PartyHostingChange),
+          CheckpointWritten(ts(3), off(3), PartyHostingChange),
+          CheckpointWritten(ts(8), off(8), PartyHostingChange),
+          CheckpointWritten(ts(19), off(19), ReconciliationIntervalBoundary),
+          CheckpointWritten(ts(22), off(22), PartyHostingChange),
+          CheckpointWritten(ts(26), off(26), MaxEventsWithoutCheckpoint),
+        )
+
+        signaller.close()
+      }
+    }
+
+    "throw and log an exception on event with repeated offset different than OffsetCheckpoint" in {
+      val signaller = mkTickSignaller()
+      val metrics = TestCommitmentMetrics()
+      val rdp = mkRunningDigestProcessor(
+        participant = thisParticipant,
+        tickSignaller = signaller,
+        reconciliationInterval = 200.seconds,
+        maxNumUpdatesBetweenCheckpoints = PositiveInt.one,
+        metrics = metrics,
+      )
+
+      val events = Source(
+        Seq(
+          ProcessingContext(tp(8), partyHostingChange),
+          ProcessingContext(tp(19), topologyReconciliationIntervalChange),
+          ProcessingContext(tp(19), partyHostingChange), // Duplicated offset on purpose
+        )
+      )
+
+      val expectedExceptionMessage =
+        s"Only $offsetCheckpoint can repeat offsets, ${ProcessingContext(tp(19), partyHostingChange)} received at timepoint ${tp(19)}"
+
+      val exception = loggerFactory.assertLogs(
+        events
+          .via(rdp.pipeline(None, None))
+          .runWith(Sink.seq)
+          .failed
+          .futureValue,
+        errorLog => {
+          errorLog.errorMessage should include("An internal error has occurred.")
+          errorLog.throwable.map(_.getMessage) shouldBe expectedExceptionMessage.some
+        },
+      )
+
+      exception
+        .asInstanceOf[IllegalStateException]
+        .getMessage shouldBe expectedExceptionMessage
+
+      signaller.close()
     }
   }
 

@@ -46,12 +46,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ConsensusStatus,
   P2PNetworkOut,
 }
-import com.digitalasset.canton.time.SimClock
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicLong
 
 class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   private val self = BftNodeId("self")
@@ -584,11 +584,75 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         )
       )
     }
+
+    "refill the rate limiter from an independent monotonic time source so that requests resume while protocol time is static" in {
+      val networkOut = mock[ModuleRef[P2PNetworkOut.Message]]
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]]()
+
+      // An independent monotonic elapsed-time source (nanoseconds) for the rate limiter, decoupled
+      //  from protocol time (which, during a view change, can be a non-advancing sim clock). This is
+      //  what allows retransmissions to keep refilling and avoids the view-change liveness failure.
+      val rateLimiterNanos = new AtomicLong(0L)
+      val manager =
+        createManager(networkOut, rateLimiterNanoTime = () => rateLimiterNanos.get())
+
+      val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
+      val message = validRetransmissionRequest
+      val epochState = mock[EpochState[ProgrammableUnitTestEnv]]
+      when(epochState.epoch).thenReturn(epoch)
+      manager.startEpoch(epochState)
+
+      when(
+        cryptoProvider.verifySignedMessage(
+          message.signedEpochStatus,
+          AuthenticatedMessageType.BftSignedRetransmissionMessage,
+        )
+      ).thenReturn(() => Right(()))
+
+      def sendRequest(): Unit =
+        manager.handleMessage(
+          orderingTopologyInfo(cryptoProvider),
+          Consensus.RetransmissionsMessage.UnverifiedNetworkMessage(message),
+        )
+
+      // Exhaust the initial burst (protocol time and the rate-limiter source both held static).
+      val burstSize =
+        (RetransmissionsManager.MaxRetransmissionRequestBurstFactorPerNode /
+          RetransmissionsManager.RetransmissionRequestPeriod.toSeconds.toDouble).toInt
+      (1 to burstSize).foreach(_ => sendRequest())
+      context.runPipedMessages() should have size burstSize.toLong
+
+      // Once the burst is exhausted and time doesn't advance, further requests are rate-limited and dropped.
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
+        sendRequest(),
+        logEntry => logEntry.infoMessage should include("due to rate limiting"),
+      )
+      context.runPipedMessages() shouldBe empty
+
+      // Advancing only the independent rate-limiter source (protocol time stays static) refills the
+      //  limiter by one token, so retransmission request processing resumes.
+      rateLimiterNanos.addAndGet(
+        RetransmissionsManager.RetransmissionRequestPeriod.toNanos
+      )
+      sendRequest()
+      context.runPipedMessages() should have size 1
+
+      // With no further advancement, the next request is rate-limited again.
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
+        sendRequest(),
+        logEntry => logEntry.infoMessage should include("due to rate limiting"),
+      )
+      context.runPipedMessages() shouldBe empty
+    }
   }
 
   private def createManager(
       networkOut: ModuleRef[P2PNetworkOut.Message],
       previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
+      // Static by default (like a non-advancing sim clock), so tests exercise the burst deterministically.
+      rateLimiterNanoTime: () => Long = () => 0L,
   ): RetransmissionsManager[ProgrammableUnitTestEnv] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
     new RetransmissionsManager[ProgrammableUnitTestEnv](
@@ -597,10 +661,10 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       fail(_),
       previousEpochsCommitCerts = Map.empty,
       metrics,
-      new SimClock(loggerFactory = loggerFactory),
       loggerFactory,
       logEndOfEpochProgress = true,
       previousEpochsRetransmissionsTrackerO,
+      rateLimiterNanoTime,
     )
   }
 }

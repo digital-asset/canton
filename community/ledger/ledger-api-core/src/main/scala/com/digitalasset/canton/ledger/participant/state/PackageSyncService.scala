@@ -8,6 +8,7 @@ import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
   UpdateVettedPackagesOpts,
   UploadDarVettingChange,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
@@ -79,5 +80,5 @@ trait PackageSyncService {
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[EnrichedVettedPackages]]
+  ): Future[VettedPackagesPage[EnrichedVettedPackages]]
 }

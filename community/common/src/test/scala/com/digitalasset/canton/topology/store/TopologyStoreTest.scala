@@ -90,6 +90,31 @@ trait TopologyStoreTest
       mk: (PhysicalSynchronizerId, String) => TopologyStore[TopologyStoreId.SynchronizerStore]
   ): Unit = {
 
+    def toParticipantIds(
+        vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
+    ): Seq[ParticipantId] =
+      vps.result.map(_.mapping.participantId)
+
+    def findLatestPagedVettingChanges(
+        store: TopologyStore[TopologyStoreId.SynchronizerStore],
+        participantsFilter: Option[NonEmpty[Set[ParticipantId]]],
+        participantStartExclusive: Option[ParticipantId],
+        pageLimit: Int,
+    ): FutureUnlessShutdown[
+      StoredTopologyTransactions[TopologyChangeOp.Replace, VettedPackages]
+    ] =
+      store
+        .findPositiveTransactions(
+          asOf = CantonTimestamp.MaxValue,
+          asOfInclusive = true,
+          isProposal = false,
+          types = Seq(VettedPackages.code),
+          filterUid = participantsFilter.map(_.toSeq.map(_.uid)),
+          filterNamespace = None,
+          pagination = Some((participantStartExclusive.map(_.uid), pageLimit)),
+        )
+        .map(_.collectOfMapping[VettedPackages])
+
     "topology store" should {
 
       "clear all data without affecting other stores" in {
@@ -723,20 +748,11 @@ trait TopologyStoreTest
         "able to find latest vetted packages changes in order" in {
           val store = mk(da_vp123_physicalSynchronizerId, "case9a")
 
-          def toParticipantIds(
-              vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
-          ): Seq[ParticipantId] =
-            vps.result.map(_.mapping.participantId)
-
           def isNotSortedNaively(
               vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
           ): Assertion = {
-            val naiveKeys = toParticipantIds(vps).map(id => id.uid.toProtoPrimitive)
-            val keys = toParticipantIds(vps).map(id =>
-              id.uid.identifier.toProtoPrimitive
-                -> id.uid.namespace.toProtoPrimitive
-            )
-            naiveKeys.sorted should not equal keys.sorted
+            val ids = toParticipantIds(vps)
+            ids.sortBy(_.uid.toProtoPrimitive) should not equal ids
           }
 
           def isSorted(
@@ -748,26 +764,6 @@ trait TopologyStoreTest
             )
             keys.sorted should equal(keys)
           }
-
-          def findLatestPagedVettingChanges(
-              store: TopologyStore[TopologyStoreId.SynchronizerStore],
-              participantsFilter: Option[NonEmpty[Set[ParticipantId]]],
-              participantStartExclusive: Option[ParticipantId],
-              pageLimit: Int,
-          ): FutureUnlessShutdown[
-            StoredTopologyTransactions[TopologyChangeOp.Replace, VettedPackages]
-          ] =
-            store
-              .findPositiveTransactions(
-                asOf = CantonTimestamp.MaxValue,
-                asOfInclusive = true,
-                isProposal = false,
-                types = Seq(VettedPackages.code),
-                filterUid = participantsFilter.map(_.toSeq.map(_.uid)),
-                filterNamespace = None,
-                pagination = Some((participantStartExclusive.map(_.uid), pageLimit)),
-              )
-              .map(_.collectOfMapping[VettedPackages])
 
           for {
             _ <- update(
@@ -793,21 +789,21 @@ trait TopologyStoreTest
             vettedPackagesBounded <- findLatestPagedVettingChanges(
               store = store,
               participantsFilter = None,
-              participantStartExclusive = Some(vp3Id),
+              participantStartExclusive = Some(vp1Id),
               pageLimit = 1000,
             )
 
             vettedPackagesUserSpecified <- findLatestPagedVettingChanges(
               store = store,
-              participantsFilter = Some(NonEmpty(Set, vp2Id, vp3Id)),
+              participantsFilter = Some(NonEmpty(Set, vp1Id, vp2Id)),
               participantStartExclusive = None,
               pageLimit = 1000,
             )
 
             vettedPackagesUserSpecifiedBounded <- findLatestPagedVettingChanges(
               store = store,
-              participantsFilter = Some(NonEmpty(Set, vp2Id, vp3Id)),
-              participantStartExclusive = Some(vp3Id),
+              participantsFilter = Some(NonEmpty(Set, vp1Id, vp2Id)),
+              participantStartExclusive = Some(vp1Id),
               pageLimit = 1000,
             )
           } yield {
@@ -817,20 +813,56 @@ trait TopologyStoreTest
 
             vettedPackagesOnly2.result should have length 2
             isSorted(vettedPackagesOnly2)
-            toParticipantIds(vettedPackagesOnly2) should equal(Seq(vp3Id, vp2Id))
+            toParticipantIds(vettedPackagesOnly2) should equal(Seq(vp1Id, vp2Id))
 
             vettedPackagesBounded.result should have length 2
             isSorted(vettedPackagesBounded)
-            toParticipantIds(vettedPackagesBounded) should equal(Seq(vp2Id, vp1Id))
+            toParticipantIds(vettedPackagesBounded) should equal(Seq(vp2Id, vp3Id))
 
             vettedPackagesUserSpecified.result should have length 2
             isSorted(vettedPackagesUserSpecified)
-            toParticipantIds(vettedPackagesUserSpecified) should equal(Seq(vp3Id, vp2Id))
+            toParticipantIds(vettedPackagesUserSpecified) should equal(Seq(vp1Id, vp2Id))
 
             vettedPackagesUserSpecifiedBounded.result should have length 1
             toParticipantIds(vettedPackagesUserSpecifiedBounded) should equal(Seq(vp2Id))
           }
 
+        }
+
+        "not lose participants when paging with a filter longer than one query batch" in {
+          val store = mk(da_vp123_physicalSynchronizerId, "case9b")
+
+          // Chunks follow the filter's input order, so with `maxItemsInBatch = 2`,
+          // the chunks are: [vp1Id, vp2Id], [vp3Id]
+          val filter = NonEmpty(Set, vp1Id, vp2Id, vp3Id)
+
+          def nextPage(after: Option[ParticipantId]) =
+            findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = Some(filter),
+              participantStartExclusive = after,
+              pageLimit = 1,
+            )
+
+          for {
+            _ <- update(
+              store,
+              ts1,
+              add = Seq(vp_vp3_synchronizer1, vp_vp2_synchronizer1, vp_vp1_synchronizer1),
+            )
+
+            // Each chunk query gets the page limit and fills it, so without merging the results
+            // and cutting back, page1 is [vp1Id, vp3Id] and resuming after vp3Id we'd lose vp2Id.
+            page1 <- nextPage(None)
+            page2 <- nextPage(toParticipantIds(page1).lastOption)
+            page3 <- nextPage(toParticipantIds(page2).lastOption)
+            page4 <- nextPage(toParticipantIds(page3).lastOption)
+          } yield {
+            toParticipantIds(page1) should equal(Seq(vp1Id))
+            toParticipantIds(page2) should equal(Seq(vp2Id))
+            toParticipantIds(page3) should equal(Seq(vp3Id))
+            toParticipantIds(page4) shouldBe empty
+          }
         }
 
         "able to find positive transactions" in {

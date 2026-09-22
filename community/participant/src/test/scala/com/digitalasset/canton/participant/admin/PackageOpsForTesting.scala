@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.api.{
   PriorTopologySerial,
   SinglePackageTargetVetting,
   UpdateVettedPackagesForceFlags,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -71,10 +72,12 @@ class PackageOpsForTesting(
 
   override def getVettedPackages(
       opts: ListVettedPackagesOpts
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[
+  )(implicit
+      tc: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, VettedPackagesPage[
     ParticipantVettedPackages
   ]] =
-    EitherT.rightT(Seq())
+    EitherT.rightT(VettedPackagesPage(Seq(), None))
 
   override def updateVettedPackages(
       targetStates: Seq[SinglePackageTargetVetting[PackageId]],
