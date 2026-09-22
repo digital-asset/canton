@@ -9,8 +9,9 @@ _Write summary of release_
 ## What’s New
 
 ### CantonBFT
-- Batch fetching: retry patience defaults are now shorter to avoid long delays in case a batch is not retrieved timely.
-- Improved flow control defaults to avoid slowing down catch-up.
+- Raised some log thresholds around epoch/topology transition to INFO to troubleshoot issues with the orderer
+  not being able to make progress in some scenarios.
+- Fixed an OutputModule memory leak caused by abandoned block state during recovery and view changes.
 
 ### Topic A
 Template for a bigger topic
@@ -19,7 +20,7 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- Added runbook for reinitializing commitments to a recent point in time without reading or processing past changes.
+- improvement
 
 ### Preview Features
 - preview feature

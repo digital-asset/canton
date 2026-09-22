@@ -1,47 +1,35 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  dpmPath = "ghcr.io/digital-asset/temp/components/dpm";
-  dpmVersion = "1.0.20";
-  dpmRef = "${dpmPath}:${dpmVersion}";
+  dpmVersion = "1.0.22";
 
-  # These are OCI layer digests for each platform-specific artifact.
   dpmHashes = {
-    "x86_64-linux" = "sha256-Nzg47tUPIgqRCAQgBVRgXDo+Kiz16kHL3bhMH6uT374=";
-    "aarch64-linux" = "sha256-Dd7v8/8nst5tTL8bGoxAcIMWL2EIxBlrv9zESKqeXXU=";
-    "x86_64-darwin" = "sha256-FHLLSsQroWH8PhE/kMN5fch+OfmPDy5jxpt8PG4pvs0=";
-    "aarch64-darwin" = "sha256-izl9SStIMyI0cjrx8Qv2VYkSLvdjPUjRvfNayhsqM9s=";
+    "x86_64-linux" = sha256:1zw8w0vgjfz1m2fpk22dchvdavss38i9n7ycyjab1r325q3v5zgb;
+    "aarch64-linux" = sha256:1sbp4smsffgm984fib4p6g4z1mgbd5652ywr1rhx9hmc2kq8lb1n;
+    "x86_64-darwin" = "sha256:0ill45s9zgxpgr7x0p16ahbf43sxx7136c0vi88msxl7ciyziljj";
+    "aarch64-darwin" = "sha256:1nq2m141nvmis1axjl1v290q17lxcmxnqv6ssmcha3p1aa2im1z6";
   };
-  dpmHash = dpmHashes.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: $pkgs.stdenv.hostPlatform.system}");
+  dpmHash = dpmHashes.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: ${pkgs.stdenv.hostPlatform.system}");
 
   ociPlatforms = {
-    "x86_64-linux" = "linux/amd64";
-    "aarch64-linux" = "linux/arm64";
-    "x86_64-darwin" = "darwin/amd64";
-    "aarch64-darwin" = "darwin/arm64";
+    "x86_64-linux" = "linux-amd64";
+    "aarch64-linux" = "linux-arm64";
+    "x86_64-darwin" = "darwin-amd64";
+    "aarch64-darwin" = "darwin-arm64";
   };
   ociPlatform = ociPlatforms.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: ${pkgs.stdenv.hostPlatform.system}");
 in
 pkgs.stdenv.mkDerivation {
-  pname = "dpm";
-  version = dpmVersion;
+  name = "dpm-gh";
 
-  src = pkgs.stdenv.mkDerivation {
-    name = "dpm-pull-${dpmRef}.${ociPlatform}";
-    nativeBuildInputs = [ pkgs.oras pkgs.cacert ];
-
-    buildCommand = ''
-      set -e
-      echo "Pulling dpm component from ${dpmRef}.${ociPlatform}"
-      oras pull --platform ${ociPlatform} -o $out ${dpmRef}
-    '';
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-    outputHash = dpmHash;
+ src = builtins.fetchurl {
+    url = "https://github.com/digital-asset/dpm/releases/download/${dpmVersion}/dpm-${dpmVersion}-${ociPlatform}.tar.gz";
+    sha256 = "${dpmHash}";
   };
 
+  sourceRoot = ".";
   installPhase = ''
     mkdir -p $out/bin
-    install -Dm755 $src/dpm $out/bin/dpm
+    cp -r * "$out/bin"
   '';
 }

@@ -5,15 +5,19 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeNumeric, PositiveDouble}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.util.RateLimiter
 
 import scala.collection.mutable
 
 class BftNodeRateLimiter(
-    clock: Clock,
     maxTasksPerSecond: NonNegativeNumeric[Double],
     maxBurstFactor: PositiveDouble,
+    // Elapsed-time source in nanoseconds, injectable for tests.
+    //  Defaults to `System.nanoTime()`, which (unlike a wall clock) is monotonic and unaffected by
+    //  system time corrections. RateLimiter interprets this as elapsed nanoseconds, so a wall-clock-based
+    //  source could go backwards, inflate the token debt, and suppress retransmissions until wall time
+    //  catches up, recreating the view-change liveness failure this rate limiter must avoid.
+    timeSource: => Long = System.nanoTime(),
 ) {
   private val rateLimiter: mutable.Map[BftNodeId, RateLimiter] = mutable.Map()
 
@@ -24,7 +28,7 @@ class BftNodeRateLimiter(
         new RateLimiter(
           maxTasksPerSecond,
           maxBurstFactor,
-          nanoTime = clock.now.toMicros * 1000,
+          timeSource,
         ),
       )
       .checkAndUpdateRate()

@@ -287,7 +287,7 @@ final class AvailabilityModule[E <: Env[E]](
       case Availability.LocalDissemination.LocalBatchCreated(requests) =>
         emitBatchWaitLatency()
         val batch = OrderingRequestBatch.create(requests, lastKnownEpochNumber)
-        val batchId = BatchId.from(batch)
+        val batchId = emitLocalBatchIdComputationLatency(BatchId.from(batch))
         spanManager.trackSpansForBatch(
           batchId,
           spans = requests.map { t =>
@@ -1215,6 +1215,9 @@ final class AvailabilityModule[E <: Env[E]](
         logger.debug(s"$messageType: removing $batchId from incoming batch requests")
         outputFetchProtocolState.incomingBatchRequests.remove(batchId).discard
 
+      case validated: Availability.LocalOutputFetch.LocalFetchedBatchValidated =>
+        handleLocalFetchedBatchValidated(messageType, validated)
+
       case Availability.LocalOutputFetch.FetchedBatchStored(batchId) =>
         outputFetchProtocolState.pendingRemoteBatchIdsToStore.remove(batchId).discard
         outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
@@ -1234,6 +1237,24 @@ final class AvailabilityModule[E <: Env[E]](
           ) =>
         if (outputFetchProtocolState.pendingRemoteBatchIdsToStore.contains(batchId)) {
           logger.info(s"Won't retry fetching remote batch $batchId, because it is being stored")
+          return
+        }
+        if (outputFetchProtocolState.pendingRemoteBatchIdsToValidate.contains(batchId)) {
+          // A response already arrived and its payload is being (re)hashed and validated off the
+          //  actor thread. Starting another download now would duplicate the fetch and hashing work
+          //  (and could later trigger a duplicate store), so instead we reschedule the timeout to keep
+          //  a single retry chain alive: if validation turns out invalid, clearing the phase lets this
+          //  rescheduled timeout resume retrying.
+          logger.info(
+            s"Won't retry fetching remote batch $batchId yet, because it is being validated; rescheduling timeout"
+          )
+          context
+            .delayedEvent(
+              timeout,
+              Availability.LocalOutputFetch
+                .FetchRemoteBatchDataTimeout(nodesThatTimedOut, batchId, epochNumber, timeout),
+            )
+            .discard
           return
         }
         val status = outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
@@ -1278,6 +1299,7 @@ final class AvailabilityModule[E <: Env[E]](
           missingBatchStatus.calculateTimeout(),
           nodesThatTimedOut,
         )
+
       case LocalOutputFetch.PickedRecipientsForFetch(
             chosenRecipients,
             batchId,
@@ -1372,34 +1394,101 @@ final class AvailabilityModule[E <: Env[E]](
     val batchId = message.batchId
 
     outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
-      case Some(missingBatchStatus) =>
+      case Some(_)
+          if outputFetchProtocolState.pendingRemoteBatchIdsToValidate.contains(batchId) ||
+            outputFetchProtocolState.pendingRemoteBatchIdsToStore.contains(batchId) =>
+        // A response for this batch is already being validated or stored. Validating (i.e. hashing)
+        //  it again would duplicate the expensive hashing work and could later trigger a duplicate
+        //  store, so we suppress it.
+        logger.debug(
+          s"$messageType: received $batchId but it is already being validated or stored, ignoring"
+        )
+      case Some(_) =>
         val batch = message.batch
         val from = message.from
         val timeWeReceivedResponse = Instant.now()
-        validateRemotelyFetchedBatch(batchId, batch, from).fold(
-          _(), // Call log action if validation fails
-          _ => {
-            logger.debug(s"$messageType: received $batchId, persisting it")
-            outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
-            missingBatchStatus.firstTimeWeMadeRequest.get(from).foreach {
-              timeWeMadeRequestToThisNode =>
-                emitOutputFetchLatency(
-                  metrics,
-                  from,
-                  timeWeMadeRequestToThisNode,
-                  timeWeReceivedResponse,
-                )
-            }
-            pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
-              case Failure(exception) =>
-                abort(s"Failed to add batch $batchId", exception)
-              case Success(_) =>
-                Availability.LocalOutputFetch.FetchedBatchStored(batchId)
-            }
-          },
-        )
+        // Remotely fetched batches only need to be validated for their hash, to make sure we are getting
+        //  the right payload, i.e., the one that matches the batch id. Otherwise, the payload being right,
+        //  all the other validations have already been previously performed in a way
+        //  that generated the quorum and proof-of-availability.
+        //
+        //  However, recomputing the batch ID hashes the whole batch payload, which can be expensive and, during
+        //  state transfer, happens for many batches in quick succession. We therefore perform it off
+        //  the actor thread and continue handling (which mutates state) once the result is piped back.
+        //  Validation is tracked as an in-flight phase before it is scheduled, so that a fetch timeout
+        //  firing while hashing is still in progress does not start a duplicate download.
+        outputFetchProtocolState.pendingRemoteBatchIdsToValidate.add(batchId).discard
+        val fetchedBatchIdValidationStage =
+          metrics.performance.orderingStageLatency.labels.stage.values.availability.hashing.FetchedBatchIdValidation
+        pipeToSelf(
+          context.runAsync(
+            fetchedBatchIdValidationStage,
+            () => BatchId.from(batch) == batchId,
+            orderingStage = Some(fetchedBatchIdValidationStage),
+          )
+        ) {
+          case Failure(exception) =>
+            abort(s"Failed to validate fetched batch $batchId", exception)
+          case Success(isValid) =>
+            Availability.LocalOutputFetch.LocalFetchedBatchValidated(
+              batchId,
+              batch,
+              from,
+              isValid,
+              timeWeReceivedResponse,
+            )
+        }
       case None =>
         logger.debug(s"$messageType: received $batchId but nobody needs it, ignoring")
+    }
+  }
+
+  private def handleLocalFetchedBatchValidated(
+      messageType: => String,
+      validated: Availability.LocalOutputFetch.LocalFetchedBatchValidated,
+  )(implicit
+      context: E#ActorContextT[Availability.Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
+    val Availability.LocalOutputFetch.LocalFetchedBatchValidated(
+      batchId,
+      batch,
+      from,
+      isValid,
+      timeWeReceivedResponse,
+    ) = validated
+    // Validation has completed, so it is no longer in flight. Clearing the phase here (for both the
+    //  valid and the invalid case) is what lets a pending fetch timeout resume retrying if the result
+    //  turned out to be invalid.
+    outputFetchProtocolState.pendingRemoteBatchIdsToValidate.remove(batchId).discard
+    outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
+      case Some(missingBatchStatus) =>
+        if (!isValid) {
+          emitInvalidMessage(metrics, from)
+          logBatchIdDoesntMatchBatchHashWarning(from)
+          // The validation phase has been cleared above, so the pending (or rescheduled) fetch
+          //  timeout for this batch will resume retrying from another node.
+        } else {
+          logger.debug(s"$messageType: received $batchId, persisting it")
+          outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
+          missingBatchStatus.firstTimeWeMadeRequest.get(from).foreach {
+            timeWeMadeRequestToThisNode =>
+              emitOutputFetchLatency(
+                metrics,
+                from,
+                timeWeMadeRequestToThisNode,
+                timeWeReceivedResponse,
+              )
+          }
+          pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
+            case Failure(exception) =>
+              abort(s"Failed to add batch $batchId", exception)
+            case Success(_) =>
+              Availability.LocalOutputFetch.FetchedBatchStored(batchId)
+          }
+        }
+      case None =>
+        logger.debug(s"$messageType: validated $batchId but nobody needs it anymore, ignoring")
     }
   }
 
@@ -1761,18 +1850,6 @@ final class AvailabilityModule[E <: Env[E]](
   ): Unit =
     logger.warn(s"BatchId doesn't match digest for remote batch from $from, skipping")
 
-  /** Validates whether a batch fetched from a remote node is valid, returning a log action if not.
-    */
-  private def validateRemotelyFetchedBatch(
-      batchId: BatchId,
-      batch: OrderingRequestBatch,
-      from: BftNodeId,
-  )(implicit traceContext: TraceContext): Either[() => Unit, Unit] =
-    // Remotely fetched batches only need to be validated for their hash, to make sure we are getting the right payload,
-    //  i.e., the one that matches the batch id. Otherwise, the payload being right, all the other validations have
-    //  already been previously performed in a way that generated the quorum and proof-of-availability.
-    validateBatchId(batchId, batch, from)
-
   private def validateBatchId(
       batchId: BatchId,
       batch: OrderingRequestBatch,
@@ -1861,6 +1938,14 @@ final class AvailabilityModule[E <: Env[E]](
     emitOrderingStageLatency(
       labels.stage.values.availability.dissemination.BatchValidation,
       Some(validationStart),
+    )
+  }
+
+  private def emitLocalBatchIdComputationLatency(computeBatchId: => BatchId): BatchId = {
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.availability.hashing.LocalBatchIdComputation,
+      () => computeBatchId,
     )
   }
 }

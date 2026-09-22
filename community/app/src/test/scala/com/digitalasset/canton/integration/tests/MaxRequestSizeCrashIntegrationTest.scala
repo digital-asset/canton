@@ -197,20 +197,26 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
         LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
           "Could not send a time-advancing message"
         )),
+        LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+          "is larger than max allowed"
+        )),
       )
-
-      restart
 
       // Use the old env (without the override), submission should work
       eventually(retryOnTestFailuresOnly = false) {
         // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
         loggerFactory.assertLogsUnorderedOptional(
           {
+            restart
+
             val (_, submissionF) = submitCommand(participant1)
             submissionF.futureValue.discard
           },
           LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
             s"but it exceeds the maximum (${lowMaxRequestSize.value}), rejecting"
+          )),
+          LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+            "is larger than max allowed"
           )),
         )
       }
