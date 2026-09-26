@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger
 
 import cats.syntax.either.*
-import cats.syntax.order.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.package_management_service
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
@@ -374,13 +373,12 @@ package api {
 
     override def getParticipantBound(
         synchronizerId: SynchronizerId
-    ): Option[Option[TopoParticipantId]] =
-      if (synchronizerId > synchronizerBound)
-        Some(None)
-      else if (synchronizerId == synchronizerBound)
-        Some(Some(participantBound))
-      else
-        None
+    ): Option[Option[TopoParticipantId]] = {
+      val syncOrder = SynchronizerId.orderingIdentifierThenNamespace
+      if (syncOrder.gt(synchronizerId, synchronizerBound)) Some(None)
+      else if (syncOrder.equiv(synchronizerId, synchronizerBound)) Some(Some(participantBound))
+      else None
+    }
   }
 
   final case object InitialPageToken extends PageToken {
@@ -896,6 +894,14 @@ package api {
     def participantId: TopoParticipantId
     def synchronizerId: SynchronizerId
     def toBoundedPageToken: BoundedPageToken = BoundedPageToken(synchronizerId, participantId)
+  }
+
+  final case class VettedPackagesPage[+A](
+      results: Seq[A],
+      nextPageToken: Option[BoundedPageToken],
+  ) {
+    def mapResults[B](f: Seq[A] => Seq[B]): VettedPackagesPage[B] =
+      VettedPackagesPage(f(results), nextPageToken)
   }
 
   final case class ParticipantVettedPackages(

@@ -308,9 +308,11 @@ class TopologyStoreTestData(
       .getOrElse(fail())
   )(dnd_p1p2_keys*)
 
+  // vp1 < vp2 < vp3 by (identifier, namespace). Keep one a prefix of the others,
+  // so `isNotSortedNaively` in TopologyStoreTest still checks the ordering edge case.
   val vp1Key = factory.SigningKeys.key1
   val vp1Namespace = Namespace(p1Key.fingerprint)
-  val vp1Id = ParticipantId(UniqueIdentifier.tryCreate("vettingparticipantA", vp1Namespace))
+  val vp1Id = ParticipantId(UniqueIdentifier.tryCreate("vettingparticipant", vp1Namespace))
 
   val vp2Key = factory.SigningKeys.key2
   val vp2Namespace = Namespace(p2Key.fingerprint)
@@ -318,7 +320,7 @@ class TopologyStoreTestData(
 
   val vp3Key = factory.SigningKeys.key3
   val vp3Namespace = Namespace(p3Key.fingerprint)
-  val vp3Id = ParticipantId(UniqueIdentifier.tryCreate("vettingparticipant", vp3Namespace))
+  val vp3Id = ParticipantId(UniqueIdentifier.tryCreate("vettingparticipantA", vp3Namespace))
 
   val dnd_vp123_keys = NonEmpty(Seq, vp1Key, vp2Key, vp3Key)
   val dns_vp123 = DecentralizedNamespaceDefinition.computeNamespace(

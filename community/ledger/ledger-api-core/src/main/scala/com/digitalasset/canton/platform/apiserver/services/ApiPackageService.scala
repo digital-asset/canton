@@ -21,12 +21,7 @@ import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.api.{
-  InitialPageToken,
-  ListVettedPackagesOpts,
-  PageToken,
-  ValidationLogger,
-}
+import com.digitalasset.canton.ledger.api.{ListVettedPackagesOpts, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
@@ -135,11 +130,10 @@ private[apiserver] final class ApiPackageService(
       opts <- ListVettedPackagesOpts
         .fromProto(request, packageServiceConfig.maxVettedPackagesPageSize)
         .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
-      results <- packageSyncService.listVettedPackages(opts)
+      page <- packageSyncService.listVettedPackages(opts)
     } yield ListVettedPackagesResponse(
-      vettedPackages = results.map(_.toProtoLAPI),
-      nextPageToken =
-        results.lastOption.map(_.toBoundedPageToken: PageToken).getOrElse(InitialPageToken).encode,
+      vettedPackages = page.results.map(_.toProtoLAPI),
+      nextPageToken = page.nextPageToken.fold("")(_.encode),
     )
   }
 

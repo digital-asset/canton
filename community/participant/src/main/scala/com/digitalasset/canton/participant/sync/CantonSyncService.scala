@@ -44,6 +44,7 @@ import com.digitalasset.canton.ledger.api.{
   UpdateVettedPackagesOpts,
   UploadDarVettingChange,
   VetAllPackages,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
@@ -933,7 +934,7 @@ class CantonSyncService(
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[EnrichedVettedPackages]] =
+  ): Future[VettedPackagesPage[EnrichedVettedPackages]] =
     EitherTUtil.toFuture(
       packageService
         .listVettedPackages(opts)

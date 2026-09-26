@@ -304,6 +304,40 @@ class RunningDigestProcessorImpl(
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private def filterAndValidateDuplicatedOffsets()
+      : Flow[Checkpointing_Input, Checkpointing_Input, NotUsed] =
+    Flow[Checkpointing_Input].statefulMapConcat { () =>
+      var latestOffset: Option[Offset] = None
+
+      currentEvent => {
+        implicit val tc = currentEvent.traceContext
+
+        val result =
+          if (latestOffset.forall(_ < currentEvent.offset)) Seq(currentEvent)
+          else {
+            if (enableAdditionalConsistencyChecks) {
+              val isOffsetCheckpoint = currentEvent.value match {
+                case InternalIndexService.AcsUpdate.OffsetCheckpoint => true
+                case _ => false
+              }
+
+              ErrorUtil.requireState(
+                isOffsetCheckpoint,
+                s"Only ${InternalIndexService.AcsUpdate.OffsetCheckpoint} can repeat offsets, $currentEvent received" +
+                  s" at timepoint ${currentEvent.timepoint}",
+              )
+            }
+
+            Seq.empty
+          }
+
+        latestOffset = Some(currentEvent.offset)
+
+        result
+      }
+    }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private def validateCheckpointConsistency(
       mainCheckpointingFlow: Flow[Checkpointing_Input, Checkpointing_Output, NotUsed]
   ): Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] = {
@@ -694,6 +728,7 @@ class RunningDigestProcessorImpl(
     metrics.bufferDigestPipelineSize.updateValue(bufferSize.toLong)
     Flow[Checkpointing_Input].async
       .buffered(metrics.bufferDigestPipelineCheckpointing, bufferSize)
+      .via(filterAndValidateDuplicatedOffsets())
       .via(checkpointing(startingRecordTimeO, traceContext))
       .async
       .buffered(metrics.bufferDigestPipelineBeforeClassification, bufferSize)

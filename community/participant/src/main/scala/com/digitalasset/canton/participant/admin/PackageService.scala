@@ -286,13 +286,13 @@ class PackageService(
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Seq[EnrichedVettedPackages]] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, VettedPackagesPage[EnrichedVettedPackages]] = {
     val snapshot = getPackageMetadataView.getSnapshot
     val packagePredicate = opts.toPackagePredicate(snapshot)
     packageOps
       .getVettedPackages(opts)
       .leftWiden[RpcError]
-      .map(_.flatMap(pkgs => filterAndEnrich(pkgs, predicate = packagePredicate)))
+      .map(_.mapResults(_.flatMap(pkgs => filterAndEnrich(pkgs, predicate = packagePredicate))))
   }
 
   private def enrichVettedPackages(vetted: ParticipantVettedPackages)(implicit
