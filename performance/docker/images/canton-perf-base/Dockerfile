@@ -4,8 +4,7 @@
 ARG base_version
 ARG oci_path
 
-FROM europe-docker.pkg.dev/da-images/playground/docker/canton-base:3.7.0-snapshot-2026-09-11.23c8f39d13a
-#FROM europe-docker.pkg.dev/da-images/public-unstable/docker/canton-base:3.6
+FROM europe-docker.pkg.dev/da-images/public-unstable/docker/canton-base:3.7
 
 WORKDIR /
 

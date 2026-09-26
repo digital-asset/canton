@@ -4,7 +4,7 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -24,8 +24,7 @@ final case class ReassignmentSubmitterMetadata(
     submissionId: Option[LedgerSubmissionId],
     userId: LedgerUserId,
     workflowId: Option[LfWorkflowId],
-) extends PrettyPrinting
-    with HasSubmissionTrackerData {
+) extends HasSubmissionTrackerData {
 
   override def submissionTrackerData: Option[SubmissionTrackerData] = None
 
@@ -39,7 +38,16 @@ final case class ReassignmentSubmitterMetadata(
       workflowId = workflowId.getOrElse("").toProtoUnvalidated,
     )
 
-  override protected def pretty: Pretty[ReassignmentSubmitterMetadata] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[ReassignmentSubmitterMetadata] =
+    ReassignmentSubmitterMetadata
+
+  def submittingAdminParty: LfPartyId = submittingParticipant.adminParty.toLf
+}
+
+object ReassignmentSubmitterMetadata
+    extends PrettyPrintingCompanion[ReassignmentSubmitterMetadata] {
+
+  override protected val pretty: Pretty[ReassignmentSubmitterMetadata] = prettyOfClass(
     param("submitter", _.submitter),
     param("submitting participant", _.submittingParticipant),
     param("command id", _.commandId),
@@ -48,10 +56,6 @@ final case class ReassignmentSubmitterMetadata(
     param("workflow id", _.workflowId),
   )
 
-  def submittingAdminParty: LfPartyId = submittingParticipant.adminParty.toLf
-}
-
-object ReassignmentSubmitterMetadata {
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
       reassignmentSubmitterMetadataP: v30.ReassignmentSubmitterMetadata,

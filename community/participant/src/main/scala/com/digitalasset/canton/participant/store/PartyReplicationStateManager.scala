@@ -29,21 +29,6 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.util.chaining.scalaUtilChainingOps
 
-/** ACS replication progress specific read and write methods.
-  *
-  * Note: Non-sealed for testing.
-  */
-private[canton] trait AcsReplicationProgress {
-  def getAcsReplicationProgress(requestId: AddPartyRequestId)(implicit
-      traceContext: TraceContext
-  ): Option[PartyReplicationStatus.AcsReplicationProgress]
-
-  def updateAcsReplicationProgress(
-      requestId: AddPartyRequestId,
-      progress: PartyReplicationStatus.AcsReplicationProgress,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
-}
-
 /** The [[PartyReplicationStateManager]] manages online party replication (OnPR) state in memory and
   * conditionally on disk (on behalf of OnPRs handled by this participant in the target participant
   * TP role). This lets TPs re-initiate interrupted OnPRs after restarts or crashes.
@@ -59,7 +44,7 @@ private[canton] trait AcsReplicationProgress {
   *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.replicationO]] and
   *     does so from a simple execution queue.
   *   - Other components such as the
-  *     [[com.digitalasset.canton.participant.protocol.party.PartyReplicationTargetParticipantProcessor]]
+  *     [[com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationTargetParticipantProcessor]]
   *     update individual status subcomponents set to Some(_) such as
   *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.AcsReplicationProgress]]
   *     from a simple execution queue.
@@ -67,6 +52,8 @@ private[canton] trait AcsReplicationProgress {
   *     error on the side of safety and have only the update methods use the simple execution queue
   *     to avoid lost updates in the absence of atomic update support in the underlying db store.
   */
+// TODO(#35267) Find a way to avoid querying AcsReplicationStateManager for every get or collect call
+// Maybe register a callback with AcsReplicationStateManager
 final class PartyReplicationStateManager(
     participantId: ParticipantId,
     storage: Storage,
@@ -74,6 +61,7 @@ final class PartyReplicationStateManager(
     exitOnFatalFailures: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
+    acsReplicationStateManager: AcsReplicationStateManager,
 )(implicit executionContext: ExecutionContext)
     extends AcsReplicationProgress
     with NamedLogging
@@ -206,7 +194,22 @@ final class PartyReplicationStateManager(
     * so in an idempotent way, i.e. setting new values rather than incrementing a counter.
     */
   def get(requestId: AddPartyRequestId): Option[PartyReplicationStatus] =
-    partyReplications.get(requestId)
+    partyReplications
+      .get(requestId)
+      .map { status =>
+        acsReplicationStateManager.get(requestId) match {
+          case Some(acsReplicationStatus) =>
+            status
+              .setAcsReplicationStatus(Some(acsReplicationStatus))
+              .setAgreementStatus(acsReplicationStatus.agreementStatus)
+              .setReplication(acsReplicationStatus.replicationO)
+          // TODO(#35267) Copy error as well and make sure OnlinePartyReplicationRecoverFromDisruptionsTest passes
+          case None => status
+        }
+
+      }
+      // in case of SP, only AcsReplicator knows about replication
+      .orElse(acsReplicationStateManager.get(requestId))
 
   /** Finds replication status by Daml sequencer channel agreement contract id.
     *
@@ -217,14 +220,15 @@ final class PartyReplicationStateManager(
     */
   def findByAgreementContractId(agreementContractId: String): Option[PartyReplicationStatus] =
     partyReplications.values.find(_.agreementStatus match {
-      case PartyReplicationStatus.AgreementStatus.Exists(contractId, _) =>
+      case PartyReplicationStatus.AgreementStatus.Exists(contractId, _, _) =>
         contractId.coid == agreementContractId
       case _ => false
     })
 
   def collectFirst[T](
       f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]
-  ): Option[T] = partyReplications.iterator.collectFirst(f)
+  ): Option[T] =
+    partyReplications.iterator.collectFirst(f).orElse(acsReplicationStateManager.collectFirst(f))
 
   def collect[T](f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]): Seq[T] =
     partyReplications.iterator.collect(f).toSeq

@@ -50,8 +50,8 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.
 import com.digitalasset.canton.sequencing.client.pool.{
   GrpcSequencerConnectionPoolFactory,
   SequencerConnectionPool,
-  SequencerSubscriptionFactoryImpl,
   SequencerSubscriptionPoolFactoryImpl,
+  SequencerSubscriptionWrapperFactoryImpl,
   SubscriptionHandlerFactoryImpl,
 }
 import com.digitalasset.canton.sequencing.client.{
@@ -444,6 +444,7 @@ class ParticipantSimulator(
               )
             ),
             partySigningKeysWithThreshold = None,
+            isOffline = false,
           ),
           pv,
         ),
@@ -478,6 +479,7 @@ class ParticipantSimulator(
               )
             ),
             partySigningKeysWithThreshold = None,
+            isOffline = false,
           ),
           signedBy = Seq.empty,
           serial = None,
@@ -544,7 +546,7 @@ class ParticipantSimulator(
         )
     )
 
-    val sequencerSubscriptionFactory = new SequencerSubscriptionFactoryImpl(
+    val subscriptionWrapperFactory = new SequencerSubscriptionWrapperFactoryImpl(
       SequencedEventValidatorFactory.noValidation(psid, warn = false),
       env.environment.config.parameters.timeouts.processing,
       loggerFactoryForParticipant,
@@ -602,7 +604,7 @@ class ParticipantSimulator(
     )
 
     val sequencerSubscriptionPoolFactory = new SequencerSubscriptionPoolFactoryImpl(
-      sequencerSubscriptionFactory,
+      subscriptionWrapperFactory,
       subscriptionHandlerFactory,
       synchronizerMetrics.sequencerClient.connectionPool,
       metricsContext = pool.metricsContext,

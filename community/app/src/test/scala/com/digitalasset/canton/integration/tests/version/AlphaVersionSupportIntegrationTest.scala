@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.version
 
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -46,13 +47,14 @@ sealed trait AlphaVersionSupportIntegrationTest
   "participant without alpha protocol version" should {
     "not be able to connect to a synchronizer with alpha protocol version" onlyRunWhen (!_.isAlpha && alphaVersionO.isDefined) in {
       env =>
-        assertThrowsAndLogsCommandFailures(
+        val expectedMessage =
+          s"The protocol version required by the server ($getAlphaVersion) is not among the supported protocol versions by the client"
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
           env.participant2.synchronizers.connect(env.sequencer1, env.daName),
+          _.warningMessage should include(expectedMessage), // Connection warning
           entry => {
             entry.shouldBeCantonErrorCode(SyncServiceInconsistentConnectivity)
-            entry.message should include(
-              s"The protocol version required by the server ($getAlphaVersion) is not among the supported protocol versions by the client"
-            )
+            entry.commandFailureMessage should include(expectedMessage)
           },
         )
     }

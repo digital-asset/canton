@@ -11,9 +11,11 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.{
   allocate,
 }
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
+import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
 import com.daml.ledger.api.testtool.{TestDar, TestDars}
+import com.daml.ledger.api.v2.admin.package_management_service.UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES
 import com.daml.ledger.api.v2.admin.package_management_service.{
   UpdateVettedPackagesForceFlag,
   UpdateVettedPackagesRequest,
@@ -39,8 +41,8 @@ import com.digitalasset.canton.ledger.api.{
   VetAllPackages,
 }
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError
-import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError
+import com.digitalasset.canton.topology.{ParticipantId, TopologyManagerError, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref
@@ -1826,6 +1828,102 @@ class VettingIT(testDars: TestDars) extends LedgerTestSuite with AppendedClues {
         _ <- unvetAllDARMains(participant1)
         _ <- unvetAllDARMains(participant2)
       } yield ()
+  })
+
+  test(
+    "PVListVettedPackageMetadataFilterDiscardsFirstPage",
+    "Filtering by package-metadata works even when discarding full store pages",
+    allocate(NoParties, NoParties),
+    runConcurrently = false,
+  )(implicit ec => {
+    case Participants(Participant(participant1, _), Participant(participant2, _)) =>
+      for {
+        _ <- unvetAllDARMains(participant1)
+        _ <- unvetAllDARMains(participant2)
+
+        participant1IdStr <- participant1.getParticipantId()
+        participant2IdStr <- participant2.getParticipantId()
+
+        p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(participant1IdStr))
+        p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(participant2IdStr))
+
+        // Sort participants according to topology store ordering (identifier, namespace)
+        ((firstParticipant, firstParticipantId), secondParticipant) =
+          if (ParticipantId.orderingIdentifierThenNamespace.lt(p1, p2))
+            ((participant1, participant1IdStr), participant2)
+          else ((participant2, participant2IdStr), participant1)
+
+        targetSyncId <- getSynchronizerId(participant = participant1, syncIndex = 1)
+
+        // firstParticipant only uploads and vets VettingDepDar
+        _ <- firstParticipant.uploadDarFile(
+          UploadDarFileRequest(
+            darFile = VettingDepDar.bytes,
+            submissionId = "",
+            vettingChange = VETTING_CHANGE_VET_ALL_PACKAGES,
+            synchronizerId = targetSyncId,
+          )
+        )
+
+        // secondParticipant uploads and vets VettingMainDar_2_0_0 and VettingDepDar, implicitly, as a dependency of VettingMainDar_2_0_0
+        _ <- secondParticipant.uploadDarFile(
+          UploadDarFileRequest(
+            darFile = VettingMainDar_2_0_0.bytes,
+            submissionId = "",
+            vettingChange = VETTING_CHANGE_VET_ALL_PACKAGES,
+            synchronizerId = targetSyncId,
+          )
+        )
+
+        _ <- eventually("firstParticipant's vetting is visible to secondParticipant") {
+          secondParticipant
+            .listVettedPackages(
+              requestAllPaged(
+                size = 1,
+                participantIds = Seq(firstParticipantId),
+                synchronizerIds = Seq(targetSyncId),
+              )
+            )
+            .map(_.vettedPackages should not be empty)
+        }
+
+        fullResponse <- {
+          def go(nextPageToken: String): Future[ListVettedPackagesResponse] =
+            secondParticipant
+              .listVettedPackages(
+                ListVettedPackagesRequest(
+                  packageMetadataFilter = Some(
+                    // Filter just by package-id
+                    PackageMetadataFilter(
+                      packageIds = Seq(vettingMainPkgIdV2),
+                      packageNamePrefixes = Seq(),
+                    ).toProtoLAPI
+                  ),
+                  topologyStateFilter = None,
+                  pageToken = nextPageToken,
+                  pageSize = 1,
+                )
+              )
+              .flatMap { response =>
+                if (response.nextPageToken.isEmpty) Future.successful(response)
+                else
+                  go(response.nextPageToken).map { nextResponse =>
+                    ListVettedPackagesResponse(
+                      response.vettedPackages ++ nextResponse.vettedPackages,
+                      nextResponse.nextPageToken,
+                    )
+                  }
+              }
+
+          go("")
+        }
+
+        _ <- unvetAllDARMains(participant1)
+        _ <- unvetAllDARMains(participant2)
+      } yield {
+        val pkgIds = fullResponse.vettedPackages.flatMap(_.packages.map(_.packageId)).distinct
+        pkgIds should be(Seq(vettingMainPkgIdV2))
+      }
   })
 
   // TODO(#28384): Re-enable these tests when

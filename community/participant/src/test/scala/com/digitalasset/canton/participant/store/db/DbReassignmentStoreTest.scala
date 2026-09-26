@@ -12,10 +12,15 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.data.UnassignmentData.UnassignmentGlobalOffset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.ReassignmentStoreTest
+import com.digitalasset.canton.participant.topology.{
+  FailingOfflineTopologyLookup,
+  OfflineTopologyLookup,
+}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{MonadUtil, ReassignmentTag}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -36,6 +41,7 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
 
     def mkStore(
         synchronizerId: IndexedSynchronizer,
+        offlineTopologyLookup: OfflineTopologyLookup,
         batchingConfig: BatchingConfig = BatchingConfig(),
     ): DbReassignmentStore =
       new DbReassignmentStore(
@@ -45,18 +51,21 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
         futureSupervisor,
         exitOnFatalFailures = true,
         batchingConfig,
+        DefaultTestIdentities.participant1,
+        offlineTopologyLookup,
         timeouts,
         loggerFactory,
       )
 
-    behave like reassignmentStore(mkStore(_))
+    behave like reassignmentStore(mkStore(_, _))
 
     "findIncomplete" should {
       "return all the incomplete reassignments when they span several pages" in {
         val pageSize = 3
         val store = mkStore(
           ReassignmentStoreTest.indexedTargetSynchronizer,
-          BatchingConfig(maxItemsInBatch = PositiveNumeric.tryCreate(pageSize)),
+          new FailingOfflineTopologyLookup(),
+          batchingConfig = BatchingConfig(maxItemsInBatch = PositiveNumeric.tryCreate(pageSize)),
         )
         val offset = Offset.tryFromLong(10L)
 
@@ -80,7 +89,6 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
             .valueOrFail("add unassignment offsets")
 
           found <- store.findIncomplete(
-            sourceSynchronizer = None,
             validAt = offset,
             stakeholders = None,
             limit = NonNegativeInt.tryCreate(reassignments.size * 2),
@@ -94,6 +102,6 @@ trait DbReassignmentStoreTest extends AsyncWordSpec with BaseTest with Reassignm
 
 }
 
-class ReassignmentStoreTestH2 extends DbReassignmentStoreTest with H2Test
+final class ReassignmentStoreTestH2 extends DbReassignmentStoreTest with H2Test
 
-class ReassignmentStoreTestPostgres extends DbReassignmentStoreTest with PostgresTest
+final class ReassignmentStoreTestPostgres extends DbReassignmentStoreTest with PostgresTest

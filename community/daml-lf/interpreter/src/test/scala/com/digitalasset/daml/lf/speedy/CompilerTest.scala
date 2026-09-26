@@ -181,7 +181,6 @@ object CompilerTest {
         initialSeeding = InitialSeeding.TransactionSeed(crypto.Hash.hashPrivateKey("CompilerTest")),
         expr = sexpr,
         committers = committers,
-        readAs = Set.empty,
         logger = MachineLogger(),
       )
 

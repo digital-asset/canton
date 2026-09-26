@@ -6,7 +6,11 @@ package com.digitalasset.canton.topology.store
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.v30 as adminV30
 import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
@@ -19,13 +23,13 @@ import scala.reflect.ClassTag
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp, +M <: TopologyMapping](
     result: Seq[StoredTopologyTransaction[Op, M]]
 ) extends HasVersionedWrapper[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override protected def companionObj: StoredTopologyTransactions.type = StoredTopologyTransactions
 
-  override protected def pretty: Pretty[StoredTopologyTransactions.this.type] = prettyOfParam(
-    _.result
-  )
+  override def prettyCompanion
+      : PrettyPrintingCompanion[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
+    StoredTopologyTransactions
 
   def toTopologyState: List[M] =
     result.map(_.mapping).toList
@@ -115,7 +119,15 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp, +M <: Topol
 object StoredTopologyTransactions
     extends HasVersionedMessageCompanion[
       StoredTopologyTransactions[TopologyChangeOp, TopologyMapping],
+    ]
+    with PrettyPrintingCompanion[
+      StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]
     ] {
+
+  override protected val pretty
+      : Pretty[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]] = prettyOfParam(
+    _.result
+  )
 
   type GenericStoredTopologyTransactions =
     StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]

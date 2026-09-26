@@ -1542,6 +1542,9 @@ object CantonConfig {
           : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
         (_: ConfigCursor) =>
           sys.error("party replicator test interceptor cannot be created from pureconfig")
+      implicit val onlinePartyReplicationTargetConfig
+          : ConfigReader[OnlinePartyReplicationTargetConfig] =
+        deriveReader[OnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfig
           : ConfigReader[AlphaOnlinePartyReplicationConfig] =
         deriveReader[AlphaOnlinePartyReplicationConfig]
@@ -2360,6 +2363,9 @@ object CantonConfig {
       implicit val partyReplicatorTestInterceptorWriter
           : ConfigWriter[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
         ConfigWriter.toString(_ => "None")
+      implicit val onlinePartyReplicationTargetConfigWriter
+          : ConfigWriter[OnlinePartyReplicationTargetConfig] =
+        deriveWriter[OnlinePartyReplicationTargetConfig]
       implicit val alphaOnlinePartyReplicationConfigWriter
           : ConfigWriter[AlphaOnlinePartyReplicationConfig] =
         deriveWriter[AlphaOnlinePartyReplicationConfig]

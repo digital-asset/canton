@@ -203,6 +203,7 @@ class TopologyTransactionTest
             PartyId(uid),
             PositiveInt.one,
             Seq(HostingParticipant(ParticipantId(uid2), ParticipantPermission.Observation)),
+            isOffline = false,
           )
         )
 
@@ -215,6 +216,7 @@ class TopologyTransactionTest
               HostingParticipant(ParticipantId(uid2), ParticipantPermission.Confirmation),
               HostingParticipant(ParticipantId(uid), ParticipantPermission.Submission),
             ),
+            isOffline = false,
           )
         )
 

@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -48,12 +48,7 @@ final case class CommonMetadata private (
 
   override val hashPurpose: HashPurpose = HashPurpose.CommonMetadata
 
-  override protected def pretty: Pretty[CommonMetadata] = prettyOfClass(
-    param("synchronizer id", _.synchronizerId),
-    param("mediator", _.mediator),
-    param("uuid", _.uuid),
-    param("salt", _.salt),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[CommonMetadata] = CommonMetadata
 
   @transient override protected lazy val companionObj: CommonMetadata.type = CommonMetadata
 
@@ -70,8 +65,16 @@ object CommonMetadata
     extends VersioningCompanionContextMemoization[
       CommonMetadata,
       HashOps,
-    ] {
+    ]
+    with PrettyPrintingCompanion[CommonMetadata] {
   override val name: String = "CommonMetadata"
+
+  override protected val pretty: Pretty[CommonMetadata] = prettyOfClass(
+    param("synchronizer id", _.synchronizerId),
+    param("mediator", _.mediator),
+    param("uuid", _.uuid),
+    param("salt", _.salt),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.CommonMetadata)(

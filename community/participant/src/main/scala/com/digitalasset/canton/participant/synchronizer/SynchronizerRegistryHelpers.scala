@@ -11,7 +11,6 @@ import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.SequencerConnectClient
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{
   ProcessingTimeout,
@@ -39,19 +38,22 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.HandshakeErrors.SynchronizerIdMismatch
-import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryHelpers.SynchronizerHandle
+import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryHelpers.{
+  SequencerAggregatedInfo,
+  SynchronizerHandle,
+}
 import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   TopologyComponentFactory,
 }
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.channel.{
   SequencerChannelClient,
   SequencerChannelClientFactory,
 }
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool
+import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
@@ -484,6 +486,13 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
 
 object SynchronizerRegistryHelpers {
 
+  final case class SequencerAggregatedInfo(
+      psid: PhysicalSynchronizerId,
+      staticSynchronizerParameters: StaticSynchronizerParameters,
+      expectedSequencersO: Option[NonEmpty[Map[SequencerAlias, SequencerId]]],
+      sequencerConnections: SequencerConnections,
+  )
+
   private[synchronizer] final case class SynchronizerHandle(
       synchronizerId: PhysicalSynchronizerId,
       alias: SynchronizerAlias,
@@ -558,7 +567,7 @@ object SynchronizerRegistryHelpers {
           copyAction.thereafter(_ =>
             metrics.setLsuStatus(
               ParticipantMetrics.LsuStatus.LocalCopyDone,
-              persistentState.psid,
+              persistentState.psid.opaque,
             )
           )
         }

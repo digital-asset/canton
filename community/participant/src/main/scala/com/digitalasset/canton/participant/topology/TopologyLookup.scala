@@ -49,7 +49,7 @@ import scala.concurrent.ExecutionContext
   * @param cleanSynchronizerRecordTime
   *   Retrieve the latest clean record time of the synchronizer. Returns None if the psid is
   *   unknown. The fact, that this is a clean record time, means there must have been a sequenced
-  *   time greater than or equal to the record time. As a consequenced, the clean record time serves
+  *   time greater than or equal to the record time. As a consequence, the clean record time serves
   *   as the lower bound for sequenced time to initialize the topology client.
   */
 final class TopologyLookup(
@@ -79,13 +79,13 @@ final class TopologyLookup(
           .leftMap(err => TopologyManagerError.InternalError.Unexpected(err): TopologyManagerError)
       )
       snapshot <- withMaybeOfflineTopologyClient(psid) { client =>
-        val approximateTs = client.approximateTimestamp
+        val topologyKnownUntil = client.topologyKnownUntilTimestamp
         for {
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            ts <= approximateTs,
+            ts <= topologyKnownUntil,
             InvalidQueryTime.Reject(
               synchronizerId,
-              topologyKnownUntil = approximateTs,
+              topologyKnownUntil = topologyKnownUntil,
               queryTime = ts,
             ),
           )

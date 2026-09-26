@@ -186,6 +186,7 @@ class SynchronizerOnboardingOutboxTest
           PartyId(UniqueIdentifier.tryCreate("alice", namespace)),
           PositiveInt.one,
           Seq.empty,
+          isOffline = false,
         )
       )
       val (result, client) =

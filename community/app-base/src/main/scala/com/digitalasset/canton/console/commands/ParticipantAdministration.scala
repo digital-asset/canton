@@ -14,9 +14,11 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   CommitmentReinitializationInfo,
   DigestCommitmentReinitializationInfo,
   DigestCommitmentReinitializationStatusInfo,
+  DigestConsistencyCheckStatus,
   ReinitializeCommitments,
   ReinitializeDigestCommitments,
   ReinitializeDigestCommitmentsStatus,
+  RunDigestConsistencyCheck,
 }
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Resources.{
   GetResourceLimits,
@@ -57,6 +59,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, Traced
 import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
+import com.digitalasset.canton.participant.commitment.DigestConsistencyCheckProcessor
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
   ReceivedCmtState,
   SentCmtState,
@@ -1649,6 +1652,54 @@ class CommitmentsAdministrationGroup(
     consoleEnvironment.run(
       runner.adminCommand(
         ReinitializeDigestCommitmentsStatus(
+          synchronizerId
+        )
+      )
+    )
+
+  @Help.Summary(
+    "Kicks off a consistency check of ACS digests for the given synchronizer"
+  )
+  @Help.Description(
+    """Starts a consistency check of ACS digests for the given synchronizer
+      |on this participant.
+      |
+      |Useful as a safety check before performing a LSU.
+      |
+      |Since this command doesn't wait until the check completes, the operator
+      |should query the status of the check using `digest_consistency_check_status`.
+      |
+      |If the check is already in progress for the synchronizer,
+      |resubmitting this command will be ignored."""
+  )
+  def run_digest_consistency_check(
+      synchronizerId: SynchronizerId
+  ): Unit =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        RunDigestConsistencyCheck(
+          synchronizerId
+        )
+      )
+    )
+
+  @Help.Summary(
+    "Gets the status of the digest consistency check processor"
+  )
+  @Help.Description(
+    """Retrieves:
+      | - a boolean indicating whether there is a consistency check processor running
+      | - a timestamp of the checkpoint of the latest run
+      |
+      |Useful for checking if the processor started by `run_digest_consistency_check`
+      |finished its job."""
+  )
+  def digest_consistency_check_status(
+      synchronizerId: SynchronizerId
+  ): DigestConsistencyCheckProcessor.Status =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        DigestConsistencyCheckStatus(
           synchronizerId
         )
       )

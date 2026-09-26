@@ -180,6 +180,7 @@ trait MediatorOnboardingTest
                 threshold = PositiveInt.one,
                 participants = Seq(participant1, participant2)
                   .map(p => HostingParticipant(p.id, ParticipantPermission.Submission)),
+                isOffline = false,
               ),
               BaseTest.testedProtocolVersion,
             ),
@@ -225,6 +226,7 @@ trait MediatorOnboardingTest
                   else ParticipantPermission.Confirmation,
                 )
               ),
+              isOffline = false,
             ),
             BaseTest.testedProtocolVersion,
           ),

@@ -43,7 +43,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Env,
   ModuleRef,
 }
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.time.Instant
@@ -65,11 +64,12 @@ class RetransmissionsManager[E <: Env[E]](
     abort: String => Nothing,
     previousEpochsCommitCerts: Map[EpochNumber, Seq[CommitCertificate]],
     metrics: BftOrderingMetrics,
-    clock: Clock,
     override val loggerFactory: NamedLoggerFactory,
     logEndOfEpochProgress: Boolean,
     // Passed only in tests
     previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
+    // Monotonic elapsed-time source (nanoseconds) for the request rate limiter, injectable in tests.
+    rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(implicit
     mc: MetricsContext
 ) extends NamedLogging {
@@ -91,10 +91,10 @@ class RetransmissionsManager[E <: Env[E]](
 
   private val requestRateLimiter =
     new BftNodeRateLimiter(
-      clock,
       maxTasksPerSecond =
         NonNegativeNumeric.tryCreate(1.toDouble / RetransmissionRequestPeriod.toSeconds.toDouble),
       maxBurstFactor = PositiveDouble.tryCreate(MaxRetransmissionRequestBurstFactorPerNode),
+      timeSource = rateLimiterNanoTime(),
     )
 
   private val previousEpochsRetransmissionsTracker =

@@ -233,7 +233,6 @@ trait PublicKey extends CryptoKeyPairKey {
   override def isPublicKey: Boolean = true
 
   protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key]
-  protected def toProtoPublicKeyKeyV31: Either[String, v31.PublicKey.Key]
 
   /** With the v30.PublicKey message we model the class hierarchy of public keys in protobuf. Each
     * child class that implements this trait can be serialized with `toProto` to their corresponding
@@ -242,8 +241,6 @@ trait PublicKey extends CryptoKeyPairKey {
     */
   def toProtoPublicKeyV30: Either[String, v30.PublicKey] =
     toProtoPublicKeyKeyV30.map(v30.PublicKey.apply)
-  def toProtoPublicKeyV31: Either[String, v31.PublicKey] =
-    toProtoPublicKeyKeyV31.map(v31.PublicKey.apply)
 }
 
 object PublicKey {
@@ -260,15 +257,6 @@ object PublicKey {
         EncryptionPublicKey.fromProtoV30(encPubKeyP)
       case v30.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
         SigningPublicKey.fromProtoV30(signPubKeyP)
-    }
-
-  def fromProtoPublicKeyV31(publicKeyP: v31.PublicKey): ParsingResult[PublicKey] =
-    publicKeyP.key match {
-      case v31.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
-      case v31.PublicKey.Key.EncryptionPublicKey(encPubKeyP) =>
-        EncryptionPublicKey.fromProtoV30(encPubKeyP)
-      case v31.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
-        SigningPublicKey.fromProtoV31(signPubKeyP)
     }
 
 }
@@ -308,14 +296,6 @@ trait PublicKeyWithName
       )
     )
 
-  def toProtoV31: Either[String, v31.PublicKeyWithName] =
-    publicKey.toProtoPublicKeyV31.map(proto =>
-      v31.PublicKeyWithName(
-        publicKey = Some(proto),
-        name = name.map(_.unwrap).getOrElse("").toProtoUnvalidated,
-      )
-    )
-
 }
 
 object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName] {
@@ -348,23 +328,6 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
       }
     }
 
-  def fromProto31(key: v31.PublicKeyWithName): ParsingResult[PublicKeyWithName] =
-    for {
-      publicKey <- ProtoConverter.parseRequired(
-        PublicKey.fromProtoPublicKeyV31,
-        "public_key",
-        key.publicKey,
-      )
-      // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
-      name <- ProtoValidation
-        .validate(key.name, "name", ProtocolVersionValidation.NoValidation)
-        .flatMap(KeyName.fromProtoPrimitive)
-    } yield {
-      (publicKey: @unchecked) match {
-        case k: SigningPublicKey => SigningPublicKeyWithName(k, name.emptyStringAsNone)
-        case k: EncryptionPublicKey => EncryptionPublicKeyWithName(k, name.emptyStringAsNone)
-      }
-    }
 }
 
 // The private key id must match the corresponding public key's one

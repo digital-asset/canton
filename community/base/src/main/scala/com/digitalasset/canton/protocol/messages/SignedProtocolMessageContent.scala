@@ -4,14 +4,18 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 
 trait SignedProtocolMessageContent
     extends ProtocolVersionedMemoizedEvidence
     with HasPhysicalSynchronizerId
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with Product
     with Serializable {
 
@@ -30,10 +34,15 @@ trait SignedProtocolMessageContent
     */
   def signingTimestamp: Option[CantonTimestamp]
 
-  override protected def pretty: Pretty[this.type] = prettyOfObject[SignedProtocolMessageContent]
+  override def prettyCompanion: PrettyPrintingCompanion[this.type] =
+    SignedProtocolMessageContent
 }
 
-object SignedProtocolMessageContent {
+object SignedProtocolMessageContent extends PrettyPrintingCompanion[SignedProtocolMessageContent] {
+
+  override protected val pretty: Pretty[SignedProtocolMessageContent] =
+    prettyOfObject[SignedProtocolMessageContent]
+
   trait SignedMessageContentCast[A] {
     def toKind(content: SignedProtocolMessageContent): Option[A]
 

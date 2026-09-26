@@ -48,7 +48,7 @@ import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.signalling.{EventSignaller, NotificationSignal}
-import com.digitalasset.canton.util.{BatchN, EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.*
@@ -627,10 +627,9 @@ class SequencerReader(
         traceContext: TraceContext
     ): Flow[WithKillSwitch[ValidatedSnapshotWithEvent[IdOrPayload]], UnsignedEventData, NotUsed] =
       Flow[WithKillSwitch[ValidatedSnapshotWithEvent[IdOrPayload]]]
-        .batchN(
-          config.payloadBatchSize,
-          config.payloadFetchParallelism,
-          BatchN.MaximizeBatchSize,
+        .batchNForMaxBatchSize(
+          maxBatchSize = config.payloadBatchSize,
+          maxBatchCount = config.payloadFetchParallelism,
         )
         .mapAsyncAndDrainUS(config.payloadFetchParallelism) { snapshotsWithEvent =>
           // fetch payloads in bulk

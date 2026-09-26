@@ -139,6 +139,13 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "v31" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Adding of new StaticSynchronizerParameters v32 in other messages
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Added request time out to time proof requests with 3.6.1
+      """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -201,9 +208,19 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "v31" on message "GetSynchronizerParametersResponse" was deleted.""",
       """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present enum value "74" on enum "BuiltinFunction" was deleted.""",
+      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1000" with name "unpack_template" on message "Update" was deleted.""",
+      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1001" with name "unpack_interface" on message "Update" was deleted.""",
       """com/digitalasset/daml/lf/transaction.proto:Previously present field "9" with name "external_call_results" on message "Exercise" was deleted.""",
       // Removal of pv=34
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" was deleted.""",
+      // Adding of new StaticSynchronizerParameters v32 in other messages
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "6" with name "v32" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Added request time out to time proof requests with 3.6.1
+      """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
     ),
   )
 

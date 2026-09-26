@@ -9,12 +9,8 @@ import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.*
-import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SExpr.*
-import com.digitalasset.daml.lf.speedy.SResult.*
-import com.digitalasset.daml.lf.speedy.SValue.{SParty, SUnit}
 import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
-import com.digitalasset.daml.lf.testing.parser
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey}
@@ -36,11 +32,6 @@ class ExceptionTest
 
   implicit val defaultParserParameters: ParserParameters[this.type] = ParserParameters.default
   val defaultPackageId = defaultParserParameters.defaultPackageId
-
-  private def applyToParty(pkgs: CompiledPackages, e: Expr, p: Party): SExpr = {
-    val se = pkgs.compiler.unsafeCompile(e)
-    SEApp(se, ArraySeq(SParty(p)))
-  }
 
   private val alice = Party.assertFromString("Alice")
 
@@ -71,9 +62,7 @@ class ExceptionTest
         transactionSeed = crypto.Hash.hashPrivateKey("ExceptionTest.scala"),
         updateSE = sexpr,
         committers = Set(alice),
-        // we test only with contract key mode,
-        // the state machine should no have any impact for this test.
-        interpretationConfig = InterpretationConfig.Key,
+        interpretationConfig = InterpretationConfig.Default,
         logger = MachineLogger(),
       )
     SpeedyTestLib
@@ -521,76 +510,6 @@ class ExceptionTest
           v shouldBe SValue.SText(str)
         }
       }
-    }
-  }
-
-  // TODO https://github.com/digital-asset/daml/issues/12821
-  //  add tests for interface
-  "rollback of creates" - {
-
-    val party = Party.assertFromString("Alice")
-    val example: Expr = e"M:causeRollback"
-    val transactionSeed: crypto.Hash = crypto.Hash.hashPrivateKey("transactionSeed")
-
-    "works as expected for a contract version POST-dating exceptions" - {
-
-      val pkgs = mkPackagesAtVersion(LanguageVersion.devLfVersion)
-      val res = Speedy.Machine
-        .fromUpdateSExpr(
-          pkgs,
-          transactionSeed,
-          applyToParty(pkgs, example, party),
-          Set(party),
-          logger = MachineLogger(),
-          interpretationConfig = InterpretationConfig.Legacy,
-        )
-        .run()
-      inside(res) { case SResultFinal(SUnit) =>
-      }
-    }
-
-    def mkPackagesAtVersion(languageVersion: LanguageVersion): PureCompiledPackages = {
-
-      val parserParameters: parser.ParserParameters[this.type] =
-        parser.ParserParameters(defaultPackageId, languageVersion)
-
-      typeAndCompile(p"""
-   metadata ( 'pkg' : '1.0.0' )
-
-   module M {
-
-    record @serializable AnException = { } ;
-    exception AnException = { message \(e: M:AnException) -> "AnException" };
-
-    record @serializable T1 = { party: Party, info: Int64 } ;
-    template (record : T1) = {
-      precondition True;
-      signatories Cons @Party [M:T1 {party} record] (Nil @Party);
-      observers Nil @Party;
-      choice MyChoice (self) (i : Unit) : Unit,
-        controllers Cons @Party [M:T1 {party} record] (Nil @Party)
-        to
-          ubind
-            x1: ContractId M:T1 <- create @M:T1 M:T1 { party = M:T1 {party} record, info = 400 };
-            x2: ContractId M:T1 <- create @M:T1 M:T1 { party = M:T1 {party} record, info = 500 }
-          in upure @Unit ();
-    };
-
-    val causeRollback : Party -> Update Unit = \(party: Party) ->
-        ubind
-          u1: Unit <-
-            try @Unit
-              ubind
-                x1: ContractId M:T1 <- create @M:T1 M:T1 { party = party, info = 100 };
-                u: Unit <- exercise @M:T1 MyChoice x1 ();
-                x2: ContractId M:T1 <- create @M:T1 M:T1 { party = party, info = 200 }
-              in throw @(Update Unit) @M:AnException (M:AnException {})
-            catch e -> Some @(Update Unit) (upure @Unit ())
-          ;
-          x3: ContractId M:T1 <- create @M:T1 M:T1 { party = party, info = 300 }
-        in upure @Unit ();
-
-  } """ (parserParameters))
     }
   }
 }

@@ -82,6 +82,7 @@ class AcsChangesReader(
           internalUpdateFormat = wildcardInternalUpdateFormat,
           descendingOrder = descendingOrder,
           skipPruningChecks = skipPruningChecks,
+          limit = None,
         )
         // Only transactions and reassignments on the requested synchronizer contribute ACS changes.
         .filter { case (_, updateResponse) =>

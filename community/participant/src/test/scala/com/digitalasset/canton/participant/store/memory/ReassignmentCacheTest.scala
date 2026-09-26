@@ -16,8 +16,9 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 import com.digitalasset.canton.participant.store.ReassignmentStore.*
 import com.digitalasset.canton.participant.store.memory.ReassignmentCacheTest.HookReassignmentStore
 import com.digitalasset.canton.participant.store.{ReassignmentStore, ReassignmentStoreTest}
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -42,7 +43,12 @@ final class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasEx
   private val ts = CantonTimestamp.Epoch
 
   private def createStore: InMemoryReassignmentStore =
-    new InMemoryReassignmentStore(targetSynchronizerId, loggerFactory)
+    new InMemoryReassignmentStore(
+      targetSynchronizerId,
+      DefaultTestIdentities.participant1,
+      new FailingOfflineTopologyLookup(),
+      loggerFactory,
+    )
 
   "find reassignments in the backing store" in {
     val store = createStore
@@ -319,6 +325,15 @@ object ReassignmentCacheTest extends BaseTest {
     ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
       baseStore.addReassignmentsOffsets(offsets)
 
+    override def handlePartiesOffboarding(
+        offset: Offset,
+        ts: CantonTimestamp,
+        parties: NonEmpty[Set[LfPartyId]],
+    )(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
+      baseStore.handlePartiesOffboarding(offset, ts, parties)
+
     override def completeReassignment(
         reassignmentId: ReassignmentId,
         tsCompletion: CantonTimestamp,
@@ -356,12 +371,11 @@ object ReassignmentCacheTest extends BaseTest {
     ): FutureUnlessShutdown[Seq[UnassignmentData]] = baseStore.findAfter(requestAfter, limit)
 
     override def findIncomplete(
-        sourceSynchronizer: Option[Source[SynchronizerId]],
         validAt: Offset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],
         limit: NonNegativeInt,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] =
-      baseStore.findIncomplete(sourceSynchronizer, validAt, stakeholders, limit)
+      baseStore.findIncomplete(validAt, stakeholders, limit)
 
     override def findEarliestIncomplete()(implicit
         traceContext: TraceContext

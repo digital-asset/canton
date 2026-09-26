@@ -48,6 +48,7 @@ class BufferedStreamsReaderSpec
             _.updateId == TestUpdateId("tx-3").toHexString
           ),
           descendingOrder = false,
+          limit = None,
         )
         streamElements should contain theSameElementsInOrderAs Seq(
           offset2 -> TestUpdateId("tx-2").toHexString
@@ -62,10 +63,24 @@ class BufferedStreamsReaderSpec
           startInclusive = offset2,
           endInclusive = offset3,
           descendingOrder = false,
+          limit = None,
         )
         streamElements should contain theSameElementsInOrderAs Seq(
           offset2 -> TestUpdateId("tx-2").toHexString,
           offset3 -> TestUpdateId("tx-3").toHexString,
+        )
+      }
+
+      "respect limit when fetching from buffer" in new StaticTestScope {
+        run(
+          transactionsBuffer = inMemoryFanoutBuffer,
+          startInclusive = offset2,
+          endInclusive = offset3,
+          descendingOrder = false,
+          limit = Some(1),
+        )
+        streamElements should contain theSameElementsInOrderAs Seq(
+          offset2 -> TestUpdateId("tx-2").toHexString
         )
       }
     }
@@ -77,6 +92,7 @@ class BufferedStreamsReaderSpec
           startInclusive = offset2,
           endInclusive = offset3,
           descendingOrder = false,
+          limit = None,
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
@@ -111,12 +127,47 @@ class BufferedStreamsReaderSpec
           fetchFromPersistence = fetchFromPersistence,
           persistenceFetchArgs = filterMock,
           bufferSliceFilter = noFilterBufferSlice,
+          limit = None,
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
           offset1 -> anotherResponseForOffset1,
           offset2 -> anotherResponseForOffset2,
           offset3 -> TestUpdateId("tx-3").toHexString,
+        )
+      }
+
+      "fetch only from storage when limit does not allow more" in new StaticTestScope {
+        val filterMock = new Object
+
+        val anotherResponseForOffset1 = "(1) Response fetched from storage"
+        val anotherResponseForOffset2 = "(2) Response fetched from storage"
+
+        val fetchFromPersistence = buildFetchFromPersistence(
+          expectedStartInclusive = offset0,
+          expectedEndInclusive = offset2,
+          expectedDescendingOrder = false,
+          expectedFilter = `filterMock`,
+          expectedLimit = Some(2),
+          thenReturnStream = Source(
+            Seq(offset1 -> anotherResponseForOffset1, offset2 -> anotherResponseForOffset2)
+          ),
+        )
+
+        run(
+          transactionsBuffer = smallInMemoryFanoutBuffer,
+          startInclusive = offset0,
+          endInclusive = offset3,
+          descendingOrder = false,
+          fetchFromPersistence = fetchFromPersistence,
+          persistenceFetchArgs = filterMock,
+          bufferSliceFilter = noFilterBufferSlice,
+          limit = Some(2),
+        )
+
+        streamElements should contain theSameElementsInOrderAs Seq(
+          offset1 -> anotherResponseForOffset1,
+          offset2 -> anotherResponseForOffset2,
         )
       }
 
@@ -141,6 +192,7 @@ class BufferedStreamsReaderSpec
           bufferSliceFilter = noFilterBufferSlice(_).filterNot(
             _.updateId == TestUpdateId("tx-3").toHexString
           ),
+          limit = None,
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
@@ -175,6 +227,37 @@ class BufferedStreamsReaderSpec
           descendingOrder = false,
           fetchFromPersistence = fetchFromPersistence,
           persistenceFetchArgs = filterMock,
+          limit = None,
+        )
+
+        streamElements should contain theSameElementsInOrderAs fetchedElements
+      }
+
+      "fetch only from storage when fetching with limit" in new StaticTestScope {
+        val filterMock = new Object
+
+        val fetchedElements = Vector(
+          offset1 -> "Some API response from persistence",
+          offset2 -> "Another API response from persistence",
+        )
+
+        val fetchFromPersistence = buildFetchFromPersistence(
+          expectedStartInclusive = offset1,
+          expectedEndInclusive = offset2,
+          expectedDescendingOrder = false,
+          expectedFilter = `filterMock`,
+          expectedLimit = Some(4),
+          thenReturnStream = Source(fetchedElements),
+        )
+
+        run(
+          transactionsBuffer = smallInMemoryFanoutBuffer,
+          startInclusive = offset1,
+          endInclusive = offset2,
+          descendingOrder = false,
+          fetchFromPersistence = fetchFromPersistence,
+          persistenceFetchArgs = filterMock,
+          limit = Some(4),
         )
 
         streamElements should contain theSameElementsInOrderAs fetchedElements
@@ -264,6 +347,7 @@ class BufferedStreamsReaderSpec
           startInclusive = offset1,
           endInclusive = offset3,
           descendingOrder = true,
+          limit = None,
         )
         streamElements should contain theSameElementsInOrderAs Seq(
           offset3 -> TestUpdateId("tx-3").toHexString,
@@ -293,6 +377,7 @@ class BufferedStreamsReaderSpec
           descendingOrder = true,
           fetchFromPersistence = fetchFromPersistenceMock,
           persistenceFetchArgs = filterMock,
+          limit = None,
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
@@ -319,6 +404,7 @@ class BufferedStreamsReaderSpec
           descendingOrder = true,
           fetchFromPersistence = fetchFromPersistenceMock,
           persistenceFetchArgs = filterMock,
+          limit = None,
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
@@ -418,6 +504,7 @@ object BufferedStreamsReaderSpec {
             descendingOrder: Boolean,
             filter: Object,
             skipPruningChecks: Boolean,
+            limit: Option[Int],
         )(implicit
             loggingContext: LoggingContextWithTrace
         ): Source[(Offset, String), NotUsed] = fail(
@@ -435,6 +522,7 @@ object BufferedStreamsReaderSpec {
           bufferSliceFilter: TransactionLogUpdate => Option[
             TransactionLogUpdate.TransactionAccepted
           ] = noFilterBufferSlice,
+          limit: Option[Int],
       ): Done =
         new BufferedStreamsReader[Object, String](
           inMemoryFanoutBuffer = transactionsBuffer,
@@ -451,6 +539,7 @@ object BufferedStreamsReaderSpec {
             toApiResponse = tx => Future.successful(tx.updateId),
             descendingOrder = descendingOrder,
             skipPruningChecks = false,
+            limit = limit,
           )
           .runWith(Sink.foreach(streamElements.addOne))
           .futureValue
@@ -460,6 +549,7 @@ object BufferedStreamsReaderSpec {
           expectedEndInclusive: Offset,
           expectedDescendingOrder: Boolean,
           expectedFilter: Object,
+          expectedLimit: Option[Int] = None,
           thenReturnStream: Source[(Offset, String), NotUsed],
       ): FetchFromPersistence[Object, String] =
         new FetchFromPersistence[Object, String] {
@@ -468,6 +558,7 @@ object BufferedStreamsReaderSpec {
               descendingOrder: Boolean,
               filter: Object,
               skipPruningChecks: Boolean,
+              limit: Option[Int],
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, String), NotUsed] =
@@ -477,6 +568,7 @@ object BufferedStreamsReaderSpec {
               filter,
               descendingOrder,
               skipPruningChecks,
+              limit,
             ) match {
               case (
                     `expectedStartInclusive`,
@@ -484,6 +576,7 @@ object BufferedStreamsReaderSpec {
                     `expectedFilter`,
                     `expectedDescendingOrder`,
                     false,
+                    `expectedLimit`,
                   ) =>
                 thenReturnStream
               case unexpected =>
@@ -505,6 +598,7 @@ object BufferedStreamsReaderSpec {
             descendingOrder: Boolean,
             filter: Object,
             skipPruningChecks: Boolean,
+            limit: Option[Int],
         )(implicit
             loggingContext: LoggingContextWithTrace
         ): Source[(Offset, String), NotUsed] = {
@@ -518,6 +612,7 @@ object BufferedStreamsReaderSpec {
               .dropWhile(_._1 < startInclusive)
               .takeWhile(_._1 <= endInclusive)
               .map { case (o, tx) => o -> tx.updateId }
+              .pipe(v => limit.fold(v)(l => v.take(l)))
               .pipe(Source(_))
           else
             persistenceStore
@@ -525,6 +620,7 @@ object BufferedStreamsReaderSpec {
               .takeWhile(_._1 <= endInclusive)
               .reverse
               .map { case (o, tx) => o -> tx.updateId }
+              .pipe(v => limit.fold(v)(l => v.take(l)))
               .pipe(Source(_))
         }
       }
@@ -587,6 +683,7 @@ object BufferedStreamsReaderSpec {
             toApiResponse = tx => Future.successful(tx.updateId),
             descendingOrder = descendingOrder,
             skipPruningChecks = false,
+            limit = None,
           )
           .async
           .mapAsync(1) { idx =>

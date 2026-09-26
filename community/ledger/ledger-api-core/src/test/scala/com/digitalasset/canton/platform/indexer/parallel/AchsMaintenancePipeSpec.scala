@@ -341,11 +341,11 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .bumpAchsValidAt(
-        storeAchsValidAt = storeAchsValidAt(achsStateRef),
+        persistAchsValidAt = storeAchsValidAt(achsStateRef),
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = LedgerApiServerMetrics.ForTesting.indexer.achsProcessing.maintenance,
       )(inputWorkRange)
       .futureValue shouldBe inputWorkRange
 
@@ -376,11 +376,11 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .bumpAchsValidAt(
-        storeAchsValidAt = storeAchsValidAt(achsStateRef),
+        persistAchsValidAt = storeAchsValidAt(achsStateRef),
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = LedgerApiServerMetrics.ForTesting.indexer.achsProcessing.maintenance,
       )(inputWorkRange)
       .futureValue shouldBe inputWorkRange
 
@@ -411,12 +411,12 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     )
 
     AchsMaintenancePipe
-      .storeAchsLastPointersF(
-        persistAchsLastPointersF = lastPointers => Future.successful(dbRef.set(lastPointers)),
+      .updateAchsLastPointers(
+        persistAchsLastPointers = lastPointers => Future.successful(dbRef.set(lastPointers)),
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = LedgerApiServerMetrics.ForTesting.indexer.achsProcessing.maintenance,
       )(inputWorkRange)
       .futureValue
 
@@ -449,12 +449,12 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     )
 
     AchsMaintenancePipe
-      .storeAchsLastPointersF(
-        persistAchsLastPointersF = lastPointers => Future.successful(dbRef.set(lastPointers)),
+      .updateAchsLastPointers(
+        persistAchsLastPointers = lastPointers => Future.successful(dbRef.set(lastPointers)),
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = LedgerApiServerMetrics.ForTesting.indexer.achsProcessing.maintenance,
       )(inputWorkRange)
       .futureValue
 
@@ -484,12 +484,12 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     )
 
     AchsMaintenancePipe
-      .storeAchsLastPointersF(
-        persistAchsLastPointersF = lastPointers => Future.successful(dbRef.set(lastPointers)),
+      .updateAchsLastPointers(
+        persistAchsLastPointers = lastPointers => Future.successful(dbRef.set(lastPointers)),
         achsStateCache = achsStateCache,
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = LedgerApiServerMetrics.ForTesting.indexer.achsProcessing.maintenance,
       )(inputWorkRange)
       .futureValue
 
@@ -518,7 +518,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .populateAchsActivations(
-        persistActivationsF = params => _ => Future.successful(dbRef.set(params)),
+        persistActivations = params => _ => Future.successful(dbRef.set(params)),
         logger = loggerFactory.getTracedLogger(this.getClass),
         executionContext = executionContext,
       )(inputWorkRange)
@@ -542,7 +542,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .populateAchsActivations(
-        persistActivationsF = params => _ => Future.successful(dbRef.set(params)),
+        persistActivations = params => _ => Future.successful(dbRef.set(params)),
         logger = loggerFactory.getTracedLogger(this.getClass),
         executionContext = executionContext,
       )(inputWorkRange)
@@ -567,7 +567,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .removeDeactivatedFromAchs(
-        removeDeactivatedF =
+        persistRemoveDeactivated =
           params => (_: LoggingContextWithTrace) => Future.successful(dbRef.set(params)),
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
@@ -592,7 +592,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .removeDeactivatedFromAchs(
-        removeDeactivatedF =
+        persistRemoveDeactivated =
           params => (_: LoggingContextWithTrace) => Future.successful(dbRef.set(params)),
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),
@@ -614,7 +614,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
     AchsMaintenancePipe
       .removeDeactivatedFromAchs(
-        removeDeactivatedF =
+        persistRemoveDeactivated =
           params => (_: LoggingContextWithTrace) => Future.successful(dbRef.set(params)),
         executionContext = executionContext,
         logger = loggerFactory.getTracedLogger(this.getClass),

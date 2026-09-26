@@ -21,7 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.ReceivedAcsCommit
 import com.digitalasset.canton.ledger.participant.state.{SequencedEventUpdate, SequencedUpdate}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.pretty.PrettyUtil
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion, PrettyUtil}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -420,7 +420,12 @@ trait MessageDispatcherTest {
     when(legacyRawCommitment.representativeProtocolVersion).thenReturn(
       LegacyAcsCommitment.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
-    when(legacyRawCommitment.pretty).thenReturn(PrettyUtil.prettyOfString(_ => "test"))
+    when(legacyRawCommitment.prettyCompanion).thenReturn(
+      new PrettyPrintingCompanion[LegacyAcsCommitment] {
+        override protected val pretty: Pretty[LegacyAcsCommitment] =
+          PrettyUtil.prettyOfString(_ => "test")
+      }
+    )
     when(legacyRawCommitment.period).thenReturn(
       LegacyCommitmentPeriod(
         CantonTimestampSecond.ofEpochSecond(10),

@@ -146,7 +146,7 @@ class DecodeV2Spec
       }
     }
 
-    s"Reject local flattening if lf version in ${LV.featureFlatArchive}" in {
+    s"Reject local flattening if lf version in ${LV.featureFlatArchive.versionRange.pretty}" in {
       val input = DamlLf2.Kind
         .newBuilder()
         .setArrow(
@@ -336,7 +336,7 @@ class DecodeV2Spec
       }
     }
 
-    s"Reject local flattening if lf version in ${LV.featureFlatArchive}" should {
+    s"Reject local flattening if lf version in ${LV.featureFlatArchive.versionRange.pretty}" should {
 
       "for case VAR (enforced: null)" in {
         val stringTable = ImmArraySeq("a")
@@ -636,7 +636,7 @@ class DecodeV2Spec
       }
     }
 
-    s"translate BigNumeric builtins iff version in ${LV.featureBigNumeric}" in {
+    s"translate BigNumeric builtins iff version in ${LV.featureBigNumeric.versionRange.pretty}" in {
       val exceptionBuiltinCases = Table(
         "exception builtins" -> "expected output",
         DamlLf2.BuiltinFunction.SCALE_BIGNUMERIC ->
@@ -964,7 +964,7 @@ class DecodeV2Spec
       }
     }
 
-    s"decode extended TypeRep iff version not in ${LV.featureTemplateTypeRepToText}" in {
+    s"decode extended TypeRep iff version not in ${LV.featureTemplateTypeRepToText.versionRange.pretty}" in {
       val testCases = {
         val typeRepTyConName = DamlLf2.Expr
           .newBuilder()
@@ -990,7 +990,7 @@ class DecodeV2Spec
       }
     }
 
-    s"decode EXTERNAL_CALL iff version in ${LV.featureExternalCall}" in {
+    s"decode EXTERNAL_CALL iff version in ${LV.featureExternalCall.versionRange.pretty}" in {
       val proto = toProtoExpr(DamlLf2.BuiltinFunction.EXTERNAL_CALL)
       val expected = Ast.EBuiltinFun(Ast.BExternalCall)
 
@@ -1069,7 +1069,66 @@ class DecodeV2Spec
       }
     }
 
-    s"translate interface exercise guard iff version in ${LV.featureExtendedInterfaces}" in {
+    s"decode unpack update iff version in ${LV.featureUnpack.versionRange.pretty}" in {
+      val testCases = {
+
+        val pkgRef = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
+        val modRef =
+          DamlLf2.ModuleId.newBuilder().setPackageId(pkgRef).setModuleNameInternedDname(0).build()
+        val templateTyConName =
+          DamlLf2.TypeConId.newBuilder().setModule(modRef).setNameInternedDname(1)
+        val ifaceTyConName =
+          DamlLf2.TypeConId.newBuilder().setModule(modRef).setNameInternedDname(2)
+
+        val unpackProto = {
+          val unpack = DamlLf2.Update.UnpackTemplate
+            .newBuilder()
+            .setTemplate(templateTyConName)
+            .setCid(unitExpr)
+            .build()
+          DamlLf2.Update.newBuilder().setUnpackTemplate(unpack).build()
+        }
+
+        val unpackScala = Ast.UpdateUnpackTemplate(
+          Ref.Identifier.assertFromString("noPkgId:Mod:T"),
+          EUnit,
+        )
+
+        val unpackInterfaceProto = {
+          val unpack = DamlLf2.Update.UnpackInterface
+            .newBuilder()
+            .setInterface(ifaceTyConName)
+            .setCid(unitExpr)
+            .build()
+          DamlLf2.Update.newBuilder().setUnpackInterface(unpack).build()
+        }
+
+        val unpackInterfaceScala = Ast.UpdateUnpackInterface(
+          Ref.Identifier.assertFromString("noPkgId:Mod:I"),
+          EUnit,
+        )
+
+        Table(
+          "input" -> "expected output",
+          unpackProto -> unpackScala,
+          unpackInterfaceProto -> unpackInterfaceScala,
+        )
+      }
+
+      forEveryVersion { version =>
+        forEvery(testCases) { (protoUpdate, scala) =>
+          val decoder = moduleDecoder(version, dottedNameTable = interfaceDottedNameTable)
+          val proto = DamlLf2.Expr.newBuilder().setUpdate(protoUpdate).build()
+          val result = Try(decoder.decodeExprForTest(proto, "test"))
+          if (LV.featureUnpack.enabledIn(version))
+            result shouldBe Success(Ast.EUpdate(scala))
+          else
+            inside(result) { case Failure(error) => error shouldBe a[Error.Parsing] }
+        }
+      }
+    }
+
+    s"translate interface exercise guard iff version in ${LV.featureExtendedInterfaces.versionRange.pretty}" in {
 
       val pkgRef = DamlLf2.SelfOrImportedPackageId.newBuilder().setSelfPackageId(unit).build
       val modRef =
@@ -1217,7 +1276,7 @@ class DecodeV2Spec
       }
     }
 
-    s"Reject local flattening if lf version in ${LV.featureFlatArchive}" should {
+    s"Reject local flattening if lf version in ${LV.featureFlatArchive.versionRange.pretty}" should {
       "for case ABS (enforced: singleton)" in {
         val internedZero = DamlLf2.Expr
           .newBuilder()
@@ -1981,7 +2040,7 @@ class DecodeV2Spec
     }
   }
 
-  s"reject experiment expression if LF version not in ${LV.featureUnstable}" in {
+  s"reject experiment expression if LF version not in ${LV.featureUnstable.versionRange.pretty}" in {
 
     val expr = DamlLf2.Expr
       .newBuilder()

@@ -100,7 +100,7 @@ class TransactionConfirmationRequestFactory(
       contractInstanceOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       protocolVersion: ProtocolVersion,
-      limitConfig: TransactionViewLimitConfig,
+      protocolLimits: TransactionProtocolLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -135,7 +135,7 @@ class TransactionConfirmationRequestFactory(
           contractInstanceOfId,
           maxSequencingTime,
           validatePackageVettings = true,
-          limitConfig = limitConfig,
+          protocolLimits = protocolLimits,
         )
         .leftMap(TransactionTreeFactoryError.apply)
 

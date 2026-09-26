@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.ContractIdSyntax.LfContractIdSyntax
 import com.digitalasset.canton.protocol.{GlobalKeySerialization, LfContractId, LfGlobalKey, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -16,14 +20,17 @@ import com.digitalasset.canton.{LfPartyId, LfVersioned}
 final case class KeyResolutionWithMaintainers(
     contracts: Seq[LfContractId],
     maintainers: Set[LfPartyId],
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[KeyResolutionWithMaintainers.this.type] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[KeyResolutionWithMaintainers] =
+    KeyResolutionWithMaintainers
+}
+
+object KeyResolutionWithMaintainers extends PrettyPrintingCompanion[KeyResolutionWithMaintainers] {
+
+  override protected val pretty: Pretty[KeyResolutionWithMaintainers] = prettyOfClass(
     param("contracts", _.contracts),
     param("maintainers", _.maintainers),
   )
-}
-
-object KeyResolutionWithMaintainers {
 
   def toProtoV31(
       key: LfGlobalKey,

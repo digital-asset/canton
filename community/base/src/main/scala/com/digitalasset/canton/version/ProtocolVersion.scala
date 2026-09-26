@@ -270,7 +270,7 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.almostDev, ProtocolVersion.v37)
+  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v37, ProtocolVersion.almostDev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -313,7 +313,10 @@ object ProtocolVersion {
   // TODO(#32229) Remove this once we have a stable protocol version that supports transparency
   lazy val transparency: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
 
-  // Ensure the list of alpha versions is not empty (required for some tests)
+  /*
+  Ensure the list of alpha versions is not empty (required for some tests)
+  Very high value that is almost the dev version.
+   */
   lazy val almostDev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue - 1)
 

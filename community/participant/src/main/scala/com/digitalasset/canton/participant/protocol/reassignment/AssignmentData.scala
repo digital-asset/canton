@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.reassignment
 
-import com.digitalasset.canton.data.{CantonTimestamp, ContractsReassignmentBatch}
+import com.digitalasset.canton.data.ContractsReassignmentBatch
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.Source
@@ -13,6 +13,4 @@ final case class AssignmentData(
     reassignmentId: ReassignmentId,
     sourceSynchronizer: Source[SynchronizerId],
     contracts: ContractsReassignmentBatch,
-) {
-  def unassignmentDecisionTime: CantonTimestamp = CantonTimestamp.Epoch
-}
+)

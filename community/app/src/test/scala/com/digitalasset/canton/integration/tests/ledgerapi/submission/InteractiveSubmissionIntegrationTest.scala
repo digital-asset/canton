@@ -270,6 +270,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
           partyId = partyId,
           threshold = PositiveInt.one,
           participants = Seq(HostingParticipant(participant1, ParticipantPermission.Confirmation)),
+          isOffline = false,
         ),
         op = TopologyChangeOp.Replace,
         serial = PositiveInt.one,
@@ -426,6 +427,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
                 HostingParticipant(cpn, ParticipantPermission.Observation, onboarding = false)
               ),
               partySigningKeysWithThreshold = currentP2P.partySigningKeysWithThreshold,
+              isOffline = false,
             )
             .value,
           protocolVersion = testedProtocolVersion,

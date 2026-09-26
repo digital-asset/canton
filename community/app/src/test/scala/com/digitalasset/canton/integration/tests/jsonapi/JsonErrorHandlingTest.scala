@@ -131,25 +131,32 @@ class JsonErrorHandlingTest
     "map GRPC Status Code to HTTP Status Code correctly" in {
       import com.google.rpc.Code
       import GrpcHttpErrorCodes.`gRPC status as pekko http` as GrpcToHttpConverter
-      forAll(Code.values().filter(_ != Code.UNRECOGNIZED).toList) { grpcCode =>
-        val url = s"/v2/test/parametrized-status-runtime-exception?code=${grpcCode.getNumber}"
-        for {
-          response <- call(url, port)
-          _ = response.status.intValue() should be(
-            GrpcToHttpConverter(grpcCode).asPekkoHttp.intValue
-          )
-          body <- extractBodyFromResponse(response)
-        } yield {
-          val error: JsCantonError = body.value
-          error.grpcCodeValue should be(Some(grpcCode.getNumber))
+      val codes = Code.values().filter(_ != Code.UNRECOGNIZED).toList
+      Future
+        .traverse(codes) { grpcCode =>
+          val url = s"/v2/test/parametrized-status-runtime-exception?code=${grpcCode.getNumber}"
+          for {
+            response <- call(url, port)
+            _ = response.status.intValue() should be(
+              GrpcToHttpConverter(grpcCode).asPekkoHttp.intValue
+            )
+            body <- extractBodyFromResponse(response)
+          } yield {
+            val error: JsCantonError = body.value
+            error.grpcCodeValue should be(Some(grpcCode.getNumber))
+          }
         }
-      }
+        .map(_ => succeed)
     }
   }
 
   private def call(endpoint: String, port: Int): Future[HttpResponse] = {
     val request = HttpRequest(uri = s"http://localhost:$port$endpoint")
-    Http()(system).singleRequest(request)
+    Http()(system)
+      .singleRequest(request)
+      // Flaky test mitigation:
+      // The response body must be consumed promptly, otherwise will log a warning, failing the test.
+      .flatMap(_.toStrict(30.seconds))
   }
 
   private def extractBodyFromResponse(

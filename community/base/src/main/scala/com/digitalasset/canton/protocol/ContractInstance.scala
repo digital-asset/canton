@@ -6,7 +6,11 @@ package com.digitalasset.canton.protocol
 import cats.syntax.either.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.transaction.{
   ContractInstanceCoder,
@@ -23,7 +27,7 @@ import monocle.Lens
   *   - The contract instance can be serialized
   *   - The contract ID format is known
   */
-sealed trait GenContractInstance extends PrettyPrinting {
+sealed trait GenContractInstance extends PrettyPrintingFromCompanion {
   type InstCreatedAtTime <: CreationTime
 
   val inst: FatContractInstance { type CreatedAtTime = InstCreatedAtTime }
@@ -38,8 +42,8 @@ sealed trait GenContractInstance extends PrettyPrinting {
     inst.contractKeyWithMaintainers
   def toLf: LfNodeCreate = inst.toCreateNode
 
-  override protected def pretty: Pretty[GenContractInstance] =
-    ContractInstance.prettyGenContractInstance
+  override def prettyCompanion: PrettyPrintingCompanion[GenContractInstance] =
+    GenContractInstance
 
   def encoded: ByteString = serialization
 
@@ -51,6 +55,11 @@ sealed trait GenContractInstance extends PrettyPrinting {
   def traverseCreatedAt[NewCreatedAtTime <: CreationTime](
       f: InstCreatedAtTime => Either[String, NewCreatedAtTime]
   ): Either[String, GenContractInstance { type InstCreatedAtTime <: NewCreatedAtTime }]
+}
+
+object GenContractInstance extends PrettyPrintingCompanion[GenContractInstance] {
+  override protected val pretty: Pretty[GenContractInstance] =
+    ContractInstance.prettyGenContractInstance
 }
 
 object ContractInstance {

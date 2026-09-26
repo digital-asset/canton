@@ -22,7 +22,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
   TemplateId,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
@@ -51,7 +50,7 @@ import com.digitalasset.canton.ledger.client.LedgerClientUtils
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationAdminWorkflow
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
@@ -67,7 +66,7 @@ import org.slf4j.event.Level
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
-/** Objective: Test the negotiation of party replication via the PartyReplication.daml workflow.
+/** Objective: Test the negotiation of party replication via the AcsReplication.daml workflow.
   *
   * Setup:
   *   - 3 participants: the first two host the party to replicate and the third one doesn't for
@@ -269,7 +268,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
               tx.events.collect {
                 case Event(Created(event))
                     if event.templateId.contains(
-                      PartyReplicationAdminWorkflow.proposalTemplate
+                      AcsReplicationAdminWorkflow.proposalTemplate
                     ) =>
                   event
               }
@@ -286,7 +285,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
                 tx.events.collect {
                   case Event(Exercised(event))
                       if event.templateId.contains(
-                        PartyReplicationAdminWorkflow.proposalTemplate
+                        AcsReplicationAdminWorkflow.proposalTemplate
                       ) =>
                     event
                 }
@@ -299,6 +298,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
             accept.actingParties shouldBe Seq(
               sourceParticipant.adminParty.toProtoPrimitive
             )
+            accept.offset
           }
         }
       }
@@ -470,18 +470,19 @@ sealed trait OnlinePartyReplicationNegotiationTest
           partyIdString: String = alice.toProtoPrimitive,
           serial: Long = dummyTopologySerial,
           partyReplicationIdS: String = validOnPRIdS,
-      ) =
+      ): Unit =
         clue(log)(
           loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
             {
-              val proposal = new M.partyreplication.PartyReplicationProposal(
+              val proposal = new M.acsreplication.AcsReplicationProposal(
                 partyReplicationIdS,
                 partyIdString,
                 sourceParticipant.adminParty.toProtoPrimitive,
                 targetParticipant.adminParty.toProtoPrimitive,
                 sequencerStringUids.asJava,
                 serial,
-                M.partyreplication.ParticipantPermission.CONFIRMATION,
+                M.acsreplication.ParticipantPermission.CONFIRMATION,
+                "online-party-replication",
               )
               targetParticipant.ledger_api.commands
                 .submit(
@@ -501,14 +502,15 @@ sealed trait OnlinePartyReplicationNegotiationTest
         clue(log)(
           loggerFactory.assertThrowsAndLogs[CommandFailure](
             {
-              val proposal = new M.partyreplication.PartyReplicationProposal(
+              val proposal = new M.acsreplication.AcsReplicationProposal(
                 validOnPRIdS,
                 alice.toProtoPrimitive,
                 participantWithParty.adminParty.toProtoPrimitive,
                 participantWithParty2.adminParty.toProtoPrimitive,
                 Seq.empty.asJava,
                 dummyTopologySerial,
-                M.partyreplication.ParticipantPermission.CONFIRMATION,
+                M.acsreplication.ParticipantPermission.CONFIRMATION,
+                "online-party-replication",
               )
               participantWithParty2.ledger_api.commands
                 .submit(
@@ -523,7 +525,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
               logEntry.errorMessage should (include(
                 "Interpretation error: Error: User failure:"
               ) and include(
-                "Template precondition violated: PartyReplicationProposal"
+                "Template precondition violated: AcsReplicationProposal"
               ))
               logEntry.shouldBeCantonErrorCode(
                 CommandExecutionErrors.Interpreter.UnhandledException
@@ -548,14 +550,14 @@ sealed trait OnlinePartyReplicationNegotiationTest
       )
 
       testAgreementError(
-        "bad-party-replication-id",
-        "Invalid party replication id: .*Failed to parse hex string: bad-party-replication-id",
+        "bad-acs-replication-id",
+        "Invalid ACS replication id: .*Failed to parse hex string: bad-party-replication-id",
         partyReplicationIdS = "bad-party-replication-id",
       )
 
       testAgreementError(
-        "empty-party-replication-id",
-        "Empty party replication id",
+        "empty-acs-replication-id",
+        "Empty ACS replication id",
         partyReplicationIdS = "",
       )
 
@@ -575,17 +577,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
       testAgreementError(
         "source-participant-does-not-host-party",
-        "Party .* is not hosted by source participant",
+        "PartyToParticipant mapping for party .* doesn't exist for either source or target participant",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
         serial = findLatestPtpTopologySerial(participantWithParty),
-      )
-
-      testAgreementError(
-        "target-participant-already-hosts-party",
-        s"Party .* is not marked as onboarding with permission Confirmation on the target participant ${participantWithParty2.id}",
-        targetParticipant = participantWithParty2,
-        serial = findLatestPtpTopologySerial(participantWithParty2),
       )
 
       testAgreementError(
@@ -616,10 +611,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
                 .of_all(filterTemplates =
                   Seq(
                     TemplateId.fromIdentifier(
-                      PartyReplicationAdminWorkflow.proposalTemplatePkgName
+                      AcsReplicationAdminWorkflow.proposalTemplatePkgName
                     ),
                     TemplateId.fromIdentifier(
-                      PartyReplicationAdminWorkflow.agreementTemplatePkgName
+                      AcsReplicationAdminWorkflow.agreementTemplatePkgName
                     ),
                   )
                 )
@@ -634,7 +629,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
-@UnstableTest // TODO(i26538): Remove as soon as this test has been fixed
 class OnlinePartyReplicationNegotiationTestPostgres extends OnlinePartyReplicationNegotiationTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

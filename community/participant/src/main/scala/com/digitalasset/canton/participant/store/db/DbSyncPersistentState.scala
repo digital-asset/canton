@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.store.{
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
 }
+import com.digitalasset.canton.participant.topology.OfflineTopologyLookup
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbSequencedEventStore
@@ -35,9 +36,9 @@ import com.digitalasset.canton.store.{
   PendingOperationStore,
   SendTrackerStore,
 }
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ReassignmentTag
 
@@ -51,6 +52,8 @@ class DbLogicalSyncPersistentState(
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     contractStore: ContractStore,
     ledgerApiStore: Eval[LedgerApiStore],
+    participantId: ParticipantId,
+    offlineTopologyLookup: OfflineTopologyLookup,
     val loggerFactory: NamedLoggerFactory,
     val futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -134,6 +137,8 @@ class DbLogicalSyncPersistentState(
     futureSupervisor,
     exitOnFatalFailures = parameters.exitOnFatalFailures,
     parameters.batchingConfig,
+    participantId,
+    offlineTopologyLookup,
     timeouts,
     loggerFactory,
   )
@@ -152,7 +157,7 @@ class DbLogicalSyncPersistentState(
       new DbPartyReplicationIndexingStore(
         storage,
         synchronizerIdx,
-        cfg.pauseSynchronizerIndexingDuringPartyReplication,
+        cfg.target.pauseSynchronizerIndexingDuringPartyReplication,
         timeouts,
         loggerFactory,
       )

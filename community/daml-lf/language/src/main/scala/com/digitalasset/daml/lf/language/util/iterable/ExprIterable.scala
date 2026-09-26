@@ -101,7 +101,11 @@ private[lf] object ExprIterable {
         Iterator(arg)
       case UpdateFetchTemplate(templateId @ _, contractId) =>
         Iterator(contractId)
-      case UpdateFetchInterface(interface @ _, contractId) =>
+      case UpdateFetchInterface(interfaceId @ _, contractId) =>
+        Iterator(contractId)
+      case UpdateUnpackTemplate(templateId @ _, contractId) =>
+        Iterator(contractId)
+      case UpdateUnpackInterface(interfaceId @ _, contractId) =>
         Iterator(contractId)
       case UpdateExercise(templateId @ _, choice @ _, cid, arg) =>
         Iterator(cid, arg)

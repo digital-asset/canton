@@ -78,6 +78,7 @@ class UpdateStreamReaderPruningComponentTest
         pruningOffsetService = pruningOffsetService,
         queryValidRange = mock[QueryValidRange],
         dbDispatcher = dbDispatcher,
+        queryName = "EventPayloadSourceForUpdatesLedgerEffects.Activate",
       )
       .futureValue
 

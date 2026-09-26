@@ -5,32 +5,84 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.Eval
 import cats.data.EitherT
-import cats.implicits.toTraverseOps
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
+import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.PersistsContracts
 import com.digitalasset.canton.participant.store.{
-  AcsReplicationProgress,
   ParticipantNodePersistentState,
   PartyReplicationIndexingStore,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyColl.*
 
 import scala.concurrent.ExecutionContext
+
+trait AcsTransferContractHandler {
+
+  /** Handles contracts as they arrive in chunks during the party ACS transfer.
+    *
+    * The handler is deliberately unaware of how the caller tracks online party replication
+    * progress: it consumes the checkpoint reached before the chunk and reports the checkpoint
+    * reached after it. Recording the returned checkpoint is up to the caller, which alone knows how
+    * to represent its own ephemeral progress.
+    *
+    * @param contracts
+    *   the contracts to handle
+    * @param checkpoint
+    *   the transfer checkpoint reached before this chunk
+    * @return
+    *   the transfer checkpoint reached after this chunk
+    */
+  def handleContracts(
+      contracts: NonEmpty[Seq[ActiveContract]],
+      checkpoint: AcsTransferCheckpoint,
+      synchronizerId: SynchronizerId,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] = for {
+    validatedContracts <- EitherT.fromEither[FutureUnlessShutdown](
+      ReceivedContractValidation.validateContracts(contracts, synchronizerId)
+    )
+    checkpointAfter <- handleValidatedContracts(validatedContracts, checkpoint)
+  } yield checkpointAfter
+
+  def handleValidatedContracts(
+      validatedActivations: NonEmpty[Seq[ContractReassignment]],
+      checkpoint: AcsTransferCheckpoint,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint]
+}
+
+object AcsTransferContractHandler {
+
+  /** How far the target participant ACS transfer has progressed.
+    *
+    * @param processedContractCount
+    *   the total number of contracts transferred thus far
+    * @param nextPersistenceCounter
+    *   the repair counter with which to persist the next chunk of contracts
+    */
+  final case class AcsTransferCheckpoint(
+      processedContractCount: NonNegativeLong,
+      nextPersistenceCounter: RepairCounter,
+  )
+}
 
 /** Target participant ACS persistence functionality shared between the OnPR sequencer channel
   * target processor and the file-based ACS importer.
@@ -38,8 +90,6 @@ import scala.concurrent.ExecutionContext
   *   the online party replication, party add request identifier
   * @param partyOnboardingAt
   *   the effective time of the onboarding PartyToParticipant topology transaction
-  * @param replicationProgressState
-  *   interface to update OnPR progress
   * @param persistsContracts
   *   interface to persist a batch of contracts to the contract store
   * @param requestTracker
@@ -47,45 +97,41 @@ import scala.concurrent.ExecutionContext
   * @param indexingStore
   *   indexing store to add imported contract information to for subsequent Ledger API indexing
   */
-abstract class TargetParticipantAcsPersistence(
+class TargetParticipantAcsPersistence(
     requestId: AddPartyRequestId,
     psid: PhysicalSynchronizerId,
     partyOnboardingAt: EffectiveTime,
-    replicationProgressState: AcsReplicationProgress,
     persistsContracts: PersistsContracts,
     requestTracker: RequestTracker,
     indexingStore: PartyReplicationIndexingStore,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends NamedLogging {
+    extends AcsTransferContractHandler
+    with NamedLogging {
 
   /** Import contracts as part of online party replication performing the following activities.
-    *   - validate the contracts and contract ids
     *   - persist contracts at a determined time of change updating in-memory request-tracker state
     *     accordingly
     *   - schedule publishing of the corresponding indexer event
-    *   - update the persisted and ephemeral, in-memory OnPR progress state
     *
-    * @param contracts
-    *   the contracts to import
+    * @param validatedActivations
+    *   the validated contracts to import
+    * @param checkpoint
+    *   the transfer checkpoint reached before this chunk
     * @return
-    *   the updated total count of contracts imported thus far
+    *   the transfer checkpoint reached after this chunk
     */
-  def importContracts(
-      contracts: NonEmpty[Seq[ActiveContract]]
+  override def handleValidatedContracts(
+      validatedActivations: NonEmpty[Seq[ContractReassignment]],
+      checkpoint: AcsTransferCheckpoint,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
+  ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint] =
     for {
-      replicationProgress <- EitherT.fromEither[FutureUnlessShutdown](
-        replicationProgressState
-          .getAcsReplicationProgress(requestId)
-          .toRight(s"Party replication $requestId not found in progress state")
-      )
-      validatedActivations <- validateContracts(contracts)
       _ <- persistsContracts
         .persistContracts(validatedActivations.map(_.contract))
         .leftMap(err => s"Failed to persist contracts: $err")
-      repairCounter = replicationProgress.nextPersistenceCounter
+      repairCounter = checkpoint.nextPersistenceCounter
       toc = TimeOfChange(partyOnboardingAt.value, Some(repairCounter))
       replicatedContracts = validatedActivations.map {
         // TODO(#26468): Use validation packages
@@ -105,7 +151,7 @@ abstract class TargetParticipantAcsPersistence(
         toc.timestamp,
         // Indexing tracks activations at the contract-level rather than per batch to allow indexing
         // in different batches from the batches used for import.
-        replicationProgress.processedContractCount,
+        checkpoint.processedContractCount,
       )
 
       _ <- EitherT.right[String](
@@ -114,46 +160,9 @@ abstract class TargetParticipantAcsPersistence(
           validatedActivations,
         )
       )
-      updatedProcessedContractsCount =
-        replicationProgress.processedContractCount + NonNegativeLong.size(contracts)
-      _ <- replicationProgressState.updateAcsReplicationProgress(
-        requestId,
-        newProgress(updatedProcessedContractsCount, repairCounter),
-      )
-    } yield updatedProcessedContractsCount
-
-  /** The new progress depends on ephemeral state depending on the derived class.
-    */
-  protected def newProgress(
-      updatedProcessedContractsCount: NonNegativeLong,
-      usedRepairCounter: RepairCounter,
-  ): PartyReplicationStatus.AcsReplicationProgress
-
-  private def validateContracts(
-      contracts: NonEmpty[Seq[ActiveContract]]
-  ): EitherT[FutureUnlessShutdown, String, NonEmpty[Seq[ContractReassignment]]] =
-    EitherT.fromEither[FutureUnlessShutdown](
-      contracts.toNEF
-        .traverse(activeContract =>
-          for {
-            repairContract <- RepairContract.fromLapiActiveContract(activeContract.contract)
-            _ <- Either.cond(
-              repairContract.synchronizerId == psid.logical,
-              (),
-              s"Received contract ${repairContract.contractId} has unexpected synchronizer ${repairContract.synchronizerId}",
-            )
-            contractInstance <- ContractInstance.create(repairContract.contract)
-
-          } yield {
-            // TODO(#26468): Use representative package
-            ContractReassignment(
-              contractInstance,
-              ReassignmentTag.Source(contractInstance.templateId.packageId),
-              ReassignmentTag.Target(contractInstance.templateId.packageId),
-              repairContract.reassignmentCounter,
-            )
-          }
-        )
+    } yield AcsTransferCheckpoint(
+      checkpoint.processedContractCount + NonNegativeLong.size(validatedActivations),
+      repairCounter + 1,
     )
 }
 

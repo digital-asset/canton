@@ -59,7 +59,6 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
   def submit(engine: Engine, choiceName: String = "Call") =
     engine.submit(
       submitters = Set(alice),
-      readAs = Set.empty,
       cmds = ApiCommands(ImmArray(command(choiceName)), let, "external-call-engine-test"),
       participantId = participantId,
       submissionSeed = submissionSeed,

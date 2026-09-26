@@ -71,7 +71,7 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
             .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
             .loneElement
         )
       }
@@ -179,7 +179,9 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(S2M2)
       }
-      .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(
+        (configTransforms ++ Seq(ConfigTransforms.setPingRetries(true)))*
+      ) // retry pings to avoid flaky test failures
       .withSetup { implicit env =>
         import env.*
 
@@ -215,7 +217,7 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
             .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
             .loneElement
         )
       }

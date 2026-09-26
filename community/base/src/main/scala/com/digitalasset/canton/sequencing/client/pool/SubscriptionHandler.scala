@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionErro
   EventAggregationError,
   EventValidationError,
 }
-import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandlerTrait.SubscriptionLivenessStatus
+import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandler.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.{
   DelaySequencedEvent,
   SequencedEventValidator,
@@ -37,7 +37,7 @@ import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
-trait SubscriptionHandlerTrait {
+trait SubscriptionHandler extends FlagCloseable with NamedLogging {
   def handleEvent(
       serializedEvent: MaybeCompressedSerializedEvent
   ): FutureUnlessShutdown[Either[SequencerClientSubscriptionError, Unit]]
@@ -45,11 +45,11 @@ trait SubscriptionHandlerTrait {
   def getLivenessStatus(latest: EventAndOrdinal): Option[SubscriptionLivenessStatus]
 }
 
-object SubscriptionHandlerTrait {
+object SubscriptionHandler {
   final case class SubscriptionLivenessStatus(timestampDelta: Duration, ordinalDelta: Long)
 }
 
-class SubscriptionHandler private[sequencing] (
+class SubscriptionHandlerImpl private[sequencing] (
     clock: Clock,
     metrics: SequencerClientMetrics,
     applicationHandlerFailure: SingleUseCell[ApplicationHandlerFailure],
@@ -63,9 +63,7 @@ class SubscriptionHandler private[sequencing] (
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends FlagCloseable
-    with NamedLogging
-    with SubscriptionHandlerTrait {
+    extends SubscriptionHandler {
 
   // Keep track of the last event that we processed. In the event the SequencerClient is recreated, we'll restart
   // from the last successfully processed event counter, and we'll validate it is still the last event we processed
@@ -124,13 +122,7 @@ class SubscriptionHandler private[sequencing] (
           }
           _ = delayLogger.checkForDelay_(validatedEvent)
 
-          _ <- EitherT(
-            sequencerAggregator
-              .combineAndMergeEvent(
-                sequencerId,
-                validatedEvent,
-              )
-          )
+          _ <- EitherT(sequencerAggregator.combineAndMergeEvent(sequencerId, validatedEvent))
             .leftMap[SequencerClientSubscriptionError](EventAggregationError.apply)
           _ = logger.debug("Event combined and merged successfully by the sequencer aggregator")
         } yield ()
@@ -147,46 +139,4 @@ class SubscriptionHandler private[sequencing] (
 
       SubscriptionLivenessStatus(timestampDelta, ordinalDelta)
     }
-}
-
-trait SubscriptionHandlerFactory {
-  def create(
-      eventValidator: SequencedEventValidator,
-      initialPriorEventO: Option[EventAndOrdinal],
-      sequencerAlias: SequencerAlias,
-      sequencerId: SequencerId,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext): SubscriptionHandler
-}
-
-class SubscriptionHandlerFactoryImpl(
-    clock: Clock,
-    metrics: SequencerClientMetrics,
-    applicationHandlerFailure: SingleUseCell[ApplicationHandlerFailure],
-    recorderO: Option[SequencerClientRecorder],
-    sequencerAggregator: SequencerAggregator,
-    processingDelay: DelaySequencedEvent,
-    timeouts: ProcessingTimeout,
-) extends SubscriptionHandlerFactory {
-
-  override def create(
-      eventValidator: SequencedEventValidator,
-      initialPriorEventO: Option[EventAndOrdinal],
-      sequencerAlias: SequencerAlias,
-      sequencerId: SequencerId,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext): SubscriptionHandler = new SubscriptionHandler(
-    clock,
-    metrics,
-    applicationHandlerFailure,
-    recorderO,
-    sequencerAggregator,
-    eventValidator,
-    processingDelay,
-    initialPriorEventO,
-    sequencerAlias,
-    sequencerId,
-    timeouts,
-    loggerFactory,
-  )
 }

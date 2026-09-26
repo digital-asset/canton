@@ -108,10 +108,9 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
       for {
         speedyCmd <- preprocess(cmd)
         result <- engine
-          .interpretCommands(
+          .executeCommands(
             validating = false,
             submitters = Set(party),
-            readAs = Set.empty,
             commands = ImmArray(speedyCmd),
             ledgerTime = let,
             preparationTime = let,

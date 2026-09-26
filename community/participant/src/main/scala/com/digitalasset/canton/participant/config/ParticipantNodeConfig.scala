@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** Base for all participant configs - both local and remote */
-trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
+sealed trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
   def clientLedgerApi: ClientConfig
 }
 
@@ -806,11 +806,19 @@ object ContractLoaderConfig {
 }
 
 /** Parameters for the Online Party Replication (OnPR) alpha preview feature
+  *
+  * @param unsafeSequencerChannelSupport
+  *   enable Sequencer Channel based ACS replication
+  * @param target
+  *   target participant specific configuration
+  * @param testInterceptor
+  *   test-only configuration to inject ProgrammableSequencer-style behavior during ACS replication
+  *   protocol processing.
   */
 final case class AlphaOnlinePartyReplicationConfig(
-    testInterceptor: Option[AlphaOnlinePartyReplicationConfig.TestInterceptor] = None,
     unsafeSequencerChannelSupport: Boolean = false,
-    pauseSynchronizerIndexingDuringPartyReplication: Boolean = false,
+    target: OnlinePartyReplicationTargetConfig = OnlinePartyReplicationTargetConfig(),
+    testInterceptor: Option[AlphaOnlinePartyReplicationConfig.TestInterceptor] = None,
 )
 
 object AlphaOnlinePartyReplicationConfig {
@@ -821,5 +829,17 @@ object AlphaOnlinePartyReplicationConfig {
     * is not possible to set through pureconfig.
     */
   type TestInterceptor = () => PartyReplicationTestInterceptor
-
 }
+
+/** Target participant specific online party replication configuration.
+  *
+  * @param pauseSynchronizerIndexingDuringPartyReplication
+  *   whether to pause the indexer during online party replication.
+  * @param disableAcsDigestSourceSignatureValidation
+  *   by default the target validates the source participant signature of the ACS digest. This
+  *   allows to disable signature verification.
+  */
+final case class OnlinePartyReplicationTargetConfig(
+    pauseSynchronizerIndexingDuringPartyReplication: Boolean = false,
+    disableAcsDigestSourceSignatureValidation: Boolean = false,
+)

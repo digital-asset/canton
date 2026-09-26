@@ -29,7 +29,6 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   GlobalKeyWithMaintainers,
   SerializationVersion,
-  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.Value.{
   ContractId,
@@ -206,10 +205,9 @@ class ContractKeySpec
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
 
       val result = suffixLenientEngine
-        .interpretCommands(
+        .executeCommands(
           validating = false,
           submitters = submitters,
-          readAs = Set.empty,
           commands = cmds,
           ledgerTime = now,
           preparationTime = now,
@@ -237,10 +235,9 @@ class ContractKeySpec
         .preprocessApiCommands(Map.empty, ImmArray(ApiCommand.Create(templateId.toRef, createArg)))
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       val result = suffixLenientEngine
-        .interpretCommands(
+        .executeCommands(
           validating = false,
           submitters = submitters,
-          readAs = Set.empty,
           commands = cmds,
           ledgerTime = now,
           preparationTime = now,
@@ -271,10 +268,9 @@ class ContractKeySpec
         .preprocessApiCommands(Map.empty, ImmArray(ApiCommand.Create(templateId.toRef, createArg)))
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       val result = suffixLenientEngine
-        .interpretCommands(
+        .executeCommands(
           validating = false,
           submitters = submitters,
-          readAs = Set.empty,
           commands = cmds,
           ledgerTime = now,
           preparationTime = now,
@@ -351,12 +347,7 @@ class ContractKeySpec
             }
         }
 
-      def run(
-          engine: Engine,
-          choice: String,
-          argument: Value,
-          contractStateMode: ContractStateMachine.Mode,
-      ) = {
+      def run(engine: Engine, choice: String, argument: Value) = {
         val cmd = ApiCommand.CreateAndExercise(
           opsId.toRef,
           ValueRecord(None, ImmArray((None, ValueParty(party)))),
@@ -367,17 +358,15 @@ class ContractKeySpec
           .preprocessApiCommands(Map.empty, ImmArray(cmd))
           .consume(lookupHandler(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey))
         engine
-          .interpretCommands(
+          .executeCommands(
             validating = false,
             submitters = Set(party),
-            readAs = Set.empty,
             commands = cmds,
             ledgerTime = let,
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
-            interpretationConfig =
-              InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+            interpretationConfig = InterpretationConfig.Default,
           )
           .consume(lookupHandler(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey))
       }
@@ -436,14 +425,13 @@ class ContractKeySpec
 
       // TEST_EVIDENCE: Integrity: contract key behaviour (non-unique mode)
       "non-uck mode" in {
-        val contractStateMode = ContractStateMachine.Mode.Key
         forEvery(allCases) { case (name, arg) =>
           if (failures.contains(name)) {
-            inside(run(engine, name, arg, contractStateMode)) {
+            inside(run(engine, name, arg)) {
               case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
             }
           } else {
-            run(engine, name, arg, contractStateMode) shouldBe a[Right[?, ?]]
+            run(engine, name, arg) shouldBe a[Right[?, ?]]
           }
         }
       }

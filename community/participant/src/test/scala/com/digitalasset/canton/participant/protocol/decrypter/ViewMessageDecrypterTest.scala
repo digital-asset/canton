@@ -333,7 +333,7 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
               _contractOfId: ContractInstanceOfId,
               _maxSequencingTime: CantonTimestamp,
               validatePackageVettings: Boolean,
-              _limitConfig: TransactionViewLimitConfig,
+              _protocolLimits: TransactionProtocolLimits,
           )(implicit
               traceContext: TraceContext
           ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] =

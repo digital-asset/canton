@@ -6,7 +6,11 @@ package com.digitalasset.canton.protocol
 import cats.implicits.toBifunctorOps
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.ContractDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 /** @param consumed
@@ -16,7 +20,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
   *   com.digitalasset.canton.data.ViewParticipantData.coreInputs
   */
 final case class InputContract(contract: GenContractInstance, consumed: Boolean)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
   def contractId: LfContractId = contract.contractId
 
@@ -32,13 +36,16 @@ final case class InputContract(contract: GenContractInstance, consumed: Boolean)
       consumed = consumed,
     )
 
-  override protected def pretty: Pretty[InputContract] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[InputContract] = InputContract
+}
+
+object InputContract extends PrettyPrintingCompanion[InputContract] {
+
+  override protected val pretty: Pretty[InputContract] = prettyOfClass(
     unnamedParam(_.contract),
     paramIfTrue("consumed", _.consumed),
   )
-}
 
-object InputContract {
   def fromProtoV30(
       inputContractP: v30.InputContract
   ): ParsingResult[InputContract] = {

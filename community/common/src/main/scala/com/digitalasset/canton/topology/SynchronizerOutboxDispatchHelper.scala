@@ -16,7 +16,7 @@ import com.digitalasset.canton.lifecycle.{
   RunOnClosing,
 }
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.logging.pretty.PrettyPrinting
+import com.digitalasset.canton.logging.pretty.PrettyPrintingFromCompanion
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -41,7 +41,7 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
 
   protected def topologyTransaction(
       tx: GenericSignedTopologyTransaction
-  ): PrettyPrinting = tx.transaction
+  ): PrettyPrintingFromCompanion = tx.transaction
 
   protected def onlyApplicable(
       transactions: Seq[GenericSignedTopologyTransaction]

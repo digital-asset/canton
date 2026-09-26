@@ -1,0 +1,190 @@
+name: Generate Data Continuity Dumps
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'The runner to use for the workflow'
+        required: true
+        type: string
+      is_nightly_workflow:
+        description: 'Whether the workflow is a nightly workflow'
+        required: true
+        type: boolean
+      is_manual:
+        description: 'Whether the workflow is a manual workflow'
+        required: true
+        type: boolean
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  resolve_timings:
+    name: Resolve Timings Artifact Run
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/utils/resolve_previous_artifact_run
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve previous timings artifact run
+        id: resolve
+        continue-on-error: true
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: generate_data_continuity_dumps-timings-latest
+
+  generate_data_continuity_dumps:
+    name: Generate Data Continuity Dumps
+    needs: resolve_timings
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 180
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Guard against non-weekly nightly and pre-existing dumps
+        id: guards
+        uses: ./.github/actions/nix/nix_script_run
+        env:
+          IS_NIGHTLY_WORKFLOW: ${{ inputs.is_nightly_workflow }}
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          output-name: should_skip
+          command: |
+            set -euo pipefail
+
+            should_skip=false
+
+            if [[ "$IS_NIGHTLY_WORKFLOW" == "true" && "$(date +"%u")" -ne 2 ]]; then
+              echo "On nightly jobs, data continuity dumps are only generated for weekly releases. Skipping..."
+              should_skip=true
+            fi
+
+            if [[ "$should_skip" != "true" ]]; then
+              version="$RELEASE_SUFFIX"
+              echo "Checking whether dumps already exist for $version"
+              aws s3api list-objects \
+                --bucket canton-public-releases \
+                --prefix data-continuity-dumps/ \
+                --query 'CommonPrefixes[].{Prefix: Prefix}' \
+                --output text \
+                --no-sign-request \
+                --delimiter "/0" > dumps_listing
+
+              if grep -q "/$version/" dumps_listing; then
+                echo "Data continuity dumps have already been generated for this version. Skipping..."
+                should_skip=true
+              fi
+            fi
+
+            rm -f dumps_listing
+            echo "should_skip=$should_skip" >> "$GITHUB_OUTPUT"
+
+      - name: Start Postgres container
+        if: steps.guards.outputs.result != 'true'
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: "0"
+
+      - name: Ensure dumps output directory exists
+        if: steps.guards.outputs.result != 'true'
+        shell: bash
+        run: mkdir -p /tmp/canton/data-continuity-dumps
+
+      - name: Run data continuity dump tests
+        if: steps.guards.outputs.result != 'true'
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l
+            com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          include_patterns: |
+            com\.digitalasset\.canton\.integration\.tests\.manual\.Create.*DataContinuityDumpsPostgres_all.*
+            com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest
+            com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.*Writer.*
+            com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest
+            com\.digitalasset\.canton\.integration\.tests\.ProtobufCompatibilityWriterTest
+          num_test_buckets: "1"
+          shard_index: "0"
+          execution_context_size: "8"
+          num_parallel_tasks: "8"
+          timeout: '60m'
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Upload data continuity dumps to S3
+        if: steps.guards.outputs.result != 'true'
+        uses: ./.github/actions/nix/nix_run
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          command: ./scripts/ci/publish-data-continuity-dumps-to-s3.sh
+
+      - name: Stop Postgres container
+        if: always() && steps.guards.outputs.result != 'true'
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: generate_data_continuity_dumps
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: generate_data_continuity_dumps
+      runner: ${{ inputs.runner }}
+      protocol_version: ''

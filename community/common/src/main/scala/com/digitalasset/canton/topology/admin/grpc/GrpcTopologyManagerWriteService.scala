@@ -168,6 +168,8 @@ class GrpcTopologyManagerWriteService(
           validatedMapping <- mapping match {
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
               TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
+            case v30.AuthorizeRequest.Proposal.Mapping.V31(value) =>
+              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
             case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("AuthorizeRequest.mapping", None)
           }
@@ -488,6 +490,8 @@ class GrpcTopologyManagerWriteService(
           mapping <- mappingPO match {
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
               TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
+            case v30.GenerateTransactionsRequest.Proposal.Mapping.V31(value) =>
+              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
             case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("mapping", None)
           }

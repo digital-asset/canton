@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config.GeneratorsConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.{GeneratorsCrypto, Hash}
+import com.digitalasset.canton.crypto.{Hash, Signature}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
@@ -28,10 +28,10 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   PersistentProgress,
   ReplicationParams,
 }
-import com.digitalasset.canton.participant.protocol.party.{
-  OnboardingClearanceOperation,
-  PartyReplicationSourceParticipantMessage,
-  PartyReplicationTargetParticipantMessage,
+import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
+import com.digitalasset.canton.participant.protocol.party.acsreplication.{
+  AcsReplicationSourceParticipantMessage,
+  AcsReplicationTargetParticipantMessage,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.{
   CauseWithTemplate,
@@ -57,6 +57,7 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
+  UniqueIdentifier,
 }
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -66,6 +67,7 @@ import com.digitalasset.canton.{
   ReassignmentCounter,
   RepairCounter,
 }
+import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -73,7 +75,6 @@ final class GeneratorsParticipant(
     generatorsTopology: GeneratorsTopology,
     generatorsTransaction: GeneratorsTransaction,
     generatorsLf: GeneratorsLf,
-    generatorsCrypto: GeneratorsCrypto,
     version: ProtocolVersion,
 ) {
 
@@ -83,7 +84,7 @@ final class GeneratorsParticipant(
   import generatorsTransaction.*
   import generatorsLf.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
-  import generatorsCrypto.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
 
   implicit val completionInfoArb: Arbitrary[CompletionInfo] = Arbitrary {
     for {
@@ -155,9 +156,9 @@ final class GeneratorsParticipant(
 
   // If this pattern match is not exhaustive anymore, update the message generator below
   {
-    ((_: PartyReplicationSourceParticipantMessage.DataOrStatus) match {
-      case _: PartyReplicationSourceParticipantMessage.AcsBatch => ()
-      case PartyReplicationSourceParticipantMessage.EndOfACS => ()
+    ((_: AcsReplicationSourceParticipantMessage.DataOrStatus) match {
+      case _: AcsReplicationSourceParticipantMessage.AcsBatch => ()
+      case _: AcsReplicationSourceParticipantMessage.EndOfAcs => ()
     }).discard
   }
 
@@ -186,8 +187,9 @@ final class GeneratorsParticipant(
     Arbitrary(
       for {
         damlAgreementContractId <- Arbitrary.arbitrary[LfContractId]
+        agreedAt <- Arbitrary.arbitrary[CantonTimestamp]
         sequencerId <- Arbitrary.arbitrary[SequencerId]
-      } yield Exists(damlAgreementContractId, sequencerId)
+      } yield Exists(damlAgreementContractId, agreedAt, sequencerId)
     )
 
   implicit val sequencerChannelAgreementStatusArb: Arbitrary[AgreementStatus] =
@@ -216,12 +218,14 @@ final class GeneratorsParticipant(
       for {
         replicatedContractCount <- Arbitrary.arbitrary[NonNegativeLong]
         nextPersistenceCounter <- Arbitrary.arbitrary[RepairCounter]
+        acsHashO <- Arbitrary.arbitrary[Option[ByteString]]
         fullyReplicatedAcs <- Arbitrary.arbitrary[Boolean]
       } yield {
         // Alternative AcsReplicationProgressRuntime is not serializable (due to processor field)
         PersistentProgress(
           replicatedContractCount,
           nextPersistenceCounter,
+          acsHashO,
           fullyReplicatedAcs,
         )
       }
@@ -256,6 +260,8 @@ final class GeneratorsParticipant(
         authorizationO <- Gen.option(Arbitrary.arbitrary[PartyReplicationAuthorization])
         agreementO <- Arbitrary.arbitrary[AgreementStatus]
         replicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationProgress])
+        // TODO (#35267): change this once AcsReplicationStatus is a separate class
+        acsReplicationO <- Gen.const(None)
         indexingO <- Gen.option(Arbitrary.arbitrary[AcsIndexingProgress])
         hasCompleted <- Arbitrary.arbitrary[Boolean]
         errorO <- Gen.option(Arbitrary.arbitrary[PartyReplicationError])
@@ -265,6 +271,7 @@ final class GeneratorsParticipant(
         authorizationO.map(_ => agreementO).getOrElse(AgreementStatus.NotProposed),
         authorizationO,
         authorizationO.flatMap(_ => replicationO),
+        acsReplicationO,
         // Can only have indexing status if we have authorization and replication status
         authorizationO.flatMap(_ => replicationO).flatMap(_ => indexingO),
         hasCompleted,
@@ -272,19 +279,73 @@ final class GeneratorsParticipant(
       )
     )
 
-  implicit val partyReplicationSourceParticipantMessageArb
-      : Arbitrary[PartyReplicationSourceParticipantMessage] =
+  implicit val acsReplicationAcsBatchArb
+      : Arbitrary[AcsReplicationSourceParticipantMessage.AcsBatch] =
     Arbitrary(
       for {
         acsBatch <- nonEmptyListGen[ActiveContract]
+      } yield AcsReplicationSourceParticipantMessage.AcsBatch(
+        acsBatch
+      )
+    )
+
+  implicit val acsReplicationGetAcsArgumentsArb
+      : Arbitrary[AcsReplicationSourceParticipantMessage.GetAcsArguments] =
+    Arbitrary(
+      for {
+        partyId <- Arbitrary.arbitrary[PartyId]
+        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
+        asOf <- Arbitrary.arbitrary[CantonTimestamp]
+        excludedStakeholders <- boundedListGen[PartyId]
+      } yield AcsReplicationSourceParticipantMessage.GetAcsArguments(
+        partyId,
+        synchronizerId,
+        asOf,
+        excludedStakeholders.toSet,
+      )
+    )
+
+  implicit val acsReplicationAcsDigestArb
+      : Arbitrary[AcsReplicationSourceParticipantMessage.AcsDigest] =
+    Arbitrary(
+      for {
+        acsHash <- Arbitrary.arbitrary[ByteString]
+        getAcsArgs <- Arbitrary.arbitrary[AcsReplicationSourceParticipantMessage.GetAcsArguments]
+        sourceParticipantUid <- Arbitrary.arbitrary[UniqueIdentifier]
+        agreedAt <- Arbitrary.arbitrary[CantonTimestamp]
+      } yield AcsReplicationSourceParticipantMessage.AcsDigest(
+        acsHash,
+        getAcsArgs,
+        sourceParticipantUid,
+        agreedAt,
+        version,
+      )
+    )
+
+  implicit val acsReplicationEndOfAcsArb
+      : Arbitrary[AcsReplicationSourceParticipantMessage.EndOfAcs] =
+    Arbitrary(
+      for {
+        acsDigest <- Arbitrary.arbitrary[AcsReplicationSourceParticipantMessage.AcsDigest]
+        acsDigestByteString = acsDigest.toByteString
+        signature <- Arbitrary.arbitrary[Signature]
+      } yield AcsReplicationSourceParticipantMessage.EndOfAcs(
+        acsDigest,
+        acsDigestByteString,
+        signature,
+      )
+    )
+
+  implicit val acsReplicationSourceParticipantMessageArb
+      : Arbitrary[AcsReplicationSourceParticipantMessage] =
+    Arbitrary(
+      for {
         message <- Gen
-          .oneOf[PartyReplicationSourceParticipantMessage.DataOrStatus](
-            PartyReplicationSourceParticipantMessage.AcsBatch(
-              acsBatch
-            ),
-            Gen.const(PartyReplicationSourceParticipantMessage.EndOfACS),
+          .oneOf[AcsReplicationSourceParticipantMessage.DataOrStatus](
+            Arbitrary.arbitrary[AcsReplicationSourceParticipantMessage.AcsBatch],
+            Arbitrary.arbitrary[AcsReplicationSourceParticipantMessage.EndOfAcs],
           )
-      } yield PartyReplicationSourceParticipantMessage.apply(
+      } yield AcsReplicationSourceParticipantMessage.apply(
         message,
         version,
       )
@@ -292,22 +353,22 @@ final class GeneratorsParticipant(
 
   // If this pattern match is not exhaustive anymore, update the instruction generator below
   {
-    ((_: PartyReplicationTargetParticipantMessage.Instruction) match {
-      case _: PartyReplicationTargetParticipantMessage.Initialize => ()
-      case _: PartyReplicationTargetParticipantMessage.SendAcsUpTo => ()
+    ((_: AcsReplicationTargetParticipantMessage.Instruction) match {
+      case _: AcsReplicationTargetParticipantMessage.Initialize => ()
+      case _: AcsReplicationTargetParticipantMessage.SendAcsUpTo => ()
     }).discard
   }
 
-  implicit val partyReplicationTargetParticipantMessageArb
-      : Arbitrary[PartyReplicationTargetParticipantMessage] = Arbitrary(
+  implicit val acsReplicationTargetParticipantMessageArb
+      : Arbitrary[AcsReplicationTargetParticipantMessage] = Arbitrary(
     for {
       contractOrdinal <- nonNegativeLongArb.arbitrary
       instruction <- Gen
-        .oneOf[PartyReplicationTargetParticipantMessage.Instruction](
-          PartyReplicationTargetParticipantMessage.Initialize(contractOrdinal),
-          PartyReplicationTargetParticipantMessage.SendAcsUpTo(contractOrdinal),
+        .oneOf[AcsReplicationTargetParticipantMessage.Instruction](
+          AcsReplicationTargetParticipantMessage.Initialize(contractOrdinal),
+          AcsReplicationTargetParticipantMessage.SendAcsUpTo(contractOrdinal),
         )
-    } yield PartyReplicationTargetParticipantMessage.apply(instruction, version)
+    } yield AcsReplicationTargetParticipantMessage.apply(instruction, version)
   )
 
   implicit val pendingLsuOperationArb: Arbitrary[PendingLsuOperation] =

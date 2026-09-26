@@ -34,7 +34,6 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.signalling.{EventSignaller, LocalEventSignaller}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.apache.pekko.Done
 import org.apache.pekko.stream.{KillSwitch, Materializer}
 
@@ -183,24 +182,21 @@ class AcsCommitmentProcessorManager(
       val handle = sync.subscribeToConnections {
         _.withTraceContext { implicit traceContext => synchronizerId =>
           logger.info(s"Starting commitment processor pipeline for synchronizer $synchronizerId")
+
           val syncState = getOrCreate(synchronizerId)
-          val connectedSynchronizerO = sync.readyConnectedSynchronizerById(synchronizerId)
-          if (connectedSynchronizerO.isEmpty) {
-            logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
-          }
-          val senderO = connectedSynchronizerO.flatMap { connectedSynchronizer =>
-            Option.when(
-              connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.v36
-            )(connectedSynchronizer.ephemeral.acsCommitmentSender)
-          }
           syncState.digestProcessorManager.startRunningDigestProcessorAsync()
-          senderO.foreach(
-            _.startPipeline(
-              syncState.tickSignaller
-                .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
-                .map(_.signal)
-            )
-          )
+
+          sync.readyConnectedSynchronizerById(synchronizerId) match {
+            case None =>
+              logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
+            case Some(connectedSynchronizer) =>
+              connectedSynchronizer.ephemeral.acsCommitmentSender
+                .startPipeline(
+                  syncState.tickSignaller
+                    .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
+                    .map(_.signal)
+                )
+          }
         }
       }
       runOnOrAfterClose_(new RunOnClosing {

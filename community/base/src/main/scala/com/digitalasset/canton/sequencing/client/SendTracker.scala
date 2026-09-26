@@ -31,7 +31,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.concurrent.TrieMap
+import scala.collection.immutable.TreeSet
 
 /** When we make a send request to the sequencer it will not be sequenced until some point in the
   * future and may not be sequenced at all. To track a request call `send` with the messageId and
@@ -74,19 +74,36 @@ class SendTracker(
       metricsContext: MetricsContext,
   )
 
-  private val pendingSends: TrieMap[MessageId, PendingSend] =
-    (TrieMap.newBuilder ++= initialPendingSends map {
-      // callbacks and startedAt times will be lost between restarts of the sequencer client
-      case (messageId, maxSequencingTime) =>
-        messageId -> PendingSend(
-          maxSequencingTime,
-          SendCallback.empty,
-          startedAtNanoO = None,
-          latestAttemptRef = new LatestAttemptRef(None),
-          TraceContext.empty,
-          MetricsContext.Empty,
-        )
-    }).result()
+  private case class PendingSends(
+      byId: Map[MessageId, PendingSend],
+      byExpiry: TreeSet[(CantonTimestamp, MessageId)],
+  )
+
+  // track the timeouts of the pending sends in a sorted set so we can
+  // efficiently find the ones that are expired without traversing the entire map.
+  private implicit val pendingSendExpiryOrdering: Ordering[(CantonTimestamp, MessageId)] =
+    Ordering.by { case (maxSequencingTime, messageId) => (maxSequencingTime, messageId.unwrap) }
+
+  private val pendingSends = new AtomicReference[PendingSends](
+    PendingSends(
+      byId = Map.from(initialPendingSends.iterator.map {
+        // callbacks and startedAt times will be lost between restarts of the sequencer client
+        case (messageId, maxSequencingTime) =>
+          messageId -> PendingSend(
+            maxSequencingTime,
+            SendCallback.empty,
+            startedAtNanoO = None,
+            latestAttemptRef = new LatestAttemptRef(None),
+            TraceContext.empty,
+            MetricsContext.Empty,
+          )
+      }),
+      byExpiry = TreeSet.from(initialPendingSends.iterator.map {
+        case (messageId, maxSequencingTime) =>
+          (maxSequencingTime, messageId)
+      }),
+    )
+  )
 
   def track(
       messageId: MessageId,
@@ -100,30 +117,33 @@ class SendTracker(
       _ <- store.savePendingSend(messageId, maxSequencingTime)
     } yield {
       val latestAttempt = new LatestAttemptRef(None)
-      pendingSends.put(
-        messageId,
-        PendingSend(
-          maxSequencingTime,
-          callback,
-          startedAtNanoO = Some(System.nanoTime),
-          latestAttemptRef = latestAttempt,
-          traceContext,
-          metricsContext,
-        ),
-      ) match {
-        case Some(previousMaxSequencingTime) =>
+      val pendingSend = PendingSend(
+        maxSequencingTime,
+        callback,
+        startedAtNanoO = Some(System.nanoTime),
+        latestAttemptRef = latestAttempt,
+        traceContext,
+        metricsContext,
+      )
+      val previous = pendingSends.getAndUpdate { current =>
+        current.copy(
+          byId = current.byId.updated(messageId, pendingSend),
+          byExpiry = current.byExpiry + ((maxSequencingTime, messageId)),
+        )
+      }
+      previous.byId.get(messageId) match {
+        case Some(previousPendingSend) =>
           // if we were able to persist the new message id without issue but found the message id in our in-memory
           // pending set it suggests either:
           //  - the database has been modified by a writer other than this sequencer client (so its pending set is not in sync)
           //  - there is a bug :-|
           sys.error(
             s"""The SequencerClient pending set of sends is out of sync from the database.
-                 |The database reported no send for $messageId but our pending set includes a prior send with mst of $previousMaxSequencingTime.""".stripMargin
+                 |The database reported no send for $messageId but our pending set includes a prior send with mst of ${previousPendingSend.maxSequencingTime}.""".stripMargin
           )
         case _none => // we're good
       }
       metrics.submissions.inFlight.inc()
-
       latestAttempt
     }
 
@@ -159,22 +179,23 @@ class SendTracker(
   else {
     val maxTimestamp = events.foldLeft(CantonTimestamp.MinValue) { case (maxTs, event) =>
       removePendingSend(event.signedEvent.content)(event.traceContext)
-
       maxTs.max(event.timestamp)
     }
-
     processTimeouts(maxTimestamp)
   }
 
   private def processTimeouts(
       timestamp: CantonTimestamp
   ): Unit = {
-    val timedOut = pendingSends.collect {
-      case (messageId, PendingSend(maxSequencingTime, _, _, _, traceContext, _))
-          if maxSequencingTime < timestamp =>
-        Traced(messageId)(traceContext)
-    }.toList
-
+    val snapshot = pendingSends.get()
+    val timedOut = snapshot.byExpiry.iterator
+      .takeWhile { case (maxSequencingTime, _) => maxSequencingTime < timestamp }
+      .flatMap { case (_, messageId) =>
+        snapshot.byId.get(messageId).map(pending => Traced(messageId)(pending.traceContext))
+      }
+      .toList
+    // note: race condition on reused message-ids is fine as we assume that message ids
+    // generated by the node are unique (see exception thrown in track)
     timedOut.foreach(_.withTraceContext { implicit traceContext =>
       handleTimeout(timestamp)
     })
@@ -206,7 +227,6 @@ class SendTracker(
   private def updateSequencedMetrics(pendingSend: PendingSend, result: SendResult): Unit = {
     def recordSequencingTime(success: Boolean): Unit = {
       val now = System.nanoTime
-
       withEmptyMetricsContext { implicit metricsContext =>
         pendingSend.startedAtNanoO foreach { startedAtNano =>
           val elapsed = java.time.Duration.of(now - startedAtNano, ChronoUnit.NANOS)
@@ -216,7 +236,6 @@ class SendTracker(
 
       pendingSend.latestAttemptRef.get.foreach { attempt =>
         val elapsed = java.time.Duration.of(now - attempt.startedAtNano, ChronoUnit.NANOS)
-
         withExtraMetricLabels(
           "sequencerAlias" -> attempt.sequencerAlias.toString,
           "success" -> success.toString,
@@ -248,23 +267,26 @@ class SendTracker(
   )(implicit
       traceContext: TraceContext
   ): Unit = {
-    // note: this should be okay from a concurrency perspective as there should be only one active
-    // send with this message-id at a time (track would fail otherwise)
-    val current = pendingSends.get(messageId)
-    val removeUnlessTimedOut = pendingSends.updateWith(messageId) {
-      case Some(pending) if sequencedTimeO.exists(_ > pending.maxSequencingTime) => Some(pending)
-      case other =>
-        // a concurrent modification of the same message id is only possible when the SendTracker is shutting down
-        // otherwise this shouldn't happen (as per above comment), but let's leave a note in the logs if it does
-        if (!isClosing && other != current)
-          logger.error(s"Concurrent modification of pending sends $other / $current")
-        None
-    }
+    def removePendingSendUpdate(current: PendingSends): PendingSends =
+      current.byId.get(messageId) match {
+        case Some(pending) if sequencedTimeO.exists(_ > pending.maxSequencingTime) => current
+        case Some(pending) =>
+          current.copy(
+            byId = current.byId - messageId,
+            byExpiry = current.byExpiry - ((pending.maxSequencingTime, messageId)),
+          )
+        case None => current
+      }
+
+    val current = pendingSends.getAndUpdate(removePendingSendUpdate)
+    val updated = removePendingSendUpdate(current)
+    val currentPending = current.byId.get(messageId)
+    val updatedPending = updated.byId.get(messageId)
 
     // Metrics context extracted from the pending send
     // This allows to get labels such as the request type and application ID back and use them to update
     // event specific metrics
-    val eventSpecificMetricsContext = current
+    val eventSpecificMetricsContext = currentPending
       .map(_.metricsContext)
       .getOrElse(
         // If we there's no pending send, set the application id and type labels to unknown to get consistent
@@ -298,23 +320,20 @@ class SendTracker(
       case _ =>
     }
 
-    (removeUnlessTimedOut, current) match {
-      // if the sequencedTime is passed and it is more recent than the max-sequencing time of the
-      // event, then we will not remove the pending send (it will be picked up later by the handleTimeout method)
+    (updatedPending, currentPending) match {
+      // pending command was removed
       case (None, Some(pending)) =>
         resultO.foreach { result =>
           result.foreach(updateSequencedMetrics(pending, _))
           pending.callback(result)
         }
-
         store.removePendingSend(messageId)
-
         metrics.submissions.inFlight.dec()(eventSpecificMetricsContext)
-
+      // if the sequencedTime is passed and it is more recent than the max-sequencing time of the
+      // event, then we will not remove the pending send (it will be picked up later by the handleTimeout method)
       case (Some(_), _) =>
         // We observed the command being sequenced but it arrived too late to be processed.
         ()
-
       case _ =>
         logger.debug(s"Removing unknown pending command $messageId")
         store.removePendingSend(messageId)
@@ -339,9 +358,13 @@ class SendTracker(
     Seq(
       SyncCloseable(
         "complete-pending-sends",
-        pendingSends.keys.foreach(
-          removePendingSendUnlessTimeout(_, Some(UnlessShutdown.AbortedDueToShutdown), None)
-        ),
+        pendingSends
+          .get()
+          .byId
+          .keys
+          .foreach(
+            removePendingSendUnlessTimeout(_, Some(UnlessShutdown.AbortedDueToShutdown), None)
+          ),
       ),
       SyncCloseable("send-tracker-store", store.close()),
     )

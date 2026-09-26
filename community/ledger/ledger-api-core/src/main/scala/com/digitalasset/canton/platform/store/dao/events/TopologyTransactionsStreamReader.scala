@@ -99,7 +99,7 @@ class TopologyTransactionsStreamReader(
     ): Source[Iterable[Long], NotUsed] =
       idStreams
         .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = descendingOrder))
-        .batchN(
+        .batchNForMaxConcurrency(
           maxBatchSize = maxPayloadsPerPayloadsPage,
           maxBatchCount = maxOutputBatchCount,
         )

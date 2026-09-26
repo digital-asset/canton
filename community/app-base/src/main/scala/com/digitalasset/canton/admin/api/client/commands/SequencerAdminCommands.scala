@@ -362,6 +362,10 @@ object SequencerAdminCommands {
             proto.InitializeSequencerFromGenesisStateRequest.Parameters.V31(
               synchronizerParameters.toProtoV31
             )
+          case ProtoVersion(32) =>
+            proto.InitializeSequencerFromGenesisStateRequest.Parameters.V32(
+              synchronizerParameters.toProtoV32
+            )
           case other =>
             throw Status.INTERNAL
               .withDescription(
@@ -444,6 +448,10 @@ object SequencerAdminCommands {
             proto.InitializeSequencerFromLsuPredecessorRequest.Parameters.V31(
               synchronizerParameters.toProtoV31
             )
+          case ProtoVersion(32) =>
+            proto.InitializeSequencerFromLsuPredecessorRequest.Parameters.V32(
+              synchronizerParameters.toProtoV32
+            )
           case other =>
             throw Status.INTERNAL
               .withDescription(
@@ -505,6 +513,10 @@ object SequencerAdminCommands {
           case ProtoVersion(31) =>
             proto.InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
               synchronizerParameters.toProtoV31
+            )
+          case ProtoVersion(32) =>
+            proto.InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV32(
+              synchronizerParameters.toProtoV32
             )
           case other =>
             throw Status.INTERNAL

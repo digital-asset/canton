@@ -27,6 +27,8 @@ class MultiSynchronizerPerformanceRunnerIntegrationTest
     with SharedEnvironment {
   import BasePerformanceIntegrationTest.*
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](

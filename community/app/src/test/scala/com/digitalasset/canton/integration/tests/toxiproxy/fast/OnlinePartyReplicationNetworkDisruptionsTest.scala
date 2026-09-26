@@ -290,7 +290,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
         e.warningMessage should include regex "Failed to submit submission due to .*No connection available"
       },
       LogEntryOptionality.OptionalMany -> { e =>
-        e.loggerName should include("PartyReplicationAdminWorkflow")
+        e.loggerName should include("AcsReplicationAdminWorkflow")
         e.warningMessage should include regex "Failed to submit submit .*SEQUENCER_REQUEST_FAILED"
       },
       LogEntryOptionality.OptionalMany -> { e =>
@@ -300,7 +300,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
       // GrpcSequencerClientTransportPekko
       // TODO(#26698): Remove UnknownContractSynchronizers warning.
       LogEntryOptionality.OptionalMany -> { e =>
-        e.loggerName should include("PartyReplicationAdminWorkflow")
+        e.loggerName should include("AcsReplicationAdminWorkflow")
         e.level shouldBe Level.WARN
         e.warningMessage should include regex "UNKNOWN_CONTRACT_SYNCHRONIZERS.*: The synchronizers for the contracts .* are currently unknown due to ongoing contract reassignments or disconnected synchronizers"
       },

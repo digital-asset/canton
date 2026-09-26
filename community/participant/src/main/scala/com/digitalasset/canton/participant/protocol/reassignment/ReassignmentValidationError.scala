@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.ReassignmentRef
+import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentRef}
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -18,6 +18,7 @@ import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, Stakehold
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
 trait ReassignmentValidationError
@@ -136,6 +137,16 @@ object ReassignmentValidationError extends PrettyPrintingCompanion[ReassignmentV
   ) extends ReassignmentValidationError {
     override def message: String =
       s"For `$reassignmentRef`: reassigning participants mismatch (expected: $expected, declared: $declared)"
+  }
+
+  final case class NonReassigningParticipantsDeclared(
+      reassignmentRef: ReassignmentRef,
+      targetTimestamp: Target[CantonTimestamp],
+      reassigningParticipants: Set[ParticipantId],
+      declared: Set[ParticipantId],
+  ) extends ReassignmentValidationError {
+    override def message: String =
+      s"For `$reassignmentRef`: declared participants ${declared.diff(reassigningParticipants)} are not reassigning participants at target timestamp ${targetTimestamp.unwrap} (reassigning participants: $reassigningParticipants)"
   }
 
   final case class AbortedDueToShutdownOut(contractId: LfContractId)

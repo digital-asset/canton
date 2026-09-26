@@ -21,7 +21,6 @@ import com.digitalasset.daml.lf.transaction.{
   SerializationVersion,
   SubmittedTransaction,
   Transaction,
-  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*
@@ -83,8 +82,6 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     loggerFactory,
   )
 
-  private val contractStateMode = ContractStateMachine.Mode.default
-
   private val engine = freshEngine
 
   def Top(xs: Shape*) = Shape.Top(xs.toList)
@@ -100,13 +97,13 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
   private def reinterpretCommand(theCommand: ReplayCommand): Either[Error, SubmittedTransaction] = {
     val res = engine
       .reinterpret(
-        submitters,
-        theCommand,
-        Some(seed),
-        time,
-        time,
-        contractIdVersion,
-        InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+        submitters = submitters,
+        command = theCommand,
+        nodeSeed = Some(seed),
+        preparationTime = time,
+        ledgerEffectiveTime = time,
+        contractIdVersion = contractIdVersion,
+        interpretationConfig = InterpretationConfig.Default,
       )
       .consume(lookupHandler(pcs = defaultContracts, pkgs = allPackages))
     res match {
@@ -132,24 +129,6 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
       }
       val Right(tx) = reinterpretCommand(theCommand)
       Shape.ofTransaction(tx.transaction) shouldBe Top(Exercise())
-    }
-
-    "be a rollback for an exercise command which throws" in {
-      val choiceName = "MyThrow"
-      val theCommand = {
-        val templateId = Identifier(miniTestsPkgId, "ReinterpretTests:MySimple")
-        val r = Identifier(miniTestsPkgId, s"ReinterpretTests:$choiceName")
-        val cid = toContractId("ReinterpretTests:MySimple:1")
-        ReplayCommand.Exercise(
-          templateId,
-          None,
-          cid,
-          choiceName,
-          ValueRecord(Some(r), ImmArray.Empty),
-        )
-      }
-      val Right(tx) = reinterpretCommand(theCommand)
-      Shape.ofTransaction(tx.transaction) shouldBe Top(Rollback(Exercise()))
     }
 
     "still fail for an uncatchable exception" in {
@@ -222,13 +201,13 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
       }
       freshEngine
         .reinterpret(
-          submitters,
-          cmd,
-          Some(seed),
-          time,
-          time,
-          contractIdVersion,
-          InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
+          submitters = submitters,
+          command = cmd,
+          nodeSeed = Some(seed),
+          preparationTime = time,
+          ledgerEffectiveTime = time,
+          contractIdVersion = contractIdVersion,
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(lookupHandler(pkgs = trackPackageQueries))
       pkgIds.toSet shouldBe queriedPackageIds

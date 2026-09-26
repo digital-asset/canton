@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.admin.grpc.{
   GrpcPingService,
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicator
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator
 import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PackageService}
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
@@ -57,7 +58,9 @@ class StartableStoppableLedgerApiDependentServices(
     clock: Clock,
     registry: CantonMutableHandlerRegistry,
     adminTokenDispenser: CantonAdminTokenDispenser,
+    // TODO(#35267) Try to find a way to completely remove replicators from here
     partyReplicatorEvalO: Option[Eval[PartyReplicator]],
+    acsReplicatorEvalO: Option[Eval[AcsReplicator]],
     ledgerApiStore: Eval[LedgerApiStore],
     internalIndexService: Eval[InternalIndexService],
     futureSupervisor: FutureSupervisor,
@@ -95,7 +98,7 @@ class StartableStoppableLedgerApiDependentServices(
   def start()(implicit traceContext: TraceContext): Unit =
     lock.exclusive {
       servicesRef match {
-        case Some(_servicesStarted) =>
+        case Some(_) =>
           logger.info(
             "Attempt to start Ledger API-dependent Canton services, but they are already started. Ignoring."
           )
@@ -103,6 +106,7 @@ class StartableStoppableLedgerApiDependentServices(
           logger.debug("Starting Ledger API-dependent canton services")
 
           val partyReplicatorO = partyReplicatorEvalO.map(_.value)
+          val acsReplicatorO = acsReplicatorEvalO.map(_.value)
 
           val adminWorkflowServices =
             new AdminWorkflowServices(
@@ -110,7 +114,7 @@ class StartableStoppableLedgerApiDependentServices(
               parameters,
               packageService,
               syncService,
-              partyReplicatorO,
+              acsReplicatorO,
               participantId,
               adminTokenDispenser,
               futureSupervisor,

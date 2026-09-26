@@ -6,8 +6,9 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose, Salt}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
@@ -54,17 +55,7 @@ final case class SubmitterMetadata private (
     SubmissionTrackerData(submittingParticipant, maxSequencingTime)
   )
 
-  override protected def pretty: Pretty[SubmitterMetadata] = prettyOfClass(
-    param("act as", _.actAs),
-    param("user id", _.userId),
-    param("command id", _.commandId),
-    param("submitting participant", _.submittingParticipant),
-    param("salt", _.salt),
-    paramIfDefined("submission id", _.submissionId),
-    param("deduplication period", _.dedupPeriod),
-    param("max sequencing time", _.maxSequencingTime),
-    paramIfDefined("external authorization", _.externalAuthorization),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SubmitterMetadata] = SubmitterMetadata
 
   @transient override protected lazy val companionObj: SubmitterMetadata.type = SubmitterMetadata
 
@@ -103,8 +94,21 @@ object SubmitterMetadata
     extends VersioningCompanionContextMemoization[
       SubmitterMetadata,
       SubmitterMetadataDeserializationContext,
-    ] {
+    ]
+    with PrettyPrintingCompanion[SubmitterMetadata] {
   override val name: String = "SubmitterMetadata"
+
+  override protected val pretty: Pretty[SubmitterMetadata] = prettyOfClass(
+    param("act as", _.actAs),
+    param("user id", _.userId),
+    param("command id", _.commandId),
+    param("submitting participant", _.submittingParticipant),
+    param("salt", _.salt),
+    paramIfDefined("submission id", _.submissionId),
+    param("deduplication period", _.dedupPeriod),
+    param("max sequencing time", _.maxSequencingTime),
+    paramIfDefined("external authorization", _.externalAuthorization),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SubmitterMetadata)(
@@ -151,24 +155,35 @@ object SubmitterMetadata
       salt: Salt,
       maxSequencingTime: CantonTimestamp,
       externalAuthorization: Option[ExternalAuthorization],
+      protocolLimits: TransactionProtocolLimits,
       protocolVersion: ProtocolVersion,
-  ): Either[String, SubmitterMetadata] =
-    NonEmpty.from(submitterActAs.toSet).toRight("The actAs set must not be empty.").map {
-      actAsNes =>
-        SubmitterMetadata(
-          actAsNes, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
-          UserId(submitterUserId),
-          CommandId(submitterCommandId),
-          submittingParticipant,
-          salt,
-          submitterSubmissionId,
-          submitterDeduplicationPeriod,
-          maxSequencingTime,
-          externalAuthorization,
-          hashOps,
-          protocolVersion,
+  ): Either[String, SubmitterMetadata] = {
+    val protocolVersionValidation = ProtocolVersionValidation.PV(protocolVersion)
+    val maxActAs = protocolLimits.maxActAs
+
+    for {
+      _ <- ProtoValidation
+        .validateCondition(
+          protocolVersionValidation,
+          submitterActAs.sizeIs <= maxActAs.value,
+          InvariantViolation("act_as", s"size of ${submitterActAs.size} exceeds limit of $maxActAs"),
         )
-    }
+        .leftMap(_.message)
+      actAsNes <- NonEmpty.from(submitterActAs.toSet).toRight("The actAs set must not be empty.")
+    } yield SubmitterMetadata(
+      actAsNes, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
+      UserId(submitterUserId),
+      CommandId(submitterCommandId),
+      submittingParticipant,
+      salt,
+      submitterSubmissionId,
+      submitterDeduplicationPeriod,
+      maxSequencingTime,
+      externalAuthorization,
+      hashOps,
+      protocolVersion,
+    )
+  }
 
   private def fromProtoV31(
       pvv: ProtocolVersionValidation,

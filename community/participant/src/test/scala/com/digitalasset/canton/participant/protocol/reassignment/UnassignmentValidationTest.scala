@@ -28,10 +28,11 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
   ReassignmentProcessorError,
   UnknownPhysicalSynchronizer,
 }
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors.stakeholdersNoReassigningParticipant
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
-  ReassigningParticipantsMismatch,
+  NonReassigningParticipantsDeclared,
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
 }
@@ -50,6 +51,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
 import scala.annotation.unused
+import scala.collection.immutable.SortedSet
 
 class UnassignmentValidationTest
     extends AnyWordSpec
@@ -306,7 +308,7 @@ class UnassignmentValidationTest
       )
     }
 
-    "detect reassigning participant mismatch" in {
+    "detect insufficient reassigning participants" in {
       def unassignmentValidation(reassigningParticipants: Set[ParticipantId]) =
         performValidation(
           reassigningParticipantsOverride = reassigningParticipants
@@ -321,37 +323,18 @@ class UnassignmentValidationTest
       unassignmentValidation(
         reassigningParticipants = additionalReassigningParticipant
       ) shouldBe Seq(
-        ReassigningParticipantsMismatch(
+        NonReassigningParticipantsDeclared(
           ReassignmentRef(contract.contractId),
-          expected = reassigningParticipants,
+          targetTimestamp = Target(identityFactory.topologySnapshot().timestamp),
+          reassigningParticipants = reassigningParticipants,
           declared = additionalReassigningParticipant,
         )
       )
 
-      // Additional/extra reassigning participant
-      val additionalConfirmingReassigningParticipant = reassigningParticipants + otherParticipant
-
+      // Missing reassigning participant: the observer is left without one
       unassignmentValidation(
-        reassigningParticipants = additionalConfirmingReassigningParticipant
-      ) shouldBe Seq(
-        ReassigningParticipantsMismatch(
-          ReassignmentRef(contract.contractId),
-          expected = reassigningParticipants,
-          declared = additionalConfirmingReassigningParticipant,
-        )
-      )
-
-      // Missing reassigning participant
-      val missingObservingReassigningParticipant = Set(confirmingParticipant)
-      unassignmentValidation(
-        reassigningParticipants = missingObservingReassigningParticipant
-      ) shouldBe Seq(
-        ReassigningParticipantsMismatch(
-          ReassignmentRef(contract.contractId),
-          expected = reassigningParticipants,
-          declared = missingObservingReassigningParticipant,
-        )
-      )
+        reassigningParticipants = Set(confirmingParticipant)
+      ) shouldBe Seq(stakeholdersNoReassigningParticipant(SortedSet(observer)))
 
       // If the request declares no reassigning participants, the validator treats this participant
       // as non-reassigning for this check and therefore skips reassigning-participant validation.

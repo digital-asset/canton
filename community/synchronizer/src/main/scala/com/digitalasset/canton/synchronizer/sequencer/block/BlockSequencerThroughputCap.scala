@@ -322,7 +322,7 @@ object BlockSequencerThroughputCap {
 
       def explain(criteria: String) =
         "You are experiencing backpressure because your validator is exceeding the rate limits for a single validator " +
-          "as configured by the synchronizer operators. If you need more bandwidth, please reach out to the operators. " +
+          s"as configured by the synchronizer operators for the request type '$requestType'. If you need more bandwidth, please reach out to the operators. " +
           "The limit enforced is: " + criteria
 
       val result = for {
@@ -376,7 +376,7 @@ object BlockSequencerThroughputCap {
 
         def explain(criteria: String, globalCap: Double, individualUse: Long) =
           "You are experiencing backpressure because the network is congested and exceeds the " +
-            s"configured global limits on the sequencer. Therefore, the sequencer is " +
+            s"configured global limits on the sequencer for the request type '$requestType'. Therefore, the sequencer is " +
             s"allocating the same bandwidth of ${f"$globalCap%.1f"} $criteria over $observationPeriodSeconds seconds to all " +
             s"$vActive active validators until the global usage rate drops again below the enforcement level. " +
             s"Please wait a few seconds and retry, as your current rate is $individualUse $criteria over $observationPeriodSeconds seconds."

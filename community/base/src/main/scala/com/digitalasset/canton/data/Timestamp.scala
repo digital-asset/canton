@@ -4,14 +4,18 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.LfTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import java.time.Instant
 import java.util.Date
 
-trait Timestamp extends PrettyPrinting {
+trait Timestamp extends PrettyPrintingFromCompanion {
   def underlying: LfTimestamp
 
   def toLf: LfTimestamp = underlying
@@ -53,5 +57,9 @@ trait Timestamp extends PrettyPrinting {
     nanos / 1000L
   }
 
-  override protected def pretty: Pretty[this.type] = prettyOfParam(_.underlying)
+  override def prettyCompanion: PrettyPrintingCompanion[Timestamp] = Timestamp
+}
+
+object Timestamp extends PrettyPrintingCompanion[Timestamp] {
+  override protected val pretty: Pretty[Timestamp] = prettyOfParam(_.underlying)
 }

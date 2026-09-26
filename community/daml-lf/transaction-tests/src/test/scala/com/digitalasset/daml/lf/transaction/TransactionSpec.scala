@@ -452,13 +452,13 @@ class TransactionSpec
     def lookup(s: V.ContractId, k: String, found: Boolean) =
       dummyBuilder.lookupByKey(contract = create(s, k), found = found)
 
-    "return None for create" in {
+    "return nothing for create" in {
       val builder = new TxBuilder()
       val createNode = create(cid("#0"), "k0")
       builder.add(createNode)
       builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
-    "return Some(_) for fetch and fetch-by-key" in {
+    "return something for fetch and fetch-by-key" in {
       val builder = new TxBuilder()
       val fetchNode0 = fetch(cid("#0"), "k0", byKey = false)
       val fetchNode1 = fetch(cid("#1"), "k1", byKey = true)
@@ -488,7 +488,7 @@ class TransactionSpec
       )
     }
 
-    "return None for negative lookup by key" in {
+    "return nothing for negative lookup by key" in {
       val builder = new TxBuilder()
       val lookupNode = lookup(cid("#0"), "k0", found = false)
       builder.add(lookupNode)
@@ -497,7 +497,7 @@ class TransactionSpec
       )
     }
 
-    "return Some(_) for positive lookup by key" in {
+    "return something for positive lookup by key" in {
       val builder = new TxBuilder()
       val lookupNode = lookup(cid("#0"), "k0", found = true)
       builder.add(lookupNode)
@@ -510,16 +510,20 @@ class TransactionSpec
     }
     "returns keys used under rollback nodes" in {
       val builder = new TxBuilder()
-      val createNode = create(cid("#0"), "k0")
-      val exerciseNode = exe(cid("#1"), "k1", consuming = false, byKey = false)
-      val fetchNode = fetch(cid("#2"), "k2", byKey = false)
+      val exerciseNode = exe(cid("#1"), "k1", consuming = false, byKey = true)
+      val fetchNode = fetch(cid("#2"), "k2", byKey = true)
       val lookupNode = lookup(cid("#3"), "k3", found = false)
       val rollback = builder.add(builder.rollback())
-      builder.add(createNode, rollback)
       builder.add(exerciseNode, rollback)
       builder.add(fetchNode, rollback)
       builder.add(lookupNode, rollback)
-      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
+      builder.build().contractKeyInputs shouldBe Right(
+        Map(
+          globalKey("k1") -> KeyMapping(Vector(exerciseNode.targetCoid), false),
+          globalKey("k2") -> KeyMapping(Vector(fetchNode.coid), false),
+          globalKey("k3") -> KeyMapping.Empty,
+        )
+      )
     }
     "fetch and create conflict for the same contract ID" in {
       val builder = new TxBuilder()
@@ -566,11 +570,10 @@ class TransactionSpec
       builder.add(create(cid("#1"), "k0"))
       builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
-    "two creates do not conflict if one is in rollback" in {
+    "rollback of create is forbidden" in {
       val builder = new TxBuilder()
       val rollback = builder.add(builder.rollback())
       builder.add(create(cid("#0"), "k0"), rollback)
-      builder.add(create(cid("#1"), "k0"))
       builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
     }
     "negative lookup after create fails" in {
@@ -606,7 +609,7 @@ class TransactionSpec
         Map(globalKey("k0") -> KeyMapping(Vector(cid("#0")), false))
       )
     }
-    "positive lookup in rollback conflicts with create" in {
+    "positive lookup does not conflict with create" in {
       val builder = new TxBuilder()
       val rollback = builder.add(builder.rollback())
       builder.add(lookup(cid("#0"), "k0", found = true), rollback)
@@ -619,9 +622,9 @@ class TransactionSpec
       val builder = new TxBuilder()
       builder.add(create(cid("#0"), "k0"))
       val rollback = builder.add(builder.rollback())
-      builder.add(exe(cid("#0"), "k0", consuming = true, byKey = true), rollback)
+      builder.add(exe(cid("#0"), "k0", consuming = false, byKey = true), rollback)
       builder.add(create(cid("#1"), "k0"))
-      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(2))))
+      builder.build().contractKeyInputs shouldBe Right(Map.empty)
     }
     "successful, inconsistent lookups conflict" in {
       val builder = new TxBuilder()
@@ -636,15 +639,16 @@ class TransactionSpec
     "first negative input wins" in {
       val builder = new TxBuilder()
       val rollback = builder.add(builder.rollback())
-      val create0 = create(cid("#0"), "k0")
+      val create0 = create(cid("#0"), "k")
       val lookup0 = builder.lookupByKey(create0, found = false)
-      val create1 = create(cid("#1"), "k1")
+      val create1 = create(cid("#1"), "k")
       val lookup1 = builder.lookupByKey(create1, found = false)
-      builder.add(create0, rollback)
       builder.add(lookup1, rollback)
       builder.add(lookup0)
       builder.add(create1)
-      builder.build().contractKeyInputs shouldBe Left(EffectfulRollback(Set(NodeId(1))))
+      builder.build().contractKeyInputs shouldBe Right(
+        Map(globalKey("k") -> KeyMapping.Empty)
+      )
     }
   }
 

@@ -12,14 +12,8 @@ import com.digitalasset.canton.ledger.participant.state.ReassignmentInfo
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
-import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
-  BackwardSlice,
-  ContinueFromImfo,
-  ContinueFromPersistence,
-  NoContinue,
-  SliceWithContinuationOffset,
-  UnorderedException,
-}
+import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{Slice, UnorderedException}
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -68,13 +62,16 @@ class InMemoryFanoutBufferSpec
             // Assert data structure sizes
             buffer._bufferLog.size shouldBe 3
             buffer._lookupMap.size shouldBe 3
-            buffer.sliceForward(
-              firstOffset,
-              LastOffset,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset2.decrement,
-              slice = Vector(entry2, entry3, entry4),
+            buffer.slice(
+              range = OffsetRange(firstOffset, LastOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = Vector(entry2, entry3, entry4),
+                offsetRange = OffsetRange(offset2, offset4),
+              )
             )
 
             // Assert that all the entries are visible by lookup
@@ -85,13 +82,16 @@ class InMemoryFanoutBufferSpec
             buffer._bufferLog.size shouldBe 3
             buffer._lookupMap.size shouldBe 3
 
-            buffer.sliceForward(
-              firstOffset,
-              offset5,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset3.decrement,
-              slice = Vector(entry3, entry4, offset5 -> txAccepted5),
+            buffer.slice(
+              range = OffsetRange(firstOffset, offset5),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = Vector(entry3, entry4, offset5 -> txAccepted5),
+                offsetRange = OffsetRange(offset3, offset5),
+              )
             )
 
             // Assert that the new entry is visible by lookup
@@ -120,14 +120,12 @@ class InMemoryFanoutBufferSpec
         "maxBufferSize is 0" should {
           "not enqueue the update" in withBuffer(0) { buffer =>
             buffer.push(txAccepted5)
-            buffer.sliceForward(
-              firstOffset,
-              offset5,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = Some(offset5),
-              slice = Vector.empty,
-            )
+            buffer.slice(
+              range = OffsetRange(firstOffset, offset5),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe None
             buffer._bufferLog shouldBe empty
           }
         }
@@ -135,14 +133,12 @@ class InMemoryFanoutBufferSpec
         "maxBufferSize is -1" should {
           "not enqueue the update" in withBuffer(-1) { buffer =>
             buffer.push(txAccepted5)
-            buffer.sliceForward(
-              firstOffset,
-              offset5,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = Some(offset5),
-              slice = Vector.empty,
-            )
+            buffer.slice(
+              range = OffsetRange(firstOffset, offset5),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe None
             buffer._bufferLog shouldBe empty
           }
         }
@@ -174,151 +170,7 @@ class InMemoryFanoutBufferSpec
         }
       }
 
-      "slice" when {
-        "filters" in withBuffer() { buffer =>
-          buffer.sliceForward(
-            offset2,
-            offset4,
-            Some(_).filterNot(_ == entry3._2),
-          ) shouldBe SliceWithContinuationOffset(
-            checkPersistenceToIncl = None,
-            slice = Vector(entry2, entry4),
-          )
-        }
-
-        "called with startInclusive gteq than the buffer start" should {
-          "return a slice without checkPersistenceToIncl" in withBuffer() { buffer =>
-            buffer.sliceForward(
-              offset1,
-              succ(offset3),
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector(entry1, entry2, entry3),
-            )
-            buffer.sliceForward(
-              offset2,
-              succ(offset3),
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector(entry2, entry3),
-            )
-            buffer.sliceForward(
-              offset2,
-              offset4,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector(entry2, entry3, entry4),
-            )
-            buffer.sliceForward(
-              succ(offset1),
-              offset4,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector(entry2, entry3, entry4),
-            )
-          }
-
-          "return a chunk without checkPersistenceToIncl if resulting slice is bigger than maxFetchSize" in withBuffer(
-            maxFetchSize = 2
-          ) { buffer =>
-            buffer.sliceForward(
-              offset2,
-              offset4,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector(entry2, entry3),
-            )
-          }
-        }
-
-        "called with endInclusive lteq startInclusive" should {
-          "return an empty slice without checkPersistenceToIncl if startInclusive is greater than buffer start and endInclusive" in withBuffer() {
-            buffer =>
-              buffer.sliceForward(
-                offset2,
-                offset1,
-                IdentityFilter,
-              ) shouldBe SliceWithContinuationOffset(
-                checkPersistenceToIncl = None,
-                slice = Vector.empty,
-              )
-          }
-          "return a slice without checkPersistenceToIncl if startInclusive is greater than buffer start and equal to endInclusive" in withBuffer() {
-            buffer =>
-              buffer.sliceForward(
-                offset2,
-                offset2,
-                IdentityFilter,
-              ) shouldBe SliceWithContinuationOffset(
-                checkPersistenceToIncl = None,
-                slice = Vector(entry2),
-              )
-          }
-          "return an empty slice with checkPersistenceToIncl if startExclusive is before buffer start" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForward(
-              offset1,
-              offset1,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = Some(offset1),
-              slice = Vector.empty,
-            )
-          }
-          "return an empty slice without continuation if begin>end and begin is before buffer start" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForward(
-              offset2,
-              offset1,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = None,
-              slice = Vector.empty,
-            )
-          }
-        }
-        "called with startInclusive before the buffer start" should {
-          "return a SliceWithContinuationOffset with checkPersistenceToIncl" in withBuffer() {
-            buffer =>
-              buffer.sliceForward(
-                firstOffset,
-                offset3,
-                IdentityFilter,
-              ) shouldBe SliceWithContinuationOffset(
-                checkPersistenceToIncl = offset1.decrement,
-                slice = Vector(entry1, entry2, entry3),
-              )
-              buffer.sliceForward(
-                firstOffset,
-                succ(offset3),
-                IdentityFilter,
-              ) shouldBe SliceWithContinuationOffset(
-                checkPersistenceToIncl = offset1.decrement,
-                slice = Vector(entry1, entry2, entry3),
-              )
-          }
-
-          "return a slice with checkPersistenceToIncl if resulting slice is bigger than maxFetchSize" in withBuffer(
-            maxFetchSize = 2
-          ) { buffer =>
-            buffer.sliceForward(
-              firstOffset,
-              offset4,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset1.decrement,
-              slice = Vector(entry1, entry2),
-            )
-          }
-        }
-
+      "slice2 with descending order = false and limit=None" should {
         "called after push from a different thread" should {
           "always see the most recent updates" in withBuffer(
             1000,
@@ -353,15 +205,18 @@ class InMemoryFanoutBufferSpec
                       pushExecutor
                     )
                     _ <- Future(
-                      buffer.sliceForward(
-                        offset((901 + idx).toLong),
-                        offset(lastInsertedIdx),
-                        IdentityFilter,
+                      buffer.slice(
+                        range = OffsetRange(offset((901 + idx).toLong), offset(lastInsertedIdx)),
+                        filter = IdentityFilter,
+                        limit = None,
+                        reverseOrder = false,
                       )
                     )(
                       sliceExecutor
                     )
-                      .map(_.slice should contain theSameElementsInOrderAs expected)(sliceExecutor)
+                      .map(_.value.fromImfo should contain theSameElementsInOrderAs expected)(
+                        sliceExecutor
+                      )
                   } yield Succeeded
                 },
                 atMost = 1.seconds,
@@ -370,366 +225,153 @@ class InMemoryFanoutBufferSpec
             Succeeded
           }
         }
-      }
 
-      "sliceBackwards" when {
-        "called with startInclusive gteq than the buffer start" should {
-          "return an Backward slice with NoContinue" in withBuffer() { buffer =>
-            buffer.sliceBackwards(
-              offset1,
-              succ(offset3),
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry3, entry2, entry1),
-              NoContinue,
-            )
-            buffer.sliceBackwards(
-              offset2,
-              succ(offset3),
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry3, entry2),
-              NoContinue,
-            )
-            buffer.sliceBackwards(offset2, offset4, IdentityFilter) shouldBe BackwardSlice(
-              Vector(entry4, entry3, entry2),
-              NoContinue,
-            )
-            buffer.sliceBackwards(
-              succ(offset1),
-              offset4,
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry4, entry3, entry2),
-              NoContinue,
-            )
-          }
-
-          "return a result with ContinueFromImfo if resulting slice is bigger than maxFetchSize" in withBuffer(
-            maxFetchSize = 2
-          ) { buffer =>
-            buffer.sliceBackwards(offset2, offset4, IdentityFilter) shouldBe BackwardSlice(
-              Vector(entry4, entry3),
-              ContinueFromImfo(entry2._1),
-            )
-          }
+        "return None when the buffer is empty" in withBuffer(elems = Vector.empty) { buffer =>
+          buffer.slice(
+            range = OffsetRange(firstOffset, offset4),
+            filter = IdentityFilter,
+            limit = None,
+            reverseOrder = false,
+          ) shouldBe None
         }
 
-        "called with endInclusive lteq startInclusive" should {
-          "return an empty slice with NoContinue if startInclusive is greater than buffer start and endInclusive" in withBuffer() {
-            buffer =>
-              buffer.sliceBackwards(offset2, offset1, IdentityFilter) shouldBe BackwardSlice(
-                Vector.empty,
-                NoContinue,
-              )
-          }
-          "return an slice with NoContinue if startInclusive is greater than buffer start and equal to endInclusive" in withBuffer() {
-            buffer =>
-              buffer.sliceBackwards(offset2, offset2, IdentityFilter) shouldBe BackwardSlice(
-                Vector(entry2),
-                NoContinue,
-              )
-          }
-          "return an empty slice with ContinueFromPersistence if startExclusive is before buffer start" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwards(offset1, offset1, IdentityFilter) shouldBe BackwardSlice(
-              Vector.empty,
-              ContinueFromPersistence(offset1),
-            )
-          }
-
-          "return an empty slice with NoContinue if startExclusive is before buffer start and start < end" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwards(
-              offset1,
-              offset1.decrement.value,
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector.empty,
-              NoContinue,
-            )
-          }
+        "return None when the requested range is entirely before the buffer start" in withBuffer() {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(firstOffset, firstOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe None
         }
-        "called with startInclusive before the buffer start" should {
-          "return a slie with ContinueFromPersistence" in withBuffer() { buffer =>
-            buffer.sliceBackwards(
-              firstOffset,
-              offset3,
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry3, entry2, entry1),
-              ContinueFromPersistence(entry1._1.decrement.value),
-            )
-            buffer.sliceBackwards(
-              firstOffset,
-              succ(offset3),
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry3, entry2, entry1),
-              ContinueFromPersistence(entry1._1.decrement.value),
-            )
-          }
 
-          "return slice with Imfo continuation if resulting slice is bigger than maxFetchSize" in withBuffer(
-            maxFetchSize = 2
-          ) { buffer =>
-            buffer.sliceBackwards(
-              firstOffset,
-              offset4,
-              IdentityFilter,
-            ) shouldBe BackwardSlice(
-              Vector(entry4, entry3),
-              ContinueFromImfo(entry2._1),
+        "clip the offset range to the buffered portion when the range starts before the buffer" in withBuffer() {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(firstOffset, offset4),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = Vector(entry1, entry2, entry3, entry4),
+                offsetRange = OffsetRange(offset1, offset4),
+              )
             )
-          }
+        }
+
+        "return an empty slice when the filter excludes all entries" in withBuffer() { buffer =>
+          buffer.slice(
+            range = OffsetRange(offset2, offset4),
+            filter = _ => None,
+            limit = None,
+            reverseOrder = false,
+          ) shouldBe Some(
+            Slice(
+              fromImfo = Vector.empty,
+              offsetRange = OffsetRange(offset2, offset4),
+            )
+          )
+        }
+
+        "return an empty slice with proper offsetRange when the filter excludes all entries and range starts before buffer" in withBuffer(
+          maxBufferSize = 2
+        ) { buffer =>
+          buffer.slice(
+            range = OffsetRange(offset2, offset4),
+            filter = _ => None,
+            limit = None,
+            reverseOrder = false,
+          ) shouldBe Some(
+            Slice(
+              fromImfo = Vector.empty,
+              offsetRange = OffsetRange(offset3, offset4),
+            )
+          )
         }
       }
 
-      "sliceForwardWitLimit" when {
-        "range start is gte buffer start" should {
-          "return a slice of size of limit if the buffer contains more matching elemens in range" in withBuffer() {
-            buffer =>
-              buffer.sliceForwardWithLimit(
-                offset2,
-                offset4,
-                IdentityFilter,
-                2,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry2, entry3),
-                checkPersistenceToIncl = None,
+      "slice2 with limit=None and descendingOrder=true" should {
+        "return two last elements when called with buffer range" in withBuffer(maxFetchSize = 2) {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(offset2, offset4),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = true,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = Vector(entry4, entry3),
+                offsetRange = OffsetRange(offset2.increment, offset4),
               )
-          }
-
-          "return a slice shorter than limit if there is fewer matching elments in bufer" in withBuffer() {
-            buffer =>
-              buffer.sliceForwardWithLimit(
-                offset2,
-                offset4,
-                IdentityFilter,
-                100,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry2, entry3, entry4),
-                checkPersistenceToIncl = None,
-              )
-
-              buffer.sliceForwardWithLimit(
-                offset2,
-                offset4,
-                tlu => Option.when(tlu.offset == entry2._1)(tlu),
-                2,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry2),
-                checkPersistenceToIncl = None,
-              )
-          }
-
-          "return an empty slice if start > end" in withBuffer() { buffer =>
-            buffer.sliceForwardWithLimit(
-              offset4,
-              offset2,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector.empty,
-              checkPersistenceToIncl = None,
             )
-          }
-
-          "return all elements from buffer if the boundary is exactly at buffer end" in withBuffer() {
-            buffer =>
-              buffer.sliceForwardWithLimit(
-                offset1,
-                offset4,
-                IdentityFilter,
-                100,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry1, entry2, entry3, entry4),
-                checkPersistenceToIncl = None,
-              )
-          }
         }
 
-        "range start is before buffer start" should {
-          "return a slice with checkPersistenceToIncl if the buffer contains enough elemens in range" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForwardWithLimit(
-              offset2,
-              offset4,
-              IdentityFilter,
-              2,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector(entry3, entry4),
-              checkPersistenceToIncl = offset3.decrement,
+        "return overlapping single element if requested range has single point overlap with a buffer" in withBuffer() {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(Offset.firstOffset, offset1),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = true,
+            ) shouldBe Some(
+              Slice(fromImfo = Vector(entry1), offsetRange = OffsetRange(offset1, offset1))
             )
-          }
-
-          "return an empty slice without checkPersistenceToIncl if start > end" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForwardWithLimit(
-              offset2,
-              offset1,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector.empty,
-              checkPersistenceToIncl = None,
-            )
-          }
-
-          "return a slice with checkPersistenceToIncl if the buffer does not contain enough elemens in range" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForwardWithLimit(
-              offset1,
-              offset4,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector(entry3, entry4),
-              checkPersistenceToIncl = offset3.decrement,
-            )
-          }
-
-          "return an empty slice with checkPersistenceToIncl if filter does not match any elements in buffer" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceForwardWithLimit(
-              offset1,
-              offset4,
-              tlu => Option.when(tlu.offset == entry2._1)(tlu),
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector.empty,
-              checkPersistenceToIncl = offset3.decrement,
-            )
-          }
-        }
-      }
-
-      "sliceBackwardWithLimit" when {
-        "range start is >= buffer start" should {
-          "return a slice of size of limit if the buffer contains more matching elemens in range" in withBuffer() {
-            buffer =>
-              buffer.sliceBackwardsWithLimit(
-                offset2,
-                offset4,
-                IdentityFilter,
-                2,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry4, entry3),
-                checkPersistenceToIncl = None,
-              )
-          }
-
-          "return a slice shorter than limit if there is fewer matching elments in bufer" in withBuffer() {
-            buffer =>
-              buffer.sliceBackwardsWithLimit(
-                offset2,
-                offset4,
-                IdentityFilter,
-                100,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry4, entry3, entry2),
-                checkPersistenceToIncl = None,
-              )
-
-              buffer.sliceBackwardsWithLimit(
-                offset2,
-                offset4,
-                tlu => Option.when(tlu.offset == entry2._1)(tlu),
-                2,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry2),
-                checkPersistenceToIncl = None,
-              )
-          }
-
-          "return an empty slice if start > end" in withBuffer() { buffer =>
-            buffer.sliceBackwardsWithLimit(
-              offset4,
-              offset2,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector.empty,
-              checkPersistenceToIncl = None,
-            )
-          }
-
-          "return all elements from buffer if the boundary is exactly at buffer end" in withBuffer() {
-            buffer =>
-              buffer.sliceBackwardsWithLimit(
-                offset1,
-                offset4,
-                IdentityFilter,
-                100,
-              ) shouldBe SliceWithContinuationOffset(
-                slice = Vector(entry4, entry3, entry2, entry1),
-                checkPersistenceToIncl = None,
-              )
-          }
         }
 
-        "range start is before buffer start" should {
-          "return a slice without checkPersistenceToIncl if the buffer contains enough elemens in range" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwardsWithLimit(
-              offset2,
-              offset4,
-              IdentityFilter,
-              2,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector(entry4, entry3),
-              checkPersistenceToIncl = None,
-            )
-          }
+        "return None when the requested range is entirely before the buffer start" in withBuffer() {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(firstOffset, firstOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = true,
+            ) shouldBe None
+        }
 
-          "return a slice with checkPersistenceToIncl if the buffer does not contain enough elemens in range" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwardsWithLimit(
-              offset1,
-              offset4,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector(entry4, entry3),
-              checkPersistenceToIncl = offset3.decrement,
+        "clip the offset range to the buffered portion when the range starts before the buffer" in withBuffer() {
+          buffer =>
+            buffer.slice(
+              range = OffsetRange(firstOffset, offset4),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = true,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = Vector(entry4, entry3, entry2, entry1),
+                offsetRange = OffsetRange(offset1, offset4),
+              )
             )
-          }
+        }
 
-          "return a slice with checkPersistenceToIncl if the buffer does not contain enough matching elemens in range" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwardsWithLimit(
-              offset1,
-              offset4,
-              tlu => Option.when(tlu.offset == entry3._1)(tlu),
-              2,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector(entry3),
-              checkPersistenceToIncl = offset3.decrement,
+        "return an empty slice when the filter excludes all entries" in withBuffer() { buffer =>
+          buffer.slice(
+            range = OffsetRange(offset2, offset4),
+            filter = _ => None,
+            limit = None,
+            reverseOrder = true,
+          ) shouldBe Some(
+            Slice(
+              fromImfo = Vector.empty,
+              offsetRange = OffsetRange(offset2, offset4),
             )
-          }
+          )
+        }
 
-          "return an empty slice with checkPersistenceToIncl if end range is before buffer start" in withBuffer(
-            maxBufferSize = 2
-          ) { buffer =>
-            buffer.sliceBackwardsWithLimit(
-              offset1,
-              offset2,
-              IdentityFilter,
-              100,
-            ) shouldBe SliceWithContinuationOffset(
-              slice = Vector.empty,
-              checkPersistenceToIncl = Some(offset2),
+        "return an empty slice with proper offsetRange when the filter excludes all entries and range starts before buffer" in withBuffer(
+          maxBufferSize = 2
+        ) { buffer =>
+          buffer.slice(
+            range = OffsetRange(offset2, offset4),
+            filter = _ => None,
+            limit = None,
+            reverseOrder = true,
+          ) shouldBe Some(
+            Slice(
+              fromImfo = Vector.empty,
+              offsetRange = OffsetRange(offset3, offset4),
             )
-          }
+          )
         }
       }
 
@@ -746,13 +388,16 @@ class InMemoryFanoutBufferSpec
 
             buffer.prune(offset3)
 
-            buffer.sliceForward(
-              firstOffset,
-              LastOffset,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset4.decrement,
-              slice = bufferElements.drop(3),
+            buffer.slice(
+              range = OffsetRange(firstOffset, LastOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = bufferElements.drop(3),
+                offsetRange = OffsetRange(offset4, offset4),
+              )
             )
 
             verifyLookupAbsent(
@@ -776,13 +421,16 @@ class InMemoryFanoutBufferSpec
             )
 
             buffer.prune(offset(6))
-            buffer.sliceForward(
-              firstOffset,
-              LastOffset,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset4.decrement,
-              slice = bufferElements.drop(3),
+            buffer.slice(
+              range = OffsetRange(firstOffset, LastOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(
+                fromImfo = bufferElements.drop(3),
+                offsetRange = OffsetRange(offset4, offset4),
+              )
             )
             verifyLookupAbsent(
               buffer,
@@ -805,13 +453,13 @@ class InMemoryFanoutBufferSpec
             )
 
             buffer.prune(offset(1))
-            buffer.sliceForward(
-              firstOffset,
-              LastOffset,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = offset1.decrement,
-              slice = bufferElements,
+            buffer.slice(
+              range = OffsetRange(firstOffset, LastOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe Some(
+              Slice(fromImfo = bufferElements, offsetRange = OffsetRange(offset1, offset4))
             )
 
             verifyLookupPresent(
@@ -835,14 +483,12 @@ class InMemoryFanoutBufferSpec
             )
 
             buffer.prune(offset5)
-            buffer.sliceForward(
-              firstOffset,
-              LastOffset,
-              IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = Some(LastOffset),
-              slice = Vector.empty,
-            )
+            buffer.slice(
+              range = OffsetRange(firstOffset, LastOffset),
+              filter = IdentityFilter,
+              limit = None,
+              reverseOrder = false,
+            ) shouldBe None
 
             verifyLookupAbsent(
               buffer,
@@ -865,14 +511,12 @@ class InMemoryFanoutBufferSpec
             )
 
             buffer.prune(offset(1))
-            buffer.sliceForward(
-              firstOffset,
-              offset(1),
+            buffer.slice(
+              OffsetRange(startInclusive = firstOffset, endInclusive = offset(1)),
               IdentityFilter,
-            ) shouldBe SliceWithContinuationOffset(
-              checkPersistenceToIncl = Some(offset(1)),
-              slice = Vector.empty,
-            )
+              None,
+              reverseOrder = false,
+            ) shouldBe None
 
             verifyLookupAbsent(buffer, reassignmentAccepted2)
           }
@@ -888,27 +532,28 @@ class InMemoryFanoutBufferSpec
             topologyTxAccepted4,
           )
 
-          buffer.sliceForward(
-            firstOffset,
-            LastOffset,
-            IdentityFilter,
-          ) shouldBe SliceWithContinuationOffset(
-            checkPersistenceToIncl = offset2.decrement,
-            slice = Vector(entry2, entry3, entry4),
+          buffer.slice(
+            range = OffsetRange(firstOffset, LastOffset),
+            filter = IdentityFilter,
+            limit = None,
+            reverseOrder = false,
+          ) shouldBe Some(
+            Slice(
+              fromImfo = Vector(entry2, entry3, entry4),
+              offsetRange = OffsetRange(offset2, offset4),
+            )
           )
 
           buffer.flush()
 
           buffer._bufferLog shouldBe empty
           buffer._lookupMap shouldBe empty
-          buffer.sliceForward(
-            firstOffset,
-            LastOffset,
-            IdentityFilter,
-          ) shouldBe SliceWithContinuationOffset(
-            checkPersistenceToIncl = Some(LastOffset),
-            slice = Vector.empty,
-          )
+          buffer.slice(
+            range = OffsetRange(firstOffset, LastOffset),
+            filter = IdentityFilter,
+            limit = None,
+            reverseOrder = false,
+          ) shouldBe None
           verifyLookupAbsent(
             buffer,
             reassignmentAccepted2,
@@ -1098,8 +743,6 @@ class InMemoryFanoutBufferSpec
       test(buffer)
     }
   }
-
-  private def succ(offset: Offset): Offset = offset.increment
 
   private def mkHash(input: String): Hash =
     Hash.digest(

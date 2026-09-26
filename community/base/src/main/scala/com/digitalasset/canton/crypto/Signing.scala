@@ -397,9 +397,9 @@ object Signature
   * sign.
   */
 final case class SignatureWithoutSigner(
-    val format: SignatureFormat,
-    val signature: ByteString,
-    val signingAlgorithmSpec: SigningAlgorithmSpec,
+    format: SignatureFormat,
+    signature: ByteString,
+    signingAlgorithmSpec: SigningAlgorithmSpec,
 )
 
 /** Defines the validity period of a session signing key delegation within a specific synchronizer
@@ -747,7 +747,6 @@ sealed trait SigningKeyUsage extends Product with Serializable with PrettyPrinti
   def dbType: Byte
 
   def toProtoEnumV30: Either[String, v30.SigningKeyUsage]
-  def toProtoEnumV31: Either[String, v31.SigningKeyUsage]
 
   override def prettyCompanion: PrettyPrintingCompanion[SigningKeyUsage] = SigningKeyUsage
 }
@@ -763,11 +762,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
       Protocol,
       ProofOfOwnership,
     )
-
-  def all(protocolVersion: ProtocolVersion): NonEmpty[Set[SigningKeyUsage]] =
-    // TODO(i32231): Update this to actually branch on protocolVersion, but we need the versioningTable to be
-    // included, since otherwise we will use proto v30 with protocol version 36.
-    protocolVersion match { case _ => All }
 
   val NamespaceOnly: NonEmpty[Set[SigningKeyUsage]] = NonEmpty.mk(Set, Namespace)
   val NamespaceOrProofOfOwnership: NonEmpty[Set[SigningKeyUsage]] =
@@ -823,8 +817,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     override val dbType: Byte = 0
     override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE.asRight
-    override def toProtoEnumV31: Either[String, v31.SigningKeyUsage] =
-      v31.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE.asRight
   }
 
   // IdentifyDelegation (dbType = 1) usage was deprecated and has now been removed.
@@ -834,8 +826,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     override val dbType: Byte = 2
     override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION.asRight
-    override def toProtoEnumV31: Either[String, v31.SigningKeyUsage] =
-      v31.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION.asRight
   }
 
   case object Protocol extends SigningKeyUsage {
@@ -845,8 +835,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     override val dbType: Byte = 3
     override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL.asRight
-    override def toProtoEnumV31: Either[String, v31.SigningKeyUsage] =
-      v31.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL.asRight
   }
 
   /** Internal type used to identify keys that can self-sign to prove ownership, required for
@@ -858,17 +846,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     override val dbType: Byte = 4
     override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
       v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP.asRight
-    override def toProtoEnumV31: Either[String, v31.SigningKeyUsage] =
-      v31.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP.asRight
-  }
-
-  private case object PartyJWTAuthentication extends SigningKeyUsage {
-    override val identifier: String = "party-jwt"
-    override val dbType: Byte = 5
-    override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
-      Left("party-jwt key usage is not supported in proto v30")
-    override def toProtoEnumV31: Either[String, v31.SigningKeyUsage] =
-      v31.SigningKeyUsage.SIGNING_KEY_USAGE_PARTY_JWT_AUTHENTICATION.asRight
   }
 
   /** Ignores the identity_delegation usage by returning None. We can do this because, up until now,
@@ -892,25 +869,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
         Right(Some(SequencerAuthentication))
       case v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL => Right(Some(Protocol))
       case v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP => Right(Some(ProofOfOwnership))
-    }
-
-  def fromProtoEnumV31(
-      usageP: v31.SigningKeyUsage,
-      field: String,
-  ): ParsingResult[Option[SigningKeyUsage]] =
-    usageP match {
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_UNSPECIFIED =>
-        Left(ProtoDeserializationError.FieldNotSet(field))
-      case v31.SigningKeyUsage.Unrecognized(value) =>
-        Left(ProtoDeserializationError.UnrecognizedEnum(field, value))
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE =>
-        Right(Some(Namespace))
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION =>
-        Right(Some(SequencerAuthentication))
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL => Right(Some(Protocol))
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP => Right(Some(ProofOfOwnership))
-      case v31.SigningKeyUsage.SIGNING_KEY_USAGE_PARTY_JWT_AUTHENTICATION =>
-        Right(Some(PartyJWTAuthentication))
     }
 
   /** When deserializing the usages for a signing key, if the usages are empty, we default to
@@ -943,24 +901,6 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
         ProtocolVersionValidation.NoValidation,
         ProtoValidation.MaxCollectionSize,
       )(SigningKeyUsage.fromProtoEnumV30)
-      .flatMap(listUsages =>
-        // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
-        NonEmpty
-          .from(listUsages.flatten.toSet)
-          .toRight(ProtoDeserializationError.FieldNotSet("usage"))
-      )
-
-  def fromProtoListWithoutDefaultV31(
-      usages: ProtoUnvalidatedSeq[v31.SigningKeyUsage]
-  ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
-    ProtoValidation
-      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
-      .validateLengthThen(
-        usages,
-        "usage",
-        ProtocolVersionValidation.NoValidation,
-        ProtoValidation.MaxCollectionSize,
-      )(SigningKeyUsage.fromProtoEnumV31)
       .flatMap(listUsages =>
         // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
         NonEmpty
@@ -1496,20 +1436,8 @@ final case class SigningPublicKey private (
       )
     }
 
-  def toProtoV31: Either[String, v31.SigningPublicKey] =
-    usage.toSeq.forgetNE.traverse(_.toProtoEnumV31).map { usage =>
-      v31.SigningPublicKey(
-        format = format.toProtoEnum,
-        publicKey = key,
-        keySpec = keySpec.toProtoEnum,
-        usage = usage,
-      )
-    }
-
   override protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key] =
     toProtoV30.map(v30.PublicKey.Key.SigningPublicKey.apply)
-  override protected def toProtoPublicKeyKeyV31: Either[String, v31.PublicKey.Key] =
-    toProtoV31.map(v31.PublicKey.Key.SigningPublicKey.apply)
 
   override def prettyCompanion: PrettyPrintingCompanion[SigningPublicKey] = SigningPublicKey
 
@@ -1682,27 +1610,6 @@ object SigningPublicKey
         )
     } yield signingPublicKey
 
-  def fromProtoV31(
-      publicKeyP: v31.SigningPublicKey
-  ): ParsingResult[SigningPublicKey] =
-    for {
-      format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
-      keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(publicKeyP.keySpec)
-      usage <- SigningKeyUsage.fromProtoListWithoutDefaultV31(publicKeyP.usage)
-      signingPublicKey <- SigningPublicKey
-        .create(
-          format,
-          publicKeyP.publicKey,
-          keySpec,
-          usage,
-        )
-        .leftMap[ProtoDeserializationError](err =>
-          ProtoDeserializationError.CryptoDeserializationError(
-            CryptoParseAndValidationError(err.toString)
-          )
-        )
-    } yield signingPublicKey
-
   def collect(initialKeys: Map[Member, Seq[PublicKey]]): Map[Member, Seq[SigningPublicKey]] =
     initialKeys.map { case (k, v) =>
       (k, v.collect { case x: SigningPublicKey => x })
@@ -1769,17 +1676,6 @@ final case class SigningPrivateKey private (
         privateKey = key,
         // we no longer use this field so we set this scheme as unspecified
         scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
-        keySpec = keySpec.toProtoEnum,
-        usage = usage,
-      )
-    }
-
-  def toProtoV31: Either[String, v31.SigningPrivateKey] =
-    usage.toSeq.forgetNE.traverse(_.toProtoEnumV31).map { usage =>
-      v31.SigningPrivateKey(
-        id = id.toProtoPrimitive,
-        format = format.toProtoEnum,
-        privateKey = key,
         keySpec = keySpec.toProtoEnum,
         usage = usage,
       )
@@ -1910,28 +1806,6 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
         privateKeyP.scheme,
       )
       usage <- SigningKeyUsage.fromProtoListWithDefaultV30(privateKeyP.usage)
-      key <- SigningPrivateKey
-        .create(id, format, privateKeyP.privateKey, keySpec, usage)
-        .leftMap(err =>
-          ProtoDeserializationError.CryptoDeserializationError(
-            CryptoParseAndValidationError(err.show)
-          )
-        )
-    } yield key
-
-  def fromProtoV31(
-      privateKeyP: v31.SigningPrivateKey
-  ): ParsingResult[SigningPrivateKey] =
-    for {
-      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
-      id <- ProtoValidation.validateThen(
-        privateKeyP.id,
-        "id",
-        ProtocolVersionValidation.NoValidation,
-      )(Fingerprint.fromProtoPrimitive)
-      format <- CryptoKeyFormat.fromProtoEnum(privateKeyP.format, "format")
-      keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(privateKeyP.keySpec)
-      usage <- SigningKeyUsage.fromProtoListWithoutDefaultV31(privateKeyP.usage)
       key <- SigningPrivateKey
         .create(id, format, privateKeyP.privateKey, keySpec, usage)
         .leftMap(err =>
@@ -2502,17 +2376,6 @@ final case class SigningKeysWithThreshold(
         )
       )
 
-  def toProtoV31: Either[String, v31.SigningKeysWithThreshold] =
-    keys.toSeq.forgetNE
-      .sortBy(_.fingerprint)
-      .traverse(_.toProtoV31)
-      .map(keys =>
-        v31.SigningKeysWithThreshold(
-          keys = keys,
-          threshold = threshold.value,
-        )
-      )
-
   @VisibleForTesting
   private def copy(
       keys: NonEmpty[Set[SigningPublicKey]],
@@ -2564,35 +2427,6 @@ object SigningKeysWithThreshold {
       keysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV30,
-          "keys",
-          keysSeqP,
-        )
-      threshold <- PositiveInt
-        .create(value.threshold)
-        .leftMap(InvariantViolation.toProtoDeserializationError("threshold", _))
-      signingKeysWithThreshold <- SigningKeysWithThreshold
-        .createFromSeq(
-          keysNE,
-          threshold,
-        )
-        .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
-    } yield signingKeysWithThreshold
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.SigningKeysWithThreshold,
-  ): ParsingResult[SigningKeysWithThreshold] =
-    for {
-      keysSeqP <- ProtoValidation
-        .validateLength(
-          value.keys,
-          "keys",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )
-      keysNE <-
-        ProtoConverter.parseRequiredNonEmpty(
-          SigningPublicKey.fromProtoV31,
           "keys",
           keysSeqP,
         )

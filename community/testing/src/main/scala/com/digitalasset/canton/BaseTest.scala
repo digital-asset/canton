@@ -112,9 +112,9 @@ trait TestEssentials extends ScalatestEssentials with NamedLogging {
   protected lazy val nonEmptyTraceContext2: TraceContext =
     W3CTraceContext("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01").toTraceContext
 
-  // increase default patience from 5s to 20s to account for noisy CI neighbours
+  // increase default patience from 5s to 60s to account for noisy CI neighbours
   implicit override val defaultPatience: PatienceConfig =
-    PatienceConfig(timeout = Span(20, Seconds), interval = Span(25, Millis))
+    PatienceConfig(timeout = Span(60, Seconds), interval = Span(25, Millis))
 
   // when mocking methods touching transactions it's very common to need to mock the traceContext as a an additional argument list
   def anyTraceContext: TraceContext = ArgumentMatchers.any[TraceContext]()

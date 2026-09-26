@@ -10,7 +10,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -37,6 +36,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.admin.AdminWorkflowServices
@@ -74,7 +74,8 @@ trait TrafficControlTest
     with OnboardsNewSequencerNode
     with TestPredicateFiltersFixtureAnyWordSpec
     with HasProgrammableSequencer
-    with TrafficBalanceSupport {
+    with TrafficBalanceSupport
+    with TopologyTransactionReSignHelpers {
 
   private val baseEventCost = 500L
   private val trafficControlParameters = TrafficControlParameters(
@@ -268,9 +269,12 @@ trait TrafficControlTest
           .result
           .map(_.transaction)
 
+      val otkAndNsdForP4Resigned =
+        reSignForTestedProtocolVersion(participant4, otkAndNsdForP4, testedProtocolVersion)
+
       // Load everything from sequencer1
       sequencer1.topology.transactions.load(
-        otkAndNsdForP4 ++ Seq(signedStc, signedVettedPackages),
+        otkAndNsdForP4Resigned ++ Seq(signedStc, signedVettedPackages),
         synchronizer1Id,
         forceFlags = ForceFlags(ForceFlag.AlienMember),
       )
@@ -869,8 +873,8 @@ trait TrafficControlTest
       clue(s"check ${part.id} traffic state on ${seq.id}") {
         val trafficStatus = seq.underlying.value.sequencer.sequencer
           .trafficStatus(Seq(part.id), TimestampSelector.LatestApproximate)
-          .failOnShutdown
-          .futureValue
+          .futureValueUS
+          .valueOrFail("failed to get traffic status")
         trafficStatus.trafficStates.get(part.id).value.baseTrafficRemainder.value should
           equal(baseTrafficAmount)
       }
@@ -995,7 +999,6 @@ trait TrafficControlTest
     )
 }
 
-@UnstableTest // TODO(i31976): Remove as soon as this test has been fixed
 class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,

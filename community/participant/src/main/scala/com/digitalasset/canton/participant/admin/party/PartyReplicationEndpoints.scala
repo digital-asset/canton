@@ -292,7 +292,7 @@ class PartyReplicationEndpointsImpl(
         ),
       )
 
-      // TODO(#33640) – Use configurable size to limit the unbounded signature collection (once it is available)
+      // TODO(#33975) – Use configurable size to limit the unbounded signature collection (once it is available)
       _ <- EitherT.cond[FutureUnlessShutdown](
         request.signatures.sizeIs <= 10,
         (),

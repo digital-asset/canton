@@ -152,7 +152,7 @@ trait TransactionConfirmationRequestFactoryTest
           _contractOfId: ContractInstanceOfId,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
-          _limitConfig: TransactionViewLimitConfig,
+          _protocolLimits: TransactionProtocolLimits,
       )(implicit
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] = {
@@ -260,15 +260,10 @@ trait TransactionConfirmationRequestFactoryTest
    * (computed from the hash of the resulting encrypted view ciphertext) as references for subviews,
    * which is more robust and guarantees uniqueness.
    */
-  protected def encryptViews(
+  protected def buildAndEncryptViews(
       example: ExampleTransaction,
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      lightTransactionTreeWithRecipients: Seq[
-        (Recipients, (LightTransactionViewTree, Option[Signature]))
-      ],
       hashToKeyMap: Map[ViewHash, (Recipients, SecureRandomness)],
-  )(implicit
-      traceContext: TraceContext
+      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
   ): Seq[(EncryptedViewMessage[TransactionViewType.type], Recipients)]
 
   def expectedConfirmationRequest(
@@ -304,31 +299,8 @@ trait TransactionConfirmationRequestFactoryTest
       tree.viewHash -> (recipients, sessionKeyRandomness)
     }.toMap
 
-    val lightTransactionTreeWithRecipients
-        : Seq[(Recipients, (LightTransactionViewTree, Option[Signature]))] =
-      example.transactionViewTreesWithWitnesses
-        .map { case (tree, _) =>
-          val signature = Option.when(tree.isTopLevel)(SymbolicCrypto.emptySignature)
-
-          val (recipients, _) = hashToKeyMap(tree.viewHash)
-
-          (
-            recipients,
-            (
-              LightTransactionViewTree
-                .fromTransactionViewTreeUsingViewHashReference(
-                  tree,
-                  tree.subviewHashes.map(viewHash => hashToKeyMap(viewHash)._2),
-                  testedProtocolVersion,
-                )
-                .valueOrFail("fail to create light transaction view tree"),
-              signature,
-            ),
-          )
-        }
-
     val encryptedViewMessages =
-      encryptViews(example, cryptoSnapshot, lightTransactionTreeWithRecipients, hashToKeyMap)
+      buildAndEncryptViews(example, hashToKeyMap, cryptoSnapshot)
 
     val expectedTransactionViewMessages = encryptedViewMessages.map {
       case (viewMessage, recipients) =>
@@ -410,7 +382,7 @@ trait TransactionConfirmationRequestFactoryTest
                 contractInstanceOfId,
                 maxSequencingTime,
                 testedProtocolVersion,
-                limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+                protocolLimits = defaultProtocolLimits,
               )
               .value
               .failOnShutdown
@@ -439,7 +411,7 @@ trait TransactionConfirmationRequestFactoryTest
             contractInstanceOfId,
             maxSequencingTime,
             testedProtocolVersion,
-            limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+            protocolLimits = defaultProtocolLimits,
           )
           .failOnShutdown
           .map { tcr =>
@@ -474,7 +446,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
-              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+              protocolLimits = defaultProtocolLimits,
             )
             .failOnShutdown
             .map(_ =>
@@ -540,7 +512,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
-              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+              protocolLimits = defaultProtocolLimits,
             )
             .failOnShutdown
             .value
@@ -585,7 +557,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
-              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+              protocolLimits = defaultProtocolLimits,
             )
             .failOnShutdown
             .value
@@ -626,7 +598,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
-              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+              protocolLimits = defaultProtocolLimits,
             )
             .failOnShutdown
             .value
@@ -665,7 +637,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
-              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+              protocolLimits = defaultProtocolLimits,
             )
             .failOnShutdown
             .value

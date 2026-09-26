@@ -36,7 +36,11 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  KnownPhysicalSynchronizerId,
+  OpaquePhysicalSynchronizerId,
+  PhysicalSynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
@@ -106,10 +110,22 @@ class SequencerConnectionSuccessorListener(
         )
         .map(_.fmap(_.mapping))
 
+      supportedSuccessorPsid <- OptionT.fromOption[FutureUnlessShutdown](
+        successorPsid.parseAsPhysical.fold(
+          { err =>
+            logger.warn(
+              OpaquePhysicalSynchronizerId.unparseablePSIdMessage(synchronizerSuccessor, err)
+            )
+            Option.empty[PhysicalSynchronizerId]
+          },
+          Option(_),
+        )
+      )
+
       successorConfig <- LogicalSynchronizerUpgrade
         .prepareNewSynchronizerConnectionConfig(
           psid = topologyClient.psid,
-          successorPsid = successorPsid,
+          successorPsid = supportedSuccessorPsid,
           sequencerSuccessors = sequencerSuccessors,
           configStore = configStore,
           warnOnIncomplete = false,
@@ -129,10 +145,10 @@ class SequencerConnectionSuccessorListener(
         SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
 
       currentSuccessorConfigO =
-        configStore.get(alias, KnownPhysicalSynchronizerId(successorPsid)).toOption
+        configStore.get(alias, KnownPhysicalSynchronizerId(supportedSuccessorPsid)).toOption
 
       _ <- configStore
-        .deactivatePriorLsuTargets(successorPsid)
+        .deactivatePriorLsuTargets(supportedSuccessorPsid)
         .tapLeft(err =>
           logger.warn(s"Unable to deactivate prior LSU target configs of $successorPsid: $err")
         )
@@ -140,7 +156,7 @@ class SequencerConnectionSuccessorListener(
 
       updatedSuccessorConfig <- configStore
         .upsert(
-          psid = successorPsid,
+          psid = supportedSuccessorPsid,
           insert =
             (successorConfig, SynchronizerConnectionConfigStore.LsuTarget, Some(predecessor)),
           /*
@@ -161,7 +177,7 @@ class SequencerConnectionSuccessorListener(
 
       _ = if (lsuConfig.automaticallyPerformLsu && sequencerConnectionsChanged) {
         logger.info(s"Performing handshake to validate connection to $successorPsid")
-        performHandshakeAndInitiateTopology(successorPsid, predecessor)
+        performHandshakeAndInitiateTopology(supportedSuccessorPsid, predecessor)
       }
     } yield ()
 

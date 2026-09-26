@@ -62,14 +62,15 @@ final case class UnassignmentValidationResult(
     *   record time of the emitted event
     * @param trafficCost
     *   traffic cost reported in the completion of the submitting participant
-    * @param isReassigningParticipantOverride
-    *   when set, replaces the `isReassigningParticipant` field in the emitted event
+    * @param storedInReassignmentStore
+    *   whether the reassignment was recorded in the reassignment store, emitted as
+    *   `isReassigningParticipant`
     */
   def createReassignmentAccepted(
       participantId: ParticipantId,
       recordTime: CantonTimestamp,
       trafficCost: NonNegativeLong,
-      isReassigningParticipantOverride: Option[Boolean],
+      storedInReassignmentStore: Boolean,
   )(implicit
       traceContext: TraceContext
   ): AcsChangeFactory => InternalContractIds => Update.SequencedReassignmentAccepted = {
@@ -98,8 +99,7 @@ final case class UnassignmentValidationResult(
             targetSynchronizer = targetSynchronizer.map(_.logical),
             submitter = Option(submitterMetadata.submitter),
             reassignmentId = reassignmentId,
-            isReassigningParticipant =
-              isReassigningParticipantOverride.getOrElse(isReassigningParticipant),
+            isReassigningParticipant = storedInReassignmentStore,
           ),
           reassignment =
             Reassignment.Batch(contracts.contracts.zipWithIndex.map { case (reassign, idx) =>

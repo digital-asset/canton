@@ -86,6 +86,8 @@ class ParticipantReplicaManager(
             "Participant replica is becoming active: Ledger API Index Service started"
           )
 
+          _ <- participantServices.acsReplicatorContainerO.traverse(_.initializeNext())
+          _ = logger.info("Participant replica is becoming active: ACS Replicator started")
           _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
           _ = logger.info("Participant replica is becoming active: Party Replicator started")
           // Start up the Ledger API server
@@ -184,6 +186,11 @@ class ParticipantReplicaManager(
         participantServices.partyReplicatorContainerO.foreach { partyReplicatorContainer =>
           partyReplicatorContainer.closeCurrent()
           logger.info("Participant replica is becoming passive: Party Replicator is stopped")
+        }
+
+        participantServices.acsReplicatorContainerO.foreach { acsReplicatorContainer =>
+          acsReplicatorContainer.closeCurrent()
+          logger.info("Participant replica is becoming passive: ACS Replicator is stopped")
         }
 
         participantServices.ledgerApiIndexServiceContainer.closeCurrent()

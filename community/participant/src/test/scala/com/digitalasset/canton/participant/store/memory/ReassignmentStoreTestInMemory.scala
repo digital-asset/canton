@@ -4,19 +4,29 @@
 package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.participant.store.ReassignmentStoreTest
+import com.digitalasset.canton.participant.topology.OfflineTopologyLookup
 import com.digitalasset.canton.store.IndexedSynchronizer
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
-class ReassignmentStoreTestInMemory
+final class ReassignmentStoreTestInMemory
     extends AsyncWordSpec
     with BaseTest
     with HasExecutionContext
     with ReassignmentStoreTest {
 
-  private def mk(synchronizer: IndexedSynchronizer): InMemoryReassignmentStore =
-    new InMemoryReassignmentStore(Target(synchronizer.synchronizerId), loggerFactory)
+  private def mk(
+      synchronizer: IndexedSynchronizer,
+      offlineTopologyLookup: OfflineTopologyLookup,
+  ): InMemoryReassignmentStore =
+    new InMemoryReassignmentStore(
+      Target(synchronizer.synchronizerId),
+      DefaultTestIdentities.participant1,
+      offlineTopologyLookup,
+      loggerFactory,
+    )
 
   "ReassignmentStoreTestInMemory" should {
     behave like reassignmentStore(mk)

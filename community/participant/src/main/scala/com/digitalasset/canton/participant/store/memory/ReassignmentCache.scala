@@ -152,12 +152,11 @@ class ReassignmentCache(
     * don't need additional synchronization here and we can directly query the store.
     */
   override def findIncomplete(
-      sourceSynchronizer: Option[Source[SynchronizerId]],
       validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] =
-    reassignmentStore.findIncomplete(sourceSynchronizer, validAt, stakeholders, limit)
+    reassignmentStore.findIncomplete(validAt, stakeholders, limit)
 
   def findEarliestIncomplete()(implicit
       traceContext: TraceContext

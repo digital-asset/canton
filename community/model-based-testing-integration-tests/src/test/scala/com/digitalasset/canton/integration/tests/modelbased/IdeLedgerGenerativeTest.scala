@@ -12,7 +12,6 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.DurationInt
@@ -32,24 +31,15 @@ class IdeLedgerGenerativeTest
     "not crash on valid scenarios" should {
       List(
         (
-          "pv34",
-          new ConcreteGenerators(
-            contractKeys = false,
-            readOnlyRollbacks = false,
-          ),
-          ContractStateMachine.Mode.NoKey,
-        ),
-        (
           "pv35",
           new ConcreteGenerators(
             contractKeys = true,
             readOnlyRollbacks = true,
           ),
-          ContractStateMachine.Mode.Key,
-        ),
-      ).foreach { case (pv, generators, csmMode) =>
+        )
+      ).foreach { case (pv, generators) =>
         s"for $pv transactions" in {
-          val interpreter = ReferenceInterpreter(loggerFactory, csmMode)
+          val interpreter = ReferenceInterpreter(loggerFactory)
 
           val generator =
             generators.validScenarioGenerator(

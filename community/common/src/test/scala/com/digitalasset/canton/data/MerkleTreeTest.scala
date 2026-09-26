@@ -14,7 +14,7 @@ import com.digitalasset.canton.data.MerkleTree.{
   VersionedMerkleTree,
 }
 import com.digitalasset.canton.data.MerkleTreeTest.*
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
@@ -209,8 +209,11 @@ object MerkleTreeTest {
 
   object AbstractLeaf
       extends VersioningCompanion[VersionedAbstractLeaf]
-      with IgnoreInSerializationTestExhaustivenessCheck {
+      with IgnoreInSerializationTestExhaustivenessCheck
+      with PrettyPrintingCompanion[AbstractLeaf[?]] {
     override def name: String = "AbstractLeaf"
+
+    override protected val pretty: Pretty[AbstractLeaf[?]] = prettyOfClass(unnamedParam(_.index))
     override val versioningTable: VersioningTable = VersioningTable(
       ProtoVersion(30) -> VersionedProtoCodec
         .raw[Id, VersionedAbstractLeaf, Unit, VersionedAbstractLeaf, this.type](
@@ -244,7 +247,7 @@ object MerkleTreeTest {
 
     override val hashPurpose: HashPurpose = TestHash.testHashPurpose
 
-    override protected def pretty: Pretty[AbstractLeaf[A]] = prettyOfClass(unnamedParam(_.index))
+    override def prettyCompanion: PrettyPrintingCompanion[AbstractLeaf[?]] = AbstractLeaf
   }
 
   def leafFromByteString[L <: AbstractLeaf[?]](
@@ -294,7 +297,12 @@ object MerkleTreeTest {
     ): MerkleTree[A] =
       create(subtrees.map(_.doBlind(blindingCommandPerNode)))
 
-    override protected def pretty: Pretty[AbstractInnerNode[A]] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[AbstractInnerNode[?]] =
+      AbstractInnerNode
+  }
+
+  object AbstractInnerNode extends PrettyPrintingCompanion[AbstractInnerNode[?]] {
+    override protected val pretty: Pretty[AbstractInnerNode[?]] = prettyOfClass(
       param("subtrees", _.subtrees)
     )
   }

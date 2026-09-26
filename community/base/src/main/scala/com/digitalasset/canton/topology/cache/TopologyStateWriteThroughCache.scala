@@ -25,7 +25,11 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   NamedLoggerFactory,
@@ -364,6 +368,7 @@ class TopologyStateWriteThroughCache(
           }
         }
       }
+
       override def prettyItem: Pretty[StateKeyFetch] = StateKeyFetch.pretty
     },
     aggregatorConfig,
@@ -1042,8 +1047,8 @@ object TopologyStateWriteThroughCache {
       code: TopologyMapping.Code,
       namespace: Namespace,
       identifier: Option[String185],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[StateKey] = StateKey.pretty
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[StateKey] = StateKey
     def toStateKeyFetch(
         validUntilInclusive: EffectiveTime
     ): StateKeyFetch =
@@ -1051,11 +1056,9 @@ object TopologyStateWriteThroughCache {
 
   }
 
-  private[cache] object StateKey {
-    import PrettyUtil.*
-    import com.digitalasset.canton.util.ShowUtil.*
+  private[cache] object StateKey extends PrettyPrintingCompanion[StateKey] {
 
-    private val pretty: Pretty[StateKey] = prettyOfClass[StateKey](
+    override protected val pretty: Pretty[StateKey] = prettyOfClass[StateKey](
       param("code", _.code.code.unquoted),
       param("ns", _.namespace),
       paramIfDefined("id", _.identifier.map(_.str.unquoted)),
@@ -1099,9 +1102,9 @@ object TopologyStateWriteThroughCache {
       head: Seq[MaybeUpdatedTx],
       tail: Seq[GenericStoredTopologyTransaction],
       validUntilInclusive: EffectiveTime,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override def pretty: Pretty[StateData] = StateData.prettyInstance
+    override def prettyCompanion: PrettyPrintingCompanion[StateData] = StateData
 
     def dropPendingChanges(
         asOfInclusive: CantonTimestamp
@@ -1344,17 +1347,15 @@ object TopologyStateWriteThroughCache {
 
   }
 
-  private[cache] object StateData {
+  private[cache] object StateData extends PrettyPrintingCompanion[StateData] {
 
-    private val prettyInstance: Pretty[StateData] = {
-      import PrettyUtil.*
+    override protected val pretty: Pretty[StateData] =
       prettyOfClass[StateData](
         param("key", _.key),
         param("head", _.head.size),
         param("tail", _.tail.size),
         param("cutOff", _.validUntilInclusive.value),
       )
-    }
 
     def fromLoaded(
         stateKey: StateKey,
@@ -1498,7 +1499,7 @@ object TopologyStateWriteThroughCache {
       initStored: GenericStoredTopologyTransaction,
       initPersisted: Boolean,
       typedRejectionReasonOfNewlyAppendedTxs: Option[TopologyTransactionRejection],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     private val current: AtomicReference[GenericStoredTopologyTransaction] = new AtomicReference(
       initStored
@@ -1532,11 +1533,15 @@ object TopologyStateWriteThroughCache {
       )
     }
 
-    override protected def pretty: Pretty[MaybeUpdatedTx] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[MaybeUpdatedTx] = MaybeUpdatedTx
+
+  }
+
+  private[cache] object MaybeUpdatedTx extends PrettyPrintingCompanion[MaybeUpdatedTx] {
+    override protected val pretty: Pretty[MaybeUpdatedTx] = prettyOfClass(
       param("stored", _.stored),
       paramIfTrue("persisted", _.persisted.get()),
     )
-
   }
 
 }

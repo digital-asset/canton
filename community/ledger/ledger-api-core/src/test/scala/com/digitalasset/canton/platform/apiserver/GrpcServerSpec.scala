@@ -142,11 +142,10 @@ final class GrpcServerSpec
         new LedgerApiServerHistograms(MetricName("test"))(inventory),
         metricsFactory,
       )
-      val overLimitRejection = LedgerApiErrors.ThreadpoolOverloaded.Rejection(
-        "test",
+      val overLimitRejection = LedgerApiErrors.HeapMemoryOverLimit.Rejection(
         "test",
         100,
-        59,
+        "test",
         "test",
       )
       val rateLimitingInterceptor = RateLimitingInterceptorFactory.create(

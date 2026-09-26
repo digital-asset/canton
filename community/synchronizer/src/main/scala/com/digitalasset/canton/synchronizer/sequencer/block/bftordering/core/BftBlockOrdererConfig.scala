@@ -409,9 +409,13 @@ object BftBlockOrdererConfig {
     *   The maximum delay between retry attempts to connect to a peer
     * @param connectionRetryDelayMultiplier
     *   The backoff factor applied to the delay between subsequent failed retry attempts
+    * @param flowControlEnabled
+    *   Determines whether flow control is enabled on the sender; if enabled, messages are only sent
+    *   over gRPC if the receiver signals readiness, else queued in a max-sized buffer and
+    *   potentially dropped.
     * @param flowControlBuffer
-    *   If set, enables P2P flow control on the sender side with the specified buffer size. If not
-    *   set, the gRPC implementation will manage send buffers in case of slow receivers (and may
+    *   If flow control is enabled, it configures the specified buffer size on the sender side. If
+    *   not set, the gRPC implementation will manage send buffers in case of slow receivers (and may
     *   OOM).
     * @param flowControlBufferDropNewest
     *   If true, newest excess sends, rather than oldest, will be dropped from the flow control
@@ -433,8 +437,10 @@ object BftBlockOrdererConfig {
       maxConnectionRetryDelay: config.NonNegativeFiniteDuration =
         config.NonNegativeFiniteDuration.ofMinutes(2),
       connectionRetryDelayMultiplier: NonNegativeInt = NonNegativeInt.two,
-      // These flow control defaults seem to work best on 16 nodes, 3KB payload, 4k req/s benchmark
-      flowControlBuffer: Option[PositiveInt] = Some(PositiveInt.tryCreate(128)),
+      flowControlEnabled: Boolean = true,
+      // These flow control defaults seem to work well on both a happy case benchmark (16 nodes,
+      //  3KB payload, 4k req/s)  and on a catch-up benchmark.
+      flowControlBuffer: PositiveInt = PositiveInt.tryCreate(2048),
       flowControlBufferDropNewest: Boolean = false,
       flowControlReadyAllowance: PositiveInt = PositiveInt.one,
   )

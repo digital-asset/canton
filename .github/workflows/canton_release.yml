@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - 'gha-migration/*'
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -90,6 +92,32 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  generate_data_continuity_dumps:
+    name: Generate Data Continuity Dumps
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_generate_data_continuity_dumps.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  tag_new_releases:
+    name: Tag New Releases
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-') }}
+    needs: pick_runner
+    uses: ./.github/workflows/_tag_new_releases.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   notify:
     name: Notify on Failure
     needs:
@@ -105,9 +133,9 @@ jobs:
 #      - publish_libraries
 #      - publish_release
 #      - release_test
-#      - tag_new_releases
+      - tag_new_releases
 #      - run_propose_script
-#      - generate_data_continuity_dumps
+      - generate_data_continuity_dumps
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

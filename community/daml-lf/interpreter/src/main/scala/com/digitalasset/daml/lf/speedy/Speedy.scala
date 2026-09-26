@@ -180,8 +180,6 @@ private[lf] object Speedy {
       private[speedy] var ptx: PartialTransaction,
       /* Committers of the action. */
       val committers: Set[Party],
-      /* Additional readers (besides committers) for visibility checks. */
-      val readAs: Set[Party],
       /* Commit location, if a script commit is in progress. */
       val commitLocation: Option[Location],
       val limits: interpretation.Limits,
@@ -427,12 +425,6 @@ private[lf] object Speedy {
     private[speedy] def setTimeBoundaries(newTimeBoundaries: Time.Range): Unit =
       timeBoundaries = newTimeBoundaries
 
-    val visibleToStakeholders: Set[Party] => SVisibleToStakeholders =
-      if (validating) { _ => SVisibleToStakeholders.Visible }
-      else {
-        SVisibleToStakeholders.fromSubmitters(committers, readAs)
-      }
-
     def incompleteTransaction: IncompleteTransaction = ptx.finishIncomplete
     def nodesToString: String = ptx.nodesToString
 
@@ -563,7 +555,6 @@ private[lf] object Speedy {
         initialSeeding: InitialSeeding,
         expr: SExpr,
         committers: Set[Party],
-        readAs: Set[Party],
         logger: MachineLogger,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
@@ -587,13 +578,11 @@ private[lf] object Speedy {
         preparationTime = preparationTime,
         ptx = PartialTransaction
           .initial(
-            interpretationConfig.contractStateMode,
             initialSeeding,
             committers,
             authorizationChecker,
           ),
         committers = committers,
-        readAs = readAs,
         commitLocation = commitLocation,
         interpretationConfig = interpretationConfig,
         contractIdVersion = contractIdVersion,
@@ -645,7 +634,7 @@ private[lf] object Speedy {
     private[speedy] override def asCmdMachine(location: => String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Nothing =
-      throw SError.Crash(location, "unexpected pure machine in cmd context")
+      throw SError.Crash(location, "unexpected pure machine in cmd")
 
     /** Pure Machine does not handle exceptions */
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
@@ -1129,7 +1118,6 @@ private[lf] object Speedy {
         updateSE: SExpr,
         committers: Set[Party],
         logger: MachineLogger,
-        readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         interpretationConfig: interpretation.InterpretationConfig =
@@ -1142,7 +1130,6 @@ private[lf] object Speedy {
         initialSeeding = InitialSeeding.TransactionSeed(transactionSeed),
         expr = SEApp(updateSE, ArraySeq(SValue.SToken)),
         committers = committers,
-        readAs = readAs,
         packageResolution = packageResolution,
         limits = limits,
         authorizationChecker = authorizationChecker,
@@ -1567,7 +1554,7 @@ private[lf] object Speedy {
 
       machine.updateGasBudget(_.KCloseExercise.cost(exerciseResult))
 
-      machine.asUpdateMachine(getClass.getSimpleName) { machine =>
+      machine.asUpdateMachine(productPrefix) { machine =>
         machine.ptx = machine.ptx.endExercises(exerciseResult.toNormalizedValue)
         Control.Value(exerciseResult)
       }

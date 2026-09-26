@@ -16,7 +16,6 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.ParticipantSynchronizerLimits
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -614,7 +613,7 @@ trait LedgerApiParticipantPruningTest
 
     // Advance clock long enough to be sure that the last event to be pruned is followed by an acs commitment. Only then
     // invoke pruning.
-    eventually(timeUntilSuccess = transactionTolerance.underlying * 10) {
+    eventually(timeUntilSuccess = transactionTolerance.underlying * 20) {
       // Need to add an event after the reconciliation interval to also advance clean head beyond acs commitment tick.
       clock.advance(reconciliationInterval.asJava)
       // ensure participants have observed the new advanced time
@@ -734,7 +733,6 @@ trait LedgerApiParticipantPruningTest
 
 }
 
-@UnstableTest // TODO(i32417): Remove once the test is stable again
 class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

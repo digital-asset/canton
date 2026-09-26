@@ -9,6 +9,7 @@ import com.digitalasset.canton.console.{CommandFailure, LocalInstanceReference}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.SigningKeyUsage.Protocol
 import com.digitalasset.canton.integration.plugins.UsePostgres
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -34,6 +35,7 @@ import scala.concurrent.ExecutionContext
 
 class TopologyAdministrationIntegrationTest
     extends CommunityIntegrationTest
+    with TopologyTransactionReSignHelpers
     with SharedEnvironment {
   registerPlugin(new UsePostgres(loggerFactory))
   override def environmentDefinition: EnvironmentDefinition =
@@ -354,7 +356,15 @@ class TopologyAdministrationIntegrationTest
           .flatMap(_.selectMapping[NamespaceDelegation])
           .filter(NamespaceDelegation.isRootCertificate(_))
           .loneElement
-        participant2.topology.transactions.load(Seq(rootCert), testTempStoreId)
+
+        val reSignedRootCert =
+          reSignForTestedProtocolVersion(
+            participant2,
+            Seq(rootCert),
+            testedProtocolVersion,
+          ).loneElement
+
+        participant2.topology.transactions.load(Seq(reSignedRootCert), testTempStoreId)
 
         val signingKey = participant2.keys.secret
           .generate_signing_key("authorized-store-test", usage = Set(Protocol))

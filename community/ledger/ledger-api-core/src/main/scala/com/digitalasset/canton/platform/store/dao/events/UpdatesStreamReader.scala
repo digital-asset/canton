@@ -41,9 +41,15 @@ import com.digitalasset.canton.platform.store.dao.events.OrderingUtils.{
 }
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.{
   SynchronizerParametersResponse,
+  TopologyTransactionResponse,
   TopologyTransactionsStreamQueryParams,
 }
-import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.VectorOps
+import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.{
+  RawEventBasedUpdate,
+  RawTopologyTransaction,
+  RawUpdate,
+  VectorOps,
+}
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
 import com.digitalasset.canton.platform.store.utils.{
   ConcurrencyLimiter,
@@ -96,6 +102,7 @@ class UpdatesStreamReader(
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
+      limit: Option[Int],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, UpdateResponse), NotUsed] = {
@@ -114,6 +121,7 @@ class UpdatesStreamReader(
       internalUpdateFormat = internalUpdateFormat,
       descendingOrder = descendingOrder,
       skipPruningChecks = skipPruningChecks,
+      limit = limit,
     )
       .wireTap(_ match {
         case (_, ProtoUpdate(getUpdatesResponseO, _)) =>
@@ -149,9 +157,11 @@ class UpdatesStreamReader(
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
+      limit: Option[Int],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, UpdateResponse), NotUsed] = {
+    val longOrdering = if (descendingOrder) Ordering.Long.reverse else Ordering.Long
     val payloadQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelPayloadQueries, executionContext)
     val deserializationQueriesLimiter =
@@ -256,7 +266,7 @@ class UpdatesStreamReader(
       case None => Source.empty
     }
 
-    val topologyTransactions: Source[(Offset, UpdateResponse), NotUsed] =
+    val topologyTransactions: Source[RawTopologyTransaction, NotUsed] =
       internalUpdateFormat.includeTopologyEvents match {
         case Some(topologyFormat) =>
           topologyTransactionsStreamReader
@@ -273,24 +283,7 @@ class UpdatesStreamReader(
                 maxParallelPayloadQueries = transactionsProcessingParallelism,
               )
             )
-            .map { case (offset, topologyTransactionResponse) =>
-              offset -> UpdateResponse.ProtoUpdate(
-                response = topologyTransactionResponse.toProtoTopologyTransaction.map(proto =>
-                  GetUpdateResponse(
-                    GetUpdateResponse.Update.TopologyTransaction(proto)
-                  ).withPrecomputedSerializedSize()
-                ),
-                synchronizerParametersResponse =
-                  topologyTransactionResponse.synchronizerParametersState.map(
-                    synchronizerParametersState =>
-                      SynchronizerParametersResponse(
-                        commonTopologyTransactionProperties =
-                          topologyTransactionResponse.commonTopologyTransactionProperties,
-                        synchronizerParametersState = synchronizerParametersState,
-                      )
-                  ),
-              )
-            }
+            .map((RawTopologyTransaction.apply _).tupled)
         case None => Source.empty
       }
 
@@ -314,42 +307,70 @@ class UpdatesStreamReader(
 
     UpdateReader
       .groupContiguous(sourceOfTransactionsAndReassignments)(_.offset)
-      .mapAsync(transactionsProcessingParallelism) { rawEvents =>
-        deserializationQueriesLimiter.execute(
-          UpdateReader.toApiUpdate[(Offset, UpdateResponse)](
-            reassignmentEventProjectionProperties = internalUpdateFormat.includeReassignments.map(
-              _.eventProjectionProperties
-            ),
-            transactionEventProjectionProperties = internalUpdateFormat.includeTransactions.map(
-              _.internalEventFormat.eventProjectionProperties
-            ),
-            lfValueTranslation = lfValueTranslation,
-          )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
-            convertReassignment = reassignment =>
-              Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
-                Some(
-                  GetUpdateResponse(
-                    GetUpdateResponse.Update.Reassignment(reassignment)
-                  ).withPrecomputedSerializedSize()
-                ),
-                synchronizerParametersResponse = None,
-              ),
-            convertTransaction = transaction =>
-              Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
-                Some(
-                  GetUpdateResponse(
-                    GetUpdateResponse.Update.Transaction(transaction)
-                  ).withPrecomputedSerializedSize()
-                ),
-                synchronizerParametersResponse = None,
-              ),
-          )
+      .map[RawUpdate](RawEventBasedUpdate.apply)
+      .mergeSorted(topologyTransactions)(
+        Ordering.by[RawUpdate, Long](_.offsetAsLong)(
+          longOrdering
         )
+      )
+      .optionalTake(limit.map(_.toLong))
+      .mapAsync(transactionsProcessingParallelism) {
+        case RawEventBasedUpdate(rawEvents) =>
+          deserializationQueriesLimiter.execute(
+            UpdateReader.toApiUpdate[(Offset, UpdateResponse)](
+              reassignmentEventProjectionProperties = internalUpdateFormat.includeReassignments.map(
+                _.eventProjectionProperties
+              ),
+              transactionEventProjectionProperties = internalUpdateFormat.includeTransactions.map(
+                _.internalEventFormat.eventProjectionProperties
+              ),
+              lfValueTranslation = lfValueTranslation,
+            )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
+              convertReassignment = reassignment =>
+                Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
+                  Some(
+                    GetUpdateResponse(
+                      GetUpdateResponse.Update.Reassignment(reassignment)
+                    ).withPrecomputedSerializedSize()
+                  ),
+                  synchronizerParametersResponse = None,
+                ),
+              convertTransaction = transaction =>
+                Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
+                  Some(
+                    GetUpdateResponse(
+                      GetUpdateResponse.Update.Transaction(transaction)
+                    ).withPrecomputedSerializedSize()
+                  ),
+                  synchronizerParametersResponse = None,
+                ),
+            )
+          )
+        case RawTopologyTransaction(offset, topologyTransactionResponse) =>
+          deserializationQueriesLimiter.execute(
+            Future(
+              Some(
+                offset -> UpdateResponse.ProtoUpdate(
+                  response = topologyTransactionResponse.toProtoTopologyTransaction.map(proto =>
+                    GetUpdateResponse(
+                      GetUpdateResponse.Update.TopologyTransaction(proto)
+                    ).withPrecomputedSerializedSize()
+                  ),
+                  synchronizerParametersResponse =
+                    topologyTransactionResponse.synchronizerParametersState.map(
+                      synchronizerParametersState =>
+                        SynchronizerParametersResponse(
+                          commonTopologyTransactionProperties =
+                            topologyTransactionResponse.commonTopologyTransactionProperties,
+                          synchronizerParametersState = synchronizerParametersState,
+                        )
+                    ),
+                )
+              )
+            )
+          )
       }
       .mapConcat(identity)
-      .mergeSorted(topologyTransactions)(
-        offsetOrdering[UpdateResponse](descendingOrder)
-      )
       .via(acsCommitmentsFlow)
   }
 
@@ -539,6 +560,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "AcsDelta/Activate",
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -561,6 +583,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "AcsDelta/Deactivate",
       )
 
     payloadsActivate
@@ -856,6 +879,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/Activate",
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -878,6 +902,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/Deactivate",
       )
     val payloadsVariousWitnessed =
       fetchPayloads(
@@ -900,6 +925,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/VariousWitnessed",
       )
 
     payloadsActivate
@@ -974,7 +1000,7 @@ class UpdatesStreamReader(
   )(sourcesOfIds: Vector[Source[Long, NotUsed]]): Source[Iterable[Long], NotUsed] =
     EventIdsUtils
       .sortAndDeduplicateIds(descendingOrder)(sourcesOfIds)
-      .batchN(
+      .batchNForMaxConcurrency(
         maxBatchSize = maxOutputBatchSize,
         maxBatchCount = maxOutputBatchCount,
       )
@@ -988,6 +1014,7 @@ class UpdatesStreamReader(
       payloadQueriesLimiter: ConcurrencyLimiter,
       contractStore: LedgerApiContractStore,
       skipPruningChecks: Boolean,
+      queryName: String,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -1008,6 +1035,7 @@ class UpdatesStreamReader(
               pruningOffsetService = pruningOffsetService,
               queryValidRange = queryValidRange,
               dbDispatcher = dbDispatcher,
+              queryName = queryName,
             )
           }
         }
@@ -1017,6 +1045,17 @@ class UpdatesStreamReader(
 }
 
 object UpdatesStreamReader {
+  sealed trait RawUpdate {
+    def offsetAsLong: Long
+  }
+  final case class RawTopologyTransaction(offset: Offset, transaction: TopologyTransactionResponse)
+      extends RawUpdate {
+    override def offsetAsLong: Long = offset.unwrap
+  }
+  final case class RawEventBasedUpdate(el: Vector[RawEvent]) extends RawUpdate {
+    require(el.nonEmpty)
+    override def offsetAsLong: Long = el(0).offset
+  }
 
   final implicit class VectorOps[T](vec: Vector[T]) {
     def reverseIfDescendingOrder(descendingOrder: Boolean): Vector[T] =
@@ -1033,6 +1072,7 @@ object UpdatesStreamReader {
       pruningOffsetService: PruningOffsetService,
       queryValidRange: QueryValidRange,
       dbDispatcher: DbDispatcher,
+      queryName: String,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -1059,7 +1099,13 @@ object UpdatesStreamReader {
     }
     pruningCheck {
       dbDispatcher
-        .executeSql(dbMetric)(fetchEvents(ids, _))
+        .executeSql(dbMetric)(
+          Utils.wrapDbQuery(fetchEvents(ids, _)) { result =>
+            val resultSize = result.size
+            val idSize = ids.size
+            s"EventPayloadQuery $queryName returned $resultSize/$idSize events"
+          }
+        )
         .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
     }
       .map(UpdateReader.tryToResolveFatInstance)

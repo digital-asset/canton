@@ -8,7 +8,11 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.OnboardingRestriction
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -20,16 +24,21 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
 }
 import com.digitalasset.nonempty.NonEmpty
 
-sealed trait TopologyTransactionRejection extends PrettyPrinting with Product with Serializable {
+sealed trait TopologyTransactionRejection
+    extends PrettyPrintingFromCompanion
+    with Product
+    with Serializable {
   def asString: String
   def asString300: String300 =
     String300.tryCreate(asString.take(300), Some("topology transaction rejection"))
 
   def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError
 
-  override protected def pretty: Pretty[this.type] = prettyOfString(_ => asString)
+  override def prettyCompanion: PrettyPrintingCompanion[this.type] = TopologyTransactionRejection
 }
-object TopologyTransactionRejection {
+object TopologyTransactionRejection extends PrettyPrintingCompanion[TopologyTransactionRejection] {
+
+  override protected val pretty: Pretty[TopologyTransactionRejection] = prettyOfString(_.asString)
 
   /** list of rejections produced by state processor */
   object Processor {
@@ -37,28 +46,42 @@ object TopologyTransactionRejection {
         extends TopologyTransactionRejection {
       override def asString: String =
         show"The actual serial $actual does not match the expected serial $expected"
-      override protected def pretty: Pretty[SerialMismatch] =
-        prettyOfClass(param("expected", _.expected), param("actual", _.actual))
+      override def prettyCompanion: PrettyPrintingCompanion[SerialMismatch] = SerialMismatch
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.SerialMismatch.Failure(
           actual = Some(actual),
           expected = Some(expected),
         )
     }
+
+    object SerialMismatch extends PrettyPrintingCompanion[SerialMismatch] {
+      override protected val pretty: Pretty[SerialMismatch] =
+        prettyOfClass(param("expected", _.expected), param("actual", _.actual))
+    }
     case object MaxSerialReached extends TopologyTransactionRejection {
       val message = "Max serial has been reached for the transaction."
       override def asString: String = message
-      override protected def pretty: Pretty[MaxSerialReached.type] =
-        prettyOfClass(param("message", _.message.singleQuoted))
+      override def prettyCompanion: PrettyPrintingCompanion[MaxSerialReached.type] =
+        MaxSerialReachedPrettyPrintingCompanion
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.TopologyManagerAlarm.Warn(message)
     }
+
+    private object MaxSerialReachedPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[MaxSerialReached.type] {
+      override protected val pretty: Pretty[MaxSerialReached.type] =
+        prettyOfClass(param("message", _.message.singleQuoted))
+    }
     final case class InternalError(message: String) extends TopologyTransactionRejection {
       override def asString: String = message
-      override protected def pretty: Pretty[InternalError] =
-        prettyOfClass(param("message", _.message.singleQuoted))
+      override def prettyCompanion: PrettyPrintingCompanion[InternalError] = InternalError
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.InternalError.Unexpected(message)
+    }
+
+    object InternalError extends PrettyPrintingCompanion[InternalError] {
+      override protected val pretty: Pretty[InternalError] =
+        prettyOfClass(param("message", _.message.singleQuoted))
     }
   }
 
@@ -110,22 +133,32 @@ object TopologyTransactionRejection {
     final case class SignatureCheckFailed(err: SignatureCheckError)
         extends TopologyTransactionRejection {
       override def asString: String = err.toString
-      override protected def pretty: Pretty[SignatureCheckFailed] = prettyOfClass(
-        param("err", _.err)
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[SignatureCheckFailed] =
+        SignatureCheckFailed
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.InvalidSignatureError.Failure(err)
+    }
+
+    object SignatureCheckFailed extends PrettyPrintingCompanion[SignatureCheckFailed] {
+      override protected val pretty: Pretty[SignatureCheckFailed] = prettyOfClass(
+        param("err", _.err)
+      )
     }
 
     final case class InvalidSynchronizer(synchronizerId: SynchronizerId)
         extends TopologyTransactionRejection {
       override def asString: String = show"Invalid synchronizer $synchronizerId"
-      override protected def pretty: Pretty[InvalidSynchronizer] = prettyOfClass(
-        param("synchronizer", _.synchronizerId)
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[InvalidSynchronizer] =
+        InvalidSynchronizer
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.InvalidSynchronizer.Failure(synchronizerId)
+    }
+
+    object InvalidSynchronizer extends PrettyPrintingCompanion[InvalidSynchronizer] {
+      override protected val pretty: Pretty[InvalidSynchronizer] = prettyOfClass(
+        param("synchronizer", _.synchronizerId)
+      )
     }
   }
 
@@ -205,23 +238,31 @@ object TopologyTransactionRejection {
       override def asString: String =
         s"Members ${members.sorted.mkString(", ")} are missing a valid owner to key mapping."
 
-      override protected def pretty: Pretty[InsufficientKeys] = prettyOfClass(
-        param("members", _.members)
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[InsufficientKeys] = InsufficientKeys
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.InsufficientKeys.Failure(members)
     }
 
+    object InsufficientKeys extends PrettyPrintingCompanion[InsufficientKeys] {
+      override protected val pretty: Pretty[InsufficientKeys] = prettyOfClass(
+        param("members", _.members)
+      )
+    }
+
     final case class UnknownMembers(members: Seq[Member]) extends TopologyTransactionRejection {
       override def asString: String = s"Members ${members.sorted.mkString(", ")} are unknown."
 
-      override protected def pretty: Pretty[UnknownMembers] = prettyOfClass(
-        param("members", _.members)
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[UnknownMembers] = UnknownMembers
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.UnknownMembers.Failure(members)
+    }
+
+    object UnknownMembers extends PrettyPrintingCompanion[UnknownMembers] {
+      override protected val pretty: Pretty[UnknownMembers] = prettyOfClass(
+        param("members", _.members)
+      )
     }
 
     final case class MissingSynchronizerParameters(effective: EffectiveTime)
@@ -239,7 +280,12 @@ object TopologyTransactionRejection {
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.NamespaceHasBeenRevoked.Reject(namespace)
 
-      override protected def pretty: Pretty[NamespaceHasBeenRevoked.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[NamespaceHasBeenRevoked] =
+        NamespaceHasBeenRevoked
+    }
+
+    object NamespaceHasBeenRevoked extends PrettyPrintingCompanion[NamespaceHasBeenRevoked] {
+      override protected val pretty: Pretty[NamespaceHasBeenRevoked] = prettyOfClass(
         param("namespace", _.namespace)
       )
     }
@@ -251,7 +297,12 @@ object TopologyTransactionRejection {
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.NamespaceAlreadyInUse.Reject(namespace)
 
-      override protected def pretty: Pretty[NamespaceAlreadyInUse.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[NamespaceAlreadyInUse] =
+        NamespaceAlreadyInUse
+    }
+
+    object NamespaceAlreadyInUse extends PrettyPrintingCompanion[NamespaceAlreadyInUse] {
+      override protected val pretty: Pretty[NamespaceAlreadyInUse] = prettyOfClass(
         param("namespace", _.namespace)
       )
     }
@@ -264,10 +315,15 @@ object TopologyTransactionRejection {
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.PartyIdConflictWithAdminParty.Reject(partyId)
 
-      override protected def pretty: Pretty[PartyIdConflictWithAdminParty.this.type] =
-        prettyOfClass(
-          param("partyId", _.partyId)
-        )
+      override def prettyCompanion: PrettyPrintingCompanion[PartyIdConflictWithAdminParty] =
+        PartyIdConflictWithAdminParty
+    }
+
+    object PartyIdConflictWithAdminParty
+        extends PrettyPrintingCompanion[PartyIdConflictWithAdminParty] {
+      override protected val pretty: Pretty[PartyIdConflictWithAdminParty] = prettyOfClass(
+        param("partyId", _.partyId)
+      )
     }
 
     final case class ParticipantIdConflictWithPartyId(
@@ -280,11 +336,16 @@ object TopologyTransactionRejection {
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.ParticipantIdConflictWithPartyId.Reject(participantId, partyId)
 
-      override protected def pretty: Pretty[ParticipantIdConflictWithPartyId.this.type] =
-        prettyOfClass(
-          param("participantId", _.participantId),
-          param("partyId", _.partyId),
-        )
+      override def prettyCompanion: PrettyPrintingCompanion[ParticipantIdConflictWithPartyId] =
+        ParticipantIdConflictWithPartyId
+    }
+
+    object ParticipantIdConflictWithPartyId
+        extends PrettyPrintingCompanion[ParticipantIdConflictWithPartyId] {
+      override protected val pretty: Pretty[ParticipantIdConflictWithPartyId] = prettyOfClass(
+        param("participantId", _.participantId),
+        param("partyId", _.partyId),
+      )
     }
 
     final case class MediatorsAlreadyInOtherGroups(
@@ -310,8 +371,8 @@ object TopologyTransactionRejection {
     }
 
     final case class InvalidSynchronizerSuccessor(
-        successorSynchronizerId: PhysicalSynchronizerId,
-        inStoreSuccessorSynchronizerId: PhysicalSynchronizerId,
+        successorSynchronizerId: OpaquePhysicalSynchronizerId,
+        inStoreSuccessorSynchronizerId: OpaquePhysicalSynchronizerId,
     ) extends TopologyTransactionRejection {
       override def asString: String =
         s"The declared successor $successorSynchronizerId is not greater than prior synchronizer $inStoreSuccessorSynchronizerId."
@@ -346,8 +407,8 @@ object TopologyTransactionRejection {
 
     final case class LsuSequencerSuccessorInvalidSuccessorPsid(
         sequencerId: SequencerId,
-        successorPsid: PhysicalSynchronizerId,
-        expectedSuccessorPsid: PhysicalSynchronizerId,
+        successorPsid: OpaquePhysicalSynchronizerId,
+        expectedSuccessorPsid: OpaquePhysicalSynchronizerId,
     ) extends TopologyTransactionRejection {
       override def asString: String =
         s"Lsu sequencer successor for sequencer $sequencerId is invalid because it mentions successor $successorPsid but the current LSU announcement mentions $expectedSuccessorPsid"
@@ -390,8 +451,8 @@ object TopologyTransactionRejection {
         s"Cannot remove synchronizer trust certificate or owner to key mapping for $participantId because it still hosts parties ${parties
             .mkString(",")}"
 
-      override protected def pretty: Pretty[ParticipantStillHostsParties] =
-        prettyOfClass(param("participantId", _.participantId), param("parties", _.parties))
+      override def prettyCompanion: PrettyPrintingCompanion[ParticipantStillHostsParties] =
+        ParticipantStillHostsParties
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
         TopologyManagerError.IllegalRemovalOfActiveTopologyTransactions
@@ -399,6 +460,12 @@ object TopologyTransactionRejection {
             participantId,
             parties,
           )
+    }
+
+    object ParticipantStillHostsParties
+        extends PrettyPrintingCompanion[ParticipantStillHostsParties] {
+      override protected val pretty: Pretty[ParticipantStillHostsParties] =
+        prettyOfClass(param("participantId", _.participantId), param("parties", _.parties))
     }
 
     final case class MembersCannotRejoinSynchronizer(members: Seq[Member])

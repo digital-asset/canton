@@ -6,10 +6,14 @@ package com.digitalasset.canton.participant.teststores
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.participant.store.db.{DbActiveContractStore, DbReassignmentStore}
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.store.teststores.H2StoresTest
 import com.digitalasset.canton.store.{IndexedSynchronizer, PrunableByTimeParameters}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import org.scalatest.Suite
+
+import scala.concurrent.ExecutionContext
 
 trait H2ParticipantStoresWithIndexedStringDependency extends H2StoresTest {
   self: Suite & TestEssentials & H2IndexedStringStore =>
@@ -27,13 +31,15 @@ trait H2ParticipantStoresWithIndexedStringDependency extends H2StoresTest {
 
   def createReassignmentStore(
       targetIndexedSynchronizer: Target[IndexedSynchronizer]
-  ): DbReassignmentStore = new DbReassignmentStore(
+  )(implicit executionContext: ExecutionContext): DbReassignmentStore = new DbReassignmentStore(
     storage = inMemoryH2Storage,
     indexedTargetSynchronizer = targetIndexedSynchronizer,
     indexedStringStore = createIndexedStringStore(),
     futureSupervisor = futureSupervisor,
     exitOnFatalFailures = false,
     batchingConfig = new BatchingConfig,
+    participantId = DefaultTestIdentities.participant1,
+    offlineTopologyLookup = new FailingOfflineTopologyLookup(),
     timeouts = timeouts,
     loggerFactory = loggerFactory,
   )(h2InMemoryEc)

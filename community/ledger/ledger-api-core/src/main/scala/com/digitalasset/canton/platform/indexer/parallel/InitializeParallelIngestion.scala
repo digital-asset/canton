@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
+import com.daml.logging.LoggingContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.*
@@ -44,6 +45,7 @@ import java.sql.Connection
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 private[platform] final case class InitializeParallelIngestion(
     providedParticipantId: Ref.ParticipantId,
@@ -69,7 +71,9 @@ private[platform] final case class InitializeParallelIngestion(
   ): Future[Future[(Option[LedgerEnd], AchsWorkDistance)]] = {
     implicit val ec: ExecutionContext = DirectExecutionContext(noTracingLogger)
     implicit val loggingContext: LoggingContextWithTrace =
-      LoggingContextWithTrace.empty
+      LoggingContextWithTrace(TraceContext.createNew("initialize-parallel-ingestion"))(
+        LoggingContext.empty
+      )
     logger.info(s"Attempting to initialize with participant ID $providedParticipantId")
     for {
       _ <- dbDispatcher.executeSql(metrics.index.db.initializeLedgerParameters)(
@@ -101,8 +105,6 @@ private[platform] final case class InitializeParallelIngestion(
       }
       _ <- updatingStringInterningView.update(ledgerEnd.map(_.lastStringInterningId)) {
         (fromExclusive, toInclusive) =>
-          implicit val loggingContext: LoggingContextWithTrace =
-            LoggingContextWithTrace.empty
           dbDispatcher.executeSql(metrics.index.db.loadStringInterningEntries) {
             stringInterningStorageBackend.loadStringInterningEntries(
               fromExclusive,
@@ -271,7 +273,7 @@ private[platform] final case class InitializeParallelIngestion(
       }
       .takeWhile(_ => !shutdownRequested())
       .runWith(Sink.ignore)
-      .map { _ =>
+      .transform { tryDone =>
         cancellable.cancel().discard
         // After both phases, the in-memory ACHS state reflects the actual pointers
         // advanced by the pipe (including the flushed sub-threshold remainder via fullDrain).
@@ -280,15 +282,25 @@ private[platform] final case class InitializeParallelIngestion(
         val updatedAchsState = achsStateCache.get()
         val remainingWork =
           AchsMaintenancePipe.initialWork(updatedAchsState, lastEventSeqId, config)
-        if (!shutdownRequested())
-          logger.info(
-            s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
-          )
-        else
-          logger.info(
-            s"ACHS snapshot initialization interrupted by shutdown request. Initial work: $initialWork, work at interruption: $remainingWork (updated ACHS state: $updatedAchsState)"
-          )
-        remainingWork
+        tryDone match {
+          case Success(_) =>
+            if (!shutdownRequested())
+              logger.info(
+                s"ACHS snapshot initialization finished. Initial work: $initialWork, remaining work: $remainingWork (updated ACHS state: $updatedAchsState)"
+              )
+            else
+              logger.info(
+                s"ACHS snapshot initialization interrupted by shutdown request. Initial work: $initialWork, work at interruption: $remainingWork (updated ACHS state: $updatedAchsState)"
+              )
+            Success(remainingWork)
+
+          case Failure(throwable) =>
+            logger.warn(
+              s"ACHS snapshot initialization interrupted by failure. Initial work: $initialWork, work at interruption: $remainingWork (updated ACHS state: $updatedAchsState)",
+              throwable,
+            )
+            Failure(throwable)
+        }
       }
   }
 
@@ -351,7 +363,7 @@ private[platform] final case class InitializeParallelIngestion(
           populationParallelism = achsConfig.initParallelism.unwrap,
           removalParallelism = achsConfig.initParallelism.unwrap,
           aggregationThreshold = achsConfig.initAggregationThreshold,
-          metrics = metrics,
+          metrics = metrics.indexer.achsProcessing.initialization,
           executionContext = ec,
           logger = logger,
           fullDrain = true,

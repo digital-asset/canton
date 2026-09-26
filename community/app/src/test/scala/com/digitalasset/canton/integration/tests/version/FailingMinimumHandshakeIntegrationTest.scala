@@ -22,16 +22,15 @@ class FailingMinimumHandshakeIntegrationTestH2
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  private lazy val participantVersion = Some(
-    ParticipantProtocolVersion(TestProtocolVersions.UnreleasedValidPV)
-  )
+  private lazy val participantMinPv = TestProtocolVersions.UnreleasedValidPV
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(
         ConfigTransforms.allInMemory,
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.minimumProtocolVersion).replace(participantVersion)
+          _.focus(_.parameters.minimumProtocolVersion)
+            .replace(Some(ParticipantProtocolVersion(participantMinPv)))
         ),
       )
 
@@ -41,14 +40,15 @@ class FailingMinimumHandshakeIntegrationTestH2
 
       def connectP1(): Unit = participant1.synchronizers.connect_local(sequencer1, daName)
 
-      if (testedProtocolVersion.isStable) {
+      if (testedProtocolVersion < participantMinPv) {
+        val expectedMessage = s"GrpcClientError: INVALID_ARGUMENT/" +
+          s"The version required by the synchronizer ($testedProtocolVersion) is lower than the " +
+          s"minimum version configured by the participant (${TestProtocolVersions.UnreleasedValidPV})."
+
         loggerFactory.assertLogs(
           a[CommandFailure] should be thrownBy connectP1(),
-          _.errorMessage should include(
-            s"GrpcClientError: INVALID_ARGUMENT/" +
-              s"The version required by the synchronizer ($testedProtocolVersion) is lower than the " +
-              s"minimum version configured by the participant (${TestProtocolVersions.UnreleasedValidPV})."
-          ),
+          _.warningMessage should include(expectedMessage), // Connection warning
+          _.errorMessage should include(expectedMessage), // Command error
         )
       } else connectP1()
   }

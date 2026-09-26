@@ -8,13 +8,13 @@ package compiler
 import com.daml.nameof.NameOf
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{ImmArray, Struct}
+import com.digitalasset.daml.lf.interpretation.ExecutionMode
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{LookupError, PackageInterface}
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, ProfilingMode, StackTraceMode}
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
 import com.digitalasset.daml.lf.speedy.SExpr as t
 import com.digitalasset.daml.lf.speedy.SValue.*
-import com.digitalasset.daml.lf.speedy.compiler.Compiler.ExecutionMode
 import com.digitalasset.daml.lf.speedy.compiler.SExpr0.*
 
 import scala.annotation.tailrec
@@ -33,7 +33,7 @@ private[compiler] object PhaseOne {
   final case class Config(
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
-      cmdMode: ExecutionMode = ExecutionMode.Upd,
+      cmdMode: ExecutionMode = ExecutionMode.UpdateMachine,
   )
 
   private val SUGetTime = SEBuiltin(SBUGetTime)
@@ -440,8 +440,8 @@ private[lf] final class PhaseOne(
           // External call
           case BExternalCall =>
             config.cmdMode match {
-              case ExecutionMode.Upd => SBExternalCall
-              case ExecutionMode.Cmd => SBCNeedExternalCall
+              case ExecutionMode.UpdateMachine => SBExternalCall
+              case ExecutionMode.Conductor => SBCNeedExternalCall
             }
 
           // TextMap
@@ -675,24 +675,28 @@ private[lf] final class PhaseOne(
       case UpdateFetchTemplate(tmplId, coid) =>
         compileExp(env, coid) { coid =>
           config.cmdMode match {
-            case ExecutionMode.Cmd => Return(t.CmdFetchTemplateDefRef(tmplId)(coid))
-            case ExecutionMode.Upd => Return(t.FetchTemplateDefRef(tmplId)(coid))
+            case ExecutionMode.Conductor => Return(t.CmdFetchTemplateDefRef(tmplId)(coid))
+            case ExecutionMode.UpdateMachine => Return(t.FetchTemplateDefRef(tmplId)(coid))
           }
         }
       case UpdateFetchInterface(ifaceId, coid) =>
         compileExp(env, coid) { coid =>
           config.cmdMode match {
-            case ExecutionMode.Cmd => Return(t.CmdFetchInterfaceDefRef(ifaceId)(coid))
-            case ExecutionMode.Upd => Return(t.FetchInterfaceDefRef(ifaceId)(coid))
+            case ExecutionMode.Conductor => Return(t.CmdFetchInterfaceDefRef(ifaceId)(coid))
+            case ExecutionMode.UpdateMachine => Return(t.FetchInterfaceDefRef(ifaceId)(coid))
           }
         }
+      case UpdateUnpackTemplate(_, _) =>
+        Return(SEBuiltin(new NotImplement("unpack_template", 1)))
+      case UpdateUnpackInterface(_, _) =>
+        Return(SEBuiltin(new NotImplement("unpack_interface", 1)))
       case UpdateEmbedExpr(_, exp) =>
         compileEmbedExpr(env, exp)
       case UpdateCreate(tmplId, arg) =>
         compileExp(env, arg) { arg =>
           config.cmdMode match {
-            case ExecutionMode.Cmd => Return(t.CmdCreateDefRef(tmplId)(arg))
-            case ExecutionMode.Upd => Return(t.CreateDefRef(tmplId)(arg))
+            case ExecutionMode.Conductor => Return(t.CmdCreateDefRef(tmplId)(arg))
+            case ExecutionMode.UpdateMachine => Return(t.CreateDefRef(tmplId)(arg))
           }
         }
       case UpdateCreateInterface(_, arg) =>
@@ -700,9 +704,9 @@ private[lf] final class PhaseOne(
           compileExp(env, arg) { arg =>
             let(env, arg) { (payloadPos, env) =>
               config.cmdMode match {
-                case ExecutionMode.Cmd =>
+                case ExecutionMode.Conductor =>
                   Return(SBCResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
-                case ExecutionMode.Upd =>
+                case ExecutionMode.UpdateMachine =>
                   Return(SBResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
               }
             }
@@ -712,9 +716,9 @@ private[lf] final class PhaseOne(
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
             config.cmdMode match {
-              case ExecutionMode.Cmd =>
+              case ExecutionMode.Conductor =>
                 Return(t.CmdExerciseTemplateDefRef(tmplId, chId)(cid, arg))
-              case ExecutionMode.Upd =>
+              case ExecutionMode.UpdateMachine =>
                 Return(t.TemplateChoiceDefRef(tmplId, chId)(cid, arg))
             }
           }
@@ -723,9 +727,9 @@ private[lf] final class PhaseOne(
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
             config.cmdMode match {
-              case ExecutionMode.Cmd =>
+              case ExecutionMode.Conductor =>
                 Return(t.CmdExerciseInterfaceDefRef(ifaceId, chId)(cid, arg))
-              case ExecutionMode.Upd =>
+              case ExecutionMode.UpdateMachine =>
                 Return(t.InterfaceChoiceDefRef(ifaceId, chId)(cid, arg))
             }
           }
@@ -734,9 +738,9 @@ private[lf] final class PhaseOne(
         compileExp(env, key) { key =>
           compileExp(env, arg) { arg =>
             config.cmdMode match {
-              case ExecutionMode.Cmd =>
+              case ExecutionMode.Conductor =>
                 Return(t.CmdExerciseByKeyDefRef(tmplId, chId)(key, arg))
-              case ExecutionMode.Upd =>
+              case ExecutionMode.UpdateMachine =>
                 Return(t.ChoiceByKeyDefRef(tmplId, chId)(key, arg))
             }
           }
@@ -746,19 +750,19 @@ private[lf] final class PhaseOne(
       case UpdateLedgerTimeLT(time) =>
         compileExp(env, time) { time =>
           config.cmdMode match {
-            case ExecutionMode.Cmd => Return(SBCCheckLedgerTimeLT(time))
-            case ExecutionMode.Upd => Return(SBULedgerTimeLT(time))
+            case ExecutionMode.Conductor => Return(SBCCheckLedgerTimeLT(time))
+            case ExecutionMode.UpdateMachine => Return(SBULedgerTimeLT(time))
           }
         }
       case UpdateQueryNByKey(templateId) =>
         config.cmdMode match {
-          case ExecutionMode.Cmd => Return(t.CmdQueryNByKeyDefRef(templateId)())
-          case ExecutionMode.Upd => Return(t.QueryNByKeyDefRef(templateId)())
+          case ExecutionMode.Conductor => Return(t.CmdQueryNByKeyDefRef(templateId)())
+          case ExecutionMode.UpdateMachine => Return(t.QueryNByKeyDefRef(templateId)())
         }
       case UpdateFetchByKey(templateId) =>
         config.cmdMode match {
-          case ExecutionMode.Cmd => Return(t.CmdFetchByKeyDefRef(templateId)())
-          case ExecutionMode.Upd => Return(t.FetchByKeyDefRef(templateId)())
+          case ExecutionMode.Conductor => Return(t.CmdFetchByKeyDefRef(templateId)())
+          case ExecutionMode.UpdateMachine => Return(t.FetchByKeyDefRef(templateId)())
         }
       case UpdateTryCatchV1(_, body, binder, handler) =>
         // Exception handling is not supported in the command path: in cmd mode the resulting
@@ -781,6 +785,8 @@ private[lf] final class PhaseOne(
             }
           }
         }
+      case otherwise =>
+        throw CompilationError(s"${otherwise.productPrefix} not supported")
     }
 
   @tailrec

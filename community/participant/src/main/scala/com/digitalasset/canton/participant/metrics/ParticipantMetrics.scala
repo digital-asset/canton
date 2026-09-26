@@ -23,7 +23,11 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementInventory,
   TrafficEnforcementMetrics,
 }
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  OpaquePhysicalSynchronizerId,
+  ParticipantId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent.TrieMap
@@ -218,14 +222,14 @@ class ParticipantMetrics(
     )
 
   // Since gauges don't support metrics context per update, create a map with a gauge per successor psid.
-  private val lsuStatus: TrieMap[PhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
+  private val lsuStatus: TrieMap[OpaquePhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
 
   /** Update the value of the metric if the provided value is bigger than the stored value. Create
     * the metric otherwise.
     */
   def setLsuStatus(
       value: NonNegativeInt,
-      successorPsid: PhysicalSynchronizerId,
+      successorPsid: OpaquePhysicalSynchronizerId,
   ): Unit =
     lsuStatus
       .updateWith(successorPsid) {
@@ -245,7 +249,7 @@ class ParticipantMetrics(
   /** Update the value of the metric to zero. Create the metric otherwise.
     */
   def resetLsuStatus(
-      successorPsid: PhysicalSynchronizerId
+      successorPsid: OpaquePhysicalSynchronizerId
   ): Unit = {
     val value = ParticipantMetrics.LsuStatus.NoLsu.unwrap
 
@@ -290,12 +294,12 @@ class ParticipantMetrics(
   // we use this environment variable approach to guard against instantiation in production; but
   // register the metric for the documentation generation.
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
-    val dummyPsid = PhysicalSynchronizerId(
+    val dummyPsid = OpaquePhysicalSynchronizerId(
       SynchronizerId.tryFromString(
         "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1"
       ),
       NonNegativeInt.zero,
-      ProtocolVersion.latest,
+      ProtocolVersion.latest.v,
     )
 
     resetLsuStatus(dummyPsid)

@@ -388,6 +388,10 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
           T"ContractId Mod:T → (( Update Mod:T ))",
         E"λ (e: ContractId Mod:I) → (( fetch_interface @Mod:I e ))" ->
           T"ContractId Mod:I → (( Update Mod:I ))",
+        E"λ (e: ContractId Mod:T) → (( unpack_template @Mod:T e ))" ->
+          T"ContractId Mod:T → (( Update Mod:T ))",
+        E"λ (e: ContractId Mod:I) → (( unpack_interface @Mod:I e ))" ->
+          T"ContractId Mod:I → (( Update Mod:I ))",
         E"λ (e: Party) → (( fetch_by_key @Mod:T e ))" ->
           T"Party → (( Update (${Tuple2.fmt} (ContractId Mod:T) Mod:T) ))",
         E"λ (n : Int64) (e: Party) → (( query_n_by_key @Mod:T n e ))" ->
@@ -880,6 +884,26 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
                 ) =>
           },
         E"Λ (σ : ⋆). λ (e: σ) → ⸨ fetch_interface @Mod:I e ⸩" -> //
+          { case _: ETypeMismatch => },
+        // UpdUnpackTemplate
+        E"λ (e: ContractId Mod:U) → ⸨ unpack_template @Mod:U e ⸩" -> //
+          {
+            case EUnknownDefinition(
+                  _,
+                  LookupError.NotFound(Reference.Template(_), Reference.Template(_)),
+                ) =>
+          },
+        E"Λ (σ : ⋆). λ (e: σ) → ⸨ unpack_template @Mod:T e ⸩" -> //
+          { case _: ETypeMismatch => },
+        // UpdUnpackInterface
+        E"λ (e: ContractId Mod:U) → ⸨ unpack_interface @Mod:U e ⸩" -> //
+          {
+            case EUnknownDefinition(
+                  _,
+                  LookupError.NotFound(Reference.Interface(_), Reference.Interface(_)),
+                ) =>
+          },
+        E"Λ (σ : ⋆). λ (e: σ) → ⸨ unpack_interface @Mod:I e ⸩" -> //
           { case _: ETypeMismatch => },
         // UpFecthByKey & lookupByKey
         E"""⸨ fetch_by_key @Mod:U "Bob" ⸩""" -> //

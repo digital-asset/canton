@@ -15,7 +15,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.sequencing.client.pool.{
   GrpcInternalSequencerConnection,
-  SequencerSubscriptionImpl,
+  SequencerSubscriptionWrapperImpl,
 }
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.INFO
@@ -63,7 +63,7 @@ sealed trait SubscriptionExpirationIntegrationTest
         loggerFactory.assertLogsSeq(
           SuppressionRule.LevelAndAbove(INFO) &&
             (SuppressionRule.forLogger[GrpcInternalSequencerConnection] ||
-              SuppressionRule.forLogger[SequencerSubscriptionImpl])
+              SuppressionRule.forLogger[SequencerSubscriptionWrapperImpl])
         )(
           eventually() {
             Threading.sleep(500)

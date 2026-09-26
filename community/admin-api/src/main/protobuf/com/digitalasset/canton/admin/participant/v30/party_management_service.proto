@@ -274,6 +274,8 @@ message PartyReplicationStatus {
   // Error details.
   // optional, set when there is a transient or terminal error.
   PartyReplicationError error_message = 7;
+  // TODO(#35267) replace with AcsReplicationStatus and remove AcsReplicationProgress replication = 4;
+  PartyReplicationStatus acs_replication_status = 8;
 }
 
 // Enum indicating the permission level of the party on the target participant.

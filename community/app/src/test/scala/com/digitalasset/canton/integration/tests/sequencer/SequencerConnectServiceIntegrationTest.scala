@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, RequireT
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
@@ -21,6 +22,7 @@ import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   SynchronizerTrustCertificate,
@@ -30,9 +32,12 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
 import com.digitalasset.nonempty.NonEmpty
 
+import scala.concurrent.ExecutionContext
+
 trait SequencerConnectServiceIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with TopologyTransactionReSignHelpers {
 
   // TODO(i16601): Remove after the shutdown rework
   override protected def destroyEnvironment(environment: TestConsoleEnvironment): Unit =
@@ -228,6 +233,24 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       env: TestConsoleEnvironment
   ): SequencerNodeConfig = env.sequencer1.config
 
+  private def registerParticipantOnboardingTxs(
+      client: GrpcSequencerConnectClient,
+      participant: com.digitalasset.canton.console.LocalParticipantReference,
+      additionalTxs: Seq[GenericSignedTopologyTransaction] = Seq.empty,
+  )(implicit ec: ExecutionContext): Either[SequencerConnectClient.Error, Unit] = {
+    val identityTxs = participant.topology.transactions.identity_transactions()
+    val allTxs = reSignForTestedProtocolVersion(
+      participant,
+      identityTxs ++ additionalTxs,
+      testedProtocolVersion,
+    )
+
+    client
+      .registerOnboardingTopologyTransactions(participant.id, allTxs)
+      .value
+      .futureValueUS
+  }
+
   "GrpcSequencerConnectService" should {
     "report inability to connect to sequencer on is-active requests as a left rather than an exception" in {
       implicit env =>
@@ -245,8 +268,9 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
 
         val errorFromLeft = grpcSequencerConnectClient
           .isActive(waitForActive = false)
-          .leftMap(_.message)
           .futureValueUS
+          .left
+          .map(_.message)
         errorFromLeft.left.value should include regex "Request failed for .*. Is the server running?"
     }
 
@@ -268,14 +292,8 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       //  Wait for the topology transaction to be sequenced
       sequencer1.topology.synchronisation.await_idle()
 
-      //  Attempt registration
-      val identityTxs = participant1.topology.transactions.identity_transactions()
-
-      // Wait for the result value
-      val result = grpcSequencerConnectClient
-        .registerOnboardingTopologyTransactions(participant1.id, identityTxs)
-        .value
-        .futureValueUS
+      // Attempt registration using dynamically re-signed PV identities
+      val result = registerParticipantOnboardingTxs(grpcSequencerConnectClient, participant1)
 
       // Check that it is a Left containing the gRPC error string
       inside(result) { case Left(error) =>
@@ -296,12 +314,14 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
 
       val grpcSequencerConnectClient = getSequencerConnectClient(participant1.id)
 
-      //  Attempt registration
-      val identityTxs = mediator1.topology.transactions.identity_transactions()
+      // Mediators do not suffer from the participant identity store hash mismatch issue.
+      // We can generate completely fresh onboarding transactions at the correct protocol version.
+      val reSignedTxs =
+        mediator1.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
 
       // Wait for the result value
       val result = grpcSequencerConnectClient
-        .registerOnboardingTopologyTransactions(mediator1.id, identityTxs)
+        .registerOnboardingTopologyTransactions(mediator1.id, reSignedTxs)
         .value
         .futureValueUS
         .left
@@ -345,13 +365,7 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
 
       sequencer1.topology.synchronisation.await_idle()
 
-      val identityTxs = participant1.topology.transactions.identity_transactions()
-      val allTxs = identityTxs :+ existingStc
-
-      val result = client
-        .registerOnboardingTopologyTransactions(p1Id, allTxs)
-        .value
-        .futureValueUS
+      val result = registerParticipantOnboardingTxs(client, participant1, Seq(existingStc))
 
       inside(result) { case Left(error) =>
         val errorStr = error.toString
@@ -388,8 +402,6 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       }
       sequencer1.topology.synchronisation.await_idle()
 
-      val identityTxs = participant2.topology.transactions.identity_transactions()
-
       // Check if p2 already has an STC for this synchronizer. If not, add one
       val existingStc = participant2.topology.transactions
         .list(
@@ -414,10 +426,8 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
       }
 
       // Attempt registration
-      val result = client
-        .registerOnboardingTopologyTransactions(participant2.id, identityTxs :+ trustCert)
-        .value
-        .futureValueUS
+      val result = registerParticipantOnboardingTxs(client, participant2, Seq(trustCert))
+
       result shouldBe Right(())
 
       eventually() {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability
 
 import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultOutputFetchHowManyRecipients
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule.FetchBatchesSingleWorkflowId
@@ -323,23 +324,106 @@ class AvailabilityModuleOutputFetchTest
 
         "just store the batch in the local store" in {
           val outputFetchProtocolState = new MainOutputFetchProtocolState()
-          val availabilityStore = spy(new FakeAvailabilityStore[IgnoringUnitTestEnv])
+          val availabilityStore = spy(new FakeAvailabilityStore[ProgrammableUnitTestEnv])
 
+          implicit val context
+              : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext
           outputFetchProtocolState.localOutputMissingBatches.addOne(
             ABatchId -> AMissingBatchStatusNode1And2Acks
           )
-          val availability = createAndStartAvailability[IgnoringUnitTestEnv](
+          val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
             outputFetchProtocolState = outputFetchProtocolState,
             availabilityStore = availabilityStore,
+            cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
           )
           availability.receive(
             RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, ABatchId, ABatch)
           )
+          // The batch ID is validated off the actor thread first; delivering the validation result
+          //  triggers the store. The batch stays pending until the subsequent FetchedBatchStored.
+          context.runPipedMessagesAndReceiveOnModule(availability)
 
           outputFetchProtocolState.localOutputMissingBatches should
             contain only ABatchId -> AMissingBatchStatusNode1And2Acks
           outputFetchProtocolState.incomingBatchRequests should be(empty)
           verify(availabilityStore).addBatch(ABatchId, ABatch)
+        }
+      }
+
+    "it receives OutputFetch.RemoteBatchDataFetched and " +
+      "the batch is missing" should {
+
+        "track the batch as being validated until validation completes" in {
+          val outputFetchProtocolState = new MainOutputFetchProtocolState()
+          val availabilityStore = spy(new FakeAvailabilityStore[ProgrammableUnitTestEnv])
+
+          implicit val context
+              : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext
+          outputFetchProtocolState.localOutputMissingBatches.addOne(
+            ABatchId -> AMissingBatchStatusNode1And2Acks
+          )
+          val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
+            outputFetchProtocolState = outputFetchProtocolState,
+            availabilityStore = availabilityStore,
+            cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          )
+          availability.receive(
+            RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, ABatchId, ABatch)
+          )
+          // While the (potentially expensive) hashing runs off the actor thread, the batch is
+          //  tracked as being validated so that a fetch timeout doesn't start a duplicate download.
+          outputFetchProtocolState.pendingRemoteBatchIdsToValidate should contain(ABatchId)
+
+          // Delivering the validation result clears the validation phase and moves the batch to
+          //  the pending-store phase.
+          context.runPipedMessagesAndReceiveOnModule(availability)
+          outputFetchProtocolState.pendingRemoteBatchIdsToValidate should not contain ABatchId
+          outputFetchProtocolState.pendingRemoteBatchIdsToStore should contain(ABatchId)
+          verify(availabilityStore).addBatch(ABatchId, ABatch)
+        }
+      }
+
+    "it receives OutputFetch.RemoteBatchDataFetched and " +
+      "the batch is missing but already being validated or stored" should {
+
+        "ignore it without re-validating or re-storing it" in {
+          forAll(
+            Table[String, MainOutputFetchProtocolState => Unit](
+              ("in-flight phase", "mark the batch as in-flight"),
+              ("being validated", _.pendingRemoteBatchIdsToValidate.add(ABatchId).discard),
+              ("being stored", _.pendingRemoteBatchIdsToStore.add(ABatchId).discard),
+            )
+          ) { (_, markInFlight) =>
+            val outputFetchProtocolState = new MainOutputFetchProtocolState()
+            val availabilityStore = spy(new FakeAvailabilityStore[ProgrammableUnitTestEnv])
+
+            implicit val context
+                : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+              new ProgrammableUnitTestContext
+            outputFetchProtocolState.localOutputMissingBatches.addOne(
+              ABatchId -> AMissingBatchStatusNode1And2Acks
+            )
+            markInFlight(outputFetchProtocolState)
+            val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
+              outputFetchProtocolState = outputFetchProtocolState,
+              availabilityStore = availabilityStore,
+              cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            )
+            assertLogs(
+              availability.receive(
+                RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, ABatchId, ABatch)
+              ),
+              log => {
+                log.level shouldBe Level.DEBUG
+                log.message should include("it is already being validated or stored, ignoring")
+              },
+            )
+            // Nothing is validated off the actor thread and the store is never touched.
+            context.runPipedMessages() shouldBe empty
+            verifyZeroInteractions(availabilityStore)
+          }
         }
       }
 
@@ -363,26 +447,40 @@ class AvailabilityModuleOutputFetchTest
 
       "not store the batch" in {
         val outputFetchProtocolState = new MainOutputFetchProtocolState()
-        val availabilityStore = spy(new FakeAvailabilityStore[IgnoringUnitTestEnv])
+        val availabilityStore = spy(new FakeAvailabilityStore[ProgrammableUnitTestEnv])
 
+        implicit val context
+            : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext
         val otherBatchId = WrongBatchId
         outputFetchProtocolState.localOutputMissingBatches.addOne(
           otherBatchId -> AMissingBatchStatusNode1And2Acks
         )
-        val availability = createAndStartAvailability[IgnoringUnitTestEnv](
+        val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
           outputFetchProtocolState = outputFetchProtocolState,
           availabilityStore = availabilityStore,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
         )
+        availability.receive(
+          RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, otherBatchId, ABatch)
+        )
+        // While the (potentially expensive) hashing runs off the actor thread, the batch is
+        //  tracked as being validated.
+        outputFetchProtocolState.pendingRemoteBatchIdsToValidate should contain(otherBatchId)
         assertLogs(
-          availability.receive(
-            RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, otherBatchId, ABatch)
-          ),
+          // The batch ID validation happens off the actor thread, so the warning is emitted when
+          //  the validation result is processed
+          context.runPipedMessagesUntilNoMorePiped(availability),
           log => {
             log.level shouldBe Level.WARN
             log.message should include("BatchId doesn't match digest")
           },
         )
 
+        // The invalid result clears the in-flight validation phase (without moving the batch to the
+        //  pending-store phase), so a pending fetch timeout can resume retrying.
+        outputFetchProtocolState.pendingRemoteBatchIdsToValidate should be(empty)
+        outputFetchProtocolState.pendingRemoteBatchIdsToStore should be(empty)
         outputFetchProtocolState.localOutputMissingBatches should contain only otherBatchId -> AMissingBatchStatusNode1And2Acks
         outputFetchProtocolState.incomingBatchRequests should be(empty)
         verifyZeroInteractions(availabilityStore)
@@ -508,6 +606,62 @@ class AvailabilityModuleOutputFetchTest
           }
       }
 
+    "it receives OutputFetch.FetchRemoteBatchDataTimeout, " +
+      "the batch is missing but is being validated" should {
+
+        "not retry the fetch but reschedule the timeout" in {
+          val outputFetchProtocolState = new MainOutputFetchProtocolState()
+          val p2pNetworkOutCell = new AtomicReference[Option[P2PNetworkOut.Message]](None)
+
+          outputFetchProtocolState.localOutputMissingBatches.addOne(
+            ABatchId -> AMissingBatchStatusNode1And2Acks
+          )
+          // A response is already being (re)hashed and validated off the actor thread.
+          outputFetchProtocolState.pendingRemoteBatchIdsToValidate.add(ABatchId)
+          implicit val context
+              : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext
+          val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
+            outputFetchProtocolState = outputFetchProtocolState,
+            cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
+          )
+          assertLogs(
+            availability.receive(
+              LocalOutputFetch.FetchRemoteBatchDataTimeout(
+                Seq(Node1),
+                ABatchId,
+                anEpochNumber,
+                1.second,
+              )
+            ),
+            log => {
+              log.level shouldBe Level.INFO
+              log.message should include("it is being validated; rescheduling timeout")
+            },
+          )
+
+          // No retry download is started while validation is still in flight, and the missing
+          //  batch status is left untouched (no extra attempt).
+          context.runPipedMessagesAndReceiveOnModule(availability)
+          p2pNetworkOutCell.get() shouldBe None
+          outputFetchProtocolState.localOutputMissingBatches should
+            contain only ABatchId -> AMissingBatchStatusNode1And2Acks
+
+          // Instead, the timeout is rescheduled to keep a single retry chain alive.
+          context.delayedMessages should matchPattern {
+            case Seq(
+                  LocalOutputFetch.FetchRemoteBatchDataTimeout(
+                    Seq(`Node1`),
+                    `ABatchId`,
+                    `anEpochNumber`,
+                    _,
+                  )
+                ) =>
+          }
+        }
+      }
+
     "it receives " +
       "Dissemination.StoreLocalBatch, " +
       "Dissemination.StoreRemoteBatch " +
@@ -565,7 +719,15 @@ class AvailabilityModuleOutputFetchTest
             availability.receive(message)
 
             storage shouldBe empty
-            context.runPipedMessages() shouldBe Seq(reply)
+            // Fetched batches are validated off the actor thread first, so drain the intermediate
+            //  validation step before the batch is actually stored
+            val replies = context.runPipedMessages() match {
+              case Seq(validated: Availability.LocalOutputFetch.LocalFetchedBatchValidated) =>
+                availability.receive(validated)
+                context.runPipedMessages()
+              case otherReplies => otherReplies
+            }
+            replies shouldBe Seq(reply)
             storage should contain only (ABatchId -> ABatch)
           }
         }

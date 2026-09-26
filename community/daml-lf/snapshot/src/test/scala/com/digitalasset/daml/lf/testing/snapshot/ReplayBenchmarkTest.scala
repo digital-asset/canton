@@ -12,7 +12,6 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Result
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.matchers.should.Matchers
@@ -65,14 +64,12 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
       engine
         .submit(
           submitters = Set(alice),
-          readAs = Set.empty,
           cmds = ApiCommands(ImmArray(cmd), Time.Timestamp.now(), "replay-snapshot-test"),
           participantId = participantId,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
           prefetchKeys = Seq.empty,
-          interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
+          interpretationConfig = InterpretationConfig.Default,
         )
         .consume(Result.lookupHandler()) shouldBe a[Right[?, ?]]
 

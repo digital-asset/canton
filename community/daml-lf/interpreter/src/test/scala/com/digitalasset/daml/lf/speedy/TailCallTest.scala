@@ -70,7 +70,6 @@ class TailCallTest
       preparationTime = Time.Timestamp.Epoch,
       initialSeeding = InitialSeeding.NoSeed,
       committers = Set.empty,
-      readAs = Set.empty,
       logger = MachineLogger(),
       iterationsBetweenInterruptions = Long.MaxValue,
       packageResolution = Map.empty,

@@ -7,6 +7,7 @@ package com.digitalasset.canton.sequencer.admin.v30;
 
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v31/sequencing.proto";
+import "com/digitalasset/canton/protocol/v32/sequencing.proto";
 
 // Service allowing a sequencer node to initialize the sequencer instance.
 // Should typically only be exposed to the sequencer node and not all clients
@@ -41,6 +42,7 @@ message InitializeSequencerFromGenesisStateRequest {
   oneof parameters {
     com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 3;
+    com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 4;
   }
 }
 
@@ -57,6 +59,7 @@ message InitializeSequencerFromLsuPredecessorRequest {
   oneof parameters {
     com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 4;
+    com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 6;
   }
 
   /*
@@ -90,6 +93,7 @@ message InitializeSequencerFromGenesisStateV2Request {
   oneof parameters {
     com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters_v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters synchronizer_parameters_v31 = 3;
+    com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters synchronizer_parameters_v32 = 4;
   }
 }
 

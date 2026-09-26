@@ -170,7 +170,7 @@ class ForwardingTopologySnapshot(
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
     parent.announcedLsu()
 
-  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
+  override def sequencerConnectionSuccessors(successorPsid: OpaquePhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
     Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]
@@ -480,7 +480,7 @@ class CachingTopologySnapshot(
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
     getAndCache(synchronizerUpgradeCache, parent.announcedLsu())
 
-  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
+  override def sequencerConnectionSuccessors(successorPsid: OpaquePhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
     Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]

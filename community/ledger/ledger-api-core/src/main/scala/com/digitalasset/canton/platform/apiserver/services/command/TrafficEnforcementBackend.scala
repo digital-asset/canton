@@ -224,7 +224,9 @@ class TrafficEnforcementBackendImpl(
               )
               EitherT.leftT[FutureUnlessShutdown, Unit](
                 TrafficEnforcementErrors.InsufficientBalance.Reject(
-                  s"Insufficient balance (${accountResponse.balance}) for actual traffic cost ($trafficCost) for account $accountId"
+                  accountId = accountId,
+                  balance = accountResponse.balance,
+                  trafficCost = trafficCost,
                 )
               )
             }

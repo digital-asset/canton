@@ -5,14 +5,18 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
 import com.digitalasset.canton.data.ViewType.{AssignmentViewType, UnassignmentViewType}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{RequestProcessor, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.HasToByteString
 
 /** Reifies the subclasses of [[ViewTree]] as values */
 // This trait does not extend ProtoSerializable because v0.EncryptedViewMessage.ViewType is an enum, not a message.
-sealed trait ViewType extends Product with Serializable with PrettyPrinting {
+sealed trait ViewType extends Product with Serializable with PrettyPrintingFromCompanion {
 
   /** The subclass of [[ViewTree]] that is reified. */
   type View <: ViewTree with HasToByteString
@@ -25,7 +29,7 @@ sealed trait ViewType extends Product with Serializable with PrettyPrinting {
 
   def toProtoEnum: v30.ViewType
 
-  override protected def pretty: Pretty[ViewType.this.type] = prettyOfObject[ViewType.this.type]
+  override def prettyCompanion: PrettyPrintingCompanion[ViewType] = ViewType
 
   def isReassignment: Boolean = this match {
     case UnassignmentViewType | AssignmentViewType => true
@@ -36,7 +40,9 @@ sealed trait ViewType extends Product with Serializable with PrettyPrinting {
 // This trait is not sealed so that we can extend it for unit testing
 trait ViewTypeTest extends ViewType
 
-object ViewType {
+object ViewType extends PrettyPrintingCompanion[ViewType] {
+
+  override protected val pretty: Pretty[ViewType] = prettyOfObject[ViewType]
 
   def fromProtoEnum: v30.ViewType => ParsingResult[ViewType] = {
     case v30.ViewType.VIEW_TYPE_TRANSACTION => Right(TransactionViewType)

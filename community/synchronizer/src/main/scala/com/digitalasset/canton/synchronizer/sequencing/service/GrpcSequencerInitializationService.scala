@@ -90,6 +90,8 @@ class GrpcSequencerInitializationService(
             StaticSynchronizerParameters.fromProtoV30(ssp)
           case InitializeSequencerFromGenesisStateRequest.Parameters.V31(ssp) =>
             StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromGenesisStateRequest.Parameters.V32(ssp) =>
+            StaticSynchronizerParameters.fromProtoV32(ssp)
           case InitializeSequencerFromGenesisStateRequest.Parameters.Empty =>
             Left(FieldNotSet("InitializeSequencerFromGenesisStateRequest.parameters"))
         }
@@ -123,6 +125,8 @@ class GrpcSequencerInitializationService(
             StaticSynchronizerParameters.fromProtoV30(ssp)
           case InitializeSequencerFromLsuPredecessorRequest.Parameters.V31(ssp) =>
             StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromLsuPredecessorRequest.Parameters.V32(ssp) =>
+            StaticSynchronizerParameters.fromProtoV32(ssp)
           case InitializeSequencerFromLsuPredecessorRequest.Parameters.Empty =>
             Left(FieldNotSet("InitializeSequencerFromLsuPredecessorRequest.parameters"))
         }
@@ -196,6 +200,10 @@ class GrpcSequencerInitializationService(
                 ssp
               ) =>
             StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV32(
+                ssp
+              ) =>
+            StaticSynchronizerParameters.fromProtoV32(ssp)
           case InitializeSequencerFromGenesisStateV2Request.Parameters.Empty =>
             Left(FieldNotSet("InitializeSequencerFromGenesisStateV2Request.parameters"))
         }
@@ -306,7 +314,7 @@ class GrpcSequencerInitializationService(
       _ <- EitherT.fromEither[Future](
         expectedUpgradePsidO.fold(Right(()): Either[RpcError, Unit])(expectedUpgradePsid =>
           Either.cond(
-            ignoreLsuPsidCheck || expectedUpgradePsid == physicalSynchronizerId,
+            ignoreLsuPsidCheck || expectedUpgradePsid == physicalSynchronizerId.opaque,
             (),
             TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
               physicalSynchronizerId,

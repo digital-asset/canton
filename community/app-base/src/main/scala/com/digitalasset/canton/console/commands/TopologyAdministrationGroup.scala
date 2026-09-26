@@ -2001,30 +2001,34 @@ class TopologyAdministrationGroup(
         serial: Option[PositiveInt] = None,
     ) = {
       val currentO = findCurrent(party, store)
-      val (existingPermissions, nextSerial, threshold, partySigningKeys) = currentO match {
-        case Some(current) if current.context.operation == TopologyChangeOp.Remove =>
-          (
-            // if the existing mapping was REMOVEd, we start from scratch
-            SeqMap.empty[ParticipantId, ParticipantPermission],
-            Some(current.context.serial.increment),
-            current.item.threshold,
-            None,
-          )
-        case Some(current) =>
-          (
-            SeqMap.from(current.item.participants.map(p => p.participantId -> p.permission)),
-            Some(current.context.serial.increment),
-            current.item.threshold,
-            current.item.partySigningKeysWithThreshold,
-          )
-        case None =>
-          (
-            SeqMap.empty[ParticipantId, ParticipantPermission],
-            Some(Right(PositiveInt.one)),
-            PositiveInt.one,
-            None,
-          )
-      }
+      val (existingPermissions, nextSerial, threshold, partySigningKeys, isOffline) =
+        currentO match {
+          case Some(current) if current.context.operation == TopologyChangeOp.Remove =>
+            (
+              // if the existing mapping was REMOVEd, we start from scratch
+              SeqMap.empty[ParticipantId, ParticipantPermission],
+              Some(current.context.serial.increment),
+              current.item.threshold,
+              None,
+              false,
+            )
+          case Some(current) =>
+            (
+              SeqMap.from(current.item.participants.map(p => p.participantId -> p.permission)),
+              Some(current.context.serial.increment),
+              current.item.threshold,
+              current.item.partySigningKeysWithThreshold,
+              current.item.isOffline,
+            )
+          case None =>
+            (
+              SeqMap.empty[ParticipantId, ParticipantPermission],
+              Some(Right(PositiveInt.one)),
+              PositiveInt.one,
+              None,
+              false,
+            )
+        }
       val newSerial =
         if (serial.nonEmpty) serial
         else
@@ -2042,7 +2046,7 @@ class TopologyAdministrationGroup(
         )
         .valueOr(err => consoleEnvironment.raiseError(s"Unable to compute new permissions: $err"))
 
-      (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys)
+      (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys, isOffline)
     }
 
     @Help.Summary("Change party to participant mapping")
@@ -2082,6 +2086,7 @@ class TopologyAdministrationGroup(
         |- requiresPartyToBeOnboarded: When set to true, indicate that the added participants need
         |  to first onboard the party independently from this call before the added participants
         |  fully host the party.
+        |- freezeParty: Boolean flag without any business behaviour; only for internal testing.
         """
     )
     def propose_delta(
@@ -2097,10 +2102,18 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         requiresPartyToBeOnboarded: Boolean = false,
+        // TODO(#35664): Revise command description once implemented
+        //  Option captures the user intent!
+        //   freezeParty = None: The user didn't specify the flag. We should fetch the current state from the database and keep it the same.
+        //   freezeParty = Some(true / false): The user explicitly wants to change the state.
+        freezeParty: Option[Boolean] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
 
-      val (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys) =
+      val (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys, isOffline) =
         computeDelta(party, adds, removes, store, serial)
+
+      // Bridge: If the user provided a flag, use it. Otherwise, carry over current boolean state.
+      val finalIsOffline: Boolean = freezeParty.getOrElse(isOffline)
 
       if (newPermissions.nonEmpty) {
         // issue a REPLACE
@@ -2118,6 +2131,7 @@ class TopologyAdministrationGroup(
           participantsRequiringPartyToBeOnboarded =
             if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
           partySigningKeys = partySigningKeys,
+          freezeParty = finalIsOffline,
         )
       } else {
         // we would remove the last participant, therefore we issue a REMOVE
@@ -2134,6 +2148,7 @@ class TopologyAdministrationGroup(
           store = store,
           forceFlags = forceFlags,
           partySigningKeys = partySigningKeys,
+          freezeParty = finalIsOffline,
         )
 
       }
@@ -2183,6 +2198,7 @@ class TopologyAdministrationGroup(
       |  - "<synchronizer id>": The topology transaction will be directly submitted to the
       |  specified synchronizer without storing it locally first. This also means it will _not_
       |  be synchronized to other synchronizers automatically.
+      |- freezeParty: Boolean flag without any business behaviour; only for internal testing.
       """
     )
     def propose(
@@ -2200,6 +2216,8 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
+        // TODO(#35664): Revise command description once implemented
+        freezeParty: Boolean = false,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
       val nodeStatus = instance.health.status
       val command = TopologyAdminCommands.Write.Propose(
@@ -2216,7 +2234,8 @@ class TopologyAdministrationGroup(
               onboarding = participantsRequiringPartyToBeOnboarded.contains(pid),
             )
           },
-          partySigningKeys,
+          partySigningKeysWithThreshold = partySigningKeys,
+          isOffline = freezeParty,
         ),
         signedBy = signedBy,
         serial = serial,
@@ -4088,7 +4107,7 @@ class TopologyAdministrationGroup(
           ),
       ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
         val mapping = LsuAnnouncement(
-          successorPhysicalSynchronizerId,
+          successorPhysicalSynchronizerId.opaque,
           upgradeTime,
         )
 
@@ -4158,7 +4177,7 @@ class TopologyAdministrationGroup(
           ),
       ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
         val mapping = LsuAnnouncement(
-          successorPhysicalSynchronizerId,
+          successorPhysicalSynchronizerId.opaque,
           upgradeTime,
         )
 
@@ -4247,7 +4266,7 @@ class TopologyAdministrationGroup(
                 .map { case (validatedEndpoints, useTls) =>
                   LsuSequencerConnectionSuccessor(
                     sequencerId,
-                    successorSynchronizerId,
+                    successorSynchronizerId.opaque,
                     GrpcConnection(
                       validatedEndpoints,
                       useTls,

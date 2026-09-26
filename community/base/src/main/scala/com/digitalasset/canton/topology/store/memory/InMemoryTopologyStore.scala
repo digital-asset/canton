@@ -708,15 +708,16 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   override def findStoredForVersion(
       asOfExclusive: CantonTimestamp,
       transaction: GenericTopologyTransaction,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = {
-    val rpv = TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+    val rpv = transaction.representativeProtocolVersion
 
     allTransactions().map(
       _.result.findLast(tx =>
-        tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == rpv && tx.validFrom.value < asOfExclusive
+        // Comparison is done against the stored INNER payload (tx.transaction.transaction),
+        // not the wrapper (tx.transaction), bringing this in line with DbTopologyStore.
+        tx.transaction.transaction == transaction && tx.transaction.transaction.representativeProtocolVersion == rpv && tx.validFrom.value < asOfExclusive
       )
     )
   }

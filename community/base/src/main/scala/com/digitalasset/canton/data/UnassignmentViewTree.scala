@@ -14,7 +14,7 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.UnassignmentMediatorMessage
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -74,10 +74,8 @@ final case class UnassignmentViewTree(
       UnassignmentMediatorMessage.protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  override protected def pretty: Pretty[UnassignmentViewTree] = prettyOfClass(
-    param("common data", _.commonData),
-    param("view", _.view),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[UnassignmentViewTree] =
+    UnassignmentViewTree
 
   @transient override protected lazy val companionObj: UnassignmentViewTree.type =
     UnassignmentViewTree
@@ -87,9 +85,15 @@ object UnassignmentViewTree
     extends VersioningCompanionContext[
       UnassignmentViewTree,
       (HashOps, Source[ProtocolVersionValidation]),
-    ] {
+    ]
+    with PrettyPrintingCompanion[UnassignmentViewTree] {
 
   override val name: String = "UnassignmentViewTree"
+
+  override protected val pretty: Pretty[UnassignmentViewTree] = prettyOfClass(
+    param("common data", _.commonData),
+    param("view", _.view),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ReassignmentViewTree)(
@@ -186,7 +190,19 @@ final case class UnassignmentCommonData private (
 
   override def hashPurpose: HashPurpose = HashPurpose.UnassignmentCommonData
 
-  override protected def pretty: Pretty[UnassignmentCommonData] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[UnassignmentCommonData] =
+    UnassignmentCommonData
+}
+
+object UnassignmentCommonData
+    extends VersioningCompanionContextMemoization[
+      UnassignmentCommonData,
+      HashOps,
+    ]
+    with PrettyPrintingCompanion[UnassignmentCommonData] {
+  override val name: String = "UnassignmentCommonData"
+
+  override protected val pretty: Pretty[UnassignmentCommonData] = prettyOfClass(
     param("submitter metadata", _.submitterMetadata),
     param("source synchronizer id", _.sourceSynchronizerId),
     param("source mediator group", _.sourceMediatorGroup),
@@ -195,14 +211,6 @@ final case class UnassignmentCommonData private (
     param("uuid", _.uuid),
     param("salt", _.salt),
   )
-}
-
-object UnassignmentCommonData
-    extends VersioningCompanionContextMemoization[
-      UnassignmentCommonData,
-      HashOps,
-    ] {
-  override val name: String = "UnassignmentCommonData"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.UnassignmentCommonData)(
@@ -344,7 +352,15 @@ final case class UnassignmentView private (
       },
     )
 
-  override protected def pretty: Pretty[UnassignmentView] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[UnassignmentView] = UnassignmentView
+}
+
+object UnassignmentView
+    extends VersioningCompanionContextMemoization[UnassignmentView, HashOps]
+    with PrettyPrintingCompanion[UnassignmentView] {
+  override val name: String = "UnassignmentView"
+
+  override protected val pretty: Pretty[UnassignmentView] = prettyOfClass(
     param("template ids", _.contracts.contracts.map(_.templateId).toSet),
     param("target synchronizer id", _.targetSynchronizerId),
     param("target timestamp", _.targetTimestamp),
@@ -354,10 +370,6 @@ final case class UnassignmentView private (
     ), // do not log contract details because it contains confidential data
     param("salt", _.salt),
   )
-}
-
-object UnassignmentView extends VersioningCompanionContextMemoization[UnassignmentView, HashOps] {
-  override val name: String = "UnassignmentView"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.UnassignmentView)(
@@ -444,8 +456,7 @@ object UnassignmentView extends VersioningCompanionContextMemoization[Unassignme
   */
 final case class FullUnassignmentTree(tree: UnassignmentViewTree)
     extends FullReassignmentViewTree
-    with HasToByteString
-    with PrettyPrinting {
+    with HasToByteString {
   require(tree.isFullyUnblinded, "An unassignment request must be fully unblinded")
 
   protected[this] val commonData: UnassignmentCommonData = tree.commonData.tryUnwrap
@@ -474,12 +485,18 @@ final case class FullUnassignmentTree(tree: UnassignmentViewTree)
 
   override def rootHash: RootHash = tree.rootHash
 
-  override protected def pretty: Pretty[FullUnassignmentTree] = prettyOfClass(unnamedParam(_.tree))
+  override def prettyCompanion: PrettyPrintingCompanion[FullUnassignmentTree] =
+    FullUnassignmentTree
 
   override def toByteString: ByteString = tree.toByteString
 }
 
-object FullUnassignmentTree {
+object FullUnassignmentTree extends PrettyPrintingCompanion[FullUnassignmentTree] {
+
+  override protected val pretty: Pretty[FullUnassignmentTree] = prettyOfClass(
+    unnamedParam(_.tree)
+  )
+
   def fromByteString(
       crypto: CryptoPureApi,
       expectedProtocolVersion: Source[ProtocolVersionValidation],

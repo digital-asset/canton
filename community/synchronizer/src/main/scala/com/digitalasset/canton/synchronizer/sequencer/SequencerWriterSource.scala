@@ -31,7 +31,6 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
-import com.digitalasset.canton.util.BatchN.MaximizeBatchSize
 import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -731,16 +730,16 @@ object SequenceWritesFlow {
     }
 
     val batching =
-      BatchN[WithKillSwitch[Write]](
-        writerConfig.eventWriteBatchMaxSize,
-        maxBatchCount =
-          // only block sequencers can write events parallel, because the sequencing had already happened at this point
-          if (blockSequencerMode) writerConfig.eventWriteMaxConcurrency
-          // in line with mapAsync(1) in non blocksequencer mode
-          else 1,
-        // for the sequencer, we'd rather optimize for writing fewer but fuller batches
-        catchUpMode = BatchN.MaximizeBatchSize,
-      )
+      // for the sequencer, we'd rather optimize for writing fewer but fuller batches
+      BatchN
+        .forMaxBatchSize[WithKillSwitch[Write]](
+          maxBatchSize = writerConfig.eventWriteBatchMaxSize,
+          maxBatchCount =
+            // only block sequencers can write events parallel, because the sequencing had already happened at this point
+            if (blockSequencerMode) writerConfig.eventWriteMaxConcurrency
+            // in line with mapAsync(1) in non blocksequencer mode
+            else 1,
+        )
         .mapConcat { withKsWriteSeq =>
           NonEmpty.from(withKsWriteSeq.toSeq).map { nonEmptyBatch =>
             // Assume all WithKillSwitch in the batch result in the same cancelling behavior of the stream
@@ -824,11 +823,10 @@ object WritePayloadsFlow {
       case _other => None
     }
 
-    val batching = BatchN[WithKillSwitch[Presequenced[StoreEvent[BytesPayload]]]](
-      writerConfig.payloadWriteBatchMaxSize,
-      writerConfig.payloadWriteMaxConcurrency,
+    val batching = BatchN.forMaxBatchSize[WithKillSwitch[Presequenced[StoreEvent[BytesPayload]]]](
+      maxBatchSize = writerConfig.payloadWriteBatchMaxSize,
+      maxBatchCount = writerConfig.payloadWriteMaxConcurrency,
       // for the sequencer, we'd rather optimize for writing fewer but fuller batches
-      catchUpMode = MaximizeBatchSize,
     )
     val writingPayloads =
       if (blockSequencerMode) {

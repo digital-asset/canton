@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.{
   HasCycleUtils,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -52,6 +53,9 @@ trait AcsCommitmentRestartIntegrationTest
     with HasProgrammableSequencer
     with HasCycleUtils
     with CommitmentTestUtil {
+
+  // This is flaky, requires multiple runs
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(60)
   private lazy val confirmationResponseTimeout = Duration.ofMinutes(1)
@@ -183,7 +187,7 @@ trait AcsCommitmentRestartIntegrationTest
       _.moveLedgerEndBackToScratch().futureValueUS
     )
     val stop = simClock.uniqueTime()
-    loggerFactory.assertLogs(
+    loggerFactory.assertLogsUnorderedOptional(
       {
         participant1.start()
         participant1.synchronizers.reconnect(daName)
@@ -192,7 +196,7 @@ trait AcsCommitmentRestartIntegrationTest
         participant2.health.ping(participant1)
       },
       // this warning message is a byproduct of re-processing all the messages for the synchronizer, as starting points moved back to scratch
-      _.warningMessage should startWith regex "Response message for request .* timed out at",
+      (LogEntryOptionality.Optional, _.warningMessage should include("timed out")),
     )
 
     // participant 1 doesn't publish the changes

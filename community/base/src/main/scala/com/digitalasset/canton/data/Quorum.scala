@@ -4,7 +4,11 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.{
   ParsingResult,
@@ -24,12 +28,9 @@ import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 final case class Quorum(
     confirmers: Map[LfPartyId, PositiveInt],
     threshold: NonNegativeInt,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[Quorum] = prettyOfClass(
-    param("confirmers", _.confirmers),
-    param("threshold", _.threshold),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[Quorum] = Quorum
 
   private[data] def tryToProtoV30(informees: Seq[LfPartyId]): v30.Quorum =
     v30.Quorum(
@@ -54,7 +55,12 @@ final case class Quorum(
     )
 }
 
-object Quorum {
+object Quorum extends PrettyPrintingCompanion[Quorum] {
+
+  override protected val pretty: Pretty[Quorum] = prettyOfClass(
+    param("confirmers", _.confirmers),
+    param("threshold", _.threshold),
+  )
 
   lazy val empty: Quorum = Quorum(Map.empty, NonNegativeInt.zero)
 

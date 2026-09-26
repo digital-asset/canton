@@ -614,11 +614,22 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
           WHERE external_string = ${"d|" + synchronizerId.toProtoPrimitive}
        """
       .asSingleOpt(int("internal_id"))(connection)
-      .map(internedSynchronizerId => SQL"""
-        SELECT COUNT(*) as count
-        FROM lapi_update_meta
-        WHERE synchronizer_id = $internedSynchronizerId
-       """.asSingle(int("count"))(connection))
+      .map { internedSynchronizerId =>
+        val allUpdateMetas = SQL"""
+           SELECT COUNT(*) as count
+           FROM lapi_update_meta
+           WHERE synchronizer_id = $internedSynchronizerId
+         """.asSingle(int("count"))(connection)
+        val allDistinctReceivedAcsCommitments = SQL"""
+            SELECT COUNT(*) as count
+            FROM (
+              SELECT DISTINCT event_offset
+              FROM lapi_events_acs_commitments
+              WHERE synchronizer_id = $internedSynchronizerId
+            )
+          """.asSingle(int("count"))(connection)
+        allUpdateMetas - allDistinctReceivedAcsCommitments
+      }
       .getOrElse(0)
 
   /** ONLY FOR TESTING This is causing wiping of all LAPI event data. This should not be used during

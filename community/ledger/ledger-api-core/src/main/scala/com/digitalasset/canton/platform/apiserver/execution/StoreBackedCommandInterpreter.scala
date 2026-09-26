@@ -220,7 +220,6 @@ final class StoreBackedCommandInterpreter(
           packageMap = commands.packageMap,
           packagePreference = commands.packagePreferenceSet,
           submitters = commitAuthorizers,
-          readAs = commands.readAs,
           cmds = commands.commands,
           participantId = participant,
           submissionSeed = submissionSeed,

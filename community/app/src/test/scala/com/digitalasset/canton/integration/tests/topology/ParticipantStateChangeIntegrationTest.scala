@@ -221,9 +221,10 @@ trait ParticipantStateChangeIntegrationTest
     )
 
     // fail because synchronizer id is wrong
-    assertThrowsAndLogsCommandFailures(
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
       participant3.synchronizers.connect_by_config(conConfig),
-      _.commandFailureMessage should include(
+      _.warningMessage should include("Invalid synchronizer"), // Connection warning
+      _.commandFailureMessage should include( // Command error
         SyncServiceInconsistentConnectivity.id
       ),
     )

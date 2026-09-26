@@ -11,13 +11,15 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.Dar
 import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
-import com.digitalasset.daml.lf.data
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
-import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IError}
+import com.digitalasset.daml.lf.interpretation.{
+  ExecutionMode,
+  InterpretationConfig,
+  Error as IError,
+}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, PackageInterface, *}
-import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.Question.Update
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBFetchTemplate
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SEMakeClo, SEValue, SExpr}
@@ -25,6 +27,7 @@ import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachine}
 import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
+import com.digitalasset.daml.lf.speedy.{TransactionConductor as TxConductor, *}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.transaction.validator.TransactionValidator
@@ -114,9 +117,6 @@ class Engine(
     * @param submitters
     *   the parties authorizing the root actions (both read and write) of the resulting transaction
     *   ("committers" according to the ledger model)
-    * @param readAs
-    *   the parties authorizing the root actions (only read, but no write) of the resulting
-    *   transaction
     * @param cmds
     *   the commands to be interpreted
     * @param participantId
@@ -131,7 +131,6 @@ class Engine(
       packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
       packagePreference: Set[Ref.PackageId] = Set.empty,
       submitters: Set[Party],
-      readAs: Set[Party],
       cmds: ApiCommands,
       participantId: ParticipantId,
       submissionSeed: crypto.Hash,
@@ -152,10 +151,9 @@ class Engine(
       // TODO: https://github.com/digital-asset/daml/issues/21933: Preprocessing input size checks should stop submission workflows ASAP
       _ <- preprocessor.getInputCost
       result <-
-        interpretCommands(
+        executeCommands(
           validating = false,
           submitters = submitters,
-          readAs = readAs,
           commands = processedCmds,
           ledgerTime = cmds.ledgerEffectiveTime,
           preparationTime = preparationTime,
@@ -205,16 +203,11 @@ class Engine(
   )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] =
     for {
       speedyCommand <- preprocessor.preprocessReplayCommand(command)
-      sexpr <- runCompilerSafely(
-        NameOf.qualifiedNameOfCurrentFunc,
-        compiledPackages.compiler.unsafeCompileForReinterpretation(speedyCommand),
-      )
-      // reinterpret is never used for submission, only for validation.
-      result <- interpretExpression(
-        validating = true,
+      result <- executeCommands(
+        validating = true, // reinterpret is never used for submission, only for validation.
+        catchAll = true,
         submitters = submitters,
-        readAs = Set.empty,
-        sexpr = sexpr,
+        commands = ImmArray(speedyCommand),
         ledgerTime = ledgerEffectiveTime,
         preparationTime = preparationTime,
         seeding = InitialSeeding.RootNodeSeeds(ImmArray(nodeSeed)),
@@ -265,10 +258,9 @@ class Engine(
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
     for {
       commands <- preprocessor.translateTransactionRoots(tx)
-      result <- interpretCommands(
+      result <- executeCommands(
         validating = true,
         submitters = submitters,
-        readAs = Set.empty,
         commands = commands,
         ledgerTime = ledgerEffectiveTime,
         preparationTime = preparationTime,
@@ -400,31 +392,41 @@ class Engine(
     }
 
   // command-list compilation, followed by interpretation
-  private[engine] def interpretCommands(
+  private def interpretCommands(
       validating: Boolean,
+      catchAll: Boolean,
       submitters: Set[Party],
-      readAs: Set[Party],
       commands: ImmArray[speedy.Command],
       ledgerTime: Time.Timestamp,
       preparationTime: Time.Timestamp,
       seeding: speedy.InitialSeeding,
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
-      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      submissionInfo: Option[Engine.SubmissionInfo] = None,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId],
+      submissionInfo: Option[Engine.SubmissionInfo],
+      metricPlugins: Seq[MetricPlugin],
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
     for {
-      sexpr <- runCompilerSafely(
-        NameOf.qualifiedNameOfCurrentFunc,
-        compiledPackages.compiler.unsafeCompile(commands),
-      )
+      sexpr <-
+        runCompilerSafely(
+          NameOf.qualifiedNameOfCurrentFunc,
+          if (catchAll)
+            commands match {
+              case ImmArray(cmd) =>
+                compiledPackages.compiler.unsafeCompileForReinterpretation(cmd)
+              case _ =>
+                throw new java.lang.AssertionError(
+                  "interpretCommands require exactly one command if catchAll is true"
+                )
+            }
+          else
+            compiledPackages.compiler.unsafeCompile(commands),
+        )
       result <- interpretExpression(
         validating,
         submitters,
-        readAs,
         sexpr,
         ledgerTime,
         preparationTime,
@@ -437,8 +439,162 @@ class Engine(
       )
     } yield result
 
-  /** Interprets the given commands under the authority of @submitters, with additional readers
-    * \@readAs
+  private[engine] def executeCommands(
+      validating: Boolean,
+      catchAll: Boolean = false,
+      submitters: Set[Party],
+      commands: ImmArray[speedy.Command],
+      ledgerTime: Time.Timestamp,
+      preparationTime: Time.Timestamp,
+      seeding: speedy.InitialSeeding,
+      contractIdVersion: ContractIdVersion,
+      interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+      submissionInfo: Option[Engine.SubmissionInfo] = None,
+      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+  )(implicit
+      traceContext: TraceContext
+  ) =
+    config.executionMode match {
+      case ExecutionMode.UpdateMachine =>
+        interpretCommands(
+          validating,
+          catchAll,
+          submitters,
+          commands,
+          ledgerTime,
+          preparationTime,
+          seeding,
+          contractIdVersion,
+          interpretationConfig,
+          packageResolution,
+          submissionInfo,
+          metricPlugins,
+        )
+      case ExecutionMode.Conductor =>
+        executeCommandsWithConductor(
+          validating,
+          submitters,
+          commands,
+          ledgerTime,
+          preparationTime,
+          seeding,
+          contractIdVersion,
+          interpretationConfig,
+          packageResolution,
+          submissionInfo,
+          metricPlugins,
+        )
+    }
+
+  private[engine] def executeCommandsWithConductor(
+      validating: Boolean,
+      submitters: Set[Party],
+      commands: ImmArray[speedy.Command],
+      ledgerTime: Time.Timestamp,
+      preparationTime: Time.Timestamp,
+      seeding: speedy.InitialSeeding,
+      contractIdVersion: ContractIdVersion,
+      interpretationConfig: InterpretationConfig,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+      submissionInfo: Option[Engine.SubmissionInfo] = None,
+      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+  )(implicit
+      traceContext: TraceContext
+  ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
+    import TxConductor.Upd
+
+    def loop[X](upd: Upd.Step[X]): Result[X] =
+      upd match {
+        case Upd.Step.Pure(value) =>
+          Result.done(value)
+        case Upd.Step.Error(e) =>
+          Result.error(Error.Interpretation.DamlException(e), None)
+        case im: Upd.Step.Impure[x, X] =>
+          im.fx match {
+            case Upd.NeedPackage(pkgId, context) =>
+              for {
+                pkgO <- Result.needPackage(pkgId)
+                pkg <- pkgO match {
+                  case Some(p) => Result.done(p)
+                  case None => Result.error(Error.Package.MissingPackage(pkgId, context))
+                }
+                _ <- compiledPackages.addPackage(pkgId, pkg)
+                result <- loop(im.resume(compiledPackages))
+              } yield result
+            case Upd.NeedContract(coid, _) =>
+              for {
+                contract <- Result.needContract(coid)
+                result <- loop(im.resume(contract))
+              } yield result
+            case _: Upd.NeedKey =>
+              throw new java.lang.Error("NeedKey not implemented")
+            case Upd.NeedExternalCall(extId, funcId, configHash, input) =>
+              for {
+                result <- Result.needExternalCall(extId, funcId, configHash, input)
+                next <- loop(
+                  im.resume(result.left.map(e => Upd.NeedExternalCall.Error(e.message)))
+                )
+              } yield next
+            case Upd.NeedInterruption(abort) =>
+              for {
+                _ <- Result.needInterruption(abort)
+                result <- loop(im.resume(()))
+              } yield result
+            case Upd.NeedTime =>
+              for {
+                _ <- Result.unit // to force trampoline
+                result <- loop(im.resume(ledgerTime))
+              } yield result
+          }
+      }
+
+    for {
+      _ <- runCompilerSafely(
+        NameOf.qualifiedNameOfCurrentFunc,
+        compiledPackages.compiler.unsafeCompile(commands),
+      )
+      conductor = TxConductor(
+        compiledPackages = compiledPackages,
+        preparationTime = preparationTime,
+        initialSeeding = seeding,
+        committers = submitters,
+        logger = machineLogger(validating),
+        authorizationChecker = config.authorizationChecker,
+        iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
+        packageResolution = packageResolution,
+        interpretationConfig = interpretationConfig,
+        contractIdVersion = contractIdVersion,
+        limits = config.transactionLimits,
+        metricPlugins = metricPlugins,
+      )
+      _ <- loop(conductor.handleCommands(commands.toSeq).start)
+      txResult <- Result.done(conductor.finish)
+      TxConductor.Result(
+        tx,
+        seeds,
+        globalKeyMapping,
+        contractOrder,
+      ) = txResult.getOrElse(
+        throw new NotImplementedError("Error handling in conductor.commit not yet implemented")
+      )
+      usedPackages <- deps(tx)
+    } yield (
+      tx,
+      Tx.Metadata(
+        submissionSeed = submissionInfo.map(_.submissionSeed),
+        preparationTime = preparationTime,
+        usedPackages = usedPackages,
+        timeBoundaries = conductor.getTimeBoundaries,
+        nodeSeeds = seeds,
+        globalKeyMapping = globalKeyMapping,
+        contractOrder = contractOrder,
+      ),
+      conductor.metrics,
+    )
+  }
+
+  /** Interprets the given commands under the authority of @submitters,
     *
     * Submitters are a set, in order to support interpreting subtransactions (a subtransaction can
     * be authorized by multiple parties).
@@ -449,7 +605,6 @@ class Engine(
       validating: Boolean,
       /* See documentation for `Speedy.Machine` for the meaning of this field */
       submitters: Set[Party],
-      readAs: Set[Party],
       sexpr: SExpr,
       ledgerTime: Time.Timestamp,
       preparationTime: Time.Timestamp,
@@ -469,7 +624,6 @@ class Engine(
       initialSeeding = seeding,
       expr = SEApp(sexpr, ArraySeq(SValue.SToken)),
       committers = submitters,
-      readAs = readAs,
       authorizationChecker = config.authorizationChecker,
       validating = validating,
       interpretationConfig = interpretationConfig,

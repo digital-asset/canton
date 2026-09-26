@@ -32,7 +32,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
@@ -57,6 +57,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.{SyncEphemeralState, SynchronizerConnectionsManager}
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   ParticipantNodeParameters,
@@ -205,7 +206,12 @@ class ProtocolProcessorTest
   ).thenAnswer(FutureUnlessShutdown.unit)
 
   private val trm = mock[ConfirmationResultMessage]
-  when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[ConfirmationResultMessage])
+  when(trm.prettyCompanion).thenAnswer(
+    new PrettyPrintingCompanion[ConfirmationResultMessage] {
+      override protected val pretty: Pretty[ConfirmationResultMessage] =
+        Pretty.adHocPrettyInstance[ConfirmationResultMessage]
+    }
+  )
   when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
   when(trm.rootHash).thenAnswer(rootHash)
   when(trm.psid).thenAnswer(DefaultTestIdentities.physicalSynchronizerId)
@@ -318,6 +324,8 @@ class ProtocolProcessorTest
       contractStore,
       nodePersistentState.acsCounterParticipantConfigStore,
       Eval.now(nodePersistentState.ledgerApiStore),
+      participant,
+      new FailingOfflineTopologyLookup(),
       loggerFactory,
       FutureSupervisor.Noop,
     )

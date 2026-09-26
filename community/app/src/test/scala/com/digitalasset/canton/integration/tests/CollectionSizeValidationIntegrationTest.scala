@@ -6,9 +6,9 @@ package com.digitalasset.canton.integration.tests
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
+import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.integration.bootstrap.{
@@ -16,17 +16,23 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.security.SecurityTestHelpers
+import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
+  HasCycleUtils,
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.LocalRejectError
+import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.CollectionConverters.*
 
 /** Simple test to validate that collection size limits configured in the `SynchronizerLimits` are
@@ -35,15 +41,24 @@ import scala.jdk.CollectionConverters.*
   */
 sealed trait CollectionSizeValidationIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with HasProgrammableSequencer
+    with HasCycleUtils
+    with SecurityTestHelpers {
 
   private var extraParties: Seq[PartyId] = _
   private val nbExtraParties = 2
+  private var maliciousNode: MaliciousParticipantNode = _
+  private val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
+
+  override def pureCrypto: CryptoPureApi = pureCryptoRef.get()
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Config
       .withNetworkBootstrap { implicit env =>
         import env.*
+
+        pureCryptoRef.set(sequencer1.crypto.pureCrypto)
 
         val defaultSsp = EnvironmentDefinition.defaultStaticSynchronizerParameters
 
@@ -58,7 +73,8 @@ sealed trait CollectionSizeValidationIntegrationTest
               Option.when(testedProtocolVersion >= ProtocolVersion.v36)(
                 defaultSsp
                   .focus(_.synchronizerLimits.transactionProtocolLimits.maxActAs)
-                  .replace(PositiveInt.two)
+                  // 1 under the nb of parties used in the test, i.e. 1 + nbExtraParties - 1
+                  .replace(PositiveInt.tryCreate(nbExtraParties))
               ),
           )
         )
@@ -71,12 +87,21 @@ sealed trait CollectionSizeValidationIntegrationTest
 
         extraParties =
           (1 to nbExtraParties).map(i => participant1.parties.enable(s"extra-party-$i"))
+
+        maliciousNode = MaliciousParticipantNode(
+          participant1,
+          daId,
+          testedProtocolVersion,
+          defaultProtocolLimits,
+          timeouts,
+          loggerFactory,
+        )
       }
 
   "synchronizer-wide collection limits are checked" in { implicit env =>
     import env.*
 
-    val cmd = new UniversalContract(
+    val commands = new UniversalContract(
       Seq(participant1.adminParty).map(_.toProtoPrimitive).asJava,
       List.empty.asJava,
       List.empty.asJava,
@@ -88,13 +113,6 @@ sealed trait CollectionSizeValidationIntegrationTest
       .toSeq
       .map(c => Command.fromJavaProto(c.toProtoCommand))
 
-    def submitCommand: Transaction = participant1.ledger_api.commands
-      .submit(
-        actAs = List(participant1.adminParty) ++ extraParties,
-        cmd,
-        optTimeout = Some(config.NonNegativeDuration.ofSeconds(20)),
-      )
-
     clue("submit command") {
       if (testedProtocolVersion >= ProtocolVersion.v36) {
         val invariantViolation = InvariantViolation(
@@ -102,8 +120,20 @@ sealed trait CollectionSizeValidationIntegrationTest
           s"repeated field has ${nbExtraParties + 1} elements, exceeding the maximum of $nbExtraParties",
         )
 
-        loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-          submitCommand,
+        val commandsWithMetadata = CommandsWithMetadata(
+          actAs = List(participant1.adminParty) ++ extraParties,
+          commands = commands,
+        )
+
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          {
+            // Use a malicious participant, otherwise the command already fails in Phase 1
+            val (_, trackingResult) =
+              trackingLedgerEvents(Seq(participant1), extraTrackedParties = Seq.empty) {
+                maliciousNode.submitCommand(commandsWithMetadata).futureValueUS.value
+              }
+            trackingResult.assertNoTransactions()
+          },
           LogEntry.assertLogSeq(
             mustContainWithClue = Seq(
               (
@@ -135,13 +165,16 @@ sealed trait CollectionSizeValidationIntegrationTest
                 ),
                 "Mediator does not know locally rejected request",
               ),
-              (_.errorMessage should include("DEADLINE_EXCEEDED"), "Command fails with timeout"),
             )
           ),
         )
       } else {
         // Bounds are not checked in this protocol version, so the command should succeed
-        submitCommand shouldBe a[Transaction]
+        participant1.ledger_api.commands
+          .submit(
+            actAs = List(participant1.adminParty) ++ extraParties,
+            commands,
+          ) shouldBe a[Transaction]
       }
     }
   }

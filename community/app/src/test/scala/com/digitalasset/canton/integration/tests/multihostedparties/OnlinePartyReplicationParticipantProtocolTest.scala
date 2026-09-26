@@ -13,28 +13,24 @@ import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.cycle as M
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.sequencer.channel.SequencerChannelProtocolTestExecHelpers
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  HasCycleUtils,
-  SharedEnvironment,
-}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.party.{
   PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
 }
+import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
-import com.digitalasset.canton.participant.protocol.party.{
-  PartyReplicationSourceParticipantProcessor,
-  PartyReplicationTargetParticipantProcessor,
+import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence
+import com.digitalasset.canton.participant.protocol.party.acsreplication.{
+  AcsReplicationSourceParticipantProcessor,
+  AcsReplicationTargetParticipantProcessor,
 }
-import com.digitalasset.canton.participant.store.PartyReplicationStateManager
+import com.digitalasset.canton.participant.store.AcsReplicationStateManager
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelId
@@ -50,8 +46,8 @@ import scala.concurrent.duration.*
 import scala.util.chaining.scalaUtilChainingOps
 
 /** Objectives:
-  *   - Test the behavior of the [[PartyReplicationSourceParticipantProcessor]] and
-  *     [[PartyReplicationTargetParticipantProcessor]] in replicating a party's active contracts via
+  *   - Test the behavior of the [[AcsReplicationSourceParticipantProcessor]] and
+  *     [[AcsReplicationTargetParticipantProcessor]] in replicating a party's active contracts via
   *     the online party replication participant protocol from a source participant SP to a target
   *     participant TP.
   *   - Test that TP-side conflict detection properly handles concurrent contract archives and
@@ -222,12 +218,14 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           PartyReplicationStatus.PersistentProgress(
             processedContractCount = NonNegativeLong.zero,
             nextPersistenceCounter = RepairCounter.Genesis,
+            acsHashO = None,
             fullyProcessedAcs = false,
           )
         ),
       )
-      def inMemoryStateManager(pid: ParticipantId) =
-        new PartyReplicationStateManager(
+
+      def inMemoryAcsReplicationStateManager(pid: ParticipantId) =
+        new AcsReplicationStateManager(
           pid,
           inMemoryStorageForTesting,
           futureSupervisor,
@@ -236,20 +234,20 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           timeouts,
         ).tap(_.add(initialStatus).value.futureValueUS.value)
 
-      val connectedSynchronizerSP =
-        sourceParticipant.underlying.value.sync.connectedSynchronizerForAlias(daName).value
+      val agreedAt = env.environment.clock.now
       val sourceProcessor = asyncExec("Initialize SP processor")(
-        PartyReplicationSourceParticipantProcessor.initialize(
+        AcsReplicationSourceParticipantProcessor.initialize(
           daId,
           alice,
           requestId,
           partyToTargetParticipantEffectiveAt,
-          targetParticipant.id,
+          sourceParticipant.id,
+          excludedStakeholders = Set.empty,
+          agreedAt,
           sourceParticipant.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
-          inMemoryStateManager(sourceParticipant.id),
+          inMemoryAcsReplicationStateManager(sourceParticipant.id),
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
-          connectedSynchronizerSP.synchronizerHandle.syncPersistentState.topologyStore,
           sourceParticipant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore,
           futureSupervisor,
           exitOnFatalFailures = false,
@@ -263,25 +261,49 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       // This flag, when set to true will unblock the target participant processor.
       var canTargetParticipantProceed: Boolean = false
       val handfulOfContractsCountToProcessBeforePausing = 4
-      val targetProcessor = PartyReplicationTargetParticipantProcessor(
-        alice,
-        requestId,
-        EffectiveTime(partyToTargetParticipantEffectiveAt),
-        inMemoryStateManager(targetParticipant.id),
-        noOpProgressAndCompletionCallback,
-        noOpProgressAndCompletionCallback2,
-        targetParticipant.underlying.value.sync.participantNodePersistentState,
-        connectedSynchronizer,
-        futureSupervisor,
-        exitOnFatalFailures = false,
-        timeouts,
-        loggerFactory,
-        PartyReplicationTestInterceptorImpl
-          .targetParticipantProceedsIf(
-            // wait for a handful of contracts
-            canTargetParticipantProceed || _.processedContractCount.unwrap < handfulOfContractsCountToProcessBeforePausing
+      val replicationProgressState = inMemoryAcsReplicationStateManager(targetParticipant.id)
+      val targetProcessorLoggerFactory = loggerFactory
+        .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
+        .append("partyId", alice.toProtoPrimitive)
+        .append("requestId", requestId.toHexString)
+      val acsTransferContractHandler =
+        new TargetParticipantAcsPersistence(
+          requestId,
+          connectedSynchronizer.psid,
+          EffectiveTime(partyToTargetParticipantEffectiveAt),
+          new TargetParticipantAcsPersistence.PersistsContractsImpl(
+            targetParticipant.underlying.value.sync.participantNodePersistentState
           ),
-      )
+          connectedSynchronizer.ephemeral.requestTracker,
+          connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+            .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled")),
+          targetProcessorLoggerFactory,
+        )
+
+      val targetProcessor =
+        new AcsReplicationTargetParticipantProcessor(
+          connectedSynchronizer.psid,
+          alice,
+          requestId,
+          EffectiveTime(partyToTargetParticipantEffectiveAt),
+          excludedStakeholders = Set.empty,
+          sourceParticipant.id,
+          agreedAt,
+          replicationProgressState,
+          noOpProgressAndCompletionCallback,
+          noOpProgressAndCompletionCallback2,
+          acsTransferContractHandler,
+          OnlinePartyReplicationTargetConfig(),
+          futureSupervisor,
+          exitOnFatalFailures = false,
+          timeouts,
+          targetProcessorLoggerFactory,
+          PartyReplicationTestInterceptorImpl
+            .targetParticipantProceedsIf(
+              // wait for a handful of contracts
+              canTargetParticipantProceed || _.processedContractCount.unwrap < handfulOfContractsCountToProcessBeforePausing
+            ),
+        )
       val targetParticipantIndexingWorkflow = new PartyReplicationIndexingWorkflow(
         targetParticipant.underlying.value.sync.participantNodePersistentState.map(_.contractStore),
         pauseSynchronizerIndexingDuringPartyReplication = true,
@@ -291,7 +313,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
 
       val sessionKeyOwner = true
       val noSessionKeyOwner = false
-      // Connect in parallel as it does not matter which participant connects first.
+      // Connect both participants. It does not matter which participant connects first.
       asyncExec("Connect source and target participants")(
         Seq(
           ("source", spClient, sourceProcessor, participant2, noSessionKeyOwner),
@@ -323,7 +345,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         // available for responding to the TP.
         clue("Regularly ensure the SP does not get stuck")(
           while (!sourceProcessor.hasChannelCompleted) {
-            sourceProcessor.progressPartyReplication()
+            sourceProcessor.progressAcsReplication()
             Threading.sleep(1000)
           }
         )
@@ -366,9 +388,9 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       // Set the flag and wake up the target participant processor to resume OnPR.
       logger.info("Unblocking the target participant processor")
       canTargetParticipantProceed = true
-      targetProcessor.progressPartyReplication()
+      targetProcessor.progressAcsReplication()
 
-      eventually(timeUntilSuccess = 1.minute) {
+      eventually(timeUntilSuccess = 2.minute) {
         sourceProcessor.hasChannelCompleted shouldBe true
         targetProcessor.hasChannelCompleted shouldBe true
       }

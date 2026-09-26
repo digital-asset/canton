@@ -75,6 +75,7 @@ import com.digitalasset.canton.participant.store.{
   SyncPersistentState,
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
@@ -192,6 +193,8 @@ final class UnassignmentProcessingStepsTest
       contractStore = contractStore,
       acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
       Eval.now(ledgerApiStore),
+      submittingParticipant,
+      new FailingOfflineTopologyLookup(),
       loggerFactory,
       FutureSupervisor.Noop,
     )

@@ -9,7 +9,11 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   UnknownContractAuthenticationDataVersion,
 }
 import com.digitalasset.canton.crypto.Salt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ByteStringUtil
@@ -21,7 +25,10 @@ import com.digitalasset.daml.lf.data.Bytes as LfBytes
 import com.google.protobuf.ByteString
 import io.scalaland.chimney.dsl.*
 
-sealed trait ContractAuthenticationData extends PrettyPrinting with Product with Serializable {
+sealed trait ContractAuthenticationData
+    extends PrettyPrintingFromCompanion
+    with Product
+    with Serializable {
 
   /** Defines the serialization of contract authentication data as stored inside
     * [[com.digitalasset.daml.lf.transaction.FatContractInstance.authenticationData]]
@@ -42,9 +49,8 @@ final case class ContractAuthenticationDataV1(salt: Salt)(
     private val contractIdVersion: CantonContractIdV1Version
 ) extends ContractAuthenticationData {
 
-  override protected def pretty: Pretty[ContractAuthenticationDataV1] = prettyOfClass(
-    param("contract salt", _.salt.forHashing)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ContractAuthenticationDataV1] =
+    ContractAuthenticationDataV1
 
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   override def toLfBytes: LfBytes =
@@ -92,7 +98,18 @@ final case class ContractAuthenticationDataV2(
 
   override def toSerializableContractAdminProtoV30: ByteString = toLfBytes.toByteString
 
-  override protected def pretty: Pretty[ContractAuthenticationDataV2.this.type] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[ContractAuthenticationDataV2] =
+    ContractAuthenticationDataV2
+}
+
+object ContractAuthenticationDataV1 extends PrettyPrintingCompanion[ContractAuthenticationDataV1] {
+  override protected val pretty: Pretty[ContractAuthenticationDataV1] = prettyOfClass(
+    param("contract salt", _.salt.forHashing)
+  )
+}
+
+object ContractAuthenticationDataV2 extends PrettyPrintingCompanion[ContractAuthenticationDataV2] {
+  override protected val pretty: Pretty[ContractAuthenticationDataV2] = prettyOfClass(
     param("salt", _.salt.toByteString),
     paramIfDefined("creating transaction id", _.creatingUpdateId),
     paramIfNonEmpty(

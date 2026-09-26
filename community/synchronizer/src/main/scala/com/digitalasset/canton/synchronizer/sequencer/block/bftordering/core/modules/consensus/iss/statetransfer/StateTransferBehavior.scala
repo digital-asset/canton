@@ -97,6 +97,11 @@ final class StateTransferBehavior[E <: Env[E]](
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
+    // Monotonic elapsed-time source (nanoseconds) for the retransmission request rate limiter.
+    //  Defaults to `System.nanoTime()` (real, monotonic), which ensures that rate limiting allows retransmissions
+    //  to be sent even if the main clock is a SimClock and is not advancing, which in turn ensures that view
+    //  changes can make progress.
+    rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(private val maybeCustomStateTransferManager: Option[StateTransferManager[E]] = None)(implicit
     synchronizerProtocolVersion: ProtocolVersion,
     config: BftBlockOrdererConfig,
@@ -512,13 +517,14 @@ final class StateTransferBehavior[E <: Env[E]](
         abort,
         previousEpochsCommitCerts = Map.empty,
         metrics,
-        clock,
         loggerFactory,
         config.consensusEnableLogEndOfEpochProgress,
+        rateLimiterNanoTime = rateLimiterNanoTime,
       ),
       dependencies,
       loggerFactory,
       timeouts,
+      rateLimiterNanoTime = rateLimiterNanoTime,
       futurePbftMessageQueue = initialState.pbftMessageQueue,
       postponedConsensusMessageQueue = Some(postponedConsensusMessages),
     )(initTraceContext = traceContext)(catchupDetector)

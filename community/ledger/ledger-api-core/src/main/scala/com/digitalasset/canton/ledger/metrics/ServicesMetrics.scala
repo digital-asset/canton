@@ -114,6 +114,15 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Debug,
   )
 
+  private[metrics] val bufferedReaderSliceWithoutConversion: Item = Item(
+    bufferedReaderPrefix :+ "slice_without_conversion",
+    summary =
+      "The time to fetch a chunk of events from the buffer without converting to final event format",
+    description = """The events are served from the buffer in chunks, respecting the input
+                    |bounds and a predicate filter and serves output in it's internal form. This metric times this operation.""",
+    qualification = MetricQualification.Debug,
+  )
+
   private[metrics] val bufferedReaderSlice: Item = Item(
     bufferedReaderPrefix :+ "slice",
     summary = "The time to fetch a chunk of events from the buffer",

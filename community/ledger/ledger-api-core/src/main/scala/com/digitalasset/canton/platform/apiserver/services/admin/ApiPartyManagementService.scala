@@ -1090,6 +1090,7 @@ private[apiserver] final class ApiPartyManagementService private (
             threshold = PositiveInt.one,
           )
         ),
+        isOffline = false,
       )
       transactions <- {
         // Importing globally appears to conflict with `import scalaz.syntax.traverse.*`

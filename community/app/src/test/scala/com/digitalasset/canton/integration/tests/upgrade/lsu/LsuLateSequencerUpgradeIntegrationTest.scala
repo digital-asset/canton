@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S4M4
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
@@ -14,12 +12,12 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.DefaultNewPV
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.integration.{ConfigTransforms, *}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{admin, config}
-import monocle.macros.syntax.lens.*
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -96,14 +94,13 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
       }
       .addConfigTransforms(configTransforms*)
       .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          /*
+        /*
           The first handshake with the new synchronizer fail for P2 and P3 because s2 successor is not up yet.
           The default timeout (before giving up) is 30 seconds and during that time, the simple execution queue
           for the synchronizer connect/disconnect/handshakes is blocked, which means LSU cannot succeed.
           A lower value makes the test faster. A value that is too low would make the test flaky.
-           */
-          .replace(NonNegativeDuration.ofSeconds(3))
+         */
+        ConfigTransforms.setSequencerInfoTimeout(3.second)
       )
       .withSetup { implicit env =>
         import env.*

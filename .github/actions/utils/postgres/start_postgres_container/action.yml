@@ -15,7 +15,7 @@ inputs:
     description: Postgres password
     required: true
   postgres-port:
-    description: Host port mapped to container port 5432
+    description: Port Postgres listens on in the runner network namespace
     required: true
   postgres-user:
     description: Postgres username
@@ -100,7 +100,15 @@ runs:
         # Base flags supported by any Postgres image. The pg_store_plans/pg_stat_statements
         # flags below require the custom query-stats image, so they are only appended when
         # ENABLE_QUERY_STATS is true (a vanilla postgres:NN would fail to start otherwise).
-        PG_ARGS=(-c max_connections=1000 -c max_wal_size=4GB -c checkpoint_timeout=60min)
+        PG_ARGS=(
+          -c listen_addresses=localhost # Listen on both 127.0.0.1 and ::1
+          -c port="$POSTGRES_PORT"
+          -c max_connections=1000
+          -c max_wal_size=4GB
+          -c checkpoint_timeout=60min
+          -c fsync=off            # In CI, PG is on same host as JVM - turn off to avoid excessive IO
+          -c full_page_writes=off # In CI, PG is on same host as JVM - turn off to avoid excessive IO
+        )
         if [[ "$ENABLE_QUERY_STATS" == "true" ]]; then
           PG_ARGS+=(
             -c shared_preload_libraries=pg_store_plans,pg_stat_statements
@@ -114,12 +122,12 @@ runs:
         echo "container-name=$CONTAINER_NAME" >> "$GITHUB_OUTPUT"
         docker run -d \
           --name "$CONTAINER_NAME" \
+          --network host \
           -e POSTGRES_DB="$POSTGRES_DB" \
           -e POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS" \
           -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
           -e POSTGRES_USER="$POSTGRES_USER" \
           $INITDB_VOLUME_ARG \
-          -p "$POSTGRES_PORT:5432" \
           "$IMAGE" \
           postgres "${PG_ARGS[@]}"
 
@@ -129,9 +137,10 @@ runs:
         CONTAINER_NAME: ${{ steps.start.outputs.container-name }}
         POSTGRES_USER: ${{ inputs.postgres-user }}
         POSTGRES_DB: ${{ inputs.postgres-db }}
+        POSTGRES_PORT: ${{ inputs.postgres-port }}
       run: |
         for _ in $(seq 1 60); do
-          if docker exec "$CONTAINER_NAME" pg_isready -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then
+          if docker exec "$CONTAINER_NAME" pg_isready -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then
             exit 0
           fi
           sleep 2

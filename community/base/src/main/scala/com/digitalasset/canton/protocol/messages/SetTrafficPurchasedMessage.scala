@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -24,7 +24,6 @@ final case class SetTrafficPurchasedMessage private (
     override val deserializedFrom: Option[ByteString]
 ) extends ProtocolVersionedMemoizedEvidence
     with HasProtocolVersionedWrapper[SetTrafficPurchasedMessage]
-    with PrettyPrinting
     with SignedProtocolMessageContent {
 
   val representativeProtocolVersion: RepresentativeProtocolVersion[
@@ -54,19 +53,23 @@ final case class SetTrafficPurchasedMessage private (
       getCryptographicEvidence
     )
 
-  override protected def pretty: Pretty[SetTrafficPurchasedMessage] = prettyOfClass(
-    param("member", _.member),
-    param("serial", _.serial),
-    param("totalTrafficPurchased", _.totalTrafficPurchased),
-    param("psid", _.psid),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SetTrafficPurchasedMessage] =
+    SetTrafficPurchasedMessage
 }
 
 object SetTrafficPurchasedMessage
     extends VersioningCompanionMemoization[
       SetTrafficPurchasedMessage,
-    ] {
+    ]
+    with PrettyPrintingCompanion[SetTrafficPurchasedMessage] {
   override val name: String = "SetTrafficPurchasedMessage"
+
+  override protected val pretty: Pretty[SetTrafficPurchasedMessage] = prettyOfClass(
+    param("member", _.member),
+    param("serial", _.serial),
+    param("totalTrafficPurchased", _.totalTrafficPurchased),
+    param("psid", _.psid),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.v35)(

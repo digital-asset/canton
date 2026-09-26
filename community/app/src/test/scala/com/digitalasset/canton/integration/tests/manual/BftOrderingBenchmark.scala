@@ -497,11 +497,14 @@ class BftOrderingBenchmark
 
     if (nodesToStop.nonEmpty) {
 
+      val nodesToStopStr = nodesToStop.map(_.name).mkString(", ")
+      logger.info(s"Stopping nodes for catchup test: $nodesToStopStr")
       nodesToStop.foreach(_.stop())
 
       env.actorSystem.scheduler.scheduleOnce(
         bftOrderingBenchmarkConfig.testCatchupConfig.durationNodesAreDown
       ) {
+        logger.info(s"Restarting nodes for catchup test: $nodesToStopStr")
         nodesToStop.foreach(_.start())
       }
     }

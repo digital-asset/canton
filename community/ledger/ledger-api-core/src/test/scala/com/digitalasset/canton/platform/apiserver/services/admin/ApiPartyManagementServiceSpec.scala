@@ -575,6 +575,7 @@ class ApiPartyManagementServiceSpec
                       p2p.mapping.partyId,
                       p2p.mapping.threshold,
                       Seq(HostingParticipant(participantId, ParticipantPermission.Submission)),
+                      isOffline = false,
                     ),
                     testedProtocolVersion,
                   )
@@ -616,6 +617,7 @@ class ApiPartyManagementServiceSpec
                           ParticipantPermission.Confirmation,
                         )
                       ),
+                      isOffline = false,
                     ),
                     testedProtocolVersion,
                   )
@@ -661,6 +663,7 @@ class ApiPartyManagementServiceSpec
                           ParticipantPermission.Observation,
                         ),
                       ),
+                      isOffline = false,
                     ),
                     testedProtocolVersion,
                   )

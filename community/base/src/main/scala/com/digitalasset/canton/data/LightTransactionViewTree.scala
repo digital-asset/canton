@@ -9,7 +9,7 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.{SynchronizerLimits, ViewHash, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeInt}
@@ -46,8 +46,7 @@ sealed abstract case class LightTransactionViewTree private[data] (
       LightTransactionViewTree.type
     ]
 ) extends TransactionViewTree
-    with HasProtocolVersionedWrapper[LightTransactionViewTree]
-    with PrettyPrinting {
+    with HasProtocolVersionedWrapper[LightTransactionViewTree] {
 
   // This sequence contains the references of the direct subviews.
   // By definition, all these subviews are blinded, therefore we can only store their references.
@@ -136,7 +135,8 @@ sealed abstract case class LightTransactionViewTree private[data] (
       },
     )
 
-  override lazy val pretty: Pretty[LightTransactionViewTree] = prettyOfClass(unnamedParam(_.tree))
+  override def prettyCompanion: PrettyPrintingCompanion[LightTransactionViewTree] =
+    LightTransactionViewTree
 }
 
 final case class LightTransactionViewTreeDeserializationContext(
@@ -149,8 +149,13 @@ object LightTransactionViewTree
     extends VersioningCompanionContextPVValidation2[
       LightTransactionViewTree,
       LightTransactionViewTreeDeserializationContext,
-    ] {
+    ]
+    with PrettyPrintingCompanion[LightTransactionViewTree] {
   override val name: String = "LightTransactionViewTree"
+
+  override protected val pretty: Pretty[LightTransactionViewTree] = prettyOfClass(
+    unnamedParam(_.tree)
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.LightTransactionViewTree)(

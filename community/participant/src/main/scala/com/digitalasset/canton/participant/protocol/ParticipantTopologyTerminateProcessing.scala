@@ -304,12 +304,15 @@ class ParticipantTopologyTerminateProcessing(
         PendingLsuOperation.operationKey,
         PendingLsuOperation.operationName,
       )
-      successorConnectionO = synchronizerConnectionConfigStore.get(successor.psid).toOption
+      validPsidO = successor.psid.parseAsPhysical.toOption
+      successorConnectionO = validPsidO.flatMap(validPsid =>
+        synchronizerConnectionConfigStore.get(validPsid).toOption
+      )
       _ <- successorConnectionO.traverse_(connection =>
         synchronizerConnectionConfigStore
           .setStatus(
             alias = connection.config.synchronizerAlias,
-            configuredPsid = ConfiguredPhysicalSynchronizerId(Some(successor.psid)),
+            configuredPsid = ConfiguredPhysicalSynchronizerId(validPsidO),
             status = SynchronizerConnectionConfigStore.Inactive,
           )
           .valueOr(err =>

@@ -22,18 +22,10 @@ import scala.util.{Failure, Success, Try}
 
 class LedgerApiStoreIntegrityChecker(
     override protected val loggerFactory: NamedLoggerFactory
-) extends NamedLogging
+) extends AbstractChecker
+    with NamedLogging
     with NoTracing {
   private val timeout = 60.seconds
-
-  private def timeIt[T](f: => T, message: String): T = {
-    val start = System.currentTimeMillis()
-    val result = f
-    val end = System.currentTimeMillis()
-    val elapsed = end - start
-    logger.info(s"LedgerApiStoreIntegrityChecker: $message took: $elapsed ms")
-    result
-  }
 
   def verifyParticipantLapiIntegrity(
       env: AnyTestConsoleEnvironment,

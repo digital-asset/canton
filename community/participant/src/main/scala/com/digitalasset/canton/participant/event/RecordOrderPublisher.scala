@@ -32,7 +32,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.PerformLsuHandler
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.{OpaquePhysicalSynchronizerId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, MonadUtil}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
@@ -356,6 +356,14 @@ class RecordOrderPublisher private (
   def setSuccessor(successor: Option[SynchronizerSuccessor]): Unit = {
     synchronizerSuccessor.set(successor)
     successor.foreach { successor =>
+      successor.psid.parseAsPhysical match {
+        case Left(err) =>
+          logger.warn(OpaquePhysicalSynchronizerId.unparseablePSIdMessage(successor, err))(
+            TraceContext.empty
+          )
+        case Right(_) =>
+      }
+
       if (successor.upgradeTime <= initTimestamp) {
         lsuAutomaticAttemptAlreadyDone.set(true)
         // Upon node restart past the upgrade time, we attempt an automatic LSU

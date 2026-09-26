@@ -48,27 +48,27 @@ private[events] class BufferedUpdateReader(
       offsetRange: OffsetRange,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
-      skipPruningChecks: Boolean = false,
+      skipPruningChecks: Boolean,
+      limit: Option[Int],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[
     (Offset, UpdateResponse),
     NotUsed,
-  ] =
-    bufferedUpdatesReader
-      .stream(
-        offsetRange = offsetRange,
-        persistenceFetchArgs = internalUpdateFormat,
-        bufferFilter = TransactionLogUpdatesConversions
-          .filter(internalUpdateFormat),
-        toApiResponse = TransactionLogUpdatesConversions
-          .toUpdateResponse(internalUpdateFormat, lfValueTranslation)(
-            loggingContext,
-            directEC,
-          ),
-        descendingOrder = descendingOrder,
-        skipPruningChecks = skipPruningChecks,
-      )
+  ] = bufferedUpdatesReader.stream(
+    offsetRange = offsetRange,
+    persistenceFetchArgs = internalUpdateFormat,
+    bufferFilter = TransactionLogUpdatesConversions
+      .filter(internalUpdateFormat),
+    toApiResponse = TransactionLogUpdatesConversions
+      .toUpdateResponse(internalUpdateFormat, lfValueTranslation)(
+        loggingContext,
+        directEC,
+      ),
+    descendingOrder = descendingOrder,
+    skipPruningChecks = skipPruningChecks,
+    limit = limit,
+  )
 
   def lookupUpdateBy(
       lookupKey: LookupKey,
@@ -118,6 +118,7 @@ private[platform] object BufferedUpdateReader {
               descendingOrder: Boolean,
               filter: InternalUpdateFormat,
               skipPruningChecks: Boolean,
+              limit: Option[Int],
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, UpdateResponse), NotUsed] =
@@ -127,6 +128,7 @@ private[platform] object BufferedUpdateReader {
                 internalUpdateFormat = filter,
                 descendingOrder = descendingOrder,
                 skipPruningChecks = skipPruningChecks,
+                limit = limit,
               )
         },
         bufferedStreamEventsProcessingParallelism = eventProcessingParallelism,

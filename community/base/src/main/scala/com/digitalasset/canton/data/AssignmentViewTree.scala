@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.AssignmentMediatorMessage
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -75,10 +75,7 @@ final case class AssignmentViewTree(
       AssignmentMediatorMessage.protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  override protected def pretty: Pretty[AssignmentViewTree] = prettyOfClass(
-    param("common data", _.commonData),
-    param("view", _.view),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[AssignmentViewTree] = AssignmentViewTree
 
   @transient override protected lazy val companionObj: AssignmentViewTree.type =
     AssignmentViewTree
@@ -89,7 +86,13 @@ object AssignmentViewTree
       AssignmentViewTree,
       Target,
       HashOps,
-    ] {
+    ]
+    with PrettyPrintingCompanion[AssignmentViewTree] {
+
+  override protected val pretty: Pretty[AssignmentViewTree] = prettyOfClass(
+    param("common data", _.commonData),
+    param("view", _.view),
+  )
 
   override val name: String = "AssignmentViewTree"
 
@@ -190,7 +193,16 @@ final case class AssignmentCommonData private (
 
   override def hashPurpose: HashPurpose = HashPurpose.AssignmentCommonData
 
-  override protected def pretty: Pretty[AssignmentCommonData] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[AssignmentCommonData] =
+    AssignmentCommonData
+}
+
+object AssignmentCommonData
+    extends VersioningCompanionContextMemoization[AssignmentCommonData, HashOps]
+    with PrettyPrintingCompanion[AssignmentCommonData] {
+  override val name: String = "AssignmentCommonData"
+
+  override protected val pretty: Pretty[AssignmentCommonData] = prettyOfClass(
     param("submitter metadata", _.submitterMetadata),
     param("target synchronizer id", _.targetSynchronizerId),
     param("target mediator group", _.targetMediatorGroup),
@@ -199,11 +211,6 @@ final case class AssignmentCommonData private (
     param("uuid", _.uuid),
     param("salt", _.salt),
   )
-}
-
-object AssignmentCommonData
-    extends VersioningCompanionContextMemoization[AssignmentCommonData, HashOps] {
-  override val name: String = "AssignmentCommonData"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentCommonData)(
@@ -353,7 +360,15 @@ final case class AssignmentView private (
       reassignmentId = Some(reassignmentId.toProtoV30),
     )
 
-  override protected def pretty: Pretty[AssignmentView] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[AssignmentView] = AssignmentView
+}
+
+object AssignmentView
+    extends VersioningCompanionContextMemoization[AssignmentView, HashOps]
+    with PrettyPrintingCompanion[AssignmentView] {
+  override val name: String = "AssignmentView"
+
+  override protected val pretty: Pretty[AssignmentView] = prettyOfClass(
     param("reassignment id", _.reassignmentId),
     param(
       "contract ids and counters",
@@ -361,10 +376,6 @@ final case class AssignmentView private (
     ), // do not log contract details because it contains confidential data
     param("salt", _.salt),
   )
-}
-
-object AssignmentView extends VersioningCompanionContextMemoization[AssignmentView, HashOps] {
-  override val name: String = "AssignmentView"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentView)(
@@ -445,8 +456,7 @@ object AssignmentView extends VersioningCompanionContextMemoization[AssignmentVi
   */
 final case class FullAssignmentTree(tree: AssignmentViewTree)
     extends FullReassignmentViewTree
-    with HasToByteString
-    with PrettyPrinting {
+    with HasToByteString {
   require(tree.isFullyUnblinded, "an assignment request must be fully unblinded")
 
   protected[this] val commonData: AssignmentCommonData = tree.commonData.tryUnwrap
@@ -488,12 +498,15 @@ final case class FullAssignmentTree(tree: AssignmentViewTree)
 
   override def rootHash: RootHash = tree.rootHash
 
-  override protected def pretty: Pretty[FullAssignmentTree] = prettyOfClass(unnamedParam(_.tree))
+  override def prettyCompanion: PrettyPrintingCompanion[FullAssignmentTree] = FullAssignmentTree
 
   override def toByteString: ByteString = tree.toByteString
 }
 
-object FullAssignmentTree {
+object FullAssignmentTree extends PrettyPrintingCompanion[FullAssignmentTree] {
+
+  override protected val pretty: Pretty[FullAssignmentTree] = prettyOfClass(unnamedParam(_.tree))
+
   def fromByteString(
       crypto: CryptoPureApi,
       targetProtocolVersion: Target[ProtocolVersion],

@@ -4,8 +4,13 @@
 package com.digitalasset.canton.protocol
 
 import cats.syntax.either.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPartyId, LfVersioned, checked}
 
 /** Metadata for a contract.
@@ -21,7 +26,7 @@ final case class ContractMetadata private (
     signatories: Set[LfPartyId],
     stakeholders: Set[LfPartyId],
     maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   {
     val nonSignatoryMaintainers = maintainers -- signatories
@@ -42,15 +47,17 @@ final case class ContractMetadata private (
   def maintainers: Set[LfPartyId] =
     maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.maintainers)
 
-  override protected def pretty: Pretty[ContractMetadata] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[ContractMetadata] = ContractMetadata
+}
+
+object ContractMetadata extends PrettyPrintingCompanion[ContractMetadata] {
+
+  override protected val pretty: Pretty[ContractMetadata] = prettyOfClass(
     param("signatories", _.signatories),
     param("stakeholders", _.stakeholders),
     paramIfDefined("key", _.maybeKey),
     paramIfNonEmpty("maintainers", _.maintainers),
   )
-}
-
-object ContractMetadata {
 
   final case class InvalidContractMetadata(message: String) extends RuntimeException(message)
 

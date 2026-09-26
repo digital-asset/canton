@@ -15,12 +15,9 @@ import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import com.digitalasset.daml.lf.transaction.GlobalKeyWithMaintainers
 import com.digitalasset.daml.lf.transaction.SerializationVersion.VDev
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{
-  GlobalKeyWithMaintainers,
-  NextGenContractStateMachine as ContractStateMachine,
-}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.*
 import org.scalatest.Inside
@@ -482,9 +479,7 @@ class UpgradeTest
       sexprToEval,
       Set(alice, bob),
       MachineLogger(),
-      interpretationConfig = InterpretationConfig.Default.copy(
-        contractStateMode = ContractStateMachine.Mode.Key
-      ),
+      interpretationConfig = InterpretationConfig.Default,
     )
 
     val contract = TransactionBuilder
@@ -528,8 +523,7 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       packageResolution = packageResolution,
-      interpretationConfig =
-        InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
+      interpretationConfig = InterpretationConfig.Default,
     )
   }
 

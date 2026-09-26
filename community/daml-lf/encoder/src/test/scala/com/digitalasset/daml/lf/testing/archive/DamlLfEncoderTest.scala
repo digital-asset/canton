@@ -62,6 +62,7 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
         "BigNumericMod",
         "InterfaceExtMod",
         "TemplateWithKeyMod",
+        "UnpackMod",
         "DA.Types", // stable package
       )
 

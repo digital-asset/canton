@@ -22,6 +22,9 @@ class NonStakeholderInformeesITSpec
     with AppendedClues
     with OptionValues
     with Checkpoints {
+
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

@@ -1,0 +1,411 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.participant.protocol.party.acsreplication
+
+import cats.data.EitherT
+import cats.syntax.either.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature, SigningKeyUsage}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.admin.data.ActiveContract
+import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationStatus,
+  PartyReplicationTestInterceptor,
+}
+import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.protocol.party.*
+import com.digitalasset.canton.participant.store
+import com.digitalasset.canton.participant.store.AcsReplicationProgress
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.{RepairCounter, checked}
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
+import com.google.protobuf.ByteString
+import org.apache.pekko.stream.Materializer
+
+import scala.concurrent.ExecutionContext
+
+/** The source participant processor exposes a party's active contracts on a specified synchronizer
+  * and timestamp to a target participant as part of Online Party Replication.
+  *
+  * The interaction happens via the
+  * [[com.digitalasset.canton.sequencing.client.channel.SequencerChannelProtocolProcessor]] API and
+  * the source participant processor enforces the protocol guarantees made by a
+  * [[AcsReplicationTargetParticipantProcessor]]. The following guarantees made by the source
+  * participant processor are verifiable by the party replication protocol: The source participant
+  *   - only sends messages after receiving [[AcsReplicationTargetParticipantMessage.Initialize]],
+  *   - only sends as many contracts as requested by the target participant to honor flow control,
+  *   - sends [[AcsReplicationSourceParticipantMessage.EndOfAcs]] as the last message,
+  *   - and sends only deserializable payloads.
+  *
+  * @param psid
+  *   The synchronizer id of the synchronizer to replicate active contracts within.
+  * @param partyId
+  *   The party whose ACS is being replicated.
+  * @param effectiveAtLapiOffset
+  *   The Ledger API offset at which the party is being onboarded, needed to read the correct ACS
+  *   snapshot via the LAPI.
+  * @param excludedStakeholders
+  *   Shared contract stakeholder parties to exclude from the read ACS, for example as in the case
+  *   of party replication, exclude parties already hosted by the target participants.
+  * @param sourceParticipantId
+  *   The source participant id to include in the ACS digest.
+  * @param agreedAt
+  *   The time at which it was agreed to replicate the ACS via sequencer channel.
+  * @param lapiIndexService
+  *   The Ledger API index service used to read the ACS.
+  * @param replicationProgressState
+  *   Interface for processor to read and update ACS replication progress.
+  * @param onError
+  *   Callback notification that the source participant has encountered an error.
+  * @param onDisconnect
+  *   Callback notification that the target participant has disconnected.
+  * @param testOnlyInterceptor
+  *   Test interceptor only alters behavior in integration tests.
+  */
+final class AcsReplicationSourceParticipantProcessor private (
+    val psid: PhysicalSynchronizerId,
+    partyId: PartyId,
+    requestId: Hash,
+    asOf: CantonTimestamp,
+    effectiveAtLapiOffset: Offset,
+    excludedStakeholders: Set[PartyId],
+    sourceParticipantId: ParticipantId,
+    agreedAt: CantonTimestamp,
+    lapiIndexService: InternalIndexService,
+    protected val replicationProgressState: AcsReplicationProgress,
+    protected val onError: String => Unit,
+    protected val onDisconnect: (String, TraceContext) => Unit,
+    protected val futureSupervisor: FutureSupervisor,
+    protected val exitOnFatalFailures: Boolean,
+    protected val timeouts: ProcessingTimeout,
+    protected val loggerFactory: NamedLoggerFactory,
+    protected val testOnlyInterceptor: PartyReplicationTestInterceptor,
+)(implicit override val executionContext: ExecutionContext, mat: Materializer)
+    extends AcsReplicationProcessor {
+  protected val processorStore: SourceParticipantStore =
+    InMemoryProcessorStore.sourceParticipant(loggerFactory, timeouts)
+
+  // TODO(#22251): Make this configurable.
+  private val contractsPerBatch = PositiveInt.two
+
+  override def replicatedContractsCount: NonNegativeLong = processorStore.sentContractsCount
+
+  override protected def name: String = "party-replication-source-processor"
+
+  /** Once connected or reconnected, remember that the SP needs to be initialized by the TP.
+    */
+  override def onConnected()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = execute("handle connect to TP") {
+    super.onConnected().map(_ => processorStore.resetConnection())
+  }
+
+  /** Handle instructions from the target participant
+    */
+  override def handlePayload(payload: ByteString)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = execute("handle payload from TP") {
+    notifyCounterParticipantAndAcsReplicatorOnError(for {
+      messageFromTP <- EitherT.fromEither[FutureUnlessShutdown](
+        AcsReplicationTargetParticipantMessage
+          .fromByteString(protocolVersion, payload)
+          .leftMap(_.message)
+      )
+      _ <- messageFromTP.instruction match {
+        case AcsReplicationTargetParticipantMessage.SendAcsUpTo(maxOrdinal) =>
+          handleSendAcsUpTo(maxOrdinal)
+        case AcsReplicationTargetParticipantMessage.Initialize(minOrdinal) =>
+          handleInitialize(minOrdinal)
+      }
+    } yield ())
+  }
+
+  private def handleSendAcsUpTo(maxContractOrdinalInclusive: NonNegativeLong)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    logger.debug(
+      s"Source participant has received instruction to send up to contract ordinal $maxContractOrdinalInclusive"
+    )
+    for {
+      // Check that the target participant has initialized this SP.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        processorStore.initialContractOrdinalInclusiveO.isDefined,
+        (),
+        "Target participant has not initialized source participant",
+      )
+      previousMaxOrdinalInclusive = processorStore.contractOrdinalToSendUpToExclusive.unwrap - 1
+      // Check that the target participant is requesting higher contract ordinals.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        maxContractOrdinalInclusive.unwrap > previousMaxOrdinalInclusive,
+        (),
+        s"Target participant requested contract ordinals that are not strictly increasing $maxContractOrdinalInclusive compared to previous ordinal $previousMaxOrdinalInclusive",
+      )
+      _ = processorStore.setContractOrdinalToSendUpToExclusive(
+        maxContractOrdinalInclusive + NonNegativeLong.one // +1 for inclusive to exclusive
+      )
+    } yield progressAcsReplication()
+  }
+
+  private def handleInitialize(
+      initialContractOrdinalInclusive: NonNegativeLong
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    logger.info(
+      s"Source participant has received instruction initialize starting with contract $initialContractOrdinalInclusive"
+    )
+    EitherT.fromEither[FutureUnlessShutdown](
+      processorStore.initializeSourceParticipantState(
+        initialContractOrdinalInclusive,
+        new AcsReplicationAcsReader(
+          partyId,
+          psid,
+          asOf,
+          effectiveAtLapiOffset,
+          excludedStakeholders,
+          sourceParticipantId,
+          agreedAt,
+          lapiIndexService,
+          _,
+          _,
+          timeouts,
+        ),
+      )
+    )
+  }
+
+  /** Single point of entry for progress monitoring and advancing of party replication states for
+    * those states that are driven by the party replicator.
+    */
+  override def progressAcsReplication()(implicit traceContext: TraceContext): Unit =
+    // Skip progress check if more than one other task is already queued that performs this same progress check or
+    // is going to schedule a progress check.
+    if (executionQueue.isAtMostOneTaskScheduled) {
+      executeAsync(s"Respond to target participant if needed") {
+        EitherTUtil.ifThenET(
+          isChannelOpenForCommunication &&
+            !hasEndOfACSBeenReached &&
+            testOnlyInterceptor.onSourceParticipantProgress(
+              processorStore
+            ) == PartyReplicationTestInterceptor.Proceed &&
+            processorStore.initialContractOrdinalInclusiveO.isDefined &&
+            processorStore.sentContractsCount.unwrap < processorStore.contractOrdinalToSendUpToExclusive.unwrap - 1 // -1 for exclusive to inclusive
+        )(
+          respondToTargetParticipant()
+        )
+      }
+    }
+
+  private def respondToTargetParticipant()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
+    notifyCounterParticipantAndAcsReplicatorOnError {
+      val fromInclusive = processorStore.sentContractsCount
+      val toInclusive: NonNegativeLong =
+        processorStore.contractOrdinalToSendUpToExclusive.map(_ - 1)
+      logger.debug(
+        s"Source participant looking up contract ordinals [${fromInclusive.unwrap},${toInclusive.unwrap}]"
+      )
+
+      val deltaLong =
+        processorStore.contractOrdinalToSendUpToExclusive.unwrap - fromInclusive.unwrap
+
+      for {
+        maxNumActiveContractsToProcess <- EitherT.cond[FutureUnlessShutdown](
+          deltaLong <= Int.MaxValue.toLong,
+          PositiveInt.tryCreate(deltaLong.toInt),
+          s"request to send up to ${processorStore.contractOrdinalToSendUpToExclusive} too large relative to $fromInclusive",
+        )
+        acsReader <- EitherT.fromEither[FutureUnlessShutdown](
+          processorStore.acsReaderO.toRight("ACS reader not initialized")
+        )
+
+        (haveReachedEndOfAcs, contracts) = acsReader.readContracts(maxNumActiveContractsToProcess)
+        numContractsSending = contracts.size
+
+        _ <- EitherTUtil.ifThenET(numContractsSending > 0) {
+          val contractBatches = contracts
+            .grouped(contractsPerBatch.unwrap)
+            .toSeq
+            .map(NonEmptyUtil.fromUnsafe)
+          sendContracts(contractBatches, fromInclusive, numContractsSending).map(_ =>
+            processorStore
+              .increaseSentContractsCount(NonNegativeInt.tryCreate(numContractsSending))
+              .discard
+          )
+        }
+
+        sentContractCount = processorStore.sentContractsCount
+
+        // If there aren't enough contracts, send that we have reached the end of the ACS.
+        _ <- EitherTUtil.ifThenET(haveReachedEndOfAcs) {
+          val acsDigest = acsReader.extractAcsDigest()
+          sendEndOfAcs(s"End of ACS after $sentContractCount contracts", acsDigest)
+        }
+
+        _ <- replicationProgressState.updateAcsReplicationProgress(
+          requestId,
+          PartyReplicationStatus.EphemeralSequencerChannelProgress(
+            sentContractCount,
+            RepairCounter.Genesis, // write-persistence not used by SP
+            Some(acsReader.getAcsDigestHash),
+            // Let the PartyReplicator know the SP is done, but let the TP, the channel owner, close the channel.
+            fullyProcessedAcs = haveReachedEndOfAcs,
+            Some(this),
+          ),
+        )
+      } yield ()
+    }
+
+  private def sendContracts(
+      contractBatches: Seq[NonEmpty[Seq[ActiveContract]]],
+      firstContractOrdinal: NonNegativeLong,
+      numContractsSending: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    logger.debug(
+      s"Source participant sending ${contractBatches.size} batches with contract ordinals from ${firstContractOrdinal.unwrap} to ${firstContractOrdinal.unwrap + numContractsSending - 1}"
+    )
+    val indexedContractBatches = contractBatches.zipWithIndex.map { case (batch, index) =>
+      val fromInclusive = firstContractOrdinal +
+        (checked(NonNegativeLong.tryCreate(index.toLong)) * checked(
+          NonNegativeLong.tryCreate(contractsPerBatch.unwrap.toLong)
+        ))
+      val toInclusive = fromInclusive + checked(NonNegativeLong.tryCreate(batch.size.toLong - 1L))
+      (batch, (fromInclusive, toInclusive))
+    }
+    MonadUtil.sequentialTraverse_(indexedContractBatches) {
+      case (contracts, (fromInclusive, toInclusive)) =>
+        val acsBatch = AcsReplicationSourceParticipantMessage(
+          AcsReplicationSourceParticipantMessage.AcsBatch(contracts)
+        )(
+          AcsReplicationSourceParticipantMessage.protocolVersionRepresentativeFor(
+            protocolVersion
+          )
+        )
+        sendPayload(s"ACS batch from $fromInclusive to $toInclusive", acsBatch.toByteString)
+    }
+  }
+
+  private def sendEndOfAcs(
+      endOfStreamMessage: String,
+      acsDigest: AcsReplicationSourceParticipantMessage.AcsDigest,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    logger.info(endOfStreamMessage)
+    val acsDigestByteString = acsDigest.toByteString
+    for {
+      signature <- signAcsDigest(acsDigestByteString)
+      endOfACS = AcsReplicationSourceParticipantMessage(
+        AcsReplicationSourceParticipantMessage.EndOfAcs(acsDigest, acsDigestByteString, signature)
+      )(
+        AcsReplicationSourceParticipantMessage.protocolVersionRepresentativeFor(protocolVersion)
+      )
+      _ <- sendPayload(endOfStreamMessage, endOfACS.toByteString)
+    } yield {
+      processorStore.setHasEndOfACSBeenReached()
+      // Don't send an onComplete or close the channel yet. Let the TP as the owner of the channel close.
+      // Having the target participant send the onComplete and initiate closing of the channel also avoids
+      // flaky warnings in case the TP has not processed the EndOfACS message yet.
+    }
+  }
+
+  private def signAcsDigest(
+      acsDigestByteString: ByteString
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Signature] =
+    for {
+      cryptoClient <- EitherT.fromEither[FutureUnlessShutdown](
+        getCryptoClient.toRight(s"Need crypto client for signing")
+      )
+      // Use signing key valid at the ACS snapshot asOf timestamp.
+      snapshot <- EitherT.right[String](cryptoClient.snapshot(asOf))
+      acsDigestHash = Hash
+        .build(HashPurpose.AcsReplicationDigest, HashAlgorithm.Sha256)
+        .addByteString(acsDigestByteString)
+        .finish()
+      signature <- snapshot
+        .sign(
+          acsDigestHash,
+          SigningKeyUsage.ProtocolOnly,
+          signingTimestampOverrides = None,
+        )
+        .leftMap(err => s"Failed to sign ACS digest: $err")
+    } yield signature
+
+  override protected def hasEndOfACSBeenReached: Boolean = processorStore.hasEndOfACSBeenReached
+
+  override def onClosed(): Unit = {
+    processorStore.resetConnection()
+    super.onClosed()
+  }
+}
+
+object AcsReplicationSourceParticipantProcessor {
+  def initialize(
+      psid: PhysicalSynchronizerId,
+      partyId: PartyId,
+      requestId: Hash,
+      asOf: CantonTimestamp,
+      sourceParticipantId: ParticipantId,
+      excludedStakeholders: Set[PartyId],
+      agreedAt: CantonTimestamp,
+      lapiIndexService: InternalIndexService,
+      replicationProgressState: store.AcsReplicationProgress,
+      onError: String => Unit,
+      onDisconnect: (String, TraceContext) => Unit,
+      ledgerApiStore: LedgerApiStore,
+      futureSupervisor: FutureSupervisor,
+      exitOnFatalFailures: Boolean,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+      testInterceptor: PartyReplicationTestInterceptor =
+        PartyReplicationTestInterceptor.AlwaysProceed,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+      mat: Materializer,
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationSourceParticipantProcessor] =
+    for {
+      effectiveAtLapiOffset <- EitherT(
+        ledgerApiStore
+          .lastSynchronizerOffsetBeforeOrAtRecordTime(psid.logical, asOf)
+          .map(
+            _.flatMap(_.lastSynchronizerOffset.map(_.offset))
+              .toRight(s"Cannot locate Ledger API offset at $asOf for $partyId")
+          )
+      )
+    } yield new AcsReplicationSourceParticipantProcessor(
+      psid,
+      partyId,
+      requestId,
+      asOf,
+      effectiveAtLapiOffset,
+      excludedStakeholders,
+      sourceParticipantId,
+      agreedAt,
+      lapiIndexService,
+      replicationProgressState,
+      onError,
+      onDisconnect,
+      futureSupervisor,
+      exitOnFatalFailures,
+      timeouts,
+      loggerFactory
+        .append("psid", psid.toProtoPrimitive)
+        .append("partyId", partyId.toProtoPrimitive)
+        .append("requestId", requestId.toHexString),
+      testInterceptor,
+    )
+}

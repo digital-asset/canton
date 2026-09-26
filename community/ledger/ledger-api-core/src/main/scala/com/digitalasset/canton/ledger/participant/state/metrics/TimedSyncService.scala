@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
   UpdateVettedPackagesOpts,
   UploadDarVettingChange,
+  VettedPackagesPage,
 }
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.{
@@ -207,7 +208,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[EnrichedVettedPackages]] =
+  ): Future[VettedPackagesPage[EnrichedVettedPackages]] =
     Timed.future(
       metrics.services.read.listVettedPackages,
       delegate.listVettedPackages(opts),

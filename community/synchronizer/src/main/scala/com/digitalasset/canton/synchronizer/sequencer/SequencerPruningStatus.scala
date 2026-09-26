@@ -13,6 +13,8 @@ import com.digitalasset.canton.logging.pretty.{
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 
 trait AbstractSequencerMemberStatus extends Product with Serializable {
   def registeredAt: CantonTimestamp
@@ -231,9 +233,16 @@ object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningSt
   def fromProtoV30(
       statusP: v30.SequencerPruningStatus
   ): ParsingResult[SequencerPruningStatus] =
+    // TODO(#35385): Reinstate a practical admin API members limit.
     for {
+      validatedMembers <- ProtoValidation.validateLength(
+        statusP.members,
+        "members",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )
       earliestEventTimestamp <- CantonTimestamp.fromProtoPrimitive(statusP.earliestEventTimestamp)
       now <- CantonTimestamp.fromProtoPrimitive(statusP.now)
-      members <- statusP.members.traverse(SequencerMemberStatus.fromProtoV30).map(_.toSet)
+      members <- validatedMembers.traverse(SequencerMemberStatus.fromProtoV30).map(_.toSet)
     } yield SequencerPruningStatus(earliestEventTimestamp, now, members)
 }

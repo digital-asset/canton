@@ -11,8 +11,8 @@ import scala.collection.mutable.ArrayBuffer
 /** Forms dynamically-sized batches based on downstream backpressure.
   *   - Under light load, this flow emits batches of size 1.
   *   - Under moderate load, this flow emits batches according to the batch mode:
-  *     - MaximizeConcurrency: emits batches of even sizes
-  *     - MaximizeBatchSize: emits fewer but full batches
+  *     - forMaxConcurrency: emits batches of even sizes
+  *     - forMaxBatchSize: emits fewer but full batches
   *   - Under heavy load (dowstream saturated), this flow emits batches of `maxBatchSize`.
   *
   * moderate load: short intermittent backpressure from downstream that doesn't fill up the maximum
@@ -21,47 +21,85 @@ import scala.collection.mutable.ArrayBuffer
   * heavy load: downstream backpressure causes the full batch capacity to fill up and BatchN to
   * exert backpressure to upstream.
   *
-  * Under heavy load or when maxBatchCount == 1, CatchUpMode.MaximizeBatchSize and
-  * CatchupMode.MaximizeConcurrency behave the same way, i.e. full batches are emitted.
+  * Under heavy load or when maxBatchCount == 1, forMaxBatchSize and forMaxConcurrency behave the
+  * same way, i.e. full batches are emitted.
   */
 object BatchN {
 
-  /** Determines how BatchN catches up under moderate load. */
-  sealed trait CatchUpMode
-
-  /** Causes BatchN to favor a smaller number of large batches when catching up after backpressure
+  /** BatchN variant to favor a smaller number of large batches when catching up after backpressure
     */
-  case object MaximizeBatchSize extends CatchUpMode
+  def forMaxBatchSize[In](maxBatchSize: Int, maxBatchCount: Int): Flow[In, Iterable[In], NotUsed] =
+    apply(maxBatchSize, maxBatchCount, minBatchSize = maxBatchSize, costFn = (_: Any) => 1L)
 
-  /** Causes BatchN to favor a higher number of small batches when catching up after backpressure */
-  case object MaximizeConcurrency extends CatchUpMode
+  /** BatchN variant to favor a higher number of small batches when catching up after backpressure
+    */
+  def forMaxConcurrency[In](
+      maxBatchSize: Int,
+      maxBatchCount: Int,
+  ): Flow[In, Iterable[In], NotUsed] =
+    apply(maxBatchSize, maxBatchCount, minBatchSize = 1, costFn = (_: Any) => 1L)
 
   def apply[In](
       maxBatchSize: Int,
       maxBatchCount: Int,
-      catchUpMode: CatchUpMode = MaximizeConcurrency,
+      minBatchSize: Int,
+      costFn: In => Long,
   ): Flow[In, Iterable[In], NotUsed] = {
+    assert(maxBatchSize > 0, s"maxBatchSize ($maxBatchSize) must be greater than 0")
+    assert(
+      minBatchSize <= maxBatchSize,
+      s"minBatchSize ($minBatchSize) must be less than or equal to maxBatchSize ($maxBatchSize)",
+    )
     val totalBatchSize = maxBatchSize * maxBatchCount
     Flow[In]
-      .batch[ArrayBuffer[In]](
+      .batchWeighted[ArrayBuffer[In]](
         totalBatchSize.toLong,
+        costFn,
         newBatch(totalBatchSize, _),
       )(_ addOne _)
       .mapConcat { totalBatch =>
-        val totalSize = totalBatch.size
-        val batchSize = catchUpMode match {
-          case MaximizeBatchSize => maxBatchSize
-          case MaximizeConcurrency => totalSize / maxBatchCount
+        val (targetBatchWeight, remainder) =
+          if (maxBatchSize == minBatchSize)
+            minBatchSize.toLong -> 0L
+          else {
+            val totalCost = totalBatch.view.map(costFn).sum
+            val baseBatchSize = totalCost / maxBatchCount
+            if (baseBatchSize >= minBatchSize)
+              baseBatchSize -> totalCost % maxBatchCount
+            else
+              minBatchSize.toLong -> 0L
+          }
+
+        // imperative code to effectively split the totalBatch into batches of targetBatchWeight factoring in the remainder
+        val result = ArrayBuffer[ArrayBuffer[In]]()
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var currentBatch = ArrayBuffer[In]()
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var currentBatchWeightRemaining = 0L
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var currentRemainder = remainder
+
+        def initNewBatch(): Unit = {
+          currentBatch = ArrayBuffer[In]()
+          currentBatch.sizeHint(targetBatchWeight.toInt + 1)
+          currentBatchWeightRemaining = if (remainder > 0) {
+            currentRemainder = currentRemainder - 1
+            targetBatchWeight + 1
+          } else targetBatchWeight
         }
-        if (batchSize == 0) {
-          totalBatch.view
-            .map(Seq(_))
-            .toVector
-        } else {
-          totalBatch
-            .grouped(batchSize)
-            .toVector
+
+        initNewBatch()
+        totalBatch.foreach { in =>
+          val cost = costFn(in)
+          if (currentBatchWeightRemaining - cost < 0 && currentBatch.nonEmpty) {
+            result.addOne(currentBatch)
+            initNewBatch()
+          }
+          currentBatch.addOne(in)
+          currentBatchWeightRemaining = currentBatchWeightRemaining - cost
         }
+        if (currentBatch.nonEmpty) result.addOne(currentBatch)
+        result
       }
   }
 

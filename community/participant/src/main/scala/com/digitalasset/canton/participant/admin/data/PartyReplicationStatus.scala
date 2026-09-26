@@ -31,11 +31,13 @@ import scala.annotation.unused
 /** External console representation of the party replication process. Refer to
   * party_management_service.proto PartyReplicationStatus for the semantics.
   */
+// TODO (#35267) Use AcsReplication status for acsReplicationO field
 final case class PartyReplicationStatus(
     parameters: ReplicationParameters,
     agreementStatusO: Option[SequencerChannelAgreement],
     authorizationO: Option[PartyReplicationAuthorization],
     replicationO: Option[AcsReplicationProgress],
+    acsReplicationO: Option[PartyReplicationStatus],
     indexingO: Option[AcsIndexingProgress.type],
     hasCompleted: Boolean,
     errorO: Option[PartyReplicationError],
@@ -54,6 +56,7 @@ final case class PartyReplicationStatus(
     indexingO.map(_.toProtoV30),
     hasCompleted = hasCompleted,
     errorO.map(_.toProtoV30),
+    acsReplicationO.map(_.toProtoV30),
   )
 
   def toLapiProto: LapiPartyReplicationStatus = {
@@ -79,6 +82,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
       paramIfDefined("agreementStatus", _.agreementStatusO),
       paramIfDefined("authorization", _.authorizationO),
       paramIfDefined("replication", _.replicationO),
+      paramIfDefined("acsReplicationStatus", _.acsReplicationO),
       paramIfDefined("indexing", _.indexingO),
       paramIfDefined("error", _.errorO),
       paramIfTrue("complete", _.hasCompleted),
@@ -93,6 +97,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
           agreementStatus,
           authorizationO,
           replicationO,
+          acsReplicationStatusO,
           indexingO,
           hasCompleted,
           errorO,
@@ -102,6 +107,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
         SequencerChannelAgreement.fromInternal(agreementStatus),
         authorizationO.map(PartyReplicationAuthorization.fromInternal),
         replicationO.map(AcsReplicationProgress.fromInternal),
+        acsReplicationStatusO.map(PartyReplicationStatus.fromInternal),
         indexingO.map(AcsIndexingProgress.fromInternal),
         hasCompleted,
         errorO.map(PartyReplicationError.fromInternal),
@@ -115,6 +121,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
       agreementO <- proto.agreement.traverse(SequencerChannelAgreement.fromProtoV30)
       authorizationO <- proto.authorization.traverse(PartyReplicationAuthorization.fromProtoV30)
       replicationO <- proto.replication.traverse(AcsReplicationProgress.fromProtoV30)
+      acsReplicationoO <- proto.acsReplicationStatus.traverse(PartyReplicationStatus.fromProtoV30)
       indexingO <- proto.indexing.traverse(AcsIndexingProgress.fromProtoV30)
       hasCompleted = proto.hasCompleted
       errorO <- proto.errorMessage.traverse(PartyReplicationError.fromProtoV30)
@@ -123,6 +130,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
       agreementO,
       authorizationO,
       replicationO,
+      acsReplicationoO,
       indexingO,
       hasCompleted,
       errorO,
@@ -230,7 +238,7 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
   private object SequencerChannelAgreement
       extends PrettyPrintingCompanion[SequencerChannelAgreement] {
     val fromInternal: InternalStatus.AgreementStatus => Option[SequencerChannelAgreement] = {
-      case InternalStatus.AgreementStatus.Exists(_, sequencerId) =>
+      case InternalStatus.AgreementStatus.Exists(_, _, sequencerId) =>
         Some(SequencerChannelAgreement(sequencerId))
       case _ => None
     }
@@ -307,9 +315,16 @@ object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationSt
   private object AcsReplicationProgress extends PrettyPrintingCompanion[AcsReplicationProgress] {
     def fromInternal(internal: InternalStatus.AcsReplicationProgress): AcsReplicationProgress = {
       val (processedContractCount, fullyProcessedAcs) = internal match {
-        case InternalStatus.PersistentProgress(count, _, done) => (count, done)
-        case InternalStatus.EphemeralSequencerChannelProgress(count, _, done, _) => (count, done)
-        case InternalStatus.EphemeralFileImporterProgress(count, _, done, _) => (count, done)
+        case InternalStatus.PersistentProgress(count, _, _, done) => (count, done)
+        case InternalStatus.EphemeralSequencerChannelProgress(
+              count,
+              _,
+              _,
+              done,
+              _,
+            ) =>
+          (count, done)
+        case InternalStatus.EphemeralFileImporterProgress(count, _, _, done, _) => (count, done)
       }
       AcsReplicationProgress(processedContractCount, fullyProcessedAcs)
     }

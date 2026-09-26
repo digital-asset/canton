@@ -7,10 +7,8 @@ import com.digitalasset.canton.config.CantonRequireTypes.String68
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, PositiveFiniteDuration}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.v31
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, Generators}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
@@ -19,22 +17,12 @@ import org.scalacheck.*
 
 import scala.annotation.nowarn
 
-final class GeneratorsCrypto(
-    protocolVersion: ProtocolVersion
-) {
+object GeneratorsCrypto {
   import Generators.*
   import com.digitalasset.canton.data.GeneratorsDataTime.*
   import org.scalatest.EitherValues.*
 
-  implicit val signingKeyUsageArb: Arbitrary[SigningKeyUsage] =
-    Arbitrary(
-      genArbitrary[SigningKeyUsage].arbitrary.suchThat { usage =>
-        // PartyJWTAuthentication requires v36
-        usage.toProtoEnumV31 != v31.SigningKeyUsage.SIGNING_KEY_USAGE_PARTY_JWT_AUTHENTICATION
-        || protocolVersion >= ProtocolVersion.v36
-      }
-    )
-
+  implicit val signingKeyUsageArb: Arbitrary[SigningKeyUsage] = genArbitrary
   implicit val signingAlgorithmSpecArb: Arbitrary[SigningAlgorithmSpec] = genArbitrary
   implicit val signingKeySpecArb: Arbitrary[SigningKeySpec] = genArbitrary
   implicit val symmetricKeySchemeArb: Arbitrary[SymmetricKeyScheme] = genArbitrary
@@ -61,7 +49,7 @@ final class GeneratorsCrypto(
   )
 
   val validUsageGen: Gen[Set[SigningKeyUsage]] = for {
-    usages <- Gen.someOf(SigningKeyUsage.all(protocolVersion))
+    usages <- Gen.someOf(SigningKeyUsage.All)
     if SigningKeyUsage.isUsageValid(NonEmptyUtil.fromUnsafe(usages.toSet))
   } yield usages.toSet
 
@@ -70,9 +58,7 @@ final class GeneratorsCrypto(
     key <- Arbitrary.arbitrary[ByteString]
     keySpec <- Arbitrary.arbitrary[SigningKeySpec]
     format = CryptoKeyFormat.Symbolic
-    usage <- nonEmptySetGen(
-      Arbitrary(Gen.oneOf(SigningKeyUsage.all(protocolVersion).toList))
-    )
+    usage <- nonEmptySetGen(Arbitrary(Gen.oneOf(SigningKeyUsage.All.toList)))
       .suchThat(usagesNE => SigningKeyUsage.isUsageValid(usagesNE))
   } yield SigningPublicKey.create(format, key, keySpec, usage).value)
 

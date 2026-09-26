@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -21,6 +20,7 @@ import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationInt
 
 /** The goal is to check persistence of
   * [[com.digitalasset.canton.participant.synchronizer.PendingLsuOperation]].
@@ -74,14 +74,13 @@ final class LsuPersistentHandshakeSuccessorIntegrationTest
       }
       .addConfigTransforms(configTransforms*)
       .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          /*
+        /*
           The handshakes fail initial because sequencers are not up.
           The default timeout (before giving up) is 30 seconds and during that time, the simple execution queue
           for the synchronizer connect/disconnect/handshakes is blocked.
           A lower value makes the test faster. A value that is too low would make the test flaky.
-           */
-          .replace(NonNegativeDuration.ofSeconds(3))
+         */
+        ConfigTransforms.setSequencerInfoTimeout(3.second)
       )
       // all nodes but P2 support alpha pv
       .addConfigTransform(

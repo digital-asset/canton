@@ -189,7 +189,6 @@ class TestEngine(
       cmds = engineCommands.commands,
       participantId = participantId,
       submissionSeed = randomHash(),
-      readAs = Set.empty,
       prefetchKeys = Seq.empty,
       contractIdVersion = ContractIdVersion.V1,
       interpretationConfig = interpretationConfig,

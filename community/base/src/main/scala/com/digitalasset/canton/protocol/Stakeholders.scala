@@ -3,9 +3,14 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
@@ -14,7 +19,7 @@ import com.google.common.annotations.VisibleForTesting
 
 // Invariant: signatories is a subset of all
 final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfPartyId])
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
   val nonConfirming: Set[LfPartyId] = all -- signatories
 
@@ -26,10 +31,7 @@ final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfP
       )
   }
 
-  override protected def pretty: Pretty[Stakeholders.this.type] = prettyOfClass(
-    param("all", _.all.toSeq.sorted),
-    param("signatories", _.signatories.toSeq.sorted),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[Stakeholders] = Stakeholders
 
   def toProtoV30: v30.Stakeholders = v30.Stakeholders(
     all = all.toSeq.map(_.toProtoUnvalidated),
@@ -37,7 +39,12 @@ final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfP
   )
 }
 
-object Stakeholders {
+object Stakeholders extends PrettyPrintingCompanion[Stakeholders] {
+
+  override protected val pretty: Pretty[Stakeholders] = prettyOfClass(
+    param("all", _.all.toSeq.sorted),
+    param("signatories", _.signatories.toSeq.sorted),
+  )
 
   def apply(metadata: ContractMetadata): Stakeholders =
     Stakeholders(all = metadata.stakeholders, signatories = metadata.signatories)

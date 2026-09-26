@@ -7,14 +7,19 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.data.ReassignmentRef
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors.{
   stakeholderNotHostedOnSynchronizer,
   stakeholdersNoReassigningParticipant,
+}
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  NonReassigningParticipantsDeclared,
+  StakeholderHostingErrors,
 }
 import com.digitalasset.canton.protocol.Stakeholders
 import com.digitalasset.canton.topology.ParticipantId
@@ -25,6 +30,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SingletonTraverse.syntax.SingletonTraverseOps
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ReassignmentTag, SingletonTraverse}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -50,13 +56,13 @@ private[protocol] class ReassigningParticipantsComputation(
   def compute: EitherT[FutureUnlessShutdown, ReassignmentValidationError, Set[ParticipantId]] =
     for {
       sourceStakeholdersInfo <- getStakeholdersPartyInfo(sourceTopology)
-      targetStakeholdersInfo <- getStakeholdersPartyInfo(targetTopology)
-
-      reassigningParticipants <- EitherT
-        .fromEither[FutureUnlessShutdown](
-          computeReassigningParticipants(sourceStakeholdersInfo, targetStakeholdersInfo)
-        )
         .leftWiden[ReassignmentValidationError]
+      targetStakeholdersInfo <- getStakeholdersPartyInfo(targetTopology)
+        .leftWiden[ReassignmentValidationError]
+
+      reassigningParticipants <- EitherT.fromEither[FutureUnlessShutdown](
+        computeReassigningParticipants(sourceStakeholdersInfo, targetStakeholdersInfo)
+      )
 
       _ <- EitherT
         .fromEither[FutureUnlessShutdown](
@@ -67,11 +73,76 @@ private[protocol] class ReassigningParticipantsComputation(
 
     } yield reassigningParticipants.values.toSet.flatten
 
+  /** Check that `declared` is included in the computed reassigning participants and satisfies the
+    * conditions listed on [[compute]].
+    *
+    * @param declared
+    *   the reassigning participants declared in the unassignment request
+    * @param reassignmentRef
+    *   used only to identify the reassignment in the [[NonReassigningParticipantsDeclared]] error
+    * @return
+    *   unit if `declared` is sufficient, the first failing check otherwise
+    */
+  def checkSufficient(
+      declared: Set[ParticipantId],
+      reassignmentRef: ReassignmentRef,
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    for {
+      sourceStakeholdersInfo <- getStakeholdersPartyInfo(sourceTopology)
+        .leftWiden[ReassignmentValidationError]
+      targetStakeholdersInfo <- getStakeholdersPartyInfo(targetTopology)
+        .leftWiden[ReassignmentValidationError]
+
+      computed <- EitherT.fromEither[FutureUnlessShutdown](
+        computeReassigningParticipants(sourceStakeholdersInfo, targetStakeholdersInfo)
+      )
+      computedParticipants = computed.values.toSet.flatten
+
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        declared.subsetOf(computedParticipants),
+        (),
+        NonReassigningParticipantsDeclared(
+          reassignmentRef,
+          targetTimestamp = targetTopology.map(_.timestamp),
+          reassigningParticipants = computedParticipants,
+          declared = declared,
+        ): ReassignmentValidationError,
+      )
+
+      // `declared` must be sufficient on its own, so the hosting and threshold checks run on it
+      restricted = computed.flatMap { case (party, participants) =>
+        NonEmpty.from(participants.intersect(declared)).map(party -> _)
+      }
+
+      _ <- EitherT.fromEither[FutureUnlessShutdown](checkAllStakeholdersHosted(restricted))
+
+      _ <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          Seq(sourceStakeholdersInfo, targetStakeholdersInfo)
+            .traverse_(checkSignatoryReassigningParticipants(_, restricted))
+        )
+        .leftWiden[ReassignmentValidationError]
+
+    } yield ()
+
+  /** Check that every stakeholder is hosted on at least one of the given reassigning participants.
+    */
+  private def checkAllStakeholdersHosted(
+      reassigningParticipants: Map[LfPartyId, NonEmpty[Set[ParticipantId]]]
+  ): Either[ReassignmentValidationError, Unit] = {
+    val reassigningParticipantsMissingFor = stakeholders.all.diff(reassigningParticipants.keySet)
+    Either.cond(
+      reassigningParticipantsMissingFor.isEmpty,
+      (),
+      stakeholdersNoReassigningParticipant(reassigningParticipantsMissingFor),
+    )
+  }
+
   /** Check that all signatories are hosted on sufficiently many signatory reassigning participants.
     */
   private def checkSignatoryReassigningParticipants(
       permissions: ReassignmentTag[Map[LfPartyId, PartyInfo]],
-      reassigningParticipants: Map[LfPartyId, Set[ParticipantId]],
+      reassigningParticipants: Map[LfPartyId, NonEmpty[Set[ParticipantId]]],
   ): Either[StakeholderHostingErrors, Unit] =
     stakeholders.signatories.toSeq.traverse_ { signatory =>
       for {
@@ -84,7 +155,7 @@ private[protocol] class ReassigningParticipantsComputation(
         }.toSet
 
         signatoryReassigningParticipants = confirmingParticipants.intersect(
-          reassigningParticipants.getOrElse(signatory, Set.empty)
+          reassigningParticipants.get(signatory).fold(Set.empty[ParticipantId])(_.forgetNE)
         )
 
         _ <- Either.cond(
@@ -100,13 +171,16 @@ private[protocol] class ReassigningParticipantsComputation(
       } yield ()
     }
 
-  /** Compute the reassigning participants Fails if one stakeholder is not hosted on any reassigning
-    * participant
+  /** Compute the reassigning participants. Fails if one stakeholder is not hosted on any
+    * reassigning participant.
+    *
+    * @return
+    *   for each stakeholder, the reassigning participants hosting it.
     */
   private def computeReassigningParticipants(
       permissionsSource: Source[Map[LfPartyId, PartyInfo]],
       permissionsTarget: Target[Map[LfPartyId, PartyInfo]],
-  ): Either[StakeholderHostingErrors, Map[LfPartyId, Set[ParticipantId]]] = {
+  ): Either[ReassignmentValidationError, Map[LfPartyId, NonEmpty[Set[ParticipantId]]]] = {
 
     def hostingParticipants(
         permissions: ReassignmentTag[Map[LfPartyId, PartyInfo]]
@@ -114,16 +188,14 @@ private[protocol] class ReassigningParticipantsComputation(
       (party, partyInfo.participants.keySet)
     }
 
-    val reassigningParticipants = MapsUtil.intersectValues(
-      hostingParticipants(permissionsSource),
-      hostingParticipants(permissionsTarget),
-    )
+    val reassigningParticipants = MapsUtil
+      .intersectValues(
+        hostingParticipants(permissionsSource),
+        hostingParticipants(permissionsTarget),
+      )
+      .flatMap { case (party, participants) => NonEmpty.from(participants).map(party -> _) }
 
-    val reassigningParticipantsMissingFor = stakeholders.all.diff(reassigningParticipants.keySet)
-
-    if (reassigningParticipantsMissingFor.nonEmpty) {
-      stakeholdersNoReassigningParticipant(reassigningParticipantsMissingFor).asLeft
-    } else reassigningParticipants.asRight
+    checkAllStakeholdersHosted(reassigningParticipants).map(_ => reassigningParticipants)
   }
 
   // Returns the list of participants hosting at least one of the stakeholders.

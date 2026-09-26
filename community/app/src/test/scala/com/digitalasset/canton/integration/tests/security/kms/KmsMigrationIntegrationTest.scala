@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsKmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpKmsCryptoIntegrationTestBase
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.integration.util.AcsInspection
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -31,7 +32,8 @@ trait KmsMigrationIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with KmsCryptoIntegrationTestBase
-    with AcsInspection {
+    with AcsInspection
+    with TopologyTransactionReSignHelpers {
 
   protected val sequencerGroups: MultiSynchronizer =
     MultiSynchronizer(Seq(Set("sequencer1"), Set("sequencer2")).map(_.map(InstanceName.tryCreate)))
@@ -130,9 +132,15 @@ trait KmsMigrationIntegrationTest
       CanSignAllButNamespaceDelegations,
     )
 
+    val resignedTxs = reSignForTestedProtocolVersion(
+      participantOld,
+      Seq(rootNamespaceDelegationOld, delegation),
+      testedProtocolVersion,
+    )
+
     participantNew.topology.transactions
       .load(
-        Seq(rootNamespaceDelegationOld, delegation),
+        resignedTxs,
         TopologyStoreId.Authorized,
         ForceFlag.AlienMember,
       )

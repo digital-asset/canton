@@ -82,7 +82,7 @@ private[channel] final class SequencerChannelClientEndpoint(
     member: Member,
     connectTo: Member,
     processor: SequencerChannelProtocolProcessor,
-    synchronizerCryptoApi: SynchronizerCryptoClient,
+    val synchronizerCryptoApi: SynchronizerCryptoClient,
     isSessionKeyOwner: Boolean,
     timestamp: CantonTimestamp,
     protocolVersion: ProtocolVersion,

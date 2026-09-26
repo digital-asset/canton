@@ -523,7 +523,7 @@ class MaliciousParticipantNode(
           contractOfIdWithDisclosure,
           maxSequencingTime,
           validatePackageVettings = false,
-          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
+          protocolLimits = defaultProtocolLimits,
         )
         .leftMap(err => s"Unable to create transaction tree: $err")
 

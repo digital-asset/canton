@@ -11,7 +11,7 @@ import com.digitalasset.canton.data.{
   ViewPosition,
   ViewType,
 }
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{RootHash, v30, v31, v32}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -87,7 +87,7 @@ case class InformeeMessage(
 
   override def viewType: ViewType = ViewType.TransactionViewType
 
-  override def pretty: Pretty[InformeeMessage] = prettyOfClass(unnamedParam(_.fullInformeeTree))
+  override def prettyCompanion: PrettyPrintingCompanion[InformeeMessage] = InformeeMessage
 
   @transient override protected lazy val companionObj: InformeeMessage.type = InformeeMessage
 }
@@ -96,7 +96,12 @@ object InformeeMessage
     extends VersioningCompanionContext[
       InformeeMessage,
       (GenTransactionTreeDeserializationContext, ProtocolVersion),
-    ] {
+    ]
+    with PrettyPrintingCompanion[InformeeMessage] {
+
+  override protected val pretty: Pretty[InformeeMessage] = prettyOfClass(
+    unnamedParam(_.fullInformeeTree)
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.InformeeMessage)(

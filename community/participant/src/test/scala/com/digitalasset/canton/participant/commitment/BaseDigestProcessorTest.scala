@@ -59,14 +59,18 @@ class BaseDigestProcessorTest
       val startingFuture = proc.start()
       checkHealth(proc, AcsCommitmentHealthState.Starting)
 
+      val stoppingPromise = Promise[Unit]()
       val promiseKillSwitch = new PromiseKillSwitch()
-      startupPromise.outcome_((promiseKillSwitch, promiseKillSwitch.promise.future))
+      val allStoppingFutures =
+        Future.sequence(Seq(promiseKillSwitch.promise.future, stoppingPromise.future)).map(_ => ())
+      startupPromise.outcome_((promiseKillSwitch, allStoppingFutures))
 
       startingFuture.futureValueUS
       checkHealth(proc, AcsCommitmentHealthState.Started)
 
       val stoppingFuture = proc.stop()
       checkHealth(proc, AcsCommitmentHealthState.Stopping)
+      stoppingPromise.success(())
 
       stoppingFuture.futureValueUS
       checkHealth(proc, AcsCommitmentHealthState.Stopped)

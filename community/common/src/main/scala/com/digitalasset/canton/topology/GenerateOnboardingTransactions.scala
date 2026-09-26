@@ -51,7 +51,8 @@ final case class GenerateOnboardingTransactions(
   // to avoid passing around all the dependencies manually: we can just pass the
   // GenerateOnboardingTransactions object around instead.
   def createTemporaryTopologyManager(
-      store: TopologyStore[TopologyStoreId.TemporaryStore]
+      store: TopologyStore[TopologyStoreId.TemporaryStore],
+      protocolVersion: ProtocolVersion,
   )(implicit
       ec: ExecutionContext
   ): TemporaryTopologyManager =
@@ -62,6 +63,7 @@ final case class GenerateOnboardingTransactions(
       topologyCacheAggregatorConfig = batchingConfig.topologyCacheAggregator,
       topologyConfig = topologyConfig,
       store = store,
+      managerVersion = TopologyManager.PV(protocolVersion),
       timeouts = processingTimeout,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,

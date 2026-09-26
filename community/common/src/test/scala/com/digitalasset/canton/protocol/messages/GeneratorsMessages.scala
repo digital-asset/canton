@@ -7,7 +7,6 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{
   AsymmetricEncrypted,
   Encrypted,
-  GeneratorsCrypto,
   SecureRandomness,
   Signature,
   SymmetricKeyScheme,
@@ -53,12 +52,12 @@ final class GeneratorsMessages(
     generatorsTopology: GeneratorsTopology,
     generatorTransactions: GeneratorsTransaction,
     generatorsTrafficData: GeneratorsTrafficData,
-    generatorsCrypto: GeneratorsCrypto,
 ) {
 
   import com.digitalasset.canton.config.GeneratorsConfig.*
   import com.digitalasset.canton.Generators.*
   import generatorsLf.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.data.GeneratorsDataTime.*
   import generatorsTopology.*
   import generatorsData.*
@@ -66,7 +65,6 @@ final class GeneratorsMessages(
   import generatorsProtocol.*
   import generatorsVerdict.*
   import generatorTransactions.*
-  import generatorsCrypto.*
 
   implicit val legacyAcsCommitmentArb: Arbitrary[LegacyAcsCommitment] = Arbitrary(
     for {

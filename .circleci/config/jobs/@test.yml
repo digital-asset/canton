@@ -119,9 +119,14 @@ stability_sequential_test:
 crash_recovery_test:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 6
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
   steps:
     - run_crash_recovery_tests:
         exclude_unstable_tests: true
+        protocol_version: << parameters.protocol_version >>
         filter: &crash_recovery_filter
           "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery"
 
@@ -455,6 +460,7 @@ benchmark_transaction_snapshot:
           export STANDALONE=True
           .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
         environment:
+          FAIL_ON_ERROR_IN_OUTPUT: false
           EXECUTOR_NUM_CPUS: 1
           MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
           MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>

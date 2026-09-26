@@ -86,11 +86,13 @@ class PartyReplicationTopologyWorkflowTest
     threshold = PositiveInt.one,
     participants =
       Seq(HostingParticipant(ParticipantId("other-participant"), ParticipantPermission.Submission)),
+    isOffline = false,
   )
   private val ptpBefore = PartyToParticipant.tryCreate(
     partyId = partyId,
     threshold = PositiveInt.one,
     participants = Seq(HostingParticipant(sp, ParticipantPermission.Submission)),
+    isOffline = false,
   )
 
   private val ptpProposal = PartyToParticipant.tryCreate(
@@ -104,6 +106,7 @@ class PartyReplicationTopologyWorkflowTest
         onboarding = true,
       ),
     ),
+    isOffline = false,
   )
 
   private val ptpProposalMissingOnboardingFlag = PartyToParticipant.tryCreate(
@@ -117,6 +120,7 @@ class PartyReplicationTopologyWorkflowTest
         onboarding = false,
       ),
     ),
+    isOffline = false,
   )
 
   private val topologyStoreTestData =

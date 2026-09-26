@@ -9,7 +9,11 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   OtherError,
   ValueDeserializationError,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfHashSyntax.*
 import com.digitalasset.canton.protocol.RefIdentifierSyntax.*
@@ -42,7 +46,7 @@ import monocle.{Lens, Prism}
 /** Summarizes the information that is needed in addition to the other fields of
   * [[ViewParticipantData]] for determining the root action of a view.
   */
-sealed trait ActionDescription extends Product with Serializable with PrettyPrinting {
+sealed trait ActionDescription extends Product with Serializable with PrettyPrintingFromCompanion {
 
   /** Whether the root action was a byKey action (exerciseByKey, fetchByKey, lookupByKey) */
   def byKey: Boolean
@@ -61,8 +65,13 @@ object ActionDescription {
 
   final case class InvalidActionDescription(message: String)
       extends RuntimeException(message)
-      with PrettyPrinting {
-    override protected def pretty: Pretty[InvalidActionDescription] = prettyOfClass(
+      with PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidActionDescription] =
+      InvalidActionDescription
+  }
+
+  object InvalidActionDescription extends PrettyPrintingCompanion[InvalidActionDescription] {
+    override protected val pretty: Pretty[InvalidActionDescription] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -319,7 +328,12 @@ object ActionDescription {
     override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Create =
       v31.ActionDescription.Description.Create(toCreateActionDescriptionV30)
 
-    override protected def pretty: Pretty[CreateActionDescription] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[CreateActionDescription] =
+      CreateActionDescription
+  }
+
+  object CreateActionDescription extends PrettyPrintingCompanion[CreateActionDescription] {
+    override protected val pretty: Pretty[CreateActionDescription] = prettyOfClass(
       param("contract Id", _.contractId),
       param("seed", _.seed),
     )
@@ -361,17 +375,8 @@ object ActionDescription {
         failed = failed,
       )
 
-    override protected def pretty: Pretty[ExerciseActionDescription] = prettyOfClass(
-      param("input contract id", _.inputContractId),
-      param("template id", _.templateId),
-      paramIfDefined("interface id", _.interfaceId),
-      param("choice", _.choice.unquoted),
-      param("chosen value", _.chosenValue),
-      param("actors", _.actors),
-      paramIfTrue("by key", _.byKey),
-      param("seed", _.seed),
-      paramIfTrue("failed", _.failed),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[ExerciseActionDescription] =
+      ExerciseActionDescription
 
     /** DO NOT USE IN PRODUCTION, as it does not necessarily check object invariants. */
     @VisibleForTesting
@@ -402,7 +407,20 @@ object ActionDescription {
 
   }
 
-  object ExerciseActionDescription {
+  object ExerciseActionDescription extends PrettyPrintingCompanion[ExerciseActionDescription] {
+
+    override protected val pretty: Pretty[ExerciseActionDescription] = prettyOfClass(
+      param("input contract id", _.inputContractId),
+      param("template id", _.templateId),
+      paramIfDefined("interface id", _.interfaceId),
+      param("choice", _.choice.unquoted),
+      param("chosen value", _.chosenValue),
+      param("actors", _.actors),
+      paramIfTrue("by key", _.byKey),
+      param("seed", _.seed),
+      paramIfTrue("failed", _.failed),
+    )
+
     def tryCreate(
         inputContractId: LfContractId,
         templateId: LfTemplateId,
@@ -495,7 +513,12 @@ object ActionDescription {
     override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Fetch =
       v31.ActionDescription.Description.Fetch(toFetchActionDescriptionV30)
 
-    override protected def pretty: Pretty[FetchActionDescription] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FetchActionDescription] =
+      FetchActionDescription
+  }
+
+  object FetchActionDescription extends PrettyPrintingCompanion[FetchActionDescription] {
+    override protected val pretty: Pretty[FetchActionDescription] = prettyOfClass(
       param("input contract id", _.inputContractId),
       param("actors", _.actors),
       paramIfTrue("by key", _.byKey),

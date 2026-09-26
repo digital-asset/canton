@@ -166,7 +166,6 @@ trait ParticipantTopologyValidation extends NamedLogging {
       EitherT(
         for {
           incompleteReassignments <- reassignmentStore.findIncomplete(
-            sourceSynchronizer = None,
             validAt = ledgerEnd().map(_.lastOffset).getOrElse(Offset.firstOffset),
             stakeholders = NonEmpty.from(Set(party.toLf)),
             limit = NonNegativeInt.maxValue,

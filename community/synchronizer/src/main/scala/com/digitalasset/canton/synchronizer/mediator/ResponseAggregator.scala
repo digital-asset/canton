@@ -280,6 +280,6 @@ object ViewKey {
     ): Map[ViewPosition, ViewConfirmationParameters] =
       request.informeesAndConfirmationParamsByViewPosition
 
-    override def treeOf(t: ViewPosition): Tree = t.pretty.treeOf(t)
+    override def treeOf(t: ViewPosition): Tree = ViewPosition.pretty.treeOf(t)
   }
 }

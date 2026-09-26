@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
   */
 final class ParticipantOfflineOnboardingTransactionsIntegrationTestH2
     extends CommunityIntegrationTest
+    with TopologyTransactionReSignHelpers
     with SharedEnvironment {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
@@ -36,10 +37,11 @@ final class ParticipantOfflineOnboardingTransactionsIntegrationTestH2
       val temporaryStore = participant1.topology.stores
         .create_temporary_topology_store("offline-onboarding", testedProtocolVersion)
 
-      val identityTransactions = participant1.topology.transactions
-        .list(filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code))
-        .result
-        .map(_.transaction)
+      val identityTransactions = reSignTopologyStoredTransactionsOf(
+        participant1,
+        Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
+        testedProtocolVersion,
+      )
 
       // seed the temporary store with the participant's identity so that the trust certificate can
       // be authorized there

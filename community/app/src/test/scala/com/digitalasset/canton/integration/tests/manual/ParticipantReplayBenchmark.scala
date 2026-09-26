@@ -11,7 +11,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.sequencing.client.transports.replay.ReplaySequencerSubscription
+import com.digitalasset.canton.sequencing.client.transports.replay.ReplaySequencerSubscriptionWrapper
 import com.digitalasset.canton.sequencing.client.{ReplayAction, ReplayConfig}
 import monocle.macros.syntax.lens.*
 
@@ -83,7 +83,7 @@ class ParticipantReplayBenchmark extends CommunityIntegrationTest with SharedEnv
 
     val lastTransactionTs = new AtomicReference(Instant.MAX)
 
-    ReplaySequencerSubscription.replayStatistics shouldBe empty
+    ReplaySequencerSubscriptionWrapper.replayStatistics shouldBe empty
 
     // Kick-off the replay
     participants.local.foreach { p =>
@@ -108,7 +108,7 @@ class ParticipantReplayBenchmark extends CommunityIntegrationTest with SharedEnv
     for (_ <- participants.local.indices) {
       blocking {
         val timeout = deadline.timeLeft
-        ReplaySequencerSubscription.replayStatistics.poll(timeout.length, timeout.unit)
+        ReplaySequencerSubscriptionWrapper.replayStatistics.poll(timeout.length, timeout.unit)
       }
     }
 

@@ -22,6 +22,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryReassignmentStore
 import com.digitalasset.canton.participant.sync.StaticSynchronizerParametersGetter
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -31,6 +32,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
   ParticipantId,
   PhysicalSynchronizerId,
   SynchronizerId,
@@ -63,6 +65,8 @@ private[reassignment] object TestReassignmentCoordination {
         .map(synchronizer =>
           synchronizer.map(_.logical) -> new InMemoryReassignmentStore(
             synchronizer.map(_.logical),
+            DefaultTestIdentities.participant1,
+            new FailingOfflineTopologyLookup(),
             loggerFactory,
           )
         )
@@ -97,6 +101,7 @@ private[reassignment] object TestReassignmentCoordination {
     new ReassignmentCoordination(
       reassignmentStoreFor = id =>
         reassignmentStores.get(id).toRight(UnknownSynchronizer(id.unwrap, "not found")),
+      isKnownSynchronizer = _ => true,
       reassignmentSubmissionFor = assignmentBySubmission,
       pendingUnassignments = reassignmentSynchronizer.map(Option(_)),
       staticSynchronizerParametersGetter = staticSynchronizerParametersGetter,

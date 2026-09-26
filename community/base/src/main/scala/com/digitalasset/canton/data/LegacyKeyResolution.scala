@@ -4,10 +4,17 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.LfContractId
 
-sealed trait LegacyKeyResolution extends Product with Serializable with PrettyPrinting {
+sealed trait LegacyKeyResolution
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
   def resolution: Option[LfContractId]
 }
 
@@ -42,21 +49,29 @@ sealed trait LegacySerializableKeyResolution extends LegacyKeyResolution {
 
 final case class LegacyAssignedKey(contractId: LfContractId)
     extends LegacySerializableKeyResolution {
-  override protected def pretty: Pretty[LegacyAssignedKey] =
-    prettyNode("Assigned", unnamedParam(_.contractId))
+  override def prettyCompanion: PrettyPrintingCompanion[LegacyAssignedKey] = LegacyAssignedKey
 
   override def resolution: Option[LfContractId] = Some(contractId)
+}
+
+object LegacyAssignedKey extends PrettyPrintingCompanion[LegacyAssignedKey] {
+  override protected val pretty: Pretty[LegacyAssignedKey] =
+    prettyNode("Assigned", unnamedParam(_.contractId))
 }
 
 final case class LegacyFreeKey(override val maintainers: Set[LfPartyId])
     extends LegacySerializableKeyResolution
     with LegacyKeyResolutionWithMaintainers {
-  override protected def pretty: Pretty[LegacyFreeKey] =
-    prettyNode("Free", param("maintainers", _.maintainers))
+  override def prettyCompanion: PrettyPrintingCompanion[LegacyFreeKey] = LegacyFreeKey
 
   override def resolution: Option[LfContractId] = None
 
   override def asSerializable: LegacySerializableKeyResolution = this
+}
+
+object LegacyFreeKey extends PrettyPrintingCompanion[LegacyFreeKey] {
+  override protected val pretty: Pretty[LegacyFreeKey] =
+    prettyNode("Free", param("maintainers", _.maintainers))
 }
 
 final case class LegacyAssignedKeyWithMaintainers(
@@ -65,11 +80,17 @@ final case class LegacyAssignedKeyWithMaintainers(
 ) extends LegacyKeyResolutionWithMaintainers {
   override def resolution: Option[LfContractId] = Some(contractId)
 
-  override protected def pretty: Pretty[LegacyAssignedKeyWithMaintainers] = prettyOfClass(
-    unnamedParam(_.contractId),
-    param("maintainers", _.maintainers),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[LegacyAssignedKeyWithMaintainers] =
+    LegacyAssignedKeyWithMaintainers
 
   override def asSerializable: LegacySerializableKeyResolution =
     LegacyAssignedKey(contractId)
+}
+
+object LegacyAssignedKeyWithMaintainers
+    extends PrettyPrintingCompanion[LegacyAssignedKeyWithMaintainers] {
+  override protected val pretty: Pretty[LegacyAssignedKeyWithMaintainers] = prettyOfClass(
+    unnamedParam(_.contractId),
+    param("maintainers", _.maintainers),
+  )
 }

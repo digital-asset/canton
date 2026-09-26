@@ -164,8 +164,33 @@ class SequencerConnectionPoolImpl private[sequencing] (
     val initializationTimeout = timeouts.sequencerInfo
 
     def signalTimeout(): Unit = {
-      val timeoutMessage = s"Connection pool failed to initialize within " +
-        s"${LoggerUtil.roundDurationForHumans(initializationTimeout.duration)}"
+      // Only report connection errors of connections that failed to validate
+      // connection name -> failure reason
+      val connectionErrors = lock.exclusive {
+        trackedConnections.toSeq.mapFilter { case (connection, validated) =>
+          Option
+            .when(!validated)(
+              connection.lastFailureReason.map(connection.config.name -> _)
+            )
+            .flatten
+        }
+      }
+
+      val timeoutMessage = {
+        val main = s"Connection pool failed to initialize within " +
+          s"${LoggerUtil.roundDurationForHumans(initializationTimeout.duration)}"
+        val errors = NonEmpty.from(connectionErrors) match {
+          case Some(errors) =>
+            val lines =
+              Seq("", "Connection errors:") ++ errors.map { case (name, error) =>
+                s"- $name: $error"
+              }
+            lines.mkString("\n")
+          case None => ""
+        }
+        s"$main$errors"
+      }
+
       if (initializedP.outcome(Left(SequencerConnectionPoolError.TimeoutError(timeoutMessage)))) {
         logger.info(s"$timeoutMessage -- closing the pool")
         close()
@@ -886,7 +911,6 @@ class GrpcSequencerConnectionPoolFactory(
       sequencerConnections,
       expectedPsidO,
     )
-    logger.debug(s"poolConfig = $poolConfig")
 
     create(poolConfig, name)
   }

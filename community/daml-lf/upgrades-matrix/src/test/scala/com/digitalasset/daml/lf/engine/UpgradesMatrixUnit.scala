@@ -158,7 +158,6 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
     val participant = ParticipantId.assertFromString("participant")
     val submissionSeed = crypto.Hash.hashPrivateKey("command")
     val submitters = Set(setupData.alice)
-    val readAs = Set.empty[Party]
 
     val lookupContractById = (contractOrigin, testHelper.operation) match {
       case (_, UpgradesMatrixCases.LookupNByKey) =>
@@ -227,13 +226,11 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
           cases.clientGlobalPkgId,
         ),
         submitters = submitters,
-        readAs = readAs,
         cmds = ApiCommands(apiCommands, Time.Timestamp.Epoch, "test"),
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = cases.contractIdVersion,
-        interpretationConfig =
-          InterpretationConfig.Default.copy(contractStateMode = cases.contractStateMode),
+        interpretationConfig = InterpretationConfig.Default,
         prefetchKeys = Seq.empty,
       )
       .consume(

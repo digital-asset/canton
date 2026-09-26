@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
 import slick.jdbc.{GetResult, GetTupleResult}
@@ -15,20 +19,24 @@ import scala.math.Ordering.Implicits.*
 final case class LegacyCommitmentPeriod(
     fromExclusive: CantonTimestampSecond,
     periodLength: PositiveSeconds,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   val toInclusive: CantonTimestampSecond = fromExclusive + periodLength
 
   def overlaps(other: LegacyCommitmentPeriod): Boolean =
     fromExclusive < other.toInclusive && toInclusive > other.fromExclusive
 
-  override protected def pretty: Pretty[LegacyCommitmentPeriod] =
+  override def prettyCompanion: PrettyPrintingCompanion[LegacyCommitmentPeriod] =
+    LegacyCommitmentPeriod
+}
+
+object LegacyCommitmentPeriod extends PrettyPrintingCompanion[LegacyCommitmentPeriod] {
+
+  override protected val pretty: Pretty[LegacyCommitmentPeriod] =
     prettyOfClassWithName("CommitmentPeriod")(
       param("fromExclusive", _.fromExclusive),
       param("toInclusive", _.toInclusive),
     )
-}
 
-object LegacyCommitmentPeriod {
   def create(
       fromExclusive: CantonTimestamp,
       periodLength: PositiveSeconds,

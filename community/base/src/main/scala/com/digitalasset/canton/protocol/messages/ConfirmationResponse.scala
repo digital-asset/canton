@@ -8,12 +8,17 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
@@ -43,7 +48,7 @@ case class ConfirmationResponse private
     viewPositionO: Option[ViewPosition],
     localVerdict: LocalVerdict,
     confirmingParties: Set[LfPartyId],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   // Private copy method used by the lenses
   // Needs to be private as it does not validate object invariants.
@@ -74,15 +79,18 @@ case class ConfirmationResponse private
       confirmingParties = confirmingParties.toList.map(_.toProtoUnvalidated),
     )
 
-  override protected def pretty: Pretty[this.type] =
+  override def prettyCompanion: PrettyPrintingCompanion[ConfirmationResponse] =
+    ConfirmationResponse
+}
+
+object ConfirmationResponse extends PrettyPrintingCompanion[ConfirmationResponse] {
+
+  override protected val pretty: Pretty[ConfirmationResponse] =
     prettyOfClass(
       paramIfDefined("viewPosition", _.viewPositionO),
       param("localVerdict", _.localVerdict),
       param("confirmingParties", _.confirmingParties),
     )
-}
-
-object ConfirmationResponse {
 
   final case class InvalidConfirmationResponse(msg: String) extends RuntimeException(msg)
 
@@ -189,8 +197,7 @@ final case class ConfirmationResponses private (
     override val deserializedFrom: Option[ByteString],
 ) extends SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[ConfirmationResponses]
-    with HasPhysicalSynchronizerId
-    with PrettyPrinting {
+    with HasPhysicalSynchronizerId {
 
   // Private copy method used by the lenses
   private def copy(
@@ -230,7 +237,17 @@ final case class ConfirmationResponses private (
       getCryptographicEvidence
     )
 
-  override protected def pretty: Pretty[this.type] =
+  override def prettyCompanion: PrettyPrintingCompanion[ConfirmationResponses] =
+    ConfirmationResponses
+
+}
+
+object ConfirmationResponses
+    extends VersioningCompanionMemoization[ConfirmationResponses]
+    with PrettyPrintingCompanion[ConfirmationResponses] {
+  override val name: String = "ConfirmationResponses"
+
+  override protected val pretty: Pretty[ConfirmationResponses] =
     prettyOfClass(
       param("requestId", _.requestId),
       param("rootHash", _.rootHash),
@@ -238,11 +255,6 @@ final case class ConfirmationResponses private (
       param("psid", _.psid),
       param("responses", _.responses),
     )
-
-}
-
-object ConfirmationResponses extends VersioningCompanionMemoization[ConfirmationResponses] {
-  override val name: String = "ConfirmationResponses"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ConfirmationResponses)(

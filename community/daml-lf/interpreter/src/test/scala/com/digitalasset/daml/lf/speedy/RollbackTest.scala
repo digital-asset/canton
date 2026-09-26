@@ -20,8 +20,11 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-// Dual-execution (UpdateMachine and TransactionConductor), dual-config (Legacy and Default)
-// version of the rollback-shape tests.
+class RollbackTestWithUpdateMachine extends RollbackTestBase with CmdFlowRunnerWithUpdateMachine
+class RollbackTestWithTransactionConductor
+    extends RollbackTestBase
+    with CmdFlowRunnerWithTransactionConductor
+
 abstract class RollbackTestBase
     extends AnyFreeSpec
     with CmdFlowRunner
@@ -31,13 +34,8 @@ abstract class RollbackTestBase
 
   import RollbackTest.*
 
-  // Legacy (protocol v3.4) allows an effect (create/exercise) inside a rolled-back scope.
-  // Default (protocol v3.5+) forbids it and crashes with EffectfulRollback instead.
-  protected def legacy: Boolean
-
   private[this] val interpretationConfig: interpretation.InterpretationConfig =
-    if (legacy) interpretation.InterpretationConfig.Legacy
-    else interpretation.InterpretationConfig.Default
+    interpretation.InterpretationConfig.Default
 
   // The only scenarios with an effect inside a rollback: uncatchable under Default.
   private[this] val effectfulRollbackChoices =
@@ -48,7 +46,7 @@ abstract class RollbackTestBase
 
   private[this] val alice = Party.assertFromString("Alice")
 
-  val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(
+  private[this] val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(
     p"""
   metadata ( 'pkg' : '1.0.0' )
 
@@ -235,7 +233,7 @@ abstract class RollbackTestBase
     ArraySeq(SParty(alice)),
   )
 
-  val testCases = Table[String, List[Tree]](
+  private[this] val testCases = Table[String, List[Tree]](
     ("choice", "expected-number-of-contracts"),
     ("Create0", Nil),
     ("Create1", List(C(100))),
@@ -251,7 +249,7 @@ abstract class RollbackTestBase
 
   forEvery(testCases) { (choiceName: String, expected: List[Tree]) =>
     val description =
-      if (!legacy && effectfulRollbackChoices(choiceName))
+      if (effectfulRollbackChoices(choiceName))
         s"$choiceName, expected to crash with EffectfulRollback"
       else
         s"$choiceName, contracts expected: $expected"
@@ -275,7 +273,7 @@ abstract class RollbackTestBase
         packageResolution = Map.empty,
         interpretationConfig = interpretationConfig,
       )
-      if (!legacy && effectfulRollbackChoices(choiceName)) {
+      if (effectfulRollbackChoices(choiceName)) {
         result match {
           case Left(SError.InterpretationError(IE.EffectfulRollback(_))) => succeed
           case other => fail(s"expected EffectfulRollback, got: $other")
@@ -296,27 +294,6 @@ abstract class RollbackTestBase
       }
     }
   }
-}
-
-class RollbackTestWithUpdateMachineLegacy
-    extends RollbackTestBase
-    with CmdFlowRunnerWithUpdateMachine {
-  override protected def legacy: Boolean = true
-}
-class RollbackTestWithUpdateMachineKey
-    extends RollbackTestBase
-    with CmdFlowRunnerWithUpdateMachine {
-  override protected def legacy: Boolean = false
-}
-class RollbackTestWithTransactionConductorLegacy
-    extends RollbackTestBase
-    with CmdFlowRunnerWithTransactionConductor {
-  override protected def legacy: Boolean = true
-}
-class RollbackTestWithTransactionConductorKey
-    extends RollbackTestBase
-    with CmdFlowRunnerWithTransactionConductor {
-  override protected def legacy: Boolean = false
 }
 
 object RollbackTest {

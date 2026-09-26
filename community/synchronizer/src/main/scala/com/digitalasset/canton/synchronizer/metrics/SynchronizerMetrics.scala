@@ -39,7 +39,7 @@ import com.digitalasset.canton.metrics.{
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.topology.{
   Member,
-  PhysicalSynchronizerId,
+  OpaquePhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
 }
@@ -339,11 +339,11 @@ class SequencerMetrics(
   val trafficControl = new TrafficControlMetrics
 
   // Since gauges don't support metrics context per update, create a map with a gauge per successor psid.
-  private val lsuStatus: TrieMap[PhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
+  private val lsuStatus: TrieMap[OpaquePhysicalSynchronizerId, Gauge[Int]] = TrieMap.empty
 
   def setLsuContactSuccessorStatus(
       value: Int,
-      successorPsid: PhysicalSynchronizerId,
+      successorPsid: OpaquePhysicalSynchronizerId,
   ): Unit =
     lsuStatus
       .updateWith(successorPsid) {
@@ -384,12 +384,12 @@ class SequencerMetrics(
   // we use this environment variable approach to guard against instantiation in production; but
   // register the metric for the documentation generation.
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
-    val dummyPsid = PhysicalSynchronizerId(
+    val dummyPsid = OpaquePhysicalSynchronizerId(
       SynchronizerId.tryFromString(
         "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1"
       ),
       NonNegativeInt.zero,
-      ProtocolVersion.latest,
+      ProtocolVersion.latest.v,
     )
 
     setLsuContactSuccessorStatus(0, dummyPsid)

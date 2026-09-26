@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.PrettyPrintingFromCompanion
 import com.digitalasset.canton.protocol.{RootHash, Stakeholders, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.{LfPartyId, LfWorkflowId}
 /** Common supertype of all view trees that are sent as
   * [[com.digitalasset.canton.protocol.messages.EncryptedViewMessage]]s
   */
-trait ViewTree extends PrettyPrinting {
+trait ViewTree extends PrettyPrintingFromCompanion {
 
   /** The informees of the view in the tree */
   def informees: Set[LfPartyId]
@@ -42,8 +42,6 @@ trait ViewTree extends PrettyPrinting {
 
   /** The mediator group that is responsible for coordinating this request */
   def mediator: MediatorGroupRecipient
-
-  override protected def pretty: Pretty[this.type]
 }
 
 /** Supertype of [[FullUnassignmentTree]] and [[FullAssignmentTree]]

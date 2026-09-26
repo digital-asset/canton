@@ -115,5 +115,22 @@ class LtHash16Blake3Test extends AnyWordSpec with BaseTest {
 
       h1.equals(h3) shouldBe false
     }
+
+    "rehydrated hash from digest should behave the same as if non-rehydrated" in {
+      val abc = "abc".getBytes()
+      val `def` = "def".getBytes()
+      val ghi = "ghi".getBytes()
+
+      val h1 = LtHash16Blake3.empty
+      h1.add(abc)
+      h1.add(`def`)
+
+      val h2 = LtHash16Blake3.tryCreate(h1.getByteString)
+      h1.add(ghi)
+      h2.add(ghi)
+
+      h1.equals(h2) shouldBe true
+      h1.getByteString shouldBe h2.getByteString
+    }
   }
 }

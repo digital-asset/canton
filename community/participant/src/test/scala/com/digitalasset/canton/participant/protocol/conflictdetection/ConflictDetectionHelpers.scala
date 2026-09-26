@@ -30,12 +30,14 @@ import com.digitalasset.canton.participant.store.{
   ReassignmentStore,
   ReassignmentStoreTest,
 }
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.{TimeOfChange, TimeOfRequest}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
   Namespace,
   PartyId,
   PhysicalSynchronizerId,
@@ -88,6 +90,8 @@ private[protocol] trait ConflictDetectionHelpers {
       loggerFactory: NamedLoggerFactory,
       store: ReassignmentStore = new InMemoryReassignmentStore(
         ReassignmentStoreTest.targetSynchronizerId,
+        DefaultTestIdentities.participant1,
+        new FailingOfflineTopologyLookup(),
         loggerFactory,
       ),
   )(

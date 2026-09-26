@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.transaction
 import cats.syntax.apply.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{
-  GeneratorsCrypto,
   Hash,
   PublicKey,
   Signature,
@@ -33,9 +32,9 @@ import com.digitalasset.canton.topology.{
   MediatorId,
   Member,
   Namespace,
+  OpaquePhysicalSynchronizerId,
   ParticipantId,
   PartyId,
-  PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
 }
@@ -55,13 +54,12 @@ final class GeneratorsTransaction(
     generatorsProtocol: GeneratorsProtocol,
     generatorsTopology: GeneratorsTopology,
     generatorsSequencing: GeneratorsSequencing,
-    generatorsCrypto: GeneratorsCrypto,
 ) {
   import generatorsLf.*
   import generatorsProtocol.*
   import generatorsSequencing.*
   import generatorsTopology.*
-  import generatorsCrypto.*
+  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import Generators.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
 
@@ -108,7 +106,7 @@ final class GeneratorsTransaction(
 
   implicit val synchronizerUpgradeAnnouncementArb: Arbitrary[LsuAnnouncement] =
     Arbitrary(for {
-      psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+      psid <- Arbitrary.arbitrary[OpaquePhysicalSynchronizerId]
       upgradeTime <- Arbitrary.arbitrary[CantonTimestamp]
     } yield LsuAnnouncement(psid, upgradeTime))
 
@@ -197,8 +195,15 @@ final class GeneratorsTransaction(
         .choose(1, participants.count(_.permission >= ParticipantPermission.Confirmation).max(1))
         .map(PositiveInt.tryCreate)
       signingKeysWithThreshold <- Gen.option(Arbitrary.arbitrary[SigningKeysWithThreshold])
+      // Only allow isOffline = true if the protocol version supports proto v31 or higher.
+      // (v30 throws a serialization error when isOffline = true).
+      isOffline <-
+        if (TopologyTransaction.protoVersionFor(protocolVersion).v >= 31)
+          Arbitrary.arbBool.arbitrary
+        else
+          Gen.const(false)
     } yield PartyToParticipant
-      .create(partyId, threshold, participants, signingKeysWithThreshold)
+      .create(partyId, threshold, participants, signingKeysWithThreshold, isOffline = isOffline)
       .value
   )
 

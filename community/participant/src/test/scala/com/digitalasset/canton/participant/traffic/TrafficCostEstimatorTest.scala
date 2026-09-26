@@ -13,7 +13,6 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   DeduplicationPeriod,
   ReassignmentSubmitterMetadata,
-  TransactionViewLimitConfig,
 }
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -38,6 +37,7 @@ import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
   ExampleTransactionFactory,
+  TransactionProtocolLimits,
   WellFormedTransaction,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -118,7 +118,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
           any[ContractInstanceOfId],
           any[CantonTimestamp],
           any[ProtocolVersion],
-          any[TransactionViewLimitConfig],
+          any[TransactionProtocolLimits],
         )(any[TraceContext])
       ).thenReturn(
         EitherT.rightT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError](

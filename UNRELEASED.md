@@ -25,7 +25,7 @@ sequencers and mediators now skip this step and generate them when needed.
 This ensures these topology transactions are generated in the right protocol version (which is not known during initialization).
 
 Practically, this means that instead of the `node.topology.transactions.identity_transactions()` console command,
-the `node.topology.transactions.generate_onboarding_transactions(protocolVersion)` command should be used instead instead.
+the `node.topology.transactions.generate_onboarding_transactions(protocolVersion)` command should be used instead.
 
 If you are using an offline root key, you cannot call this
 (but you would have already been signing and providing the transactions manually using the offline key).
@@ -65,14 +65,17 @@ It is considered a security best practice to have a distinct key per synchronize
       }
    }]
   ```
+- Added the request type to the sequencer cap rejection message.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
 - bump da-base-image to 1.0.14
-
-### (YY-nnn, Risk): Title
+- Minor performance fix: time proofs have now a max sequencing timeout of 2 minutes and they no longer create a
+  performance regression during synchronizer catch-up. Furthermore, synchronous rejects were not properly
+  cleaned up by the sequencer client immediately after the reject was processed, but relied on the timeout logic to pick
+  up the requests.
 
 ### (YY-nnn, Risk): Title
 

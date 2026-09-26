@@ -56,6 +56,7 @@ class TemporaryStoreRegistry(
       topologyCacheAggregatorConfig,
       topologyConfig,
       store,
+      TopologyManager.PV(protocolVersion),
       timeouts,
       futureSupervisor,
       loggerFactoryWithStore,

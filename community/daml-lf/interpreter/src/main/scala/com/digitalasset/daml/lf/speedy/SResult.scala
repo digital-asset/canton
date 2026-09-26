@@ -88,25 +88,21 @@ object Question {
     final case class FetchTemplate(tmplId: TypeConId, coid: ContractId) extends Cmd
     final case class ExerciseTemplate(
         ifaceId: TypeConId,
-        choice: ChoiceName,
         coid: ContractId,
+        choice: ChoiceName,
         arg: SValue,
     ) extends Cmd
     final case class FetchInterface(ifaceId: TypeConId, coid: ContractId) extends Cmd
     final case class ExerciseInterface(
         ifaceId: Identifier,
-        choice: ChoiceName,
         coid: ContractId,
+        choice: ChoiceName,
         arg: SValue,
     ) extends Cmd
     final case class QueryContractKey(tmplId: Identifier, key: SValue, n: Int) extends Cmd
     final case class FetchByKey(tmplId: TypeConId, key: SValue) extends Cmd
-    final case class ExerciseByKey(
-        tmplId: Identifier,
-        choice: ChoiceName,
-        key: SValue,
-        arg: SValue,
-    ) extends Cmd
+    final case class ExerciseByKey(tmplId: Identifier, key: SValue, choice: ChoiceName, arg: SValue)
+        extends Cmd
     final case class ExternalCall(
         extensionId: String,
         functionId: String,

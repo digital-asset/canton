@@ -63,6 +63,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{pureCrypto, submitter}
@@ -191,6 +192,8 @@ final class AssignmentProcessingStepsTest
         contractStore = contractStore,
         acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
         ledgerApiStore = Eval.now(ledgerApiStore),
+        participantId = participant,
+        offlineTopologyLookup = new FailingOfflineTopologyLookup(),
         loggerFactory = loggerFactory,
         futureSupervisor = FutureSupervisor.Noop,
       )

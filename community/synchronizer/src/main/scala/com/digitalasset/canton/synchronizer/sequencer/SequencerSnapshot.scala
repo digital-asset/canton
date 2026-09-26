@@ -25,6 +25,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus.implicitPrettyString
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -180,6 +181,14 @@ object SequencerSnapshot
         aggregatedSendersP,
       ) = proto
       for {
+        // TODO(#35385): Reinstate practical admin API limits for aggregated_senders, signatures_by_envelope,
+        //  signatures, member_previous_timestamps, in_flight_aggregations, traffic_purchased, and traffic_consumed.
+        aggregatedSendersP <- ProtoValidation.validateLength(
+          aggregatedSendersP,
+          "aggregated_senders",
+          ProtocolVersionValidation.NoValidation,
+          ProtoValidation.MaxCollectionSize,
+        )
         aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
         aggregationRule <- ProtoConverter.parseRequired(
           AggregationRule
@@ -204,9 +213,24 @@ object SequencerSnapshot
                   "v30.SequencerSnapshot.AggregationBySender.sender",
                 )
                 sequencingTimestamp <- CantonTimestamp.fromProtoPrimitive(sequencingTimestampP)
+
+                signaturesByEnvelopeP <- ProtoValidation.validateLength(
+                  signaturesByEnvelopeP,
+                  "signatures_by_envelope",
+                  ProtocolVersionValidation.NoValidation,
+                  ProtoValidation.MaxCollectionSize,
+                )
                 signatures <- signaturesByEnvelopeP.traverse {
                   case v30.SequencerSnapshot.SignaturesForEnvelope(sigsOnEnv) =>
-                    sigsOnEnv.traverse(Signature.fromProtoV30)
+                    for {
+                      sigsOnEnv <- ProtoValidation.validateLength(
+                        sigsOnEnv,
+                        "signatures",
+                        ProtocolVersionValidation.NoValidation,
+                        ProtoValidation.MaxCollectionSize,
+                      )
+                      sigs <- sigsOnEnv.traverse(Signature.fromProtoV30)
+                    } yield sigs
                 }
               } yield sender -> AggregationBySender(sequencingTimestamp, signatures)
           }
@@ -223,8 +247,13 @@ object SequencerSnapshot
 
     for {
       lastTs <- CantonTimestamp.fromProtoPrimitive(request.latestTimestamp)
-      previousTimestamps <- request.memberPreviousTimestamps
-        .traverse { case v30.SequencerSnapshot.MemberPreviousTimestamp(member, timestamp) =>
+      previousTimestamps <- ProtoValidation
+        .validateLengthThen(
+          request.memberPreviousTimestamps,
+          "member_previous_timestamps",
+          ProtocolVersionValidation.NoValidation,
+          ProtoValidation.MaxCollectionSize,
+        ) { case (v30.SequencerSnapshot.MemberPreviousTimestamp(member, timestamp), _) =>
           Member
             .fromProtoPrimitive(member, "registeredMembers")
             .flatMap(m => timestamp.traverse(CantonTimestamp.fromProtoPrimitive).map(m -> _))
@@ -235,14 +264,29 @@ object SequencerSnapshot
         "status",
         request.status,
       )
-      inFlightAggregations <- request.inFlightAggregations
-        .traverse(parseInFlightAggregationWithId)
+      inFlightAggregations <- ProtoValidation
+        .validateLengthThen(
+          request.inFlightAggregations,
+          "in_flight_aggregations",
+          ProtocolVersionValidation.NoValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((proto, _) => parseInFlightAggregationWithId(proto))
         .map(_.toMap)
-      trafficPurchased <- request.trafficPurchased.traverse(
-        TrafficPurchased.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), _)
+      trafficPurchased <- ProtoValidation.validateLengthThen(
+        request.trafficPurchased,
+        "traffic_purchased",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )((tp, _) =>
+        TrafficPurchased.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tp)
       )
-      trafficConsumed <- request.trafficConsumed.traverse(
-        TrafficConsumed.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), _)
+      trafficConsumed <- ProtoValidation.validateLengthThen(
+        request.trafficConsumed,
+        "traffic_consumed",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )((tc, _) =>
+        TrafficConsumed.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tc)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield SequencerSnapshot(

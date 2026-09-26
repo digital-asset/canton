@@ -8,11 +8,16 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
 import com.digitalasset.canton.version.*
@@ -24,7 +29,7 @@ import pprint.Tree
 sealed trait Verdict
     extends Product
     with Serializable
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with HasProtocolVersionedWrapper[Verdict] {
 
   def isApprove: Boolean = false
@@ -59,10 +64,13 @@ object Verdict
     private[messages] override def toProtoV30: v30.Verdict =
       v30.Verdict(someVerdict = v30.Verdict.SomeVerdict.Approve(empty.Empty()))
 
-    override protected def pretty: Pretty[Verdict] = prettyOfString(_ => "Approve")
+    override def prettyCompanion: PrettyPrintingCompanion[Approve] = Approve
   }
 
-  object Approve {
+  object Approve extends PrettyPrintingCompanion[Approve] {
+
+    override protected val pretty: Pretty[Approve] = prettyOfString(_ => "Approve")
+
     def apply(protocolVersion: ProtocolVersion): Approve = Approve()(
       Verdict.protocolVersionRepresentativeFor(protocolVersion)
     )
@@ -82,10 +90,7 @@ object Verdict
     def toProtoMediatorRejectV30: v30.MediatorReject =
       v30.MediatorReject(reason = Some(reason), isMalformed = isMalformed)
 
-    override protected def pretty: Pretty[MediatorReject.this.type] = prettyOfClass(
-      unnamedParam(_.reason),
-      param("isMalformed", _.isMalformed),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[MediatorReject] = MediatorReject
 
     override def isTimeoutDeterminedByMediator: Boolean =
       DecodedCantonError.fromGrpcStatus(reason).exists(_.code.id == MediatorError.Timeout.id)
@@ -93,7 +98,13 @@ object Verdict
     def errorDetails: ErrorDetails = ErrorDetails(reason, isMalformed)
   }
 
-  object MediatorReject {
+  object MediatorReject extends PrettyPrintingCompanion[MediatorReject] {
+
+    override protected val pretty: Pretty[MediatorReject] = prettyOfClass(
+      unnamedParam(_.reason),
+      param("isMalformed", _.isMalformed),
+    )
+
     // TODO(#15628) Make it safe (intercept the exception and return an either)
     def tryCreate(
         status: com.google.rpc.status.Status,
@@ -136,17 +147,7 @@ object Verdict
       v30.Verdict(someVerdict = v30.Verdict.SomeVerdict.ParticipantReject(reasonsP))
     }
 
-    override protected def pretty: Pretty[ParticipantReject] = {
-      import Pretty.PrettyOps
-
-      prettyOfClass(
-        unnamedParam(
-          _.reasons.map { case (parties, participantId, reason) =>
-            Tree.Infix(reason.toTree, s"- reported by $participantId for:", parties.toTree)
-          }
-        )
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[ParticipantReject] = ParticipantReject
 
     /** Returns the first error by enriching the reason with the confirming parties and participant
       * ID who reported it.
@@ -180,7 +181,20 @@ object Verdict
     override def isTimeoutDeterminedByMediator: Boolean = false
   }
 
-  object ParticipantReject {
+  object ParticipantReject extends PrettyPrintingCompanion[ParticipantReject] {
+
+    override protected val pretty: Pretty[ParticipantReject] = {
+      import Pretty.PrettyOps
+
+      prettyOfClass(
+        unnamedParam(
+          _.reasons.map { case (parties, participantId, reason) =>
+            Tree.Infix(reason.toTree, s"- reported by $participantId for:", parties.toTree)
+          }
+        )
+      )
+    }
+
     def apply(
         reasons: NonEmpty[List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)]],
         protocolVersion: ProtocolVersion,

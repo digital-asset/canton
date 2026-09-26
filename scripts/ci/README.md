@@ -30,6 +30,39 @@ Each script carries its own inline self-tests, runnable with `--self-test`, whic
 
 It is invoked via the `collect_failing_test_data_and_send_to_datadog` CircleCI command (and the GitHub Actions composite action of the same name), which runs `report_failing_tests.py` after every test job, always, even on failure.
 
+### How it wires together
+
+The pipeline decides, per failing test, whether to open or update a tracking issue and whether the failure has become a streak worth alerting on. Ordinary jobs are judged on **consecutive commits**, nightly jobs on **consecutive nightly runs**, and the streak's origin decides which rota is pinged.
+
+```mermaid
+flowchart TD
+    A["Test job finishes (always, even on failure)"] --> B["collect_failing_test_data_and_send_to_datadog<br/>report_failing_tests.py orchestrator"]
+    B --> C["parse_failing_tests.py<br/>test-reports + found_problems.txt -> failing_tests.json"]
+    C --> D["report_to_datadog.py<br/>metric per failure, all branches"]
+    C --> E{"branch main or main-2.x?"}
+    E -->|no| E1["Datadog only, no GitHub issue"]
+    E -->|yes| F["manage_flaky_issues.py<br/>create/reopen issue + append failure row"]
+
+    F --> G{"is_nightly_job?<br/>name starts with nightly_<br/>or in NIGHTLY_JOBS_WITHOUT_PREFIX"}
+    G -->|yes| H{"nightly_streak?<br/>failed on last 3 nightly runs"}
+    G -->|no| I{"are_consecutive_commits?<br/>3 distinct adjacent commits"}
+    H -->|no| N["no streak, nothing written"]
+    I -->|no| N
+    H -->|yes| H1["label issue broken-nightly"]
+
+    H1 --> J{"issue has an assignee?"}
+    I -->|yes| J
+    J -->|yes| J1["suppressed, not written to streaks.json"]
+    J -->|no| K["streaks.json"]
+
+    K --> L["alert_slack.py<br/>post to #team-canton-notifications"]
+    L --> M{"nightly job?"}
+    M -->|yes| M1["Broken nightly test alert<br/>@ CI rota"]
+    M -->|no| M2["Flaky test alert<br/>@ Flaky Canton rota"]
+```
+
+The separate red-main alert (`slack_red_main_with_volunteer`) is not shown here. It pings per failing job rather than per streak, and covers build and infrastructure failures. See the TLDR for how the two alerts divide the work.
+
 ### What do we check?
 
 Two sources of failures are collected:
@@ -61,7 +94,23 @@ The goals of the system are:
   The threshold avoids noise from one-off failures or manual retries while ensuring that a genuinely broken test gets human attention quickly.
   The message @-mentions whoever is on the relevant rota shift that week, read from the [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) via `select_rota.py` (falling back to the roster pool in `roster_people.json` if the sheet is unreadable).
   If the same alert keeps appearing, it means the test is still broken and has not been fixed yet, not that the notification system is misbehaving.
-  The alert is suppressed if the issue already has an assignee, to avoid Slack noise on issues that are actively being worked on.
+  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned.
+
+### Nightly tests
+
+Nightly jobs run once a night (CircleCI cron `0 22 * * 1-5`, Mon-Fri 22:00 UTC), days apart, so their failures land on non-adjacent commits and the 3-consecutive-commit check above can never fire for them.
+To still catch a genuinely broken nightly test, `manage_flaky_issues.py` uses a time-based equivalent for the jobs `is_nightly_job` recognises, meaning those whose name starts with `nightly_` plus any listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`, a nightly job that kept its historical name):
+
+- `recent_nightly_commits()` reconstructs the commits of the last `NIGHTLY_CONSECUTIVE_FAILURES` (3) nightly cron slots by walking the schedule back from now and resolving `git rev-list -1 --before=<slot> origin/main` for each. The current run always counts as the most recent slot.
+- `nightly_streak()` returns true when the test has a failure row for each of those 3 nightly commits, read from the issue body (restricted to nightly jobs) plus the current commit.
+
+When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.py` posts a distinct **broken nightly test alert** to `#team-canton-notifications`, worded "failed on the last 3 nightly runs ... likely genuinely broken, not flaky", @-mentioning the **CI rota** rather than the Flaky Canton rota.
+`unstable_test` runs nightly but is intentionally allowed to fail, so it is excluded and never produces this alert.
+
+Two caveats:
+
+- Only jobs prefixed `nightly_`, or explicitly listed in `NIGHTLY_JOBS_WITHOUT_PREFIX` (currently just `toxiproxy_test_slow`), take this path. Other jobs that run solely in the nightly workflow but are neither prefixed nor listed (for example `postgres_conformance_test`, `test_with_java17`, `external_parties_test`, `protocol_continuity_test_all`) fall back to the consecutive-commit check, which effectively never fires at nightly cadence, so they get no confirmed broken-nightly signal. They still open a tracking issue and still trigger the per-run `slack_red_main_with_volunteer` ping on `main`, so their failures are not silent, they just miss the dedicated escalation. A prefix-less nightly job that should get the escalation needs adding to `NIGHTLY_JOBS_WITHOUT_PREFIX` in `flaky_common.py`.
+- On a very low-commit branch, where fewer than 3 distinct commits span the nightly window, `nightly_streak` cannot assemble 3 commits and does not fire.
 
 ### Issue lifecycle
 
@@ -72,7 +121,7 @@ First failure on main/main-2.x
 Subsequent failures
   → gh issue reopen  (if closed, unless the failing commit predates the close)
   → gh issue edit    (new row appended to the table)
-  → if 3 consecutive commits all fail AND issue has no assignee: Slack alert sent
+  → if 3 consecutive commits all fail AND (issue is unassigned OR was assigned more than 24h ago): Slack alert sent
 
 OSS (digital-asset/canton) or other branches
   → Datadog metric only, no GitHub issue

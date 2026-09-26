@@ -7,6 +7,7 @@ import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -17,8 +18,10 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.topology.{ForceFlag, PhysicalSynchronizerId}
 import org.scalatest.matchers.{MatchResult, Matcher}
 
-@SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
-sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironment {
+sealed trait MediatorTest
+    extends CommunityIntegrationTest
+    with TopologyTransactionReSignHelpers
+    with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S3M3_Manual
@@ -47,6 +50,14 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
     // The synchronizer owners are the participants so that we can use their topology dispatcher to push topology changes to the synchronizer
     synchronizerOwners = Seq(participant1, participant2)
 
+    // Dynamically generate protocol-compliant onboarding transactions for all nodes
+    val seqIdentities = sequencersAll
+      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
+    val medIdentities = mediatorsAll
+      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
+    val parIdentities =
+      synchronizerOwners.flatMap(p => onboardingTransactionsOf(p, testedProtocolVersion))
+
     synchronizerId = bootstrap
       .synchronizer(
         synchronizer.toProtoPrimitive,
@@ -54,7 +65,7 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
         mediators = mediatorsAll,
         synchronizerOwners = synchronizerOwners,
         synchronizerThreshold = PositiveInt.two,
-        staticSynchronizerParameters = EnvironmentDefinition.defaultStaticSynchronizerParameters,
+        identityTransactions = Some(seqIdentities ++ medIdentities ++ parIdentities),
       )
   }
 

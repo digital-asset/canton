@@ -9,7 +9,11 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
 import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{RootHash, v30}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -31,7 +35,7 @@ import scala.collection.mutable
   * I.e., a proper implementation of this trait must be declared like `class MyMerkleTree extends
   * MerkleTree[MyMerkleTree]`.
   */
-trait MerkleTree[+A] extends Product with Serializable with PrettyPrinting {
+trait MerkleTree[+A] extends Product with Serializable with PrettyPrintingFromCompanion {
   def subtrees: Seq[MerkleTree[?]]
 
   def rootHash: RootHash
@@ -211,7 +215,11 @@ final case class BlindedNode[+A](rootHash: RootHash) extends MerkleTree[A] {
 
   override def unwrap: Either[RootHash, A] = Left(rootHash)
 
-  override protected def pretty: Pretty[BlindedNode.this.type] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[BlindedNode[?]] = BlindedNode
+}
+
+object BlindedNode extends PrettyPrintingCompanion[BlindedNode[?]] {
+  override protected val pretty: Pretty[BlindedNode[?]] = prettyOfClass(
     unnamedParam(_.rootHash)
   )
 }

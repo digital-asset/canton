@@ -287,7 +287,7 @@ private[lf] object SExpr {
 
   final case class SEPreventCatch(body: SExpr) extends SExpr {
     override def execute[Q](machine: Machine[Q]): Control[Q] =
-      machine.asUpdateMachine(getClass.getSimpleName) { machine =>
+      machine.asUpdateMachine(productPrefix) { machine =>
         machine.pushKont(KPreventException)
         Control.Expression(body)
       }

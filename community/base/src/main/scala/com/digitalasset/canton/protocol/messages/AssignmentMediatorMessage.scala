@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.{HashOps, Signature}
 import com.digitalasset.canton.data.{AssignmentCommonData, AssignmentViewTree, ViewType}
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -70,7 +70,8 @@ final case class AssignmentMediatorMessage(
 
   override def viewType: ViewType = ViewType.AssignmentViewType
 
-  override def pretty: Pretty[AssignmentMediatorMessage] = prettyOfClass(unnamedParam(_.tree))
+  override def prettyCompanion: PrettyPrintingCompanion[AssignmentMediatorMessage] =
+    AssignmentMediatorMessage
 
   @transient override protected lazy val companionObj: AssignmentMediatorMessage.type =
     AssignmentMediatorMessage
@@ -80,7 +81,12 @@ object AssignmentMediatorMessage
     extends VersioningCompanionContext[
       AssignmentMediatorMessage,
       (HashOps, Target[ProtocolVersion]),
-    ] {
+    ]
+    with PrettyPrintingCompanion[AssignmentMediatorMessage] {
+
+  override protected val pretty: Pretty[AssignmentMediatorMessage] = prettyOfClass(
+    unnamedParam(_.tree)
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentMediatorMessage)(

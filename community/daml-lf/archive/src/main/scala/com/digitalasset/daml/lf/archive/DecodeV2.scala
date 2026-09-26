@@ -1486,6 +1486,22 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             )
           }
 
+        case PLF.Update.SumCase.UNPACK_TEMPLATE =>
+          assertVersionSupports(LV.featureUnpack)
+          val unpack = lfUpdate.getUnpackTemplate
+          decodeExpr(unpack.getCid, definition) { contractId =>
+            Ret(UpdateUnpackTemplate(templateId = decodeTypeConId(unpack.getTemplate), contractId))
+          }
+
+        case PLF.Update.SumCase.UNPACK_INTERFACE =>
+          assertVersionSupports(LV.featureUnpack)
+          val unpack = lfUpdate.getUnpackInterface
+          decodeExpr(unpack.getCid, definition) { contractId =>
+            Ret(
+              UpdateUnpackInterface(interfaceId = decodeTypeConId(unpack.getInterface), contractId)
+            )
+          }
+
         case PLF.Update.SumCase.FETCH_BY_KEY =>
           assertVersionSupports(LV.featureContractKeys)
           Work.bind(decodeRetrieveByKey(lfUpdate.getFetchByKey)) { tmplId =>

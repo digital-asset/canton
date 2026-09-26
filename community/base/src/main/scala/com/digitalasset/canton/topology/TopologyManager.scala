@@ -205,6 +205,7 @@ class TemporaryTopologyManager(
     topologyCacheAggregatorConfig: BatchAggregatorConfig,
     topologyConfig: TopologyConfig,
     store: TopologyStore[TemporaryStore],
+    managerVersion: TopologyManager.Version,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -216,6 +217,7 @@ class TemporaryTopologyManager(
       topologyCacheAggregatorConfig,
       topologyConfig,
       store,
+      managerVersion,
       exitOnFatalFailures = false,
       timeouts,
       futureSupervisor,
@@ -244,6 +246,7 @@ class AuthorizedTopologyManager(
       topologyCacheAggregatorConfig,
       topologyConfig,
       store,
+      managerVersion = TopologyManager.NoPV,
       exitOnFatalFailures = exitOnFatalFailures,
       timeouts,
       futureSupervisor,
@@ -262,6 +265,7 @@ abstract class LocalTopologyManager[StoreId <: TopologyStoreId](
     topologyCacheAggregatorConfig: BatchAggregatorConfig,
     topologyConfig: TopologyConfig,
     store: TopologyStore[StoreId],
+    managerVersion: TopologyManager.Version,
     exitOnFatalFailures: Boolean,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
@@ -272,7 +276,7 @@ abstract class LocalTopologyManager[StoreId <: TopologyStoreId](
       clock,
       crypto,
       store,
-      TopologyManager.NoPV,
+      managerVersion,
       exitOnFatalFailures = exitOnFatalFailures,
       timeouts,
       futureSupervisor,
@@ -974,7 +978,14 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         keys,
       )
 
-    case PartyToParticipant(partyId, threshold, participants, signingKeysWithThresholdO) =>
+    // TODO(#35664): Add version specific behaviour for _isOffline
+    case PartyToParticipant(
+          partyId,
+          threshold,
+          participants,
+          signingKeysWithThresholdO,
+          _isOffline,
+        ) =>
       checkPartyToParticipantIsNotDangerous(
         partyId,
         threshold,
@@ -1103,7 +1114,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     EitherT.fromEither(store.storeId.forSynchronizer match {
       case Some(psid) =>
         Either.cond(
-          upgradeAnnouncement.successorSynchronizerId >= psid,
+          upgradeAnnouncement.successorSynchronizerId >= psid.opaque,
           (),
           InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPsid(
             successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
@@ -1148,7 +1159,14 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         .map {
           _.collectOfMapping[PartyToParticipant].collectLatestByUniqueKey.toTopologyState
             .collectFirst {
-              case PartyToParticipant(_, currentThreshold, currentHostingParticipants, _) =>
+              // TODO(#35664): Possibly consider _isOffline flag
+              case PartyToParticipant(
+                    _,
+                    currentThreshold,
+                    currentHostingParticipants,
+                    _,
+                    _isOffline,
+                  ) =>
                 Some(currentThreshold) -> currentHostingParticipants
             }
             .getOrElse(None -> Nil)

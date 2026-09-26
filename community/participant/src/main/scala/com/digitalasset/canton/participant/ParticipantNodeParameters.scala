@@ -56,7 +56,9 @@ final case class ParticipantNodeParameters(
 
   // Indexing of party onboarding events is deferred if OnPR indexer pausing is off.
   def deferPartyOnboardingIndexing: Boolean =
-    alphaOnlinePartyReplicationSupport.exists(!_.pauseSynchronizerIndexingDuringPartyReplication)
+    alphaOnlinePartyReplicationSupport.exists(
+      !_.target.pauseSynchronizerIndexingDuringPartyReplication
+    )
 }
 
 object ParticipantNodeParameters {

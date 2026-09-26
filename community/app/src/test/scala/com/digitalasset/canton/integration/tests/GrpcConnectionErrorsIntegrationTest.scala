@@ -19,6 +19,8 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInconsistentConnectivity
 import monocle.macros.syntax.lens.*
 
+import scala.concurrent.duration.DurationInt
+
 /** Test different error cases when connecting a participant to a synchronizer with and without tls.
   * Unfortunately, tls errors lead to rather poor error messages, mostly because the Grpc
   * StatusRuntimeException does not necessarily mention ssl (depending on the os).
@@ -46,6 +48,8 @@ trait GrpcConnectionErrorsIntegrationTest extends CommunityIntegrationTest with 
             )
           )
         ),
+        // Make the test faster, as this timeout value is used for the pool initialization
+        ConfigTransforms.setSequencerInfoTimeout(3.second),
       )
       .updateTestingConfig(
         _.focus(_.participantsWithoutLapiVerification).replace(

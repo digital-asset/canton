@@ -34,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.{EngineController, ProcessingSteps}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -46,8 +47,8 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{ContractValidator, EitherTUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
@@ -628,25 +629,36 @@ private[reassignment] class AssignmentProcessingSteps(
         case (_: Verdict.Approve, Some(rejection)) =>
           rejected(ErrorDetails.fromLocalError(rejection))
         case (_: Verdict.Approve, _) =>
-          val commitSet = assignmentValidationResult.commitSet
-          val commitSetO = Some(FutureUnlessShutdown.pure(commitSet))
           val contractsToBeStored = assignmentValidationResult.contracts.contracts.map(_.contract)
 
           for {
-            _ <-
+            storedInReassignmentStore <-
               if (
                 assignmentValidationResult.reassigningParticipantValidationResult.isUnassignmentDataNotFound
                 && assignmentValidationResult.isReassigningParticipant
               ) {
-                reassignmentCoordination.addAssignmentData(
-                  assignmentValidationResult.reassignmentId,
-                  contracts = assignmentValidationResult.contracts,
-                  source = assignmentValidationResult.sourcePsid.map(_.logical),
-                  target = psid.map(_.logical),
+                EitherT(
+                  reassignmentCoordination
+                    .addAssignmentData(
+                      assignmentValidationResult.reassignmentId,
+                      contracts = assignmentValidationResult.contracts,
+                      source = assignmentValidationResult.sourcePsid.map(_.logical),
+                      target = psid.map(_.logical),
+                    )
+                    .value
+                    .map {
+                      case Left(error: UnknownSynchronizer) =>
+                        alarmOnUnknownSource(error)
+                        Right(false)
+                      case outcome => outcome.map(_ => true)
+                    }
                 )
-              } else EitherTUtil.unitUS[ReassignmentProcessorError]
+              } else
+                EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](
+                  assignmentValidationResult.isReassigningParticipant
+                )
 
-            _ = if (assignmentValidationResult.isReassigningParticipant)
+            _ = if (storedInReassignmentStore)
               reassignmentMetrics.finalized.inc()(
                 ReassignmentMetrics.assignment(
                   assignmentValidationResult.sourcePsid.map(_.logical),
@@ -658,9 +670,14 @@ private[reassignment] class AssignmentProcessingSteps(
               participantId,
               requestId.unwrap,
               trafficCost,
+              storedInReassignmentStore = storedInReassignmentStore,
             )
           } yield CommitAndStoreContractsAndPublishEvent(
-            commitSetO,
+            Some(
+              FutureUnlessShutdown.pure(
+                assignmentValidationResult.commitSet(storedInReassignmentStore)
+              )
+            ),
             contractsToBeStored,
             Some(update),
           )
@@ -676,6 +693,12 @@ private[reassignment] class AssignmentProcessingSteps(
       }
     } yield commitAndStoreContract
   }
+
+  /** An unknown source synchronizer looks like malicious behaviour. */
+  private[this] def alarmOnUnknownSource(error: UnknownSynchronizer)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    SyncServiceAlarm.Warn(s"${error.message}. Skipping storing assignment data.").report()
 
   override def handleTimeout(parsedRequest: ParsedReassignmentRequest[FullView])(implicit
       traceContext: TraceContext

@@ -1313,6 +1313,10 @@ private[validation] object Typing {
         typeOfFetchTemplate(tpl, cid)
       case UpdateFetchInterface(tpl, cid) =>
         typeOfFetchInterface(tpl, cid)
+      case UpdateUnpackTemplate(tpl, cid) =>
+        typeOfFetchTemplate(tpl, cid)
+      case UpdateUnpackInterface(tpl, cid) =>
+        typeOfFetchInterface(tpl, cid)
       case UpdateGetTime =>
         Ret(TUpdate(TTimestamp))
       case UpdateLedgerTimeLT(time) =>

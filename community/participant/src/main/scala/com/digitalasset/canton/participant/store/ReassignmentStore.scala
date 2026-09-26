@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.implicits.catsSyntaxParallelTraverse_
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.UnassignmentData.{
   AssignmentGlobalOffset,
@@ -20,6 +20,10 @@ import com.digitalasset.canton.data.{
   Offset,
   UnassignmentData,
 }
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationEvent,
+  TopologyEvent,
+}
 import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -31,11 +35,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
 import com.digitalasset.canton.platform.indexer.parallel.ReassignmentOffsetPersistence
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{CheckedT, EitherTUtil, MonadUtil}
+import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
@@ -60,6 +65,41 @@ trait ReassignmentStore extends ReassignmentLookup {
     * The same offset can be added any number of times.
     */
   def addReassignmentsOffsets(offsets: Map[ReassignmentId, ReassignmentGlobalOffset])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
+
+  /** Handles the event offboarding parties `parties` at offset `offset`.
+    * @param offset
+    *   Offset of the offboarding event
+    * @param ts
+    *   Effective time of the offboarding
+    * @param parties
+    *   Parties that are offboarded
+    *
+    * Summary: the offboarding event might make some of the incomplete reassignments not incomplete
+    * anymore because the requirement for a reassignment to be incomplete is that the participant is
+    * reassigning, which means that it hosts a stakeholder of the contract.
+    *
+    * Consider a reassignment R with that is incomplete unassigned with unassignment offset o_un and
+    * suppose that the last locally hosted stakeholders of the reassignment are offboarded at offset
+    * o_off. Then for an offset o, R is:
+    *   - Incomplete if o_un <= o <= o_off
+    *   - Not incomplete otherwise
+    *
+    * Algorithm for the update:
+    *   - List all the incompletes at offset `offset` that have a stakeholder in `parties`
+    *   - Filter out the incompletes that have at least another locally hosted stakeholder remaining
+    *   - Mark the remaining incompletes as not incomplete anymore
+    *
+    * Note: the offline client needs to be able to get a topology snapshot for `ts`. This is fine as
+    * long as this method is called after the topology client has processed the topology up to ts.
+    */
+  // TODO(#23636) Remove this method
+  def handlePartiesOffboarding(
+      offset: Offset,
+      ts: CantonTimestamp,
+      parties: NonEmpty[Set[LfPartyId]],
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
 
@@ -133,62 +173,185 @@ object ReassignmentStore {
         .reassignmentStore(synchronizerId.unwrap)
         .toRight(s"Unknown synchronizer `${synchronizerId.unwrap}`")
 
+  private final case class PartyOffboardingData(
+      offset: Offset,
+      effectiveTime: CantonTimestamp,
+      lsid: SynchronizerId,
+      party: Party,
+  )
+
+  /** Collect events that lead to an update of the store:
+    *   - ReassignmentAccepted for which the participant is reassigning
+    *   - Party offboarding from the local participant
+    */
+  private def collectUpdates(
+      participantId: ParticipantId,
+      updates: Seq[(Offset, Update)],
+  ): (Seq[(Offset, Update.ReassignmentAccepted)], Seq[PartyOffboardingData]) =
+    updates.foldLeft(
+      (
+        Seq.empty[(Offset, Update.ReassignmentAccepted)],
+        Seq.empty[PartyOffboardingData],
+      )
+    ) { case (acc @ (accReassignments, accOffboardings), (offset, update)) =>
+      update match {
+        // ReassignmentAccepted and participant is reassigning
+        case reassignmentAccepted: Update.ReassignmentAccepted
+            if reassignmentAccepted.reassignmentInfo.isReassigningParticipant =>
+          ((offset, reassignmentAccepted) +: accReassignments, accOffboardings)
+
+        // Offboarding parties from the local participant
+        case topologyTransaction: Update.TopologyTransactionEffective =>
+          val newElements = topologyTransaction.events.collect {
+            case TopologyEvent.PartyToParticipantAuthorization(
+                  party,
+                  participant,
+                  AuthorizationEvent.Revoked,
+                ) if participant == participantId.toLf =>
+              PartyOffboardingData(
+                offset,
+                topologyTransaction.effectiveTime,
+                topologyTransaction.synchronizerId,
+                party,
+              )
+          }
+
+          (accReassignments, newElements ++: accOffboardings)
+
+        case _ => acc
+      }
+    }
+
   def reassignmentOffsetPersistenceFor(
-      syncPersistentStateLookup: SyncPersistentStateLookup
+      participantId: ParticipantId,
+      syncPersistentStateLookup: SyncPersistentStateLookup,
+      batchingConfig: BatchingConfig,
   )(implicit
       executionContext: ExecutionContext
   ): ReassignmentOffsetPersistence = new ReassignmentOffsetPersistence {
     override def persist(
         updates: Seq[(Offset, Update)],
         tracedLogger: TracedLogger,
-    )(implicit traceContext: TraceContext): Future[Unit] =
-      updates
-        .collect {
-          case (offset, reassignmentAccepted: Update.ReassignmentAccepted)
-              if reassignmentAccepted.reassignmentInfo.isReassigningParticipant =>
-            (reassignmentAccepted, offset)
-        }
-        .groupBy { case (event, _) => event.reassignmentInfo.targetSynchronizer }
-        .toList
-        // TODO(#24573): add and use a parallelism limit (DB write)
-        .parTraverse_ { case (targetSynchronizer, eventsForSynchronizer) =>
-          lazy val updates = eventsForSynchronizer
-            .map { case (event, offset) =>
-              s"${event.reassignmentInfo.sourceSynchronizer} ${event.reassignmentInfo.reassignmentId} (${event.reassignment}): $offset"
-            }
-            .mkString(", ")
+    )(implicit traceContext: TraceContext): Future[Unit] = {
+      val (reassignmentAccepted, offboardings) = collectUpdates(participantId, updates)
 
-          val res: EitherT[FutureUnlessShutdown, String, Unit] = for {
-            reassignmentStore <- EitherT
-              .fromEither[FutureUnlessShutdown](
-                reassignmentStoreFor(syncPersistentStateLookup)(targetSynchronizer)
-              )
-            offsets = eventsForSynchronizer.flatMap { case (reassignmentEvent, globalOffset) =>
-              reassignmentGlobalOffset(reassignmentEvent.reassignment, globalOffset).map {
-                reassignmentEvent.reassignmentInfo.reassignmentId -> _
-              }
-            }
-            _ = tracedLogger.debug(s"Updated global offsets for reassignments: $updates")
-            _ <- reassignmentStore.addReassignmentsOffsets(offsets).leftMap(_.message)
-          } yield ()
+      for {
+        _ <- handleReassignmentAccepted(syncPersistentStateLookup, batchingConfig, tracedLogger)(
+          reassignmentAccepted
+        )
 
-          EitherTUtil
-            .toFutureUnlessShutdown(
-              res.leftMap(err =>
-                new RuntimeException(
-                  s"Unable to update global offsets for reassignments ($updates): $err"
-                )
-              )
-            )
-            .onShutdown(
-              throw new RuntimeException(
-                "Notification upon published reassignment aborted due to shutdown"
-              )
-            )
-        }
+        _ <- handlePartiesOffboarding(syncPersistentStateLookup, tracedLogger)(offboardings)
+      } yield ()
+
+    }
   }
 
-  def reassignmentGlobalOffset(
+  /** For all ReassignmentAccepted event, set the offset of the unassigned or assigned event in the
+    * DB.
+    *
+    * Precondition:
+    *   - Participant is reassigning for all the events.
+    */
+  private def handleReassignmentAccepted(
+      syncPersistentStateLookup: SyncPersistentStateLookup,
+      batchingConfig: BatchingConfig,
+      tracedLogger: TracedLogger,
+  )(
+      reassignmentAccepted: Seq[(Offset, Update.ReassignmentAccepted)]
+  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
+
+    val updatesPerSynchronizer = reassignmentAccepted.groupBy { case (_, event) =>
+      event.reassignmentInfo.targetSynchronizer
+    }.toList
+
+    MonadUtil.parTraverseWithLimit_(batchingConfig.parallelism)(updatesPerSynchronizer) {
+      case (targetSynchronizer, eventsForSynchronizer) =>
+        lazy val updates = eventsForSynchronizer
+          .map { case (offset, event) =>
+            s"${event.reassignmentInfo.sourceSynchronizer} ${event.reassignmentInfo.reassignmentId} (${event.reassignment}): $offset"
+          }
+          .mkString(", ")
+
+        val res: EitherT[FutureUnlessShutdown, String, Unit] = for {
+          reassignmentStore <- EitherT
+            .fromEither[FutureUnlessShutdown](
+              reassignmentStoreFor(syncPersistentStateLookup)(targetSynchronizer)
+            )
+          offsets = eventsForSynchronizer.flatMap { case (globalOffset, reassignmentEvent) =>
+            reassignmentGlobalOffset(reassignmentEvent.reassignment, globalOffset).map {
+              reassignmentEvent.reassignmentInfo.reassignmentId -> _
+            }
+          }
+          _ = tracedLogger.debug(s"Updated global offsets for reassignments: $updates")
+          _ <- reassignmentStore.addReassignmentsOffsets(offsets).leftMap(_.message)
+        } yield ()
+
+        EitherTUtil
+          .toFutureUnlessShutdown(
+            res.leftMap(err =>
+              new RuntimeException(
+                s"Unable to update global offsets for reassignments ($updates): $err"
+              )
+            )
+          )
+          .onShutdown(
+            throw new RuntimeException(
+              "Notification upon published reassignment aborted due to shutdown"
+            )
+          )
+    }
+  }
+
+  private def handlePartiesOffboarding(
+      syncPersistentStateLookup: SyncPersistentStateLookup,
+      tracedLogger: TracedLogger,
+  )(
+      offboardings: Seq[PartyOffboardingData]
+  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] =
+    /*
+     We handle events in order because we want to mark the reassignment with the lowest offset
+      that leaves not locally hosted stakeholder.
+     */
+    MonadUtil.sequentialTraverse_(
+      offboardings
+        .groupMap(offboarding => (offboarding.offset, offboarding.effectiveTime, offboarding.lsid))(
+          _.party
+        )
+        .toSeq
+        .sortBy { case ((offset, ts, _), _) => (offset, ts) }
+    ) { case ((offset, effectiveTime, lsid), parties) =>
+      val res: EitherT[FutureUnlessShutdown, String, Unit] = for {
+        reassignmentStore <- EitherT
+          .fromEither[FutureUnlessShutdown](
+            reassignmentStoreFor(syncPersistentStateLookup)(Target(lsid))
+          )
+
+        partiesNE = NonEmpty.from(parties.toSet.map(LfPartyId.assertFromString))
+        _ <- partiesNE.fold(EitherTUtil.unitUS[String]) { partiesNE =>
+          tracedLogger.debug(
+            s"Handling offboarding of parties at offset $offset and ts $effectiveTime on $lsid: $parties"
+          )
+
+          reassignmentStore
+            .handlePartiesOffboarding(offset, effectiveTime, partiesNE)
+            .leftMap(_.message)
+        }
+      } yield ()
+
+      EitherTUtil
+        .toFutureUnlessShutdown(
+          res.leftMap(err =>
+            new RuntimeException(s"Unable to handle parties offboarding ($parties): $err")
+          )
+        )
+        .onShutdown(
+          throw new RuntimeException(
+            "Handling parties offboarding aborted due to shutdown"
+          )
+        )
+    }
+
+  private def reassignmentGlobalOffset(
       reassignment: Reassignment.Batch,
       offset: Offset,
   ): Option[ReassignmentGlobalOffset] =
@@ -200,7 +363,7 @@ object ReassignmentStore {
   /** Merge the offsets corresponding to the same reassignment id. Returns an error in case of
     * inconsistent offsets.
     */
-  def mergeReassignmentOffsets(
+  private def mergeReassignmentOffsets(
       events: Seq[(ReassignmentId, ReassignmentGlobalOffset)]
   ): Either[ConflictingGlobalOffsets, Map[ReassignmentId, ReassignmentGlobalOffset]] = {
     type Acc = Map[ReassignmentId, ReassignmentGlobalOffset]
@@ -270,13 +433,39 @@ object ReassignmentStore {
     override def message: String = s"Reassignment `$reassignmentId` is already completed"
   }
 
-  /** The data for a reassignment and possible when the reassignment was completed. */
+  final case class TopologyLookupError(lsid: SynchronizerId, ts: CantonTimestamp, error: String)
+      extends ReassignmentStoreError {
+    override def message: String =
+      s"Unable to query topology snapshot at $ts for synchronizer $lsid: $error"
+  }
+
+  /** The data for a reassignment and possible when the reassignment was completed.
+    *
+    * @param reassignmentId
+    *   Id of the reassignment
+    * @param sourceSynchronizer
+    *   Source synchronizer
+    * @param stakeholders
+    *   All stakeholders of the contracts
+    * @param unassignmentData
+    *   Data for the unassignment. Set in phase 7.
+    * @param reassignmentGlobalOffset
+    *   Offsets at which (un)assigned events are emitted.
+    * @param incompleteLastStakeholderOffboardedTargetOffset
+    *   If the last locally hosted stakeholder on the target synchronizer is offboarded from the
+    *   participant while the reassignment is incomplete unassigned, the offset of the offboarding.
+    * @param unassignmentTs
+    *   Record time of the unassignment.
+    * @param assignmentTs
+    *   Record time of the assignment.
+    */
   final case class ReassignmentEntry(
       reassignmentId: ReassignmentId,
       sourceSynchronizer: Source[SynchronizerId],
       stakeholders: NonEmpty[Set[LfPartyId]],
       unassignmentData: Option[UnassignmentData],
       reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
+      incompleteLastStakeholderOffboardedTargetOffset: Option[Offset],
       unassignmentTs: CantonTimestamp,
       assignmentTs: Option[CantonTimestamp],
   ) {
@@ -290,6 +479,7 @@ object ReassignmentStore {
     def apply(
         unassignmentData: UnassignmentData,
         reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
+        incompleteLastStakeholderOffboardedTargetOffset: Option[Offset],
         tsCompletion: Option[CantonTimestamp],
     ): ReassignmentEntry =
       ReassignmentEntry(
@@ -298,6 +488,7 @@ object ReassignmentStore {
         stakeholdersOf(unassignmentData.reassignmentId, unassignmentData.contractsBatch),
         Some(unassignmentData),
         reassignmentGlobalOffset,
+        incompleteLastStakeholderOffboardedTargetOffset,
         unassignmentData.unassignmentTs,
         tsCompletion,
       )
@@ -305,6 +496,7 @@ object ReassignmentStore {
     def apply(
         assignmentData: AssignmentData,
         reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
+        incompleteLastStakeholderOffboardedTargetOffset: Option[Offset],
         unassignmentTs: CantonTimestamp,
         tsCompletion: Option[CantonTimestamp],
     ): ReassignmentEntry =
@@ -314,6 +506,7 @@ object ReassignmentStore {
         stakeholdersOf(assignmentData.reassignmentId, assignmentData.contracts),
         None,
         reassignmentGlobalOffset,
+        incompleteLastStakeholderOffboardedTargetOffset,
         unassignmentTs,
         tsCompletion,
       )
@@ -381,8 +574,6 @@ trait ReassignmentLookup {
     * of the two offsets (unassignmentGlobalOffset, assignmentGlobalOffset) is not null and smaller
     * or equal to `validAt`.
     *
-    * @param sourceSynchronizer
-    *   if non-empty, select only reassignments whose source synchronizer matches the given one
     * @param validAt
     *   select only reassignments that are successfully unassigned
     * @param stakeholders
@@ -392,7 +583,6 @@ trait ReassignmentLookup {
     *   limit the number of results
     */
   def findIncomplete(
-      sourceSynchronizer: Option[Source[SynchronizerId]],
       validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,

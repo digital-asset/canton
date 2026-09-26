@@ -1,0 +1,107 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v31;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "scalapb/scalapb.proto";
+
+// Difference with v30:
+// - removed reserved fields 4 and 5
+// - changed field number of party_signing_keys from 6 to 4
+// - added is_offline field (5)
+// - uses v30.PartyToParticipant.HostingParticipant for participants
+// Mapping that maps a party to a participant
+// The PartyToParticipant mapping may also specify a list of signing keys for setting up an external party, in which
+// case the keys and the threshold take precedence over any PartyToKeyMapping for the same party.
+// Additionally, the list of signing keys may contain the public key of the party's namespace, which allows this
+// mapping to authorize itself without the need of a NamespaceDelegation root certificate (called self-signed).
+// authorization: the required authorization of the mapping is a union of the authorization for individual changes
+//  - threshold change: party namespace
+//  - adding a signing key: party namespace + all the new signing key
+//  - removing a signing key: party namespace
+//  - changing the signing key threshold: party namespace
+//  - upgrading a participant permission or adding a new participant: namespaces from party and the participant namespace
+//  - downgrading a participant permission or removing a participant: party namespace OR the participant namespace
+//  - setting a participant's onboarding flag from false to true: party namespace
+//  - setting a participant's onboarding flag from true to false: participant namespace
+//  - the removal of a PTP must be authorized just by the party
+// revocation: Revoking a self-signed PTP does not prevent later re-creation of a PTP with the same partyId.
+//  To prevent further usage of the key associated with the party's namespace,
+//  revoke a NamespaceDelegation root certificate for that namespace.
+// UNIQUE(party)
+message PartyToParticipant {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // the party that is to be represented by the participants
+  string party = 1;
+
+  // the signatory threshold required by the participants to be able to act on behalf of the party.
+  // a mapping with threshold > 1 is considered a definition of a consortium party
+  uint32 threshold = 2;
+
+  // which participants will host the party.
+  // if threshold > 1, must be Confirmation or Observation.
+  // if all participants have Observation permission, the confirmation treshold is ignored, making the party
+  // a purely observing party.
+  repeated v30.PartyToParticipant.HostingParticipant participants = 3;
+
+  // Contains protocol signing keys for the party used to authorize externally signed Daml transactions,
+  // along with a signing threshold.
+  // The max number of keys is 20
+  optional com.digitalasset.canton.crypto.v30.SigningKeysWithThreshold party_signing_keys = 4;
+
+  // Flag indicating if the party is offline
+  bool is_offline = 5;
+}
+
+// Difference with v30:
+// - compacted field numbers by removing reserved gaps
+// - uses v31.PartyToParticipant
+message TopologyMapping {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  oneof mapping {
+    v30.NamespaceDelegation namespace_delegation = 1;
+    v30.DecentralizedNamespaceDefinition decentralized_namespace_definition = 2;
+
+    v30.OwnerToKeyMapping owner_to_key_mapping = 3;
+
+    v30.SynchronizerTrustCertificate synchronizer_trust_certificate = 4;
+    v30.ParticipantSynchronizerPermission participant_permission = 5;
+    v30.PartyHostingLimits party_hosting_limits = 6;
+    v30.VettedPackages vetted_packages = 7;
+
+    PartyToParticipant party_to_participant = 8;
+
+    v30.SynchronizerParametersState synchronizer_parameters_state = 9;
+    v30.MediatorSynchronizerState mediator_synchronizer_state = 10;
+    v30.SequencerSynchronizerState sequencer_synchronizer_state = 11;
+    v30.DynamicSequencingParametersState sequencing_dynamic_parameters_state = 12;
+
+    // Deprecated in favor of PartyToParticipant
+    v30.PartyToKeyMapping party_to_key_mapping = 13 [deprecated = true];
+
+    v30.LsuAnnouncement synchronizer_upgrade_announcement = 14;
+    v30.LsuSequencerConnectionSuccessor sequencer_connection_successor = 15;
+  }
+}
+
+// Difference with v30:
+// - uses v31.TopologyMapping
+message TopologyTransaction {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  v30.Enums.TopologyChangeOp operation = 1;
+
+  // Serial identifier of this transaction used to prevent replay attacks.
+  // A topology transaction is replacing the existing transaction with serial - 1
+  // that has the same unique key.
+  uint32 serial = 2;
+
+  // the element of this topology transaction
+  TopologyMapping mapping = 3;
+}

@@ -40,10 +40,11 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.
   SequencerSubscriptionPoolHealth,
 }
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
-import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandlerTrait.SubscriptionLivenessStatus
+import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandler.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidator,
+  SequencedEventValidatorFactory,
   SequencerClientSubscriptionError,
 }
 import com.digitalasset.canton.sequencing.{
@@ -291,8 +292,9 @@ trait ConnectionPoolTestHelpers {
     val config = mkSubscriptionPoolConfig(livenessMargin)
 
     val subscriptionPoolFactory = new SequencerSubscriptionPoolFactoryImpl(
-      sequencerSubscriptionFactory = new TestSequencerSubscriptionFactory(timeouts, loggerFactory),
-      subscriptionHandlerFactory = TestSubscriptionHandlerFactory,
+      subscriptionWrapperFactory =
+        new TestSequencerSubscriptionWrapperFactory(timeouts, loggerFactory),
+      subscriptionHandlerFactory = new TestSubscriptionHandlerFactory(timeouts),
       metrics = CommonMockMetrics.sequencerClient.connectionPool,
       metricsContext = connectionPool.metricsContext,
       timeouts = timeouts,
@@ -389,6 +391,10 @@ protected object ConnectionPoolTestHelpers {
         SequencerConnect.GetSynchronizerParametersResponse.Parameters.V31(
           defaultStaticSynchronizerParameters.toProtoV31
         )
+      case ProtoVersion(32) =>
+        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V32(
+          defaultStaticSynchronizerParameters.toProtoV32
+        )
       case other => throw new IllegalStateException(s"Unexpected proto version: $other")
     }
     Right(SequencerConnect.GetSynchronizerParametersResponse(parameters))
@@ -424,10 +430,10 @@ protected object ConnectionPoolTestHelpers {
       Namespace(Fingerprint.tryFromString("namespace")),
     )
 
-  private class TestSequencerSubscriptionFactory(
+  private class TestSequencerSubscriptionWrapperFactory(
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  ) extends SequencerSubscriptionFactory {
+  ) extends SequencerSubscriptionWrapperFactory {
     override def create(
         connection: SequencerConnection,
         member: Member,
@@ -437,19 +443,20 @@ protected object ConnectionPoolTestHelpers {
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
-    ): SequencerSubscriptionImpl = {
-      val subscriptionHandler = new SubscriptionHandlerTrait {
-        override def handleEvent(
-            serializedEvent: MaybeCompressedSerializedEvent
-        ): FutureUnlessShutdown[Either[SequencerClientSubscriptionError, Unit]] =
-          EitherTUtil.unitUS.value
+    ): SequencerSubscriptionWrapperImpl = {
+      val eventValidationFactory = SequencedEventValidatorFactory.noValidation(
+        synchronizerId = testSynchronizerId(1),
+        warn = false,
+      )
+      val subscriptionHandler = subscriptionHandlerFactory.create(
+        eventValidator = eventValidationFactory.create(loggerFactory),
+        initialPriorEventO = None,
+        sequencerAlias = SequencerAlias.tryCreate(connection.name),
+        sequencerId = connection.attributes.sequencerId,
+        loggerFactory = loggerFactory,
+      )
 
-        override def getLivenessStatus(
-            latest: EventAndOrdinal
-        ): Option[SubscriptionLivenessStatus] = None
-      }
-
-      new SequencerSubscriptionImpl(
+      new SequencerSubscriptionWrapperImpl(
         connection = connection,
         member = member,
         startingTimestampO = None,
@@ -461,14 +468,29 @@ protected object ConnectionPoolTestHelpers {
     }
   }
 
-  private object TestSubscriptionHandlerFactory extends SubscriptionHandlerFactory {
+  private class TestSubscriptionHandlerFactory(timeouts: ProcessingTimeout)
+      extends SubscriptionHandlerFactory {
     override def create(
         eventValidator: SequencedEventValidator,
         initialPriorEventO: Option[EventAndOrdinal],
         sequencerAlias: SequencerAlias,
         sequencerId: SequencerId,
         loggerFactory: NamedLoggerFactory,
-    )(implicit ec: ExecutionContext): SubscriptionHandler = ???
+    )(implicit ec: ExecutionContext): SubscriptionHandler =
+      new TestSubscriptionHandler(timeouts, loggerFactory)
+  }
+
+  private class TestSubscriptionHandler(
+      protected override val timeouts: ProcessingTimeout,
+      protected override val loggerFactory: NamedLoggerFactory,
+  ) extends SubscriptionHandler {
+    override def handleEvent(
+        serializedEvent: MaybeCompressedSerializedEvent
+    ): FutureUnlessShutdown[Either[SequencerClientSubscriptionError, Unit]] =
+      EitherTUtil.unitUS.value
+
+    override def getLivenessStatus(latest: EventAndOrdinal): Option[SubscriptionLivenessStatus] =
+      None
   }
 
   private class TestSequencerConnectionPoolFactory(

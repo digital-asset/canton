@@ -82,9 +82,6 @@ private[service] class DirectSequencerSubscription[E](
         case Success(None) =>
           logger.debug(show"Subscription flow for $member has completed")
           closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard[Boolean]
-        case Success(Some(SubscriptionCloseReason.TransportChange)) =>
-          logger.debug(show"Subscription flow for $member has completed due to transport change")
-          closeReasonPromise.trySuccess(SubscriptionCloseReason.TransportChange).discard[Boolean]
         case Success(
               Some(
                 SubscriptionCloseReason.Shutdown |

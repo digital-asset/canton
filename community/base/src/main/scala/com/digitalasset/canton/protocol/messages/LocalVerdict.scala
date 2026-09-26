@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.protocol.v30.LocalVerdict.VerdictCode.{
   VERDICT_CODE_LOCAL_ABSTAIN,
@@ -16,6 +20,7 @@ import com.digitalasset.canton.protocol.v30.LocalVerdict.VerdictCode.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.*
 import com.google.rpc.status.Status
 
@@ -27,7 +32,7 @@ import com.google.rpc.status.Status
 sealed trait LocalVerdict
     extends Product
     with Serializable
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with HasProtocolVersionedWrapper[LocalVerdict] {
   def kind: String
 
@@ -124,10 +129,13 @@ final case class LocalApprove()(
       reason = Some(reason),
     )
 
-  override protected def pretty: Pretty[this.type] = prettyOfClass()
+  override def prettyCompanion: PrettyPrintingCompanion[LocalApprove] = LocalApprove
 }
 
-object LocalApprove {
+object LocalApprove extends PrettyPrintingCompanion[LocalApprove] {
+
+  override protected val pretty: Pretty[LocalApprove] = prettyOfClass()
+
   def apply(protocolVersion: ProtocolVersion): LocalApprove =
     LocalApprove()(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
 }
@@ -138,8 +146,7 @@ final case class LocalReject(
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[LocalVerdict.type]
 ) extends LocalVerdict
-    with NonPositiveLocalVerdict
-    with PrettyPrinting {
+    with NonPositiveLocalVerdict {
 
   override def kind: String = "LocalReject"
 
@@ -149,13 +156,16 @@ final case class LocalReject(
     v30.LocalVerdict(code = codeP, reason = Some(reason))
   }
 
-  override protected def pretty: Pretty[LocalReject] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[LocalReject] = LocalReject
+}
+
+object LocalReject extends PrettyPrintingCompanion[LocalReject] {
+
+  override protected val pretty: Pretty[LocalReject] = prettyOfClass(
     param("reason", _.reason),
     param("isMalformed", _.isMalformed),
   )
-}
 
-object LocalReject {
   def create(
       reason: com.google.rpc.status.Status,
       isMalformed: Boolean,
@@ -177,9 +187,12 @@ final case class LocalAbstain(override val reason: com.google.rpc.status.Status)
       reason = Some(reason),
     )
 
-  override protected def pretty: Pretty[this.type] = prettyOfClass()
+  override def prettyCompanion: PrettyPrintingCompanion[LocalAbstain] = LocalAbstain
 }
-object LocalAbstain {
+object LocalAbstain extends PrettyPrintingCompanion[LocalAbstain] {
+
+  override protected val pretty: Pretty[LocalAbstain] = prettyOfClass()
+
   def apply(reason: com.google.rpc.status.Status, protocolVersion: ProtocolVersion): LocalAbstain =
     LocalAbstain(reason)(LocalVerdict.protocolVersionRepresentativeFor(protocolVersion))
 }

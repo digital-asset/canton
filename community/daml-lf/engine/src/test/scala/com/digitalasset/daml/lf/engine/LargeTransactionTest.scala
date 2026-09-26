@@ -298,7 +298,6 @@ class LargeTransactionTest(
     engine
       .submit(
         submitters = Set(submitter),
-        readAs = Set.empty,
         cmds = ApiCommands(ImmArray(cmd), effectiveAt, cmdReference),
         participantId = participant,
         submissionSeed = seed,

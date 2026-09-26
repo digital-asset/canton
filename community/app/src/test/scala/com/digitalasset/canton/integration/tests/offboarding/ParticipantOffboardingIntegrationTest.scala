@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.offboarding
 
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.data.{
+  OnboardingRestriction,
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -16,18 +17,20 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
-import org.slf4j.event.Level
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import org.scalatest.Assertion
 
 import scala.concurrent.duration.DurationInt
 
-@UnstableTest // TODO(i29891): remove this once the test is no longer flaky
-class ParticipantOffboardingIntegrationTest
+final class ParticipantOffboardingIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with ParticipantOffboardingIntegrationTestAssertions {
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -39,16 +42,14 @@ class ParticipantOffboardingIntegrationTest
   private var staticParameters: StaticSynchronizerParameters = _
   private var synchronizerOwners: Seq[InstanceReference] = _
 
-  "A domain with multiple participants" should {
+  "A synchronizer with multiple participants" should {
 
     "Basic synchronizer startup" in { implicit env =>
       import env.*
 
       clue("starting up participants") {
         // for now we need a participant to effect changes to the synchronizer after the initial bootstrap
-        participant1.start()
-        participant2.start()
-        participant3.start()
+        participants.local.start()
       }
       clue("start sequencer") {
         sequencers.local.start()
@@ -81,15 +82,31 @@ class ParticipantOffboardingIntegrationTest
           identityTransactions = None,
         )
       }
+
+      // Make the synchronizer permissionned
+      synchronizerOwners.foreach(
+        _.topology.synchronizer_parameters
+          .propose_update(
+            sequencer1.synchronizer_id,
+            _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen),
+          )
+      )
+
+      for {
+        owner <- synchronizerOwners
+        participant <- participants.all
+      } yield owner.topology.participant_synchronizer_permissions.propose(
+        synchronizerId,
+        participant.id,
+        ParticipantPermission.Submission,
+      )
     }
 
-    "Onboard participants to sequencer and send a ping" in { implicit env =>
+    "Onboard participants to synchronizer and send a ping" in { implicit env =>
       import env.*
 
       clue("participants connect to sequencers") {
-        participant1.synchronizers.connect_local(sequencer1, daName)
-        participant2.synchronizers.connect_local(sequencer1, daName)
-        participant3.synchronizers.connect_local(sequencer1, daName)
+        participants.all.synchronizers.connect_local(sequencer1, daName)
       }
 
       clue("participants can ping each other") {
@@ -102,64 +119,132 @@ class ParticipantOffboardingIntegrationTest
     "successfully off-board a participant" in { implicit env =>
       import env.*
 
-      clue("offboard participant2") {
-        // Unauthorize the participant on the synchronizer by removing its permissions
-        // user-manual-entry-begin: OffboardParticipant
-        synchronizerOwners.foreach { synchronizerOwner =>
-          synchronizerOwner.topology.participant_synchronizer_permissions
-            .list(synchronizerId, filterUid = participant2.filterString)
-            .map(_.item.permission)
-            .foreach(permission =>
-              synchronizerOwner.topology.participant_synchronizer_permissions
-                .propose(synchronizerId, participant2.id, permission = permission, change = Remove)
-            )
-        }
-        // user-manual-entry-end: OffboardParticipant
-
-        eventually() {
-          forAll(synchronizerOwners) { synchronizerOwner =>
-            synchronizerOwner.topology.participant_synchronizer_permissions
-              .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+      // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
+      // this produces a bunch of warnings
+      loggerFactory.assertLogsUnorderedOptional(
+        {
+          forAll(synchronizerOwners ++ participants.all) { member =>
+            member.topology.participant_synchronizer_permissions
+              .list(synchronizerId, filterUid = participant2.filterString) should not be empty
           }
-        }
 
-        // Disable the participant on all the sequencers to remove any sequencer data associated with it
-        //  and allow sequencer pruning
-        // user-manual-entry-begin: DisableParticipant
-        sequencers.all.foreach(_.repair.disable_member(participant2))
-        // user-manual-entry-end: DisableParticipant
-      }
+          // user-manual-entry-begin: OffboardParticipant
+          synchronizerOwners.foreach { synchronizerOwner =>
+            synchronizerOwner.topology.participant_synchronizer_permissions
+              .revoke(synchronizerId, participant2.id)
+          }
+          // user-manual-entry-end: OffboardParticipant
 
-      clue("check that pings that don't involve the off-boarded participant still work") {
-        participant1.health.ping(participant3, timeout = 30.seconds)
-      }
+          eventually() {
+            forAll(synchronizerOwners ++ participants.all) { member =>
+              member.topology.participant_synchronizer_permissions
+                .list(synchronizerId, filterUid = participant2.filterString) shouldBe empty
+            }
+          }
 
-      clue("check that pings that involve the off-boarded participant don't work") {
-        forAll(Seq(participant1, participant3)) { sourceParticipant =>
-          loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
-            a[CommandFailure] should be thrownBy sourceParticipant.health.ping(
+          // Disable the participant on all the sequencers to remove any sequencer data associated with it
+          //  and allow sequencer pruning
+          // user-manual-entry-begin: DisableParticipant
+          sequencers.all.foreach(_.repair.disable_member(participant2))
+          // user-manual-entry-end: DisableParticipant
+
+          clue("check that pings that don't involve the off-boarded participant still work") {
+            participant1.health.ping(participant3, timeout = 30.seconds)
+          }
+
+          clue("check that pings that involve the off-boarded participant don't work") {
+            a[CommandFailure] should be thrownBy participant1.health.ping(
               participant2,
               timeout = 3.seconds,
-            ),
-            logs => {
-              forAtLeast(1, logs) { log =>
-                log.message should include("responder did not respond in time")
-              }
-              forAtLeast(1, logs) { log =>
-                log.message should include("is disabled at the sequencer")
-              }
-              forExactly(1, logs) { log =>
-                log.loggerName should include(classOf[CommandSubmitterWithRetry].getSimpleName)
-                // Wait for participant2 to also give up on responding to the ping
-                // to ensure the sequencer rejections on its responses are not logged after the suppression block ends
-                log.message should (include regex "failed non-retryable with.*Giving up" or include(
-                  "failed after reaching the deadline"
-                ))
-              }
-            },
+            )
+          }
+        },
+        logAssertions(participant2, daName, synchronizerId.logical)*
+      )
+    }
+  }
+}
+
+trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrationTest =>
+
+  def logAssertions(
+      offboardedParticipant: ParticipantId,
+      synchronizer: SynchronizerAlias,
+      lsid: SynchronizerId,
+  ): Seq[(LogEntryOptionality, LogEntry => Assertion)] = Seq(
+    // Ping failure
+    (
+      LogEntryOptionality.Required,
+      _.errorMessage should include(
+        "The participant is not connected to any synchronizer where the given informees are known."
+      ),
+    ),
+    // Warnings coming from the revocation
+    (
+      LogEntryOptionality.OptionalMany,
+      _.warningMessage should include(
+        s"Unable to find ParticipantSynchronizerPermission for participant $offboardedParticipant on synchronizer $lsid"
+      ),
+    ),
+    (
+      LogEntryOptionality.Required,
+      _.warningMessage should include(s"$offboardedParticipant access is disabled"),
+    ),
+    (
+      LogEntryOptionality.Required,
+      _.shouldBeCantonError(
+        SyncServiceSynchronizerDisabledUs,
+        _ should include(s"$synchronizer rejected our subscription attempt with permission denied"),
+      ),
+    ),
+    (
+      LogEntryOptionality.Optional,
+      _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
+    ),
+    (
+      LogEntryOptionality.Optional,
+      _.warningMessage should include("Token refresh aborted due to shutdown"),
+    ),
+  )
+}
+
+final class ParticipantSelfOffboardingIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with ParticipantOffboardingIntegrationTestAssertions {
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2_S1M1
+
+  "A synchronizer with multiple participants" should {
+
+    "Basic synchronizer startup" in { implicit env =>
+      import env.*
+
+      participants.all.synchronizers.connect_local(sequencer1, daName)
+      participant1.health.ping(participant2)
+
+      // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
+      // this produces a bunch of warnings
+      loggerFactory.assertLogsUnorderedOptional(
+        {
+          participant2.topology.synchronizer_trust_certificates.propose(
+            participantId = participant2.id,
+            synchronizerId = daId,
+            store = Some(daId),
+            change = Remove,
           )
-        }
-      }
+
+          a[CommandFailure] should be thrownBy participant1.health.ping(
+            participant2,
+            timeout = 3.seconds,
+          )
+        },
+        logAssertions(participant2, daName, daId.logical)*
+      )
     }
   }
 }

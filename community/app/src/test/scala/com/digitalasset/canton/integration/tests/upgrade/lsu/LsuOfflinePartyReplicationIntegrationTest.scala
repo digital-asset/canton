@@ -22,9 +22,12 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.TopologyManagerError.TopologyStoreUnknown
-import com.digitalasset.canton.topology.transaction.{HostingParticipant, ParticipantPermission}
+import com.digitalasset.canton.topology.transaction.{
+  HostingParticipant,
+  ParticipantPermission,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasTempDirectory, TempFile}
 import org.scalatest.Assertion
 
@@ -63,7 +66,8 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableDevVersionSupport
+    ) ++ ConfigTransforms.enableDevVersionSupport ++
+      ConfigTransforms.enableAlphaVersionSupport
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -103,18 +107,40 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
 
   protected val acsSnapshotFile: TempFile = tempDirectory.toTempFile("offpr_test_acs_snapshot.gz")
 
-  protected def makeFixture1(implicit env: TestEnvironment[?]): Fixture = Fixture(
-    currentPsid = env.daId,
-    upgradeTime = upgradeTime1,
-    oldSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer1), Seq(env.mediator1)),
-    newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
-    newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
-    oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
-    newPV = ProtocolVersion.dev,
-    newSerial = env.daId.serial.increment.value.toNonNegative,
-  )
+  protected def makeFixture1(implicit env: TestEnvironment[?]): Fixture = {
+    // The goal of the test is to change the PV during the LSU.
+    // We bump the PV only if the underlying serialization schema (ProtoVersion) remains the same,
+    // otherwise the interleaved split-authorization test would fail due to a hash mismatch.
+    val safeUpgradePV = testedProtocolVersion.nextSupported match {
+      case Some(next)
+          if TopologyTransaction
+            .protoVersionFor(next) == TopologyTransaction.protoVersionFor(testedProtocolVersion) =>
+        next
+      case _ => testedProtocolVersion
+    }
 
-  protected def makeFixture2(fixture1: Fixture)(implicit env: TestEnvironment[?]): Fixture =
+    Fixture(
+      currentPsid = env.daId,
+      upgradeTime = upgradeTime1,
+      oldSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer1), Seq(env.mediator1)),
+      newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
+      newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
+      oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
+      newPV = safeUpgradePV, // Real, safe PV upgrade
+      newSerial = env.daId.serial.increment.value.toNonNegative,
+    )
+  }
+
+  protected def makeFixture2(fixture1: Fixture)(implicit env: TestEnvironment[?]): Fixture = {
+    // Continue upgrading the PV for the second LSU using the same safety constraint.
+    val safeUpgradePV = fixture1.newPV.nextSupported match {
+      case Some(next)
+          if TopologyTransaction
+            .protoVersionFor(next) == TopologyTransaction.protoVersionFor(fixture1.newPV) =>
+        next
+      case _ => fixture1.newPV
+    }
+
     Fixture(
       currentPsid = fixture1.newPsid,
       upgradeTime = upgradeTime2,
@@ -122,9 +148,10 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer3), Seq(env.mediator3)),
       newOldNodesResolution = Map("sequencer3" -> "sequencer2", "mediator3" -> "mediator2"),
       oldSynchronizerOwners = Set[InstanceReference](env.sequencer2, env.mediator2),
-      newPV = testedProtocolVersion,
+      newPV = safeUpgradePV,
       newSerial = fixture1.newSerial.increment.value.toNonNegative,
     )
+  }
 
   protected def eventuallyParticipantHostsParty(
       participant: ParticipantReference,
@@ -209,9 +236,11 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
       val fixture = makeFixture1
       val iou = IouSyntax.createIou(participant1)(alice, bob)
 
-      performLsu(participants.all, fixture, upgradeTime1)
+      clue(s"Perform initial LSU (transitioning to PV ${fixture.newPV})")(
+        performLsu(participants.all, fixture, upgradeTime1)
+      )
 
-      withClue("perform offline party replication") {
+      clue("perform offline party replication") {
         val offsetBeforePartyUpdate = participant1.ledger_api.state.end()
 
         // Authorize alice on participant2, with onboarding flag set.
@@ -258,7 +287,7 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
         awaitClearOnboardingFlag(alice, participant2, fixture.newPsid.logical, offsetAfterImport)
       }
 
-      withClue("Alice can see the contract on participant2") {
+      clue("Alice can see the contract on participant2") {
         participant2.ledger_api.javaapi.state.acs
           .await(IouSyntax.modelCompanion)(alice)
           .id shouldBe iou.id
@@ -288,7 +317,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
 
         IouSyntax.createIou(participant1)(alice, bob)
 
-        withClue("Target authorizes and disconnects") {
+        clue("Target authorizes and disconnects") {
           participant2.topology.party_to_participant_mappings.propose_delta(
             party = alice.partyId,
             adds = Seq(participant2.id -> ParticipantPermission.Submission),
@@ -298,9 +327,11 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
           participant2.synchronizers.disconnect_all()
         }
 
-        performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
+        clue(s"Perform initial LSU (transitioning to PV ${fixture.newPV})")(
+          performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
+        )
 
-        val offsetBeforeSetSourceOnboarding = withClue("Source authorizes") {
+        val offsetBeforeSetSourceOnboarding = clue("Source authorizes") {
           val offset = participant1.ledger_api.state.end()
           alice.topology.party_to_participant_mappings.propose_delta(
             participant1,
@@ -311,7 +342,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
           offset
         }
 
-        withClue("ACS snapshot taken on source") {
+        clue("ACS snapshot taken on source") {
           participant1.parties.export_party_acs(
             party = alice,
             synchronizerId = lsid,
@@ -321,12 +352,12 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
           )
         }
 
-        val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
+        val offsetAfterTargetImport = clue("ACS snapshot is imported on target") {
           participant2.parties.import_party_acs(lsid, Some(alice), acsSnapshotFile.path.toString)
           participant2.ledger_api.state.end()
         }
 
-        withClue("Target reconnects and clears onboarding flag") {
+        clue("Target reconnects and clears onboarding flag") {
           participant2.synchronizers.reconnect(daName)
 
           eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = true)
@@ -338,9 +369,10 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
           eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = false)
         }
 
-        withClue("Perform another LSU") {
-          performLsu(participants.all, makeFixture2(fixture), upgradeTime2)
-        }
+        val fixture2 = makeFixture2(fixture)
+        clue(
+          s"Perform another LSU (transitioning from PV ${fixture.newPV} to PV ${fixture2.newPV})"
+        )(performLsu(participants.all, fixture2, upgradeTime2))
     }
   }
 }
@@ -367,7 +399,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
 
       IouSyntax.createIou(participant1)(alice, bob)
 
-      withClue("Target authorizes and disconnects") {
+      clue("Target authorizes and disconnects") {
         participant2.topology.party_to_participant_mappings.propose_delta(
           party = alice.partyId,
           adds = Seq(participant2.id -> ParticipantPermission.Submission),
@@ -377,7 +409,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
         participant2.synchronizers.disconnect_all()
       }
 
-      val offsetBeforeSetSourceOnboarding = withClue("Source authorizes") {
+      val offsetBeforeSetSourceOnboarding = clue("Source authorizes") {
         val offset = participant1.ledger_api.state.end()
         alice.topology.party_to_participant_mappings.propose_delta(
           participant1,
@@ -388,11 +420,11 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
         offset
       }
 
-      withClue("perform LSU") {
+      clue(s"Perform initial LSU (transitioning to PV ${fixture.newPV})")(
         performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
-      }
+      )
 
-      withClue("ACS snapshot taken on source") {
+      clue("ACS snapshot taken on source") {
         participant1.parties.export_party_acs(
           party = alice,
           synchronizerId = lsid,
@@ -402,12 +434,12 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
         )
       }
 
-      val offsetAfterTargetImport = withClue("ACS snapshot is imported on target") {
+      val offsetAfterTargetImport = clue("ACS snapshot is imported on target") {
         participant2.parties.import_party_acs(lsid, Some(alice), acsSnapshotFile.path.toString)
         participant2.ledger_api.state.end()
       }
 
-      withClue("f. Target reconnects and clears onboarding flag") {
+      clue("f. Target reconnects and clears onboarding flag") {
         participant2.synchronizers.reconnect(daName)
         eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = true)
 
@@ -418,9 +450,10 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
         eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = false)
       }
 
-      withClue("Perform another LSU") {
-        performLsu(participants.all, makeFixture2(fixture), upgradeTime2)
-      }
+      val fixture2 = makeFixture2(fixture)
+      clue(
+        s"Perform another LSU (transitioning from PV ${fixture.newPV} to PV ${fixture2.newPV})"
+      )(performLsu(participants.all, fixture2, upgradeTime2))
     }
   }
 }

@@ -262,7 +262,6 @@ class TestSubmissionService(
     interpret(
       actAs = commands.actAs,
       apiCommands = commands.apiCommands(),
-      readAs = commands.readAs,
       disclosedContracts = commands.disclosedContracts.map { case (cid, c) => cid -> c.inst },
       disclosedKeyContracts = commands.disclosedKeyContracts.map { case (cid, contracts) =>
         cid -> contracts.map(_.inst)
@@ -275,7 +274,6 @@ class TestSubmissionService(
   def interpret(
       actAs: Seq[PartyId],
       apiCommands: ApiCommands,
-      readAs: Seq[PartyId],
       disclosedContracts: Map[LfContractId, FatContractInstance],
       disclosedKeyContracts: Map[GlobalKey, Vector[FatContractInstance]],
       submissionSeed: crypto.Hash = SubmissionSeed.generate(randomOps),
@@ -307,7 +305,6 @@ class TestSubmissionService(
         packageMap = packageMap,
         packagePreference = packagePreference,
         submitters = actAs.map(_.toLf).toSet,
-        readAs = readAs.map(_.toLf).toSet,
         cmds = apiCommands,
         participantId = participantId.toLf,
         prefetchKeys = Seq.empty,

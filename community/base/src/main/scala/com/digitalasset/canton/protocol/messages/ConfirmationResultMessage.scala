@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{RequestId, RootHash, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -41,8 +41,7 @@ case class ConfirmationResultMessage private (
     with HasPhysicalSynchronizerId
     with HasRequestId
     with SignedProtocolMessageContent
-    with HasProtocolVersionedWrapper[ConfirmationResultMessage]
-    with PrettyPrinting {
+    with HasProtocolVersionedWrapper[ConfirmationResultMessage] {
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[
     ConfirmationResultMessage.type
@@ -82,8 +81,19 @@ case class ConfirmationResultMessage private (
       getCryptographicEvidence
     )
 
+  override def prettyCompanion: PrettyPrintingCompanion[ConfirmationResultMessage] =
+    ConfirmationResultMessage
+}
+
+object ConfirmationResultMessage
+    extends VersioningCompanionMemoization[
+      ConfirmationResultMessage,
+    ]
+    with PrettyPrintingCompanion[ConfirmationResultMessage] {
+  override val name: String = "ConfirmationResultMessage"
+
   @VisibleForTesting
-  override def pretty: Pretty[ConfirmationResultMessage] =
+  override protected val pretty: Pretty[ConfirmationResultMessage] =
     prettyOfClass(
       param("psid", _.psid),
       param("viewType", _.viewType),
@@ -91,13 +101,6 @@ case class ConfirmationResultMessage private (
       param("rootHash", _.rootHash),
       param("verdict", _.verdict),
     )
-}
-
-object ConfirmationResultMessage
-    extends VersioningCompanionMemoization[
-      ConfirmationResultMessage,
-    ] {
-  override val name: String = "ConfirmationResultMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(

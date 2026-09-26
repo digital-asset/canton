@@ -23,6 +23,7 @@ import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
 import com.digitalasset.canton.participant.config.{
   AcsCommitmentConfig,
   AlphaOnlinePartyReplicationConfig,
+  OnlinePartyReplicationTargetConfig,
   ParticipantNodeConfig,
   RemoteParticipantConfig,
   TestingTimeServiceConfig,
@@ -154,7 +155,13 @@ object ConfigTransforms {
 
   lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(true)
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor)
+        .replace(true)
+        // Let's change the maxNumUpdatesBetweenCheckpoints to a very small value,
+        // so we always have a meaningful checkpoint (close to the ledger end)
+        // for AcsDigestConsistencyChecker
+        .focus(_.parameters.acsCommitments.maxNumUpdatesBetweenCheckpoints)
+        .replace(PositiveInt.one)
     )
 
   lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
@@ -527,6 +534,12 @@ object ConfigTransforms {
 
     mainUpdates compose sequencerWriteBound compose disableSessionKeys compose disablePingRetries
   }
+
+  /** Set the `sequencerInfo` timeout value. Using a small value can help making some tests faster.
+    */
+  def setSequencerInfoTimeout(duration: Duration): ConfigTransform =
+    _.focus(_.parameters.timeouts.processing.sequencerInfo)
+      .replace(config.NonNegativeDuration.tryFromDuration(duration))
 
   def setPingRetries(enabled: Boolean): ConfigTransform = updateAllParticipantConfigs_(
     _.focus(_.parameters.adminWorkflow.retries).replace(enabled)
@@ -986,7 +999,10 @@ object ConfigTransforms {
           AlphaOnlinePartyReplicationConfig(
             testInterceptor = participantsWithOnPRInterceptor.get(name),
             unsafeSequencerChannelSupport = enableUnsafeSequencerChannelSupport,
-            pauseSynchronizerIndexingDuringPartyReplication = pauseIndexer,
+            target =
+              OnlinePartyReplicationTargetConfig(pauseSynchronizerIndexingDuringPartyReplication =
+                pauseIndexer
+              ),
           )
         )
       )

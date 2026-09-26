@@ -15,7 +15,6 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   Node,
   NodeId,
-  NextGenContractStateMachine as ContractStateMachine,
   Transaction as Tx,
 }
 import com.digitalasset.daml.lf.value.Value
@@ -257,16 +256,12 @@ object IdeLedger {
   }
 
   /** The initial ledger */
-  def initialLedger(
-      t0: Time.Timestamp,
-      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.Key,
-  ): IdeLedger =
+  def initialLedger(t0: Time.Timestamp): IdeLedger =
     IdeLedger(
       currentTime = t0,
       scriptStepId = TransactionId(0),
       scriptSteps = immutable.IntMap.empty,
       ledgerData = LedgerData.empty,
-      csmMode = csmMode,
     )
 
   /** Result of committing a transaction is the new ledger, and the enriched transaction.
@@ -526,7 +521,6 @@ final case class IdeLedger(
     scriptStepId: IdeLedger.TransactionId,
     scriptSteps: immutable.IntMap[IdeLedger.ScriptStep],
     ledgerData: IdeLedger.LedgerData,
-    csmMode: ContractStateMachine.Mode,
 ) {
 
   import IdeLedger.*

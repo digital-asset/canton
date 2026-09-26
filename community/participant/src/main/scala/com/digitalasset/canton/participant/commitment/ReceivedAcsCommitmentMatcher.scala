@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -22,6 +23,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced, TracedMany}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{
   GarbageCollectedShardedSequentialProcessingQueue,
+  MergeableDisjointIntervals,
   ShardedSequentialProcessingQueue,
 }
 import com.digitalasset.canton.{LedgerParticipantId, checked}
@@ -203,14 +205,50 @@ class ReceivedAcsCommitmentMatcher(
                 )
               mismatch.report()
             }
+            val insertMatched = outstandingMatchesToInsert ++ mismatchedMatchesToInsert
 
-            store.persistMatchingOutcome(
-              deleteOutstanding = outstanding,
-              deleteMismatched = matchesMismatched,
-              insertOutstanding = outstandingOutside,
-              insertMismatchedOrUnexpected = mismatchOutside ++ outstandingMismatchesToInsert,
-              insertMatched = outstandingMatchesToInsert ++ mismatchedMatchesToInsert,
-            )
+            store
+              .persistMatchingOutcome(
+                deleteOutstanding = outstanding,
+                deleteMismatched = matchesMismatched,
+                insertOutstanding = outstandingOutside,
+                insertMismatchedOrUnexpected = mismatchOutside ++ outstandingMismatchesToInsert,
+                insertMatched = insertMatched,
+              )
+              .map { _ =>
+                // merge adjacent matched periods to reduce log noise in case many smaller, but adjacent, intervals become matched periods
+                val matchedPeriods = insertMatched.map(_.commitmentPeriod)
+                MergeableDisjointIntervals
+                  .from(matchedPeriods)
+                  .map(_.mergeAdjacent.intervals.values)
+                  .getOrElse(matchedPeriods)
+                  .foreach { period =>
+                    logger.info(
+                      s"Commitment correct for sender $senderExternalized and period $period at offset $offset"
+                    )
+                  }
+                val participantMC = MetricsContext("counterparticipant" -> senderExternalized)
+                val periodEndMetric = metrics.commitmentMatchingStatusPeriodEnd(participantMC)
+                val statusMetric = metrics.commitmentMatchingStatus(participantMC)
+                if (
+                  // only update the metrics if this period after the previously reported period,
+                  periodEndMetric.getValue < period.toInclusive.toMicros ||
+                  // or the same period was previously reported as not  matched and gets updated now
+                  (periodEndMetric.getValue == period.toInclusive.toMicros && statusMetric.getValue != CommitmentMetrics.MatchingStatusValues.Matched)
+                ) {
+                  periodEndMetric.updateValue(period.toInclusive.toMicros)
+
+                  val status =
+                    if (outstandingMismatchesToInsert.nonEmpty)
+                      CommitmentMetrics.MatchingStatusValues.Mismatched
+                    else if (insertMatched.nonEmpty) CommitmentMetrics.MatchingStatusValues.Matched
+                    else {
+                      // TODO(#34324): update the matching status metric for unexpected commitments
+                      CommitmentMetrics.MatchingStatusValues.NotDetermined
+                    }
+                  statusMetric.updateValue(status)
+                }
+              }
           }
           // TODO(#34324) Check whether the commitment was unexpected
         } yield timepointToEmit

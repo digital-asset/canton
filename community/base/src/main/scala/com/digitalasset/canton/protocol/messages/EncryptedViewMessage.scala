@@ -14,7 +14,11 @@ import com.digitalasset.canton.crypto.v30 as V30Crypto
 import com.digitalasset.canton.data.{ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v31, *}
@@ -334,14 +338,8 @@ final case class EncryptedViewMessage[+VT <: ViewType](
       Some(this.asInstanceOf[EncryptedViewMessage[desiredViewType.type]])
     else None
 
-  override def pretty: Pretty[EncryptedViewMessage.this.type] = prettyOfClass(
-    param("view hashes", _.viewHashes),
-    param("view type", _.viewType),
-    param("size", _.encryptedViews.sizeHint),
-    param("psid", _.psid),
-    param("number of view keys", _.viewEncryptionKeyRandomness.size),
-    param("view encryption scheme", _.viewEncryptionScheme),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[EncryptedViewMessage[ViewType]] =
+    EncryptedViewMessage
 
   def copy[A <: ViewType](
       encryptedViews: EncryptedMultipleViews[A] = this.encryptedViews,
@@ -362,7 +360,18 @@ final case class EncryptedViewMessage[+VT <: ViewType](
 
 }
 
-object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[ViewType]] {
+object EncryptedViewMessage
+    extends VersioningCompanion[EncryptedViewMessage[ViewType]]
+    with PrettyPrintingCompanion[EncryptedViewMessage[ViewType]] {
+
+  override protected val pretty: Pretty[EncryptedViewMessage[ViewType]] = prettyOfClass(
+    param("view hashes", _.viewHashes),
+    param("view type", _.viewType),
+    param("size", _.encryptedViews.sizeHint),
+    param("psid", _.psid),
+    param("number of view keys", _.viewEncryptionKeyRandomness.size),
+    param("view encryption scheme", _.viewEncryptionScheme),
+  )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.EncryptedMultipleViewsMessage)(
@@ -738,12 +747,18 @@ object EncryptedViewMessage extends VersioningCompanion[EncryptedViewMessage[Vie
     }
 }
 
-sealed trait EncryptedViewMessageError extends Product with Serializable with PrettyPrinting {
+sealed trait EncryptedViewMessageError
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[EncryptedViewMessageError.this.type] = adHocPrettyInstance
+  override def prettyCompanion: PrettyPrintingCompanion[EncryptedViewMessageError] =
+    EncryptedViewMessageError
 }
 
-object EncryptedViewMessageError {
+object EncryptedViewMessageError extends PrettyPrintingCompanion[EncryptedViewMessageError] {
+
+  override protected val pretty: Pretty[EncryptedViewMessageError] = adHocPrettyInstance
 
   final case class SessionKeyCreationError(
       err: EncryptionKeyCreationError

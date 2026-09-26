@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.metrics
 import cats.Eval
 import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Meter, Timer}
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{
   HistogramInventory,
   MetricInfo,
@@ -14,7 +15,9 @@ import com.daml.metrics.api.{
   MetricsContext,
 }
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics.CommitmentMatchingGauges
 import com.digitalasset.canton.topology.ParticipantId
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 
@@ -545,6 +548,67 @@ class CommitmentMetrics private[metrics] (
     ),
     CommitmentMetrics.HealthValues.NotInitialized,
   )
+
+  // TODO(i28571): Factor this pattern into a helper class
+  // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
+  @VisibleForTesting
+  private[canton] val commitmentMatchingStatusPerParticipant
+      : TrieMap[MetricsContext, Eval[CommitmentMatchingGauges]] =
+    TrieMap.empty
+  private def createCommitmentMatchingGauges(mc: MetricsContext): CommitmentMatchingGauges = {
+    val statusGauge = metricsFactory.gauge[Int](
+      MetricInfo(
+        prefix :+ "latest-matching-status",
+        summary =
+          "The matching status of the latest matched period (0: not-determined, 1: mismatched, 2: unexpected, 3: matched)",
+        description = """The status of the latest matched period.""".stripMargin,
+        qualification = MetricQualification.Debug,
+      ),
+      CommitmentMetrics.MatchingStatusValues.NotDetermined,
+    )(context.merge(mc))
+
+    val periodEndGauge = metricsFactory.gauge[Long](
+      MetricInfo(
+        prefix :+ "latest-matching-status-period-end",
+        summary =
+          "The end timestamp of the period corresponding to the latest-matching-status metric.",
+        description =
+          "The end timestamp of the period corresponding to the latest-matching-status metric.",
+        qualification = MetricQualification.Debug,
+      ),
+      CantonTimestamp.MinValue.toMicros,
+    )(context.merge(mc))
+
+    CommitmentMatchingGauges(statusGauge, periodEndGauge)
+  }
+  def commitmentMatchingStatus(mc: MetricsContext): Gauge[Int] =
+    // Two concurrent calls with the same context may cause getOrElseUpdate to evaluate the new value expression twice,
+    // even though only one of the results will be stored in the map.
+    // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
+    // until the getOrElseUpdate call has finished.
+    commitmentMatchingStatusPerParticipant
+      .getOrElseUpdate(mc, Eval.later(createCommitmentMatchingGauges(mc)))
+      .value
+      .status
+
+  def commitmentMatchingStatusPeriodEnd(mc: MetricsContext): Gauge[Long] =
+    // Two concurrent calls with the same context may cause getOrElseUpdate to evaluate the new value expression twice,
+    // even though only one of the results will be stored in the map.
+    // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
+    // until the getOrElseUpdate call has finished.
+    commitmentMatchingStatusPerParticipant
+      .getOrElseUpdate(mc, Eval.later(createCommitmentMatchingGauges(mc)))
+      .value
+      .periodEnd
+
+  def removeAllMatchingStatusMetrics(): Unit =
+    commitmentMatchingStatusPerParticipant.keys.foreach { k =>
+      commitmentMatchingStatusPerParticipant.remove(k).map(_.value).foreach {
+        case CommitmentMatchingGauges(status, timestamp) =>
+          status.close()
+          timestamp.close()
+      }
+    }
 }
 
 object CommitmentMetrics {
@@ -555,5 +619,25 @@ object CommitmentMetrics {
     val Stopping = 3
     val Stopped = 4
     val Failed = 5
+  }
+
+  private[canton] final case class CommitmentMatchingGauges(
+      status: Gauge[Int],
+      periodEnd: Gauge[Long],
+  )
+
+  object MatchingStatusValues {
+    val NotDetermined = 0
+    val Mismatched = 1
+    val Unexpected = 2
+    val Matched = 3
+  }
+
+  def noopMetrics(): CommitmentMetrics = {
+    val histogramInventory = new HistogramInventory
+    new CommitmentMetrics(
+      new CommitmentHistograms(MetricName(""))(histogramInventory),
+      new NoOpMetricsFactory,
+    )(MetricsContext.Empty)
   }
 }
