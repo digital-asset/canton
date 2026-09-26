@@ -454,6 +454,19 @@ object PekkoModuleSystem {
     override def pureFuture[X](x: X): PekkoFutureUnlessShutdown[X] =
       PekkoFutureUnlessShutdown.pure(x)
 
+    override def runAsync[X](
+        action: String,
+        compute: () => X,
+        orderingStage: Option[String] = None,
+    ): PekkoFutureUnlessShutdown[X] =
+      PekkoFutureUnlessShutdown(
+        action,
+        // Evaluate the computation on the future execution context rather than on the actor thread,
+        //  so that CPU-intensive work (e.g. hashing) does not block the module's message processing.
+        () => FutureUnlessShutdown.outcomeF(Future(compute())(executionContext))(executionContext),
+        orderingStage,
+      )
+
     override def flatMapFuture[R1, R2](
         future1: PekkoFutureUnlessShutdown[R1],
         future2: PureFun[R1, PekkoFutureUnlessShutdown[R2]],

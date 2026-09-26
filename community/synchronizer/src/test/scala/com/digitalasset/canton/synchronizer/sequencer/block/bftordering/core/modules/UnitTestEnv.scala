@@ -59,6 +59,13 @@ class UnsupportedFutureContext[E <: Env[E]] extends FutureContext[E] {
   override def pureFuture[X](x: X): E#FutureUnlessShutdownT[X] =
     unsupported()
 
+  override def runAsync[X](
+      action: String,
+      compute: () => X,
+      orderingStage: Option[String] = None,
+  ): E#FutureUnlessShutdownT[X] =
+    unsupported()
+
   override def mapFuture[X, Y](
       future: E#FutureUnlessShutdownT[X]
   )(fun: PureFun[X, Y], orderingStage: Option[String] = None): E#FutureUnlessShutdownT[Y] =
@@ -208,6 +215,12 @@ class FunctionFutureContext[E <: BaseIgnoringUnitTestEnv[E]] extends FutureConte
   ): () => X = futureUnlessShutdown
 
   override def pureFuture[X](x: X): () => X = () => x
+
+  override def runAsync[X](
+      action: String,
+      compute: () => X,
+      orderingStage: Option[String] = None,
+  ): () => X = compute
 
   override def mapFuture[X, Y](
       future: () => X

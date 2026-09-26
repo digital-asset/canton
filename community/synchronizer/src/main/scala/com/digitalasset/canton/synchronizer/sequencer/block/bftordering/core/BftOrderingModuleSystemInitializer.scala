@@ -114,6 +114,11 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // Only set by simulation tests
     outputPreviousStoredBlock: OutputModule.PreviousStoredBlock =
       new OutputModule.PreviousStoredBlock,
+    // Monotonic elapsed-time source (nanoseconds) for the retransmission request rate limiter.
+    //  Defaults to `System.nanoTime()` (real, monotonic), which ensures that rate limiting allows retransmissions
+    //  to be sent even if the main clock is a SimClock and is not advancing, which in turn ensures that view
+    //  changes can make progress.
+    rateLimiterNanoTime: () => Long = () => System.nanoTime(),
 )(implicit synchronizerProtocolVersion: ProtocolVersion, mc: MetricsContext, tracer: Tracer)
     extends SystemInitializer[
       E,
@@ -300,6 +305,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             dependencies,
             loggerFactory,
             timeouts,
+            rateLimiterNanoTime = rateLimiterNanoTime,
           )
         },
         output = (availabilityRef, consensusRef, mempoolRef) =>

@@ -223,8 +223,12 @@ final class P2PNetworkOutModule[
         logQuorumInfo(peerNetworkStatus)
 
       case P2PNetworkOut.Multicast(message, recipientBftNodeIds) =>
-        recipientBftNodeIds.toSeq.sorted // For determinism
-          .foreach(sendIfKnown(_, message))
+        if (recipientBftNodeIds.nonEmpty) {
+          val serializedMessage = message.toProto
+          checkForOversizedNetworkMessage(message, serializedMessage, isMulticast = true)
+          recipientBftNodeIds.toSeq.sorted // For determinism
+            .foreach(sendIfKnown(_, serializedMessage))
+        }
 
       case P2PNetworkOut.SendToRandomAuthenticated(
             message,
@@ -263,7 +267,11 @@ final class P2PNetworkOutModule[
                 metrics.p2p.send.failure.labels.reason.values.NoAuthenticatedRecipientCandidates
             )
           )
-        recipientNodeIds.foreach(sendIfKnown(_, message))
+        else {
+          val serializedMessage = message.toProto
+          checkForOversizedNetworkMessage(message, serializedMessage, isMulticast = false)
+          recipientNodeIds.foreach(sendIfKnown(_, serializedMessage))
+        }
         try onRecipientsDecision.foreach(_(recipientNodeIds))
         catch {
           case scala.util.control.NonFatal(e) =>
@@ -279,6 +287,39 @@ final class P2PNetworkOutModule[
       case admin: P2PNetworkOut.Admin =>
         processAdminMessage(admin)
     }
+
+  // Checks whether the message body is larger than the currently acceptable maxRequestSize.
+  // This currently only counts the body of the `BftOrderingMessage`, and not also the `sentBy` and `sentAt`
+  // fields from the BftOrderingMessage. However, this should be more than enough since the instances we
+  // observe for large messages are at least several MB above the max request size.
+  private def checkForOversizedNetworkMessage(
+      message: BftOrderingNetworkMessage,
+      serializedMessage: BftOrderingMessageBody,
+      isMulticast: Boolean,
+  )(implicit traceContext: TraceContext): Unit = {
+    val permittedSize = membership.orderingTopology.maxRequestPayloadBytes.value
+    val messageSize = serializedMessage.serializedSize
+
+    if (messageSize > permittedSize) {
+      val messageType = typeOfInnerMessage(message)
+      logger.warn(
+        s"Sending $messageType w/ size $messageSize is larger than max allowed $permittedSize, " +
+          s"multicast: $isMulticast; message will likely be dropped by the receiving peer."
+      )
+    }
+  }
+
+  private def typeOfInnerMessage(message: BftOrderingNetworkMessage): String = message match {
+    case BftOrderingNetworkMessage.AvailabilityMessage(signedMessage) =>
+      signedMessage.message.getClass.getSimpleName
+    case BftOrderingNetworkMessage.ConsensusMessage(signedMessage) =>
+      val inner = signedMessage.message
+      s"${inner.getClass.getSimpleName} w/ ${inner.blockMetadata}"
+    case BftOrderingNetworkMessage.RetransmissionMessage(message) => message.getClass.getSimpleName
+    case BftOrderingNetworkMessage.StateTransferMessage(signedMessage) =>
+      signedMessage.message.getClass.getSimpleName
+    case BftOrderingNetworkMessage.Empty => "Empty"
+  }
 
   private def logQuorumInfo(
       peerNetworkStatus: PeerNetworkStatus
@@ -461,20 +502,19 @@ final class P2PNetworkOutModule[
 
   private def sendIfKnown(
       bftNodeId: BftNodeId,
-      message: BftOrderingNetworkMessage,
+      serializedMessage: BftOrderingMessageBody,
   )(implicit traceContext: TraceContext): Unit =
     if (bftNodeId != thisBftNodeId)
-      networkSendIfKnown(bftNodeId, message)
+      networkSendIfKnown(bftNodeId, serializedMessage)
     else
       dependencies.p2pNetworkIn.asyncSend(
-        messageToSend(message.toProto, maybeNetworkSendInstant = None)
+        messageToSend(serializedMessage, maybeNetworkSendInstant = None)
       )
 
   private def networkSendIfKnown(
       recipientBftNodeId: BftNodeId,
-      message: BftOrderingNetworkMessage,
-  )(implicit traceContext: TraceContext): Unit = {
-    val serializedMessage = message.toProto
+      serializedMessage: BftOrderingMessageBody,
+  )(implicit traceContext: TraceContext): Unit =
     p2pConnectionState
       .getNetworkRef(recipientBftNodeId)
       .fold {
@@ -492,7 +532,6 @@ final class P2PNetworkOutModule[
         logger.info(
           s"Dropping network message to unknown $recipientBftNodeId (possibly unauthenticated as of yet)"
         )
-        logger.trace(s"Dropped message to $recipientBftNodeId is: $message")
       } { ref =>
         val mc1: MetricsContext =
           sendMetricsContext(
@@ -502,13 +541,11 @@ final class P2PNetworkOutModule[
             droppedAsUnauthenticated = false,
           )
         locally {
-          logger.trace(s"Sending network message to $recipientBftNodeId: $message")
           implicit val mc: MetricsContext = mc1
           networkSend(recipientBftNodeId, ref, serializedMessage)
           emitSendStats(metrics, serializedMessage)
         }
       }
-  }
 
   private def processAdminMessage(
       admin: P2PNetworkOut.Admin

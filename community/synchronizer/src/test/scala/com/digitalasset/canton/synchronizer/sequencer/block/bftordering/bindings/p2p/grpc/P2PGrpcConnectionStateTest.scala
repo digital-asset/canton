@@ -59,6 +59,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
       state.connections shouldBe empty
 
+      // A self-connection is a misconfiguration rather than a security issue, but it is still
+      //  logged as a problem, so that the operator notices and fixes the configuration
       suppressProblemLogs(
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, SelfBftNodeId) shouldBe Left(
           P2PConnectionState.Error
@@ -71,6 +73,31 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
       state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
     }
+
+    "reject associating a P2P endpoint ID to the self BFT node ID " +
+      "even if it is already associated with a peer BFT node ID" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // E.g., the association was restored from the P2P endpoints store at startup, or the
+        //  endpoint was moved to this node after having been associated with a peer.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId) shouldBe Right(
+          ()
+        )
+
+        suppressProblemLogs(
+          state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, SelfBftNodeId) shouldBe Left(
+            P2PConnectionState.Error
+              .CannotAssociateP2PEndpointIdsToSelf(APeerP2PEndpoint.id, SelfBftNodeId)
+          )
+        )
+
+        // The endpoint must not be re-associated to this node; the existing association is left
+        //  untouched, so that the ensuing connection shutdown can clean up the peer's connection
+        //  state consistently by node ID.
+        state.getBftNodeId(APeerP2PEndpoint.id) shouldBe Some(APeerBftNodeId)
+        state.connections should contain only Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId)
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+      }
 
     // TODO(#34191): re-enable and complete coverage after fixing
     "reject associating a P2P endpoint ID to a BFT node ID if already associated to another BFT node ID" ignore {
@@ -404,7 +431,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
               case Left(_) => ()
             }
 
-            val result =
+            val (peerSenderO, affectedP2PEndpointIds) =
               state.shutdownConnectionAndReturnPeerSender(
                 addressId,
                 clearNetworkRefAssociations,
@@ -416,18 +443,30 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
             addressId match {
               case Right(nodeId) =>
-                result should not be None
+                peerSenderO should not be None
+                // All endpoints associated with the node are reported as affected by the shutdown
+                val associatedEndpointIds =
+                  endpointToBftNodeIdAssociations.collect { case (endpointId, `nodeId`) =>
+                    endpointId
+                  }
+                affectedP2PEndpointIds should contain theSameElementsAs associatedEndpointIds
 
                 state.getNetworkRef(nodeId) shouldBe (if (clearNetworkRefAssociations) None
                                                       else Some(ref))
+                // When associations are cleared, the endpoint-to-node mappings for this node
+                //  are also cleared, so a subsequent admin re-add can reconnect the endpoints.
+                associatedEndpointIds.foreach { endpointId =>
+                  state.isDefined(endpointId) shouldBe !clearNetworkRefAssociations
+                }
               case Left(endpointId) =>
-                result shouldBe None
-                // The endpoint is still defined if either the network ref entry was
-                //  not cleared, or the endpoint is associated with a BFT node ID.
-                state.isDefined(
-                  endpointId
-                ) shouldBe !clearNetworkRefAssociations || endpointToBftNodeIdAssociations
-                  .isDefinedAt(endpointId)
+                peerSenderO shouldBe None
+                // The requesting endpoint is always reported as affected, so that the earlier
+                //  `onConnect` is properly balanced by an `onDisconnect` notification.
+                affectedP2PEndpointIds should contain(endpointId)
+                // Clearing associations clears both the endpoint's network ref entry and,
+                //  transitively via the node it was associated with, its endpoint-to-node mapping,
+                //  so `isDefined` reflects the shutdown; otherwise nothing is cleared.
+                state.isDefined(endpointId) shouldBe !clearNetworkRefAssociations
                 // The connection was outgoing (created via a `Left` address ID),
                 //  so `isOutgoing` is true as long as the network ref entry is still
                 //  present, i.e., when associations were not cleared.
@@ -506,10 +545,20 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         )
         verify(ref2, times(1)).close()
         state.getNetworkRef(APeerBftNodeId) shouldBe None
+        // The endpoint-to-node mapping was also cleared, so a subsequent retry re-authenticates
+        //  before the ref can be routed to the node.
+        state.getBftNodeId(APeerP2PEndpoint.id) shouldBe None
 
-        // Retry: new outgoing connection via the same endpoint (association still exists)
+        // Retry: new outgoing connection via the same endpoint; the ref is keyed by the endpoint
+        //  until authentication re-establishes the endpoint-to-node association.
         val ref3 = newNetworkRef()
         state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref3)
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+
+        // Re-authentication consolidates the ref onto the node ID.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref3)
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
@@ -588,8 +637,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // The incoming connection (by node ID) is also gone.
         state.getNetworkRef(APeerBftNodeId) shouldBe None
         state.isConnected(APeerP2PNodeAddressId) shouldBe false
-        // The endpoint is however still known.
-        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+        // Since associations were cleared on shutdown, the endpoint-to-node mapping is gone too,
+        //  so the endpoint is no longer known (consistently with removing the endpoint).
+        state.isDefined(APeerP2PEndpoint.id) shouldBe false
 
         // node2 reconnects to node1 (incoming, same node ID).
         val incomingRefFromNode2b = newNetworkRef()
@@ -715,15 +765,56 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       "be a no-op" in {
         val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
 
-        val result = state.shutdownConnectionAndReturnPeerSender(
-          AnotherPeerP2PEndpointAddressId,
-          clearNetworkRefAssociations = true,
-          closeNetworkRef = false,
-        )
+        val (peerSenderO, affectedP2PEndpointIds) =
+          state.shutdownConnectionAndReturnPeerSender(
+            AnotherPeerP2PEndpointAddressId,
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = false,
+          )
 
-        result shouldBe None
+        peerSenderO shouldBe None
+        // The requesting endpoint is always reported as affected, so that any earlier `onConnect`
+        //  is properly balanced even when the endpoint was never associated.
+        affectedP2PEndpointIds shouldBe Seq(AnotherPeerP2PEndpoint.id)
         state.connections shouldBe empty
       }
+    }
+
+    "shutting down an endpoint sharing a sender with other endpoints" should {
+      "report every endpoint associated with the underlying peer as affected " +
+        "and clear their endpoint-to-node mappings" in {
+          val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+          // Two endpoints resolving to the same peer, both associated with its BFT node ID.
+          state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+          state.associateP2PEndpointIdToBftNodeId(AnotherPeerP2PEndpoint.id, APeerBftNodeId)
+          val ref = newNetworkRef()
+          state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref)
+          state.addSenderIfMissing(APeerBftNodeId, ASender).discard
+
+          // Shutting down via any single endpoint tears down the shared sender/ref and must report
+          //  every endpoint that shared it, so that `onDisconnect` can be notified for each of them.
+          val (peerSenderO, affectedP2PEndpointIds) =
+            state.shutdownConnectionAndReturnPeerSender(
+              Left(APeerP2PEndpoint.id),
+              clearNetworkRefAssociations = true,
+              closeNetworkRef = true,
+            )
+
+          peerSenderO shouldBe Some(ASender)
+          affectedP2PEndpointIds should contain theSameElementsAs Seq(
+            APeerP2PEndpoint.id,
+            AnotherPeerP2PEndpoint.id,
+          )
+          verify(ref, times(1)).close()
+          state.getNetworkRef(APeerBftNodeId) shouldBe None
+          // The endpoint-to-node mappings must be cleared too, so a subsequent admin re-add of any
+          //  of these endpoints is not skipped due to a stale association.
+          state.getBftNodeId(APeerP2PEndpoint.id) shouldBe None
+          state.getBftNodeId(AnotherPeerP2PEndpoint.id) shouldBe None
+          state.isDefined(APeerP2PEndpoint.id) shouldBe false
+          state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe false
+        }
     }
 
     "not create a duplicate network ref via endpoint when one already exists for the BFT node ID" in {

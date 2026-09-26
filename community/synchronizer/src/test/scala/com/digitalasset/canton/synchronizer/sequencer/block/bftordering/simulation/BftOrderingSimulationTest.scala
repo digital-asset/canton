@@ -70,7 +70,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   endpointToTestBftNodeId,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
-import com.digitalasset.canton.time.{Clock, SimClock}
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
@@ -146,7 +146,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
       var simulationTestStage: Option[SimulationTestStage] = None
 
-      val clock = new SimClock(SimulationStartTime, loggerFactory)
+      val simClock = new SimClock(SimulationStartTime, loggerFactory)
 
       val stages = simulationTestSettings.stages
       val stagesCount = stages.size
@@ -200,7 +200,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
         new AtomicReference[Map[BftNodeId, SimulationTestNodeData]](Map.empty)
       stages.zipWithIndex.foreach {
         case (SimulationTestStageSettings(simSettings, topologySettings, failOnViewChange), idx) =>
-          val stageStart = clock.now
+          val stageStart = simClock.now
 
           logger.info(s"Starting stage ${idx + 1} (of $stagesCount) at $stageStart")
 
@@ -260,7 +260,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
               stores,
               sendQueue,
               simulationTestSettings.segmentLength,
-              clock,
+              simClock,
               availabilityRandom,
               epochChecker,
               simSettings,
@@ -305,7 +305,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                   },
                   onboardingManager,
                   simSettings,
-                  clock,
+                  simClock,
                   timeouts,
                   loggerFactory,
                 )
@@ -403,7 +403,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
       stores: BftOrderingStores[SimulationEnv],
       sendQueue: mutable.Queue[(BftNodeId, Traced[BlockFormat.Block])],
       segmentLength: SegmentLength,
-      clock: Clock,
+      simClock: SimClock,
       availabilityRandom: Random,
       epochChecker: EpochChecker,
       simSettings: SimulationSettings,
@@ -458,7 +458,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             sequencerSnapshotAdditionalInfo,
             bootstrapMembership =>
               new P2PNetworkOutModule.State(p2pGrpcConnectionState, bootstrapMembership),
-            clock,
+            simClock,
             availabilityRandom,
             noopMetrics,
             logger,
@@ -466,6 +466,9 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             new SymbolicPureCrypto(),
             requestInspector,
             epochChecker,
+            // Deterministic, monotonic elapsed-time source derived from the simulation clock so that
+            //  the retransmission rate limiter stays reproducible and never reads real elapsed time.
+            rateLimiterNanoTime = () => simClock.now.toMicros * 1000L,
           )
       },
       IssClient.initializer(simSettings, thisBftNodeId, logger, timeouts),

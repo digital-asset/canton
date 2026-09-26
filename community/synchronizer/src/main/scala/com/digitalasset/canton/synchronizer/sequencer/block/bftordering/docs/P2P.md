@@ -326,15 +326,46 @@ deadlock — *provided the closes actually propagate* (when they may not, see §
 
 ### 5.2 Identity equivocation — the security boundary
 
-Authentication established *who* a peer is; this map keeps that binding honest.
-`State.associateP2PEndpointIdToBftNodeId` rejects the one impersonation attempt it currently
-enforces, logging at WARN and marking a `security.noncompliant` metric (`emitIdentityEquivocation`):
-`CannotAssociateP2PEndpointIdsToSelf` — a peer authenticates as *this* node. The error also fails the
-connectivity-setup future, so the offending stream doesn't become usable.
-Re-associating a known endpoint to a *different* authenticated node id is **not** currently rejected:
-the `P2PEndpointIdAlreadyAssociated` error exists (and is handled by the connection manager), but the
-branch that would produce it is commented out, so the association is just updated and logged at INFO.
-Hardening this is tracked by #34191.
+<!-- TODO(#34191) review once addressed -->
+
+Authentication established *who* a peer is; this map keeps that binding honest. The
+`endpointId→nodeId` map is **intended to be monotonic**: once set it should not be silently
+re-pointed. `State.associateP2PEndpointIdToBftNodeId` currently rejects only self-association; it
+also defines a separate identity-equivocation error for endpoint reassociation, but **that check is
+currently disabled**, so a re-authentication to a *different* peer node id is silently
+accepted and the mapping is updated — the "monotonic" property is thus an intent, not an enforced
+invariant, until the check is re-enabled:
+
+- `P2PEndpointIdAlreadyAssociated`: an endpoint already bound to node A now (re)authenticates as
+  node B ("possible impersonation attempt"): logged at WARN, marks the `security.noncompliant`
+  metric (`emitIdentityEquivocation`), and the sender is failed. Note that this check is currently
+  **disabled**.
+- `CannotAssociateP2PEndpointIdsToSelf`: a peer authenticates as *this* node, i.e. a configured
+  endpoint points back to us. This check is evaluated **before** the existing-association case
+  above: while the impersonation check is disabled, re-association is permitted, so an endpoint
+  already bound to a peer (e.g. restored from the `P2PEndpointsStore` at startup) and later
+  resolving to this node would otherwise be silently re-pointed to *this* node instead of being
+  refused. The refusal leaves any existing association untouched, so that the shutdown below can
+  still clean up that peer's connection state consistently **by node id**, instead of closing a
+  network ref possibly shared with the peer's other endpoints while leaving the peer pointing at it.
+  This is a **misconfiguration, not equivocation**: it is still logged at
+  WARN, so that the operator fixes the configuration. The connection is torn down through the same path as an
+  admin disconnect (`shutdownConnection(endpointId)`, i.e. clear associations + close the network
+  ref), which stops the connection-managing actor and hence its unbounded `Initialize` retries, so
+  the warning is emitted once per connection attempt rather than every couple of seconds.
+  `shutdownConnection` also notifies `onDisconnect` for **every endpoint** returned by the state
+  teardown (`shutdownConnectionAndReturnPeerSender` now returns them): either just the requesting
+  endpoint when the refusal happens before `addSenderIfMissing` (so the earlier `onConnect` is
+  balanced), or every endpoint that shared the torn-down sender in the pre-associated case (a
+  single sender can back several endpoints via `consolidateNetworkRefs`). The notification is
+  idempotent, guarded by `if (connectedP2PEndpointIds.remove(...))` in the out-module. The teardown
+  also **clears the endpoint-to-node mappings** for the torn-down node (the state's `Right(bftNodeId)`
+  branch, when `clearNetworkRefAssociations = true`, filters `p2pEndpointIdToBftNodeId`); otherwise
+  the refused association from the pre-associated case (left in place by the check itself so that
+  the shutdown can look up the node consistently) would remain and `isDefined(endpointId)` would
+  still report true, causing a subsequent admin re-add of the same corrected endpoint to skip
+  reconnecting. With the mapping cleared, if the endpoint is later fixed and reconnected or
+  re-added, it is dialed again like any other endpoint.
 
 A separate check guards the data path: `P2PGrpcStreamingReceiver.validateNodeId` drops any frame
 whose `sentBy` disagrees with the authenticated `SequencerId` (metric
@@ -515,13 +546,13 @@ by node id (established when A authenticated) and uses it over the same bidi str
 needed. If that link drops, A's connect-worker backoff re-establishes and re-authenticates it.
 
 **(d) Impersonation attempt.** A forged or expired token is rejected by the standard or reverse auth
-interceptor, failing the call with `UNAUTHENTICATED` before any id is bound (§2.4). If a peer at a
-known endpoint authenticates as *this* node id, the binding stage catches it:
-`CannotAssociateP2PEndpointIdsToSelf`, WARN + security metric, the association is not made and the
-setup future fails (§5.2). A peer that authenticates at a known endpoint as a *different* node id
-than previously recorded is, in contrast, currently **accepted**: the association is simply updated
-and logged at INFO (`P2PEndpointIdAlreadyAssociated` exists and is handled, but the code that would
-emit it is commented out; durable identity pinning is tracked by #34191).
+interceptor, failing the call with `UNAUTHENTICATED` before any id is bound (§2.4). This is the only
+line of defense currently active against endpoint-level impersonation: if a peer at a known endpoint
+authenticates as a *different* node id than previously recorded, the intended `P2PEndpointIdAlreadyAssociated`
+guard would catch it (WARN + `security.noncompliant` metric, sender failed, no state change — §5.2),
+but that check is disabled, so today the reassociation is silently accepted. The self-check
+(`CannotAssociateP2PEndpointIdsToSelf`, §5.2) does still fire for a peer that authenticates as this
+node — but it is a misconfiguration guard, not a security metric.
 
 **(e) Partition that heals (the duplicate-rejection loop).** A link `X = A→B` is silently
 partitioned. A's keepalive tears `X` down ~55s after A's last read and A re-dials; B's independent

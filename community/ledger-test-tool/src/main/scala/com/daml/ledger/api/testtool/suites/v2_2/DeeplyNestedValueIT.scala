@@ -11,7 +11,7 @@ import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, Update}
 import com.daml.ledger.test.java.semantic.deeplynestedvalue.{Contract, Handler, Nat, nat}
 import com.digitalasset.base.error.ErrorCode
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
+import com.digitalasset.canton.ledger.error.groups.{CommandExecutionErrors, RequestValidationErrors}
 
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
@@ -56,7 +56,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
     // The nesting of the payload of a `Contract` is one more than the nat it contains
     val nContract = n - 1
 
-    def test[T](description: String, errorCodeIfExpected: ErrorCode)(
+    def test[T](description: String, errorCodesIfExpected: ErrorCode*)(
         update: ExecutionContext => (
             ParticipantTestContext,
             Party,
@@ -70,12 +70,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
         update(ec)(alpha, party).map {
           case Right(_) if accepted => ()
           case Left(err: Throwable) if !accepted =>
-            assertGrpcError(
-              err,
-              errorCodeIfExpected,
-              None,
-              checkDefiniteAnswerMetadata = true,
-            )
+            assertGrpcErrorOneOf(err, errorCodesIfExpected*)
           case otherwise =>
             fail("Unexpected " + otherwise.fold(err => s"failure: $err", _ => "success"))
         }
@@ -84,6 +79,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
     test(
       "create command",
       CommandExecutionErrors.Preprocessing.PreprocessingFailed,
+      RequestValidationErrors.InvalidArgument,
     ) { implicit ec => (alpha, party) =>
       waitForUpdateId(alpha, party, new Contract(party, nContract, toNat(nContract)).create)
     }
@@ -91,6 +87,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
     test(
       "exercise command",
       CommandExecutionErrors.Preprocessing.PreprocessingFailed,
+      RequestValidationErrors.InvalidArgument,
     ) { implicit ec => (alpha, party) =>
       for {
         handler: Handler.ContractId <- alpha.create(party, new Handler(party))
@@ -105,6 +102,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
     test(
       "create argument in CreateAndExercise command",
       CommandExecutionErrors.Preprocessing.PreprocessingFailed,
+      RequestValidationErrors.InvalidArgument,
     ) { implicit ec => (alpha, party) =>
       waitForUpdateId(
         alpha,
@@ -117,6 +115,7 @@ final class DeeplyNestedValueIT extends LedgerTestSuite {
     test(
       "choice argument in CreateAndExercise command",
       CommandExecutionErrors.Preprocessing.PreprocessingFailed,
+      RequestValidationErrors.InvalidArgument,
     ) { implicit ec => (alpha, party) =>
       waitForUpdateId(
         alpha,

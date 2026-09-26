@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
@@ -13,7 +13,9 @@ import com.digitalasset.canton.logging.{
   SuppressionRule,
   TracedLogger,
 }
+import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
   PeerConnectionStatus,
   PeerEndpointHealth,
@@ -35,13 +37,21 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
+  EpochNumber,
   WorkflowId,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
+  OrderingRequest,
+  OrderingRequestBatch,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.P2PNetworkOut.BftOrderingNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.P2PNetworkOutModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   ModuleRef,
@@ -62,12 +72,14 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
   BftOrderingMessageBody,
 }
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import org.mockito.captor.ArgCaptor
 import org.scalatest.Assertions.fail
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
+import org.slf4j.event.Level.WARN
 import shapeless.*
 import shapeless.HList.*
 import shapeless.syntax.std.traversable.*
@@ -354,6 +366,58 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             selfNode,
             None,
           )
+        )
+      }
+    }
+
+    "is sending a network message" should {
+      "check if the message is oversized" in {
+        val sendActionSpy =
+          spyLambda((_: P2PEndpoint, _: BftOrderingMessage) => ())
+        val p2pNetworkInSpy = spy(fakeIgnoringModule[BftOrderingMessage])
+        val (context, _, module, _) = setupWithIgnoringDefaultDeps(sendActionSpy, p2pNetworkInSpy)
+
+        implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+        val membership = Membership(
+          selfNode,
+          OrderingTopology
+            .forTesting(bftNodeIds.toSet, maxRequestPayloadBytes = NonNegativeInt.tryCreate(120)),
+          leaders = bftNodeIds,
+          blacklistedNodes = Seq.empty,
+        )
+        module.receive(P2PNetworkOut.Network.TopologyUpdate(membership))
+
+        // serialized size == 105 bytes
+        val smallOrderingRequest: Traced[OrderingRequest] = Traced(
+          OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("small"))
+        )
+        val batch1 = OrderingRequestBatch.create(Seq(smallOrderingRequest), EpochNumber.First)
+        val batchId1 = BatchId.from(batch1)
+        val remoteBatch1 = RemoteDissemination.RemoteBatch.create(batchId1, batch1, selfNode)
+        val networkMessage1 = BftOrderingNetworkMessage.AvailabilityMessage(remoteBatch1.fakeSign)
+        assertNoLogs(module.receive(P2PNetworkOut.Multicast(networkMessage1, Set(selfNode))))
+
+        // serialized size == 124 bytes
+        val largeOrderingRequest: Traced[OrderingRequest] = Traced(
+          OrderingRequest(
+            BlockFormat.SendTag,
+            messageId = "",
+            ByteString.copyFromUtf8("veryLargeOrderingRequest"),
+          )
+        )
+        val batch2 = OrderingRequestBatch.create(Seq(largeOrderingRequest), EpochNumber.First)
+        val batchId2 = BatchId.from(batch2)
+        val remoteBatch2 = RemoteDissemination.RemoteBatch.create(batchId2, batch2, selfNode)
+        val networkMessage2 = BftOrderingNetworkMessage.AvailabilityMessage(remoteBatch2.fakeSign)
+        loggerFactory.assertLogs(SuppressionRule.LevelAndAbove(WARN))(
+          module.receive(P2PNetworkOut.Multicast(networkMessage2, Set(selfNode))),
+          log => {
+            log.level shouldBe Level.WARN
+            log.message should include("Sending RemoteBatch w/ size")
+            log.message should include("is larger than max allowed")
+            log.message should include("message will likely be dropped by the receiving peer.")
+          },
         )
       }
     }
@@ -1362,11 +1426,13 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           endpointRemoved shouldBe true
 
           // Its runtime state is then cleaned up
-          p2pConnectionState.shutdownConnectionAndReturnPeerSender(
-            Left(p2pEndpoint.id),
-            clearNetworkRefAssociations = true,
-            closeNetworkRef = true,
-          ) shouldBe None
+          p2pConnectionState
+            .shutdownConnectionAndReturnPeerSender(
+              Left(p2pEndpoint.id),
+              clearNetworkRefAssociations = true,
+              closeNetworkRef = true,
+            )
+            ._1 shouldBe None
           p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe false
           disconnect(p2pNetworkManager, p2pEndpoint)
 

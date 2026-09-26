@@ -11,6 +11,7 @@ object EngineMode {
     protocolVersion match {
       case ProtocolVersion.v34 => ContractStateMachine.Mode.NoKey
       case ProtocolVersion.v35 => ContractStateMachine.Mode.NUCK
+      case ProtocolVersion.v36 => ContractStateMachine.Mode.devDefault
       case ProtocolVersion.dev => ContractStateMachine.Mode.devDefault
       case other => throw new IllegalArgumentException(s"Unsupported protocol version: $other")
     }
