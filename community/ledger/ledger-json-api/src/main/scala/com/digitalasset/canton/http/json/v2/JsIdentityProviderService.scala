@@ -27,8 +27,10 @@ class JsIdentityProviderService(
     identityProviderConfigClient: IdentityProviderConfigClient,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
-)(implicit val authInterceptor: AuthInterceptor, val executionContext: ExecutionContext)
-    extends Endpoints
+)(implicit
+    val authInterceptor: AuthInterceptor,
+    val executionContext: ExecutionContext,
+) extends Endpoints
     with NamedLogging {
 
   def endpoints(): List[ServerEndpoint[Any, Future]] =

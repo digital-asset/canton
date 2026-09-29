@@ -117,6 +117,8 @@ sealed trait JsonApiConformanceBase
       .prependConfigTransform(
         ConfigTransforms.enableHttpLedgerApi
       )
+      // InteractiveSubmissionServiceIT exercises the deprecated preferred-package-version endpoint
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup { implicit env =>
         import env.*
         participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
@@ -189,6 +191,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
       .prependConfigTransform(ConfigTransforms.enableHttpLedgerApi)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        ConfigTransforms.enableAllDeprecatedApis,
         updateAllParticipantConfigs_(
           // TODO(#33996): Please provide custom timeout setting on Client Side for LWideTransaction test.
           // Remove the custom JSON API requestTimeout setting from JsonApiConformanceIntegrationShardedTest

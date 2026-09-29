@@ -308,6 +308,8 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             // The logs look fine though, so assuming too much load from other tests that delays the shutdown.
             // The 3s shutdown is hard coded in CloseableServer / defaultGracefulShutdownTimeout
             "shutdown did not complete gracefully in allotted",
+            // May happen if the sequencer is down while the participant tries to submit a periodic acknowledgement to it
+            "Failed to acknowledge clean timestamp (usually because sequencer is down)",
           ),
           Seq(),
         )

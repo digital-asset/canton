@@ -18,11 +18,13 @@ import com.digitalasset.canton.http.json.v2.JsContractEntry.{
 }
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, JsEvent}
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import com.google.protobuf.ByteString
 import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
@@ -43,6 +45,7 @@ class JsStateService(
     protocolConverters: ProtocolConverters,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
+    deprecatedApiGate: DeprecatedApiGate,
 )(implicit
     val executionContext: ExecutionContext,
     val esf: ExecutionSequencerFactory,
@@ -68,7 +71,8 @@ class JsStateService(
       activeContractsListEndpoint,
       getActiveContractsStream,
     ),
-    withServerLogic(JsStateService.activeContractsPageEndpoint, getActiveContractsPage),
+    withServerLogic(JsStateService.activeContractsPageEndpoint, getActiveContractsPage)
+      .gated(deprecatedApiGate),
     withServerLogic(JsStateService.queryActiveContractsPageEndpoint, getActiveContractsPage),
     withServerLogic(JsStateService.getConnectedSynchronizersEndpoint, getConnectedSynchronizers),
     withServerLogic(
@@ -151,7 +155,12 @@ class JsStateService(
 
   private def toGetActiveContractsRequest(
       req: LegacyDTOs.GetActiveContractsRequest
-  )(implicit traceContext: TraceContext): state_service.GetActiveContractsRequest =
+  )(implicit traceContext: TraceContext): state_service.GetActiveContractsRequest = {
+    if (req.filter.isDefined || req.verbose)
+      deprecatedApiGate.requireEnabled(
+        ApiDeprecation.Canton34.Parameters,
+        "The fields filter/verbose of the /v2/state/active-contracts requests",
+      )
     (req.eventFormat, req.filter, req.verbose) match {
       case (Some(_), Some(_), _) =>
         throw RequestValidationErrors.InvalidArgument
@@ -190,6 +199,7 @@ class JsStateService(
           streamContinuationToken = req.streamContinuationToken,
         )
     }
+  }
 
   private def getActiveContractsPage(
       callerContext: CallerContext
@@ -247,12 +257,11 @@ object JsStateService extends DocumentationEndpoints {
     .in(sttp.tapir.stringToPath("active-contracts-page"))
     .in(jsonBody[state_service.GetActiveContractsPageRequest])
     .out(jsonBody[JsGetActiveContractsPageResponse])
-    .deprecated()
-    .description(s"""|
-           |Deprecated
-           |
-           |Use POST version of this endpoint
-       """.stripMargin.trim)
+    .protoRef(state_service.StateServiceGrpc.METHOD_GET_ACTIVE_CONTRACTS_PAGE)
+    .deprecatedSince(
+      ApiDeprecation.Canton35.Endpoints,
+      useInstead = "POST /v2/state/active-contracts-page",
+    )
 
   val queryActiveContractsPageEndpoint = state.post
     .in(sttp.tapir.stringToPath("active-contracts-page"))

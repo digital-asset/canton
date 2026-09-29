@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
+import cats.syntax.functor.*
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.auth.{AuthInterceptor, AuthServiceWildcard}
 import com.digitalasset.canton.config.ApiLoggingConfig
@@ -21,7 +22,6 @@ import org.apache.pekko.http.scaladsl.model.{
   HttpCharsets,
   HttpEntity,
   HttpRequest,
-  HttpResponse,
   MediaType,
   RequestEntity,
 }
@@ -369,9 +369,13 @@ class JsonRequestBodyLoggingTest
     }
   }
 
-  private def call(port: Int, entity: RequestEntity): Future[HttpResponse] = {
+  private def call(port: Int, entity: RequestEntity): Future[Unit] = {
     val request = HttpRequest(uri = s"http://localhost:$port/v2/test/endpoint").withEntity(entity)
-    Http()(system).singleRequest(request)
+    Http()(system)
+      .singleRequest(request)
+      // Flaky test mitigation:
+      // The response body must be consumed promptly, otherwise will log a warning, failing the test.
+      .flatMap(response => response.entity.discardBytes().future().void)
   }
 
   private def createStrictEntity(contentType: ContentType): RequestEntity =

@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.Pretty.{
   DefaultWidth,
 }
 import com.digitalasset.canton.util.ThrowableUtil
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoUnvalidatedString}
 import com.google.protobuf.ByteString
 import pprint.{PPrinter, Tree}
 
@@ -44,19 +45,22 @@ class CantonPrettyPrinter(maxStringLength: Int, maxMessageLines: Int) {
       case s: String =>
         import com.digitalasset.canton.logging.pretty.Pretty.*
         s.limit(maxStringLength).toTree
-      case Some(p) =>
-        pprinter.treeify(
-          p,
-          escapeUnicode = DefaultEscapeUnicode,
-          showFieldNames = DefaultShowFieldNames,
-        )
-      case Seq(single) =>
-        pprinter.treeify(
-          single,
-          escapeUnicode = DefaultEscapeUnicode,
-          showFieldNames = DefaultShowFieldNames,
-        )
+      // The wrapper checks the content, the length limit is ours
+      case s: ProtoUnvalidatedString =>
+        import com.digitalasset.canton.logging.pretty.Pretty.*
+        s.toString.limit(maxStringLength).toTree
+      // The wrapper caps the count, elements are rendered here so the limits above reach them
+      case seq: ProtoUnvalidatedSeq[?] => ProtoUnvalidatedSeq.prettyTree(seq)(treeify)
+      case Some(p) => treeify(p)
+      case Seq(single) => treeify(single)
     },
   )
+
+  private def treeify(value: Any): Tree =
+    pprinter.treeify(
+      value,
+      escapeUnicode = DefaultEscapeUnicode,
+      showFieldNames = DefaultShowFieldNames,
+    )
 
 }

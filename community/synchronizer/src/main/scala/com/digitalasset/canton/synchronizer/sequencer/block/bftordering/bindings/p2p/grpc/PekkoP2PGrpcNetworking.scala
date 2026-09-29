@@ -30,7 +30,7 @@ import org.apache.pekko.actor.typed.{ActorRef, Behavior, PostStop}
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.duration.FiniteDuration
 
 private sealed trait PekkoP2PGrpcConnectionManagerActorMessage {
@@ -95,10 +95,38 @@ final class PekkoP2PNetworkRef(
     extends P2PNetworkRef[BftOrderingMessage]
     with NamedLogging {
 
-  outstandingMessages.incrementAndGet().discard
-  connectionManagingActorRef ! Initialize(config, attemptNumber = 1, traceContext)
+  import PekkoP2PNetworkRef.*
+
+  // Coordinates the two-phase start with closing: the connection-managing actor is spawned parked
+  //  and only activated (sent Initialize) by `startConnection` once the ref has been published. If a
+  //  concurrent shutdown closes this ref (e.g. because it was superseded or its entry was removed)
+  //  before it is started, we must not activate its actor, since an activated actor runs
+  //  address-based cleanup on teardown and could corrupt the connection state now owned by another
+  //  ref for the same address.
+  //
+  //  Start-vs-close is coordinated through the inherited closing synchronization (see
+  //  `startConnection`); this atomic only makes the start idempotent across repeated calls and, as a
+  //  secondary guard, records the terminal `Closed` state.
+  private val lifecycle = new AtomicReference[Lifecycle](Parked)
 
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
+
+  override def startConnection()(implicit traceContext: TraceContext): Unit =
+    // Guard the start with the inherited closing synchronization so that closing either prevents the
+    //  start (the body does not run once closing has begun, leaving the parked actor inert) or waits
+    //  until the body has finished, i.e. until `Initialize` has been enqueued ahead of the `Close`
+    //  that `onClosed` enqueues. Without this, `close` marks the ref closing *before* `onClosed` sets
+    //  `Closed`, leaving a gap in which the CAS below could still start an already-removed ref. The
+    //  CAS additionally makes the start idempotent across repeated calls.
+    synchronizeWithClosingSync("start-connection") {
+      if (lifecycle.compareAndSet(Parked, Started)) {
+        outstandingMessages.incrementAndGet().discard
+        connectionManagingActorRef ! Initialize(config, attemptNumber = 1, traceContext)
+      } else
+        logger.info(
+          s"Not starting connection for ref $this as it is already ${lifecycle.get()}"
+        )
+    }.discard
 
   override def asyncP2PSend(
       recipientBftNodeId: BftNodeId,
@@ -118,9 +146,22 @@ final class PekkoP2PNetworkRef(
   }
 
   override def onClosed(): Unit = {
+    // By the time `onClosed` runs, the closing synchronization has already prevented (or drained) any
+    //  concurrent `startConnection`, so no start can still be in flight. Record the terminal state
+    //  (a secondary guard for the CAS in `startConnection`) and send Close so the actor stops,
+    //  whether it was left parked or already activated.
+    lifecycle.set(Closed)
     logger.debug(s"Sending Close message to connection managing actor for ref $this")
     connectionManagingActorRef ! Close(traceContext)
   }
+}
+
+object PekkoP2PNetworkRef {
+
+  private sealed trait Lifecycle
+  private case object Parked extends Lifecycle
+  private case object Started extends Lifecycle
+  private case object Closed extends Lifecycle
 }
 
 object PekkoP2PGrpcNetworking {
@@ -361,15 +402,32 @@ object PekkoP2PGrpcNetworking {
       }
 
       Behaviors.setup { implicit pekkoActorContext =>
+        // Two-phase start: until the actor has processed at least one Initialize (sent by
+        //  `PekkoP2PNetworkRef.startConnection()` once the ref has been published) or an actual
+        //  send, it stays parked and inert. A parked actor has not touched the connection state
+        //  associated with its address, so it must NOT run the address-based cleanup on teardown;
+        //  otherwise a speculative or superseded ref could clean up state now owned by the winning
+        //  ref for the same address.
+        //
+        //  The flag is set *before* any shared-state-mutating work runs, so that if such work fails
+        //  and the actor stops, PostStop still runs the address-based cleanup, as in the original
+        //  unconditional behavior. It is only ever accessed from the actor's own thread (messages
+        //  and the PostStop signal are processed one at a time), so a plain `var` is safe.
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var connectionInitialized = false
         Behaviors
           .receiveMessage[PekkoP2PGrpcConnectionManagerActorMessage] {
 
             case i: Initialize =>
+              connectionInitialized = true
               logger.info(s"Connection-managing actor $actorName initializing")
               scheduleMessageIfNotConnectedBehavior(i)(_ => ())
               Behaviors.same
 
             case sendMsg: SendMessage =>
+              // If the network ref contract is observed, a Send won't reach the actor before an Initialize,
+              //  but the actor is nevertheless robust against that.
+              connectionInitialized = true
               implicit val traceContext: TraceContext = sendMsg.traceContext
 
               def grpcSend(
@@ -515,14 +573,30 @@ object PekkoP2PGrpcNetworking {
 
             case Close(tc) =>
               implicit val traceContext: TraceContext = tc
-              logger.info(
-                s"Connection-managing actor $actorName is stopping, closing"
-              )
-              createCloseBehavior()
+              if (connectionInitialized) {
+                logger.info(
+                  s"Connection-managing actor $actorName is stopping, closing"
+                )
+                createCloseBehavior()
+              } else {
+                logger.info(
+                  s"Connection-managing actor $actorName is stopping before initialization, " +
+                    "no connection-state cleanup needed"
+                )
+                Behaviors.stopped
+              }
           }
           .receiveSignal { case (_, PostStop) =>
-            logger.info(s"Connection-managing actor $actorName stopped, closing")
-            createCloseBehavior()
+            if (connectionInitialized) {
+              logger.info(s"Connection-managing actor $actorName stopped, closing")
+              createCloseBehavior()
+            } else {
+              logger.info(
+                s"Connection-managing actor $actorName stopped before initialization, " +
+                  "no connection-state cleanup needed"
+              )
+              Behaviors.stopped
+            }
           }
       }
     }

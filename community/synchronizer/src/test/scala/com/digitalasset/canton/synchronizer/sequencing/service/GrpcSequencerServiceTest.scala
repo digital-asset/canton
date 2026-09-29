@@ -78,7 +78,7 @@ import scala.util.Success
 
 import SubscriptionPool.PoolClosed
 
-class GrpcSequencerServiceTest
+final class GrpcSequencerServiceTest
     extends FixtureAsyncWordSpec
     with BaseTest
     with ProtocolVersionChecksFixtureAsyncWordSpec
@@ -322,7 +322,7 @@ class GrpcSequencerServiceTest
           submissionCost = None,
         )
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 30).toByteString
       )
 
       loggerFactory.assertLogs(
@@ -374,7 +374,7 @@ class GrpcSequencerServiceTest
         else "THISWILLFAIL".toProtoUnvalidated
       }
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 30).toByteString
       )
       loggerFactory.assertLogs(
         sendProtoAndCheckError(
@@ -832,7 +832,7 @@ class GrpcSequencerServiceTest
 
   def signedAcknowledgeReq(requestP: v30.AcknowledgeRequest): v30.AcknowledgeSignedRequest =
     v30.AcknowledgeSignedRequest(
-      signedContent(VersionedMessage(requestP.toByteString, 0).toByteString).toByteString
+      signedContent(VersionedMessage(requestP.toByteString, 30).toByteString).toByteString
     )
 
   "acknowledgeSigned" should {

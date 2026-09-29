@@ -179,7 +179,9 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(S2M2)
       }
-      .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(
+        (configTransforms ++ Seq(ConfigTransforms.setPingRetries(true)))*
+      ) // retry pings to avoid flaky test failures
       .withSetup { implicit env =>
         import env.*
 

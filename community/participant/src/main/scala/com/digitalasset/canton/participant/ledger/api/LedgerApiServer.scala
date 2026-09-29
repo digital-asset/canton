@@ -17,6 +17,7 @@ import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.http.HttpApiServer
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.localstore.*
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
@@ -228,6 +229,7 @@ object LedgerApiServer {
           )
         )
     }
+    val deprecatedApiGate = DeprecatedApiGate(parameters.deprecatedApis)
     val contractValidator = ContractValidator(
       syncService.pureCryptoApi,
       ledgerApiServerBootstrapUtils.engine,
@@ -372,6 +374,7 @@ object LedgerApiServer {
             authInterceptor = authInterceptor,
             packagePreferenceBackend = packagePreferenceBackend,
             trafficEnforcementEnabled = trafficEnforcementBackendO.isDefined,
+            deprecatedApiGate = deprecatedApiGate,
             apiLoggingConfig = apiLoggingConfig,
           )(httpApiMetrics)
             .afterReleased(initializationLogger.info("JSON-API HTTP Server is released"))
@@ -435,6 +438,7 @@ object LedgerApiServer {
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
+        deprecatedApiGate = deprecatedApiGate,
         externalCallHandler = externalCallHandler,
         lookupTopologyClient = lookupTopologyClient,
         lookupSynchronizerCryptoClient = lookupSynchronizerCryptoClient,

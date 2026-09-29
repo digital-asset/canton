@@ -56,6 +56,10 @@ import com.digitalasset.canton.tracing.TracingConfig.Propagation
   *   Use the new sequencer connection pool instead of the former transports.
   * @param useNewAggregator
   *   Use the new BFT sequencer aggregator instead of the former one.
+  * @param enableImmediateSyncRejectionSendTrackerCleanup
+  *   If enabled, the send tracker will be cleaned up immediately when a sync rejection is received.
+  *   Previously, this was not done and we relied on the send tracker cleanup via timeout to pick up
+  *   submissions that were rejected synchronously.
   * @param pastEventsCacheSize
   *   If a subscription receives an event for aggregation which has already been decided, a cache of
   *   past successfully aggregated events is used to determine whether this is legitimate (possibly
@@ -115,6 +119,7 @@ final case class SequencerClientConfig(
     maximumInFlightEventBatches: PositiveInt = PositiveInt.tryCreate(20),
     useNewConnectionPool: Boolean = true,
     useNewAggregator: Boolean = true,
+    enableImmediateSyncRejectionSendTrackerCleanup: Boolean = true,
     pastEventsCacheSize: PositiveInt = PositiveInt.tryCreate(1000),
     timeReadingsRetention: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
     enableAmplificationImprovements: Boolean = true,

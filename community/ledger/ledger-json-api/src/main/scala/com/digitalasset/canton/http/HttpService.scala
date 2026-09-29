@@ -24,6 +24,7 @@ import com.digitalasset.canton.http.json.v2.V2Routes
 import com.digitalasset.canton.http.metrics.{HttpApiMetrics, HttpMetricsInterceptor}
 import com.digitalasset.canton.http.util.FutureUtil.*
 import com.digitalasset.canton.http.util.Logging.InstanceUUID
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.refinements.ApiTypes.UserId
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
 import com.digitalasset.canton.ledger.client.configuration.{
@@ -62,6 +63,7 @@ class HttpService(
     packageSyncService: PackageSyncService,
     packagePreferenceBackend: PackagePreferenceBackend,
     trafficEnforcementEnabled: Boolean,
+    deprecatedApiGate: DeprecatedApiGate,
     apiLoggingConfig: ApiLoggingConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -132,6 +134,7 @@ class HttpService(
           ledgerClient,
           metadataServiceEnabled = startSettings.damlDefinitionsServiceEnabled,
           trafficEnforcementEnabled = trafficEnforcementEnabled,
+          deprecatedApiGate = deprecatedApiGate,
           packageSyncService,
           packagePreferenceBackend,
           mat.executionContext,

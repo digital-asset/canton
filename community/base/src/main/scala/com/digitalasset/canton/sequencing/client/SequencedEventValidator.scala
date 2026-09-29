@@ -500,7 +500,8 @@ class SequencedEventValidatorImpl(
 
     // TODO(M99): dishonest sequencer: Check that the node is listed as a recipient on all envelopes in the batch
 
-    logger.debug(s"Validating event:\n$event\nagainst prior event:\n$priorEventO")
+    logger.debug(s"Validating event:\n$event\nagainst prior event from ${priorEventO
+        .map(c => (c.timestamp, c.traceContext))}")
 
     for {
       _ <- EitherT.fromEither[FutureUnlessShutdown](

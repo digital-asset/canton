@@ -164,7 +164,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
   val DefaultSegmentLength: SegmentLength = SegmentLength(PositiveLong.tryCreate(10L))
   val DefaultMaxRequestsInBatch: Short = 32
   val DefaultMaxBatchesPerProposal: Short = 16
-  val DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+  val DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
     false
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
@@ -176,7 +176,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
-        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -190,7 +190,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
-        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -212,7 +212,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
-        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(rpv)
 
   def fromProto31(
@@ -296,7 +296,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
         DefaultPbftViewChangeTimeoutUpperBound,
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
-        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,

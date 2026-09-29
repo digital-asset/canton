@@ -112,9 +112,10 @@ paths:
       - apiKeyAuth: []
   /v2/commands/submit-and-wait-for-transaction-tree:
     post:
-      description: Submit a batch of commands and wait for the transaction trees response.
-        Provided for backwards compatibility, it will be removed in the Canton version
-        3.5.0, use submit-and-wait-for-transaction instead.
+      description: |-
+        Submit a batch of commands and wait for the transaction trees response.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/commands/submit-and-wait-for-transaction instead.
       operationId: postV2CommandsSubmit-and-wait-for-transaction-tree
       requestBody:
         content:
@@ -670,7 +671,8 @@ paths:
     get:
       description: |-
         Lists which participant node vetted what packages on which synchronizer.
-        This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.
+
+        Deprecated since Canton 3.5: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35 = true`) and will be removed in Canton 3.7. Use POST /v2/package-vetting/list instead.
       operationId: getV2Package-vetting
       requestBody:
         content:
@@ -703,8 +705,9 @@ paths:
       - apiKeyAuth: []
     post:
       description: |-
-        Update the vetted packages of this participant
-        This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.
+        Update the vetted packages of this participant.
+
+        Deprecated since Canton 3.5: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35 = true`) and will be removed in Canton 3.7. Use POST /v2/package-vetting/update instead.
       operationId: postV2Package-vetting
       requestBody:
         content:
@@ -1181,9 +1184,13 @@ paths:
   /v2/state/active-contracts-page:
     get:
       description: |-
-        Deprecated
+        Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
+        Once all pages are fetched by repeated calls to ``GetActiveContractsPage``,
+        the client SHOULD begin retrieving updates from the update service,
+        starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
+        Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
 
-        Use POST version of this endpoint
+        Deprecated since Canton 3.5: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35 = true`) and will be removed in Canton 3.7. Use POST /v2/state/active-contracts-page instead.
       operationId: getV2StateActive-contracts-page
       requestBody:
         content:
@@ -1422,12 +1429,14 @@ paths:
   /v2/updates/flats:
     post:
       description: |-
-        Query flat transactions update list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
+        Query flat transactions update list (blocking call).
         Notice: This endpoint should be used for small results set.
         When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
         there will be an error (`413 Content Too Large`) returned.
         Increasing this limit may lead to performance issues and high memory consumption.
         Consider using websockets (asyncapi) for better efficiency with larger results.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates instead.
       operationId: postV2UpdatesFlats
       parameters:
       - name: limit
@@ -1481,7 +1490,9 @@ paths:
   /v2/updates/trees:
     post:
       description: |-
-        Query update transactions tree list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
+        Query update transactions tree list (blocking call).
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates instead.
         Notice: This endpoint should be used for small results set.
         When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
         there will be an error (`413 Content Too Large`) returned.
@@ -1539,9 +1550,10 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-tree-by-offset/{offset}:
     get:
-      description: Get transaction tree by offset. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
-        instead.
+      description: |-
+        Get transaction tree by offset.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates/update-by-offset instead.
       operationId: getV2UpdatesTransaction-tree-by-offsetOffset
       parameters:
       - name: offset
@@ -1583,9 +1595,10 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-by-offset:
     post:
-      description: Get transaction by offset. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
-        instead.
+      description: |-
+        Get transaction by offset.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates/update-by-offset instead.
       operationId: postV2UpdatesTransaction-by-offset
       requestBody:
         content:
@@ -1652,8 +1665,10 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-by-id:
     post:
-      description: Get transaction by id. Provided for backwards compatibility, it
-        will be removed in the Canton version 3.5.0, use v2/updates/update-by-id instead.
+      description: |-
+        Get transaction by id.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates/update-by-id instead.
       operationId: postV2UpdatesTransaction-by-id
       requestBody:
         content:
@@ -1720,9 +1735,10 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-tree-by-id/{update-id}:
     get:
-      description: Get transaction tree by id. Provided for backwards compatibility,
-        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-id
-        instead.
+      description: |-
+        Get transaction tree by id.
+
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/updates/update-by-id instead.
       operationId: getV2UpdatesTransaction-tree-by-idUpdate-id
       parameters:
       - name: update-id
@@ -2492,6 +2508,8 @@ paths:
   /v2/interactive-submission/preferred-package-version:
     get:
       description: |-
+        Get the preferred package version for constructing a command submission.
+
         A preferred package is the highest-versioned package for a provided package-name
         that is vetted by all the participants hosting the provided parties.
 
@@ -2503,7 +2521,7 @@ paths:
 
         Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
 
-        Deprecated: Use GetPreferredPackages instead.
+        Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`) and will be removed in Canton 3.7. Use POST /v2/interactive-submission/preferred-packages instead.
       operationId: getV2Interactive-submissionPreferred-package-version
       parameters:
       - name: parties
@@ -2550,6 +2568,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -4745,12 +4764,12 @@ components:
         filter:
           $ref: '#/components/schemas/TransactionFilter'
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
             Templates to include in the served snapshot, per party.
             Optional, if specified event_format must be unset, if not specified event_format must be set.
         verbose:
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
             If enabled, values served over the API will contain more information than strictly necessary to interpret the data.
             In particular, setting the verbose flag to true triggers the ledger to include labels for record fields.
             Optional, if specified event_format must be unset.
@@ -5125,8 +5144,8 @@ components:
           type: string
     GetTransactionByIdRequest:
       title: GetTransactionByIdRequest
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       required:
       - updateId
@@ -5139,7 +5158,7 @@ components:
           type: string
         requestingParties:
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
             The parties whose events the client expects to see.
             Events that are not visible for the parties in this collection will not be present in the response.
             Each element must be a valid PartyIdString (as described in ``value.proto``).
@@ -5159,8 +5178,8 @@ components:
             - transaction_shape = TRANSACTION_SHAPE_ACS_DELTA
     GetTransactionByOffsetRequest:
       title: GetTransactionByOffsetRequest
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       required:
       - offset
@@ -5174,7 +5193,7 @@ components:
           format: int64
         requestingParties:
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
             The parties whose events the client expects to see.
             Events that are not visible for the parties in this collection will not be present in the response.
             Each element must be a valid PartyIdString (as described in ``value.proto``).
@@ -5342,13 +5361,13 @@ components:
         filter:
           $ref: '#/components/schemas/TransactionFilter'
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
             Requesting parties with template filters.
             Template filters must be empty for GetUpdateTrees requests.
             Optional for backwards compatibility, if defined update_format must be unset
         verbose:
           description: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
             If enabled, values served over the API will contain more information than strictly necessary to interpret the data.
             In particular, setting the verbose flag to true triggers the ledger to include labels, record and variant type ids
             for record fields.
@@ -6222,8 +6241,8 @@ components:
             Optional
     JsGetTransactionResponse:
       title: JsGetTransactionResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       required:
       - transaction
@@ -6233,8 +6252,8 @@ components:
           description: Required
     JsGetTransactionTreeResponse:
       title: JsGetTransactionTreeResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       required:
       - transaction
@@ -6250,8 +6269,8 @@ components:
           $ref: '#/components/schemas/Update'
     JsGetUpdateTreesResponse:
       title: JsGetUpdateTreesResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       properties:
         update:
@@ -6750,8 +6769,8 @@ components:
             Required
     JsSubmitAndWaitForTransactionTreeResponse:
       title: JsSubmitAndWaitForTransactionTreeResponse
-      description: Provided for backwards compatibility, it will be removed in the
-        Canton version 3.5.0.
+      description: 'Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34
+        = true`; it will be removed in the Canton version 3.7.0.'
       type: object
       properties:
         transactionTree:
@@ -6947,7 +6966,7 @@ components:
     JsTransactionTree:
       title: JsTransactionTree
       description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Complete view of an on-ledger transaction.
       type: object
       required:
@@ -8348,7 +8367,7 @@ components:
     TransactionFilter:
       title: TransactionFilter
       description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
         Used both for filtering create and archive events as well as for filtering transaction trees.
       type: object
       properties:
@@ -8397,7 +8416,7 @@ components:
     TransactionTree:
       title: TransactionTree
       description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Complete view of an on-ledger transaction.
       type: object
       required:
@@ -8408,7 +8427,7 @@ components:
     TreeEvent:
       title: TreeEvent
       description: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Each tree event message type below contains a ``witness_parties`` field which
         indicates the subset of the requested parties that can see the event
         in question.

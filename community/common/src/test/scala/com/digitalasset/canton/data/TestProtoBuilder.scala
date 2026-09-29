@@ -18,7 +18,7 @@ object TestProtoBuilder {
     v30.BlindableNode(v30.BlindableNode.BlindedOrNot.Unblinded(bytes))
 
   def versionedMessage(gm: scalapb.GeneratedMessage): ByteString =
-    VersionedMessage(gm.toByteString, 1).toByteString
+    VersionedMessage(gm.toByteString, 30).toByteString
 
   private val v30BlindedNode = v30.BlindableNode(
     v30.BlindableNode.BlindedOrNot.BlindedHash(TestHash.dummyRootHash.toProtoPrimitive)

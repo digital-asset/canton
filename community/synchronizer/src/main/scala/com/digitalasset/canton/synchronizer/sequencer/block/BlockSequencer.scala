@@ -82,6 +82,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   LsuSequencerError,
   LsuTrafficAlreadyInitialized,
   MissingSynchronizerPredecessor,
+  NonEmptyTopologyTimestamp,
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.{
@@ -387,6 +388,15 @@ class BlockSequencer(
         noTracingLogger.error("Sequencer flow has failed", ex)
   }
 
+  private def validateTopologyTimestamp(
+      submission: SubmissionRequest
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+    EitherT.cond[FutureUnlessShutdown](
+      submission.topologyTimestamp.isEmpty || !submission.shouldHaveEmptyTopologyTimestamp,
+      (),
+      NonEmptyTopologyTimestamp.Error,
+    )
+
   private def validateMaxSequencingTime(
       submission: SubmissionRequest
   )(implicit
@@ -630,6 +640,7 @@ class BlockSequencer(
           _ <- rejectSubmissionsIfOverloaded(submission)
           _ <- validateAggregationRuleRecipients(submission)
           _ <- validateMaxSequencingTime(submission)
+          _ <- validateTopologyTimestamp(submission)
           _ <- validateAggregationAlreadyDelivered(submission)
           // TODO(#19476): Why we don't check group recipients here?
           approximateSnapshot <- EitherT.liftF(

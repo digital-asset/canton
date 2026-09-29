@@ -14,8 +14,8 @@ test_jobs:
   - test
   - test_requires_external_kms
   - sequential_test
-  - test_protocol_version_36
-  - test_protocol_version_36_requires_external_kms
+  - test_protocol_version_35
+  - test_protocol_version_35_requires_external_kms
   - test_protocol_version_dev
   - ledger_api_compatibility_tests
   - protocol_continuity_test_latest

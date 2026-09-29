@@ -14,6 +14,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequest
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -96,7 +97,8 @@ object TimeProof {
     * consistent
     */
   def sendRequest(
-      client: SequencerClient
+      client: SequencerClient,
+      timeProofRequestExpiry: NonNegativeFiniteDuration,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
@@ -105,20 +107,13 @@ object TimeProof {
       // we intentionally ask for an empty event to be sequenced to observe the time.
       // this means we can safely share this event without mentioning other recipients.
       batch = Batch.empty(client.protocolVersion),
-      // as we typically won't know the synchronizer time at the point of doing this request (hence doing the request for the time...),
-      // we can't pick a known good synchronizer time for the max sequencing time.
-      // if we were to guess it we may get it wrong and then in the event of no activity on the synchronizer for our recipient,
-      // we'd then never actually learn of the time.
-      // so instead we just use the maximum value allowed.
       timestamps = SendRequestTimestamps(
         topologyTimestamp = None,
-        // It's safe to use `clock.now` regardless of the max sequencing time, as the latter is set to `MaxValue`,
-        // which causes a fallback to the long-term key when signing.
         approximateTimestampForSigning = client.clock.now,
-        maxSequencingTime = CantonTimestamp.MaxValue,
+        maxSequencingTime = client.clock.now.plus(timeProofRequestExpiry.unwrap),
       ),
       messageId = mkTimeProofRequestMessageId,
-      // Do not amplify because max sequencing time is set to MaxValue and therefore will exceed the aggregation time bound
+      // Do not amplify as there is anyway an outer retry mechanism in TimeProofRequestSubmitter
       amplify = false,
     )
   }

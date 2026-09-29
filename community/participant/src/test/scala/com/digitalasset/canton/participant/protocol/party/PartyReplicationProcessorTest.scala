@@ -251,9 +251,14 @@ final class PartyReplicationProcessorTest
 
   private def execUntilDone[P <: PartyReplicationProcessor, T](processor: P, clue: String)(
       test: P => EitherT[FutureUnlessShutdown, String, Unit]
-  ): FutureUnlessShutdown[Unit] =
+  ): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Begin \"$clue\"")
     valueOrFail(test(processor))(clue)
-      .tap(_ => eventually()(processor.isExecutionQueueEmpty shouldBe true))
+      .map { _ =>
+        eventually()(processor.isExecutionQueueEmpty shouldBe true)
+        logger.debug(s"End \"$clue\"")
+      }
+  }
 
   private def execUntilDone[P <: PartyReplicationProcessor, T](processor: P)(
       test: P => Unit

@@ -22,6 +22,8 @@ class BftOrdererPruningIntegrationTest extends CommunityIntegrationTest with Sha
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S2M1
       .addConfigTransform(ConfigTransforms.useStaticTime)
+      // retry pings to avoid flaky test failures
+      .addConfigTransform(ConfigTransforms.setPingRetries(true))
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

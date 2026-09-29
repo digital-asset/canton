@@ -120,11 +120,15 @@ final class ClientCredentialsTokenProvider(
       .singleRequest(request)
       .flatMap { response =>
         if (!response.status.isSuccess()) {
-          Future.failed(
-            new IllegalStateException(
-              s"OAuth2 token endpoint returned HTTP ${response.status.intValue}"
+          // The entity must be drained, otherwise the connection is leaked until the connection
+          // pool times out the unsubscribed response entity.
+          response.entity.discardBytes(materializer).future().flatMap { _ =>
+            Future.failed(
+              new IllegalStateException(
+                s"OAuth2 token endpoint returned HTTP ${response.status.intValue}"
+              )
             )
-          )
+          }
         } else {
           response.entity
             .toStrict(5.second)(materializer)

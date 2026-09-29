@@ -90,6 +90,7 @@ class AcsCommitmentCrashIntegrationTest
         passTopologyRegistrationTimeout()
       }
 
+  // TODO(#34818): Enable this test to also run for PV36 onwards
   "checkpoints are at a grid" onlyRunWithOrLessThan ProtocolVersion.v35 in { implicit env =>
     import env.*
 

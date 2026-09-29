@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store.db
 
+import cats.data.OptionT
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
@@ -12,8 +13,8 @@ import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -53,7 +54,6 @@ import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, TransactionIsolation}
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
@@ -286,23 +286,48 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       }
     val prepared = txWithIdx.reverse
 
+    val statementSql = s"""
+      insert into common_topology_transactions (store_id, sequenced, valid_from, batch_idx, valid_until, transaction_type, namespace,
+                  identifier, mapping_key_hash, serial_counter, operation, instance, tx_hash, is_proposal, rejection_reason, representative_protocol_version, hash_of_signatures)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict do nothing"""
+
     val updates =
       DBIOUtil.batchedSequentialTraverse(batchingConfig.maxTopologyWriteBatchSize)(prepared) {
         case (bidx, elems) =>
           logger.debug(s"Bulk inserting batch $bidx")
-          insertSignedTransaction[TxWithIdx] { case (tx, idx) =>
-            TransactionEntry(
-              sequenced = tx.sequenced,
-              validFrom = tx.validFrom,
-              batchIdx = idx,
-              validUntil = tx.validUntil,
-              signedTx = tx.transaction,
-              rejectionReason = tx.rejectionReason,
-            )
-          }(elems)
+          DbStorage.bulkOperation_(
+            statementSql,
+            elems,
+            storage.profile,
+            transactional = false,
+          )(pp =>
+            txEntry => {
+              val (tx, batchIdx) = txEntry
+              pp >> storeIndex
+              pp >> tx.sequenced.value
+              pp >> tx.validFrom.value
+              pp >> batchIdx
+              pp >> tx.validUntil.map(_.value)
+              val signedTx = tx.transaction
+              val mapping = signedTx.mapping
+              pp >> mapping.code
+              pp >> mapping.namespace
+              pp >> mapping.maybeUid.map(_.identifier).getOrElse(String185.empty)
+              pp >> mapping.uniqueKey.hash
+              pp >> signedTx.serial
+              pp >> signedTx.operation
+              pp >> signedTx
+              pp >> signedTx.hash.hash
+              pp >> signedTx.isProposal
+              pp >> tx.rejectionReason
+              pp >> signedTx.transaction.representativeProtocolVersion
+              pp >> signedTx.hashOfSignatures(protocolVersion)
+            }
+          )
       }
 
-    storage.update_(
+    storage.queryAndUpdate(
       updates.transactionally
         .withTransactionIsolation(TransactionIsolation.Serializable),
       operationName = "bulk-insert",
@@ -800,7 +825,6 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
               storedTx.copy(validUntil = None)
             } else storedTx
           },
-          skipGenesisTransactions = false,
         )
     }
 
@@ -812,101 +836,76 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       includeRejected: Boolean,
       selectFields: SQLActionBuilder,
       transform: Vector[QueryRes] => Seq[Output],
-      skipGenesisTransactions: Boolean,
   )(implicit
       getResult: GetResult[QueryResultWithId[QueryRes]],
       traceContext: TraceContext,
   ): Source[Output, NotUsed] = {
+    logger.debug(
+      s"find essential state asOfInclusive=$asOfInclusive"
+    )
     val timeFilter = sql" AND sequenced <= ${asOfInclusive.value}"
-    val skipGenesisFilter =
-      if (skipGenesisTransactions)
-        sql" AND sequenced > ${SignedTopologyTransaction.InitialTopologySequencingTime}"
-      else sql""
-    Source
-      .unfoldAsync(Option.empty[Long]) { idOffset =>
-        val query = buildQueryForTransactionsWithId[QueryRes](
-          selectFields = selectFields,
-          skipGenesisFilter ++ timeFilter ++ idOffset.map(offset => sql" AND id > $offset").toList,
-          includeRejected = includeRejected,
-          limit = storage.limit(batchingConfig.maxItemsInBatch.value),
-          orderBy = " order by id",
-        )
-        storage
-          .query(query, operationName = "essentialState")
-          .map { rows =>
-            if (rows.isEmpty) None
-            else {
-              val (ids, txData) = rows.unzip
-              val transactions = transform(txData)
-              Some(ids.lastOption -> transactions)
-            }
-          }
-          .onShutdown(None)
-      }
-      .mapConcat(identity)
-  }
 
-  private val initialTopologyStateHash
-      : AtomicReference[Option[PromiseUnlessShutdown[TopologyStateHash]]] =
-    new AtomicReference(None)
+    def minMaxRowQuery(orderBy: String) = {
+      val query = buildQueryForTransactionsWithId[Option[Long]](
+        selectFields = sql"id, null",
+        timeFilter,
+        includeRejected = includeRejected,
+        limit = storage.limit(1),
+        orderBy = orderBy,
+      )
+      storage
+        .query(query, operationName = s"$functionFullName-min-max-id")
+        .map(_.headOption.map { case (id, _null) => id })
+    }
+
+    val minMaxIdOT = for {
+      minId <- OptionT(minMaxRowQuery(orderBy = " order by sequenced asc, id asc"))
+      maxId <- OptionT(minMaxRowQuery(orderBy = " order by sequenced desc, id desc"))
+    } yield (minId, maxId)
+
+    val sourceFUS = minMaxIdOT.value.map {
+      case Some((minId, maxId)) =>
+        Source(minId to maxId by batchingConfig.maxItemsInBatch.value.toLong)
+          .mapAsync(batchingConfig.parallelism.value) { fromIdInclusive =>
+            val toIdExclusive =
+              math.min(fromIdInclusive + batchingConfig.maxItemsInBatch.value, maxId + 1)
+            logger.debug(
+              s"find essential state fromIdInclusive=$fromIdInclusive toIdExclusive=$toIdExclusive"
+            )
+            val query = buildQueryForTransactionsWithId[QueryRes](
+              selectFields = selectFields,
+              // Note: timeFilter is already included in the bounds
+              sql" AND id >= $fromIdInclusive AND id < $toIdExclusive",
+              includeRejected = includeRejected,
+              limit = storage.limit(batchingConfig.maxItemsInBatch.value),
+              orderBy = " order by id",
+            )
+            storage
+              .query(query, operationName = "essentialState")
+              .map { rows =>
+                val (_, txData) = rows.unzip
+                val transactions = transform(txData)
+                transactions
+              }
+              .onShutdown(Seq.empty)
+          }
+      case None => Source.empty
+    }
+
+    PekkoUtil.futureSourceUS(sourceFUS).mapConcat(identity)
+  }
 
   override def findEssentialStateHashAtSequencedTime(
       asOfInclusive: SequencedTime
-  )(implicit materializer: Materializer, traceContext: TraceContext): FutureUnlessShutdown[Hash] = {
-
-    def computeGenesisStateHash(): FutureUnlessShutdown[TopologyStateHash] = {
-      logger.debug(s"Querying hashes for topology genesis state")
-
-      FutureUnlessShutdown.outcomeF(
-        findAndMapEssentialStateAtSequencedTime[Hash, Hash](
-          SequencedTime(SignedTopologyTransaction.InitialTopologySequencingTime),
-          includeRejected = true,
-          selectFields = TxHashWithIdFields,
-          transform = identity,
-          skipGenesisTransactions = false,
-        ).runFold(TopologyStateHash.build())(_.add(_)).map(_.finish())
-      )
-    }
-
-    def useCachedOrComputeGenesisHash(): FutureUnlessShutdown[TopologyStateHash] = {
-      val promise = PromiseUnlessShutdown.unsupervised[TopologyStateHash]()
-      val setPromise = initialTopologyStateHash.updateAndGet {
-        case None => Some(promise)
-        case x => x
-      }
-      setPromise match {
-        case Some(existingPromise) if existingPromise != promise =>
-          logger.debug(
-            s"Reusing existing genesis topology state hash computation"
-          )
-          existingPromise.futureUS
-        case _ =>
-          logger.debug(s"Computing genesis topology state hash at $asOfInclusive")
-          promise.completeWithUS(computeGenesisStateHash()).futureUS
-      }
-    }
-
-    for {
-      genesisHash <- useCachedOrComputeGenesisHash()
-      finalHash <- {
-        if (asOfInclusive.value == SignedTopologyTransaction.InitialTopologySequencingTime) {
-          FutureUnlessShutdown.pure(genesisHash)
-        } else {
-          logger.debug(s"Querying hashes for topology state after the genesis timestamp")
-
-          FutureUnlessShutdown.outcomeF(
-            findAndMapEssentialStateAtSequencedTime[Hash, Hash](
-              asOfInclusive,
-              includeRejected = true,
-              selectFields = TxHashWithIdFields,
-              transform = identity,
-              skipGenesisTransactions = true,
-            ).runFold(genesisHash.extend())(_.add(_)).map(_.finish())
-          )
-        }
-      }
-    } yield finalHash.hash
-  }
+  )(implicit materializer: Materializer, traceContext: TraceContext): FutureUnlessShutdown[Hash] =
+    FutureUnlessShutdown.outcomeF(
+      findAndMapEssentialStateAtSequencedTime[Hash, Hash](
+        asOfInclusive,
+        includeRejected = true,
+        selectFields = TxHashWithIdFields,
+        transform = identity,
+      ).runFold(TopologyStateHash.build())(_.add(_)).map(_.finish().hash)
+    )
 
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext

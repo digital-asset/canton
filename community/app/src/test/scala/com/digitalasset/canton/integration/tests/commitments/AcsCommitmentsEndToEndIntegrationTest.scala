@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.{
@@ -25,6 +26,11 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.commitment.{
+  DigestProcessor,
+  ReinitializingDigestProcessor,
+  RunningDigestProcessor,
+}
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
@@ -47,7 +53,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
     with HasCycleUtils {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(
         ConfigTransforms.disableOldAcsCommitmentProcessor,
         // Trigger frequent garbage collections so that we can see that they are happening
@@ -63,7 +69,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 
       participant1.synchronizers.connect_local(sequencer1, daName)
       participant2.synchronizers.connect_local(sequencer1, daName)
-      participants.all.dars.upload(CantonExamplesPath)
+      Seq(participant1, participant2).dars.upload(CantonExamplesPath)
 
       // running a ping exchanges contracts
       participant1.health.ping(participant2, timeout = 30.seconds)
@@ -176,10 +182,6 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
     implicit env =>
       import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, daName)
-      participant2.synchronizers.connect_local(sequencer1, daName)
-      participants.all.dars.upload(CantonExamplesPath)
-
       val alice = participant1.parties.enable("alice-reinit")
       val bob = participant2.parties.enable("bob-reinit")
 
@@ -271,6 +273,66 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       .lookup(si.participantId.internalize(target.toLf), Offset.MaxValue)
       .futureValueUS
   }
+}
+
+// the test case below stops and starts participant3, which doesn't work for InMemory storage
+sealed trait AcsCommitmentsEndToEndIntegrationTestStorage {
+  self: AcsCommitmentsEndToEndIntegrationTest =>
+  "does not attempt automatic reinitialization if no data has been received by the synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    implicit env =>
+      import env.*
+
+      participant3.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
+
+      participant3.synchronizers.register(
+        sequencer1,
+        daName,
+        // perform the handshake to initialize the persistent state
+        performHandshake = true,
+        // and manually connect, so that the participant has a persistent state, but no events on the synchronizer yet
+        manualConnect = true,
+      )
+
+      participant3.stop()
+      participant3.start()
+
+      def currentProc: Option[DigestProcessor] =
+        participant3.underlying.value.participantServices.acsCommitmentProcessorManagerO
+          .flatMap(_.asEval.value.synchronizers.get(daId))
+          .flatMap(_.digestProcessorManager.currentProcessor)
+
+      clue(s"$participant3 hasn't started reinitialization") {
+        always() {
+          currentProc.foreach(_ should not be a[ReinitializingDigestProcessor])
+        }
+      }
+      clue(s"$participant3 has started a running digest processor") {
+        eventually() {
+          currentProc.value shouldBe a[RunningDigestProcessor]
+        }
+      }
+
+      // Now reconnect to the synchronizer and check that the commitment processing works correctly
+      participant3.synchronizers.reconnect(daName)
+      participant3.dars.upload(CantonExamplesPath)
+
+      IouSyntax
+        .createIou(participant3)(
+          participant3.adminParty,
+          participant3.adminParty,
+          observers = List(participant1.adminParty),
+        )
+        .discard
+
+      // trigger a checkpoint via a party allocation
+      participant3.parties.enable("charlie")
+
+      eventually() {
+        getDigestFor(participant1, participant3.id).value.digestUpdate.digestO.value shouldBe
+          getDigestFor(participant3, participant1.id).value.digestUpdate.digestO.value
+      }
+
+  }
 
 }
 
@@ -284,13 +346,15 @@ class AcsCommitmentsEndToEndIntegrationTestInMemory extends AcsCommitmentsEndToE
 }
 
 class AcsCommitmentsBftOrderingEndToEndIntegrationTestH2
-    extends AcsCommitmentsEndToEndIntegrationTest {
+    extends AcsCommitmentsEndToEndIntegrationTest
+    with AcsCommitmentsEndToEndIntegrationTestStorage {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
 class AcsCommitmentsBftOrderingEndToEndIntegrationTestPostgres
-    extends AcsCommitmentsEndToEndIntegrationTest {
+    extends AcsCommitmentsEndToEndIntegrationTest
+    with AcsCommitmentsEndToEndIntegrationTestStorage {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

@@ -12,8 +12,8 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
+  OtherError,
   ProtoDeserializationFailure,
-  ValueDeserializationError,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -60,17 +60,21 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils}
+import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, TryUtil}
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.scaladsl.Sink
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 class GrpcSequencerInitializationService(
     handler: GrpcSequencerInitializationService.Callback,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext
+    executionContext: ExecutionContext,
+    actorSystem: ActorSystem,
 ) extends SequencerInitializationService
     with NamedLogging {
 
@@ -109,15 +113,18 @@ class GrpcSequencerInitializationService(
       responseObserver: StreamObserver[InitializeSequencerFromLsuPredecessorResponse]
   ): StreamObserver[InitializeSequencerFromLsuPredecessorRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    GrpcStreamingUtils.streamFromClient(
-      _.topologySnapshot,
-      req => (req.parameters, req.ignorePsidCheck),
-      (
-          topologySnapshot: ByteString,
-          ctx: (InitializeSequencerFromLsuPredecessorRequest.Parameters, Boolean),
-      ) => {
-        val (parameters, ignoreLsuPsidCheck) = ctx
-
+    GrpcStreamingUtils.streamChunkedFromClient[
+      InitializeSequencerFromLsuPredecessorRequest,
+      InitializeSequencerFromLsuPredecessorResponse,
+      (InitializeSequencerFromLsuPredecessorRequest.Parameters, Boolean),
+      GenericStoredTopologyTransaction,
+    ](
+      responseObserver,
+      emptyStreamError,
+      getBytes = _.topologySnapshot,
+      parseMessage = StoredTopologyTransaction.parseDelimitedFromTrusted(_),
+    )(contextFromFirstRequest = req => Success((req.parameters, req.ignorePsidCheck))) {
+      case ((parameters, ignoreLsuPsidCheck), source) =>
         val synchronizerParametersE = parameters match {
           case InitializeSequencerFromLsuPredecessorRequest.Parameters.V30(ssp) =>
             StaticSynchronizerParameters.fromProtoV30(ssp)
@@ -127,15 +134,20 @@ class GrpcSequencerInitializationService(
             Left(FieldNotSet("InitializeSequencerFromLsuPredecessorRequest.parameters"))
         }
 
-        initializeSequencerFromGenesisStateV2(
-          topologySnapshot,
-          synchronizerParametersE,
-          doResetTimes = false,
-          ignoreLsuPsidCheck = ignoreLsuPsidCheck,
-        ).map(_ => InitializeSequencerFromLsuPredecessorResponse())
-      },
-      responseObserver,
-    )
+        FutureUnlessShutdown.outcomeF(
+          source
+            .runWith(Sink.seq)
+            .flatMap(
+              initializeSequencerFromGenesisStateV2(
+                _,
+                synchronizerParametersE,
+                doResetTimes = false,
+                ignoreLsuPsidCheck = ignoreLsuPsidCheck,
+              )
+            )
+            .map(_ => InitializeSequencerFromLsuPredecessorResponse())
+        )
+    }
   }
 
   /** Initializes the sequencer from a topology state snapshot.
@@ -180,67 +192,62 @@ class GrpcSequencerInitializationService(
       responseObserver: StreamObserver[InitializeSequencerFromGenesisStateV2Response]
   ): StreamObserver[InitializeSequencerFromGenesisStateV2Request] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    GrpcStreamingUtils.streamFromClient(
-      _.topologySnapshot,
-      _.parameters,
-      (
-          topologySnapshot: ByteString,
-          parameters: InitializeSequencerFromGenesisStateV2Request.Parameters,
-      ) => {
-        val synchronizerParametersE = parameters match {
-          case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV30(
-                ssp
-              ) =>
-            StaticSynchronizerParameters.fromProtoV30(ssp)
-          case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
-                ssp
-              ) =>
-            StaticSynchronizerParameters.fromProtoV31(ssp)
-          case InitializeSequencerFromGenesisStateV2Request.Parameters.Empty =>
-            Left(FieldNotSet("InitializeSequencerFromGenesisStateV2Request.parameters"))
-        }
-
-        initializeSequencerFromGenesisStateV2(
-          topologySnapshot,
-          synchronizerParametersE,
-          doResetTimes = true,
-          ignoreLsuPsidCheck = false,
-        ).map(InitializeSequencerFromGenesisStateV2Response(_))
-      },
+    GrpcStreamingUtils.streamChunkedFromClient[
+      InitializeSequencerFromGenesisStateV2Request,
+      InitializeSequencerFromGenesisStateV2Response,
+      InitializeSequencerFromGenesisStateV2Request.Parameters,
+      GenericStoredTopologyTransaction,
+    ](
       responseObserver,
-    )
+      emptyStreamError,
+      getBytes = _.topologySnapshot,
+      parseMessage = StoredTopologyTransaction.parseDelimitedFromTrusted(_),
+    )(contextFromFirstRequest = req => Success(req.parameters)) { (parameters, source) =>
+      val synchronizerParametersE = parameters match {
+        case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV30(
+              ssp
+            ) =>
+          StaticSynchronizerParameters.fromProtoV30(ssp)
+        case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
+              ssp
+            ) =>
+          StaticSynchronizerParameters.fromProtoV31(ssp)
+        case InitializeSequencerFromGenesisStateV2Request.Parameters.Empty =>
+          Left(FieldNotSet("InitializeSequencerFromGenesisStateV2Request.parameters"))
+      }
+
+      FutureUnlessShutdown.outcomeF(
+        source
+          .runWith(Sink.seq)
+          .flatMap(
+            initializeSequencerFromGenesisStateV2(
+              _,
+              synchronizerParametersE,
+              doResetTimes = true,
+              ignoreLsuPsidCheck = false,
+            )
+          )
+          .map(InitializeSequencerFromGenesisStateV2Response(_))
+      )
+    }
   }
 
   private def initializeSequencerFromGenesisStateV2(
-      topologySnapshot: ByteString,
+      topologySnapshot: Seq[GenericStoredTopologyTransaction],
       synchronizerParametersE: ParsingResult[StaticSynchronizerParameters],
       doResetTimes: Boolean,
       ignoreLsuPsidCheck: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): Future[Boolean] = {
-    val res: EitherT[Future, RpcError, Boolean] = for {
-      topologyState <- EitherT.fromEither[Future](
-        GrpcStreamingUtils
-          .parseDelimitedFromTrusted(
-            topologySnapshot.newInput(),
-            StoredTopologyTransaction,
-          )
-          .bimap(
-            msg =>
-              ProtoDeserializationFailure.Wrap(ValueDeserializationError(msg, "topology_snapshot")),
-            StoredTopologyTransactions(_),
-          )
-      )
-      replicated <- initializeSequencerFromGenesisStateInternal(
-        topologyState,
+  ): Future[Boolean] =
+    mapErrNew(
+      initializeSequencerFromGenesisStateInternal(
+        StoredTopologyTransactions(topologySnapshot),
         synchronizerParametersE,
         doResetTimes = doResetTimes,
         ignoreLsuPsidCheck = ignoreLsuPsidCheck,
       )
-    } yield replicated
-    mapErrNew(res)
-  }
+    )
 
   /** @param topologyState
     *   Topology state the sequencer should be initialized with.
@@ -465,31 +472,29 @@ class GrpcSequencerInitializationService(
       responseObserver: StreamObserver[InitializeSequencerFromOnboardingStateV2Response]
   ): StreamObserver[InitializeSequencerFromOnboardingStateV2Request] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    GrpcStreamingUtils.streamFromClient(
-      _.onboardingState,
-      _ => (),
-      (onboardingState: ByteString, _: Unit) =>
-        initializeSequencerFromOnboardingStateV2(onboardingState),
+    GrpcStreamingUtils.streamChunkedFromClient[
+      InitializeSequencerFromOnboardingStateV2Request,
+      InitializeSequencerFromOnboardingStateV2Response,
+      Unit,
+      OnboardingStateForSequencerV2,
+    ](
       responseObserver,
-    )
+      emptyStreamError,
+      getBytes = _.onboardingState,
+      parseMessage = OnboardingStateForSequencerV2.parseDelimitedFromTrusted(_),
+    )(contextFromFirstRequest = _ => TryUtil.unit) { (_, source) =>
+      FutureUnlessShutdown.outcomeF(
+        source.runWith(Sink.seq).flatMap(initializeSequencerFromOnboardingStateV2)
+      )
+    }
   }
 
   private def initializeSequencerFromOnboardingStateV2(
-      onboardingStateBytes: ByteString
+      onboardState: Seq[OnboardingStateForSequencerV2]
   )(implicit
       traceContext: TraceContext
   ): Future[InitializeSequencerFromOnboardingStateV2Response] = {
-    val in = onboardingStateBytes.newInput()
     val res = for {
-      onboardState <- EitherT.fromEither[Future](
-        GrpcStreamingUtils
-          .parseDelimitedFromTrusted(in, OnboardingStateForSequencerV2)
-          .leftMap(err =>
-            ProtoDeserializationFailure.Wrap(
-              ProtoDeserializationError.ValueConversionError("onboarding_state", err)
-            )
-          )
-      )
       accumulatedOnboardingState <- EitherT
         .fromEither[Future](
           onboardState.foldM[
@@ -542,6 +547,13 @@ class GrpcSequencerInitializationService(
     } yield InitializeSequencerFromOnboardingStateV2Response(replicated)
     mapErrNew(res)
   }
+
+  private def emptyStreamError[A](implicit traceContext: TraceContext): Try[A] =
+    Failure(
+      ProtoDeserializationFailure
+        .Wrap(OtherError("No elements were received in stream"))
+        .asGrpcError
+    )
 
   private def checkForEqual[A](
       field: String,

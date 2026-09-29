@@ -16,7 +16,7 @@ import com.google.protobuf.ByteString
 import java.time.Duration
 import java.util.UUID
 
-class SubmissionRequestTest extends BaseTestWordSpec {
+final class SubmissionRequestTest extends BaseTestWordSpec {
 
   private def mkAggregationRule(
       eligibleSenders: Seq[Member],
@@ -110,7 +110,15 @@ class SubmissionRequestTest extends BaseTestWordSpec {
         )
 
         val aggregationIds = differentRequests.map(_.aggregationId(TestHash))
-        aggregationIds.distinct.size shouldBe differentRequests.size
+
+        val expectedAggregationIdsCount =
+          if (testedProtocolVersion == ProtocolVersion.v35)
+            differentRequests.size
+          else
+            // In pv 36 and above, the topology timestamp (that should be empty) is not part of the hash
+            differentRequests.size - 3
+
+        aggregationIds.distinct.size shouldBe expectedAggregationIdsCount
       }
     }
 

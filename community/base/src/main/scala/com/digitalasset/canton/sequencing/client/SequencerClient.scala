@@ -659,23 +659,57 @@ abstract class SequencerClientImpl(
       }
       .thereafter {
         case scala.util.Success(UnlessShutdown.Outcome(Left(err))) =>
-          err match {
-            case SendAsyncClientError.RequestRefused(error) if error.isOverload =>
-              metrics.submissions.overloaded.inc()
-            case _ =>
+          processSyncRejection(messageId, err)
+
+        // While debugging a weird issue where time-proofs piled up, I noticed
+        // that depending on the error and the amplification state, we can get the
+        // rejection as well on the second one of the nested Either.
+        // The whole construction of the sequencer client send part with its amplification
+        // logic and nested EitherT's would warrant a refactoring.
+        case scala.util.Success(UnlessShutdown.Outcome(Right(result))) =>
+          result match {
+            case scala.util.Success(UnlessShutdown.Outcome(Left(err))) =>
+              if (config.enableImmediateSyncRejectionSendTrackerCleanup)
+                processSyncRejection(messageId, err)
+              else
+                logger.info(
+                  s"Send of $messageId failed (inner condition) with $err. Not cleaning up the send tracker immediately."
+                )
+            case scala.util.Success(UnlessShutdown.Outcome(Right(()))) =>
+            case scala.util.Success(AbortedDueToShutdown) =>
+            case scala.util.Failure(ex) =>
+              logger.info(s"Send of $messageId failed (inner condition)", ex)
           }
-
-          // cancel pending send now as we know the request will never cause a sequenced result
-          logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
-          sendTracker.cancelPendingSend(messageId)
-
+        case scala.util.Success(AbortedDueToShutdown) =>
         case scala.util.Failure(ex) =>
           logger.info(s"Send of $messageId failed", ex)
-
-        case scala.util.Success(UnlessShutdown.Outcome(Right(_))) |
-            scala.util.Success(AbortedDueToShutdown) =>
       }
 
+  }
+
+  private def processSyncRejection(messageId: MessageId, error: SendAsyncClientError)(implicit
+      traceContext: TraceContext
+  ) = {
+    val (typ, cause, warn) = error match {
+      case SendAsyncClientError.RequestRefused(error) =>
+        if (error.isOverload)
+          metrics.submissions.overloaded.inc()
+        ("refused", error.shortMessage, false)
+      case SendAsyncClientError.RequestAlreadyExists(error) => ("already-exists", error, false)
+      case SendAsyncClientError.RequestFailed(failed) => ("failed", failed, false)
+      case SendAsyncClientError.DuplicateMessageId =>
+        ("duplicate", "message id already registered with send tracker", true)
+      case SendAsyncClientError.RequestInvalid(invalid) => ("invalid", invalid, true)
+      case SendAsyncClientError.TrafficEnforcementRejected(rpc) => ("traffic", rpc.cause, true)
+    }
+    // cancel pending send now as we know the request will never cause a sequenced result
+    def message =
+      s"Cancelling the pending send as submission failed synchronously with $typ error: $cause"
+    if (warn)
+      logger.warn(message)
+    else
+      logger.debug(message)
+    sendTracker.cancelPendingSend(messageId)
   }
 
   /** Send the `signedRequest` via `firstLinkDetailsO`, which may be undefined if there is currently
@@ -792,17 +826,17 @@ abstract class SequencerClientImpl(
               nextState(sendInFlight = sendInFlight),
             )
 
-          case _: SendAsyncClientError.RequestRefused =>
+          case error: SendAsyncClientError.RequestRefused =>
             logger.debug(
-              s"Send request with message id $messageId was refused by $sequencerId: $error"
+              s"Send request with message id $messageId was refused by $sequencerId"
             )
             // Trust the single sequencer to determine whether the request should indeed be refused and give up.
             // TODO(#12377) Do not trust the sequencer and instead retry sensibly
             Right(Left(error))
 
-          case err: SendAsyncClientError.RequestAlreadyExists =>
+          case _: SendAsyncClientError.RequestAlreadyExists =>
             logger.debug(
-              s"Send request with message id $messageId was deduped by $sequencerId: ${err.message}"
+              s"Send request with message id $messageId was refused with already exists by $sequencerId"
             )
             // Trust the single sequencer to determine whether the request should indeed be refused and give up.
             // TODO(#12377) Do not trust the sequencer (I wouldn't retry but I would track the

@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestEnvironment}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerRequest
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError
@@ -76,7 +77,7 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
             shouldDrop: SubmissionRequest => Boolean,
             errMsgAssertion: String => Unit,
         ): Unit =
-          loggerFactory.assertLogs(
+          loggerFactory.assertLogsUnorderedOptional(
             {
               val wasDropped = Promise[Unit]()
               progSeq.setPolicy_(s"drop a message for command $cmdId") { req =>
@@ -109,10 +110,14 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
                 party = bank,
                 errMsgAssertion,
               )
+
             },
-            _.warningMessage should (
-              (include regex "Response message for request .* timed out at") or
-                include("Submission timed out at")
+            (
+              LogEntryOptionality.Required,
+              _.warningMessage should (
+                (include regex "Response message for request .* timed out at") or
+                  include("Submission timed out at")
+              ),
             ),
           )
 
@@ -208,5 +213,6 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
       .value
     status.code should not be Code.OK
     assertErrorMessage(status.message)
+
   }
 }
