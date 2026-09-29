@@ -13,6 +13,7 @@ from summarize_test_results import (  # noqa: E402
     SUMMARY_BUDGET_BYTES,
     SUMMARY_TRAILER_RESERVE_BYTES,
     render_detail,
+    render_log_problems,
 )
 
 # Well above the producer's line cap so render_detail only byte-truncates, never re-trims the already-capped traces.
@@ -149,6 +150,7 @@ def normalize_shard_data(data, path):
         "total": parse_int(results, "total"),
         "not_passed_tests": parse_str_list(results, "not_passed_tests"),
         "not_passed_details": parse_str_dict(results, "not_passed_details"),
+        "log_problems": parse_str_list(results, "log_problems"),
         "rerun_used": parse_optional_bool(rerun, "rerun_used", default=False),
         "rerun_classes": parse_str_list(rerun, "rerun_classes"),
         "first_run_not_passed_tests": parse_str_list(rerun, "first_run_not_passed_tests"),
@@ -259,6 +261,14 @@ def build_summary(files, shards, parse_errors, limit):
         for name, text in shard.get("not_passed_details", {}).items():
             global_details.setdefault(name, text)
 
+    all_log_problems = []
+    seen_log_problems = set()
+    for shard in shards:
+        for line in shard.get("log_problems", []):
+            if line not in seen_log_problems:
+                seen_log_problems.add(line)
+                all_log_problems.append(line)
+
     all_first_run_not_passed = []
     seen_first_run = set()
     for shard in shards:
@@ -311,6 +321,8 @@ def build_summary(files, shards, parse_errors, limit):
         )
     elif missing_xml_parse_errors:
         lines.append(f"- XML parse errors: n/a (missing in {missing_xml_parse_errors} shard(s))")
+    if all_log_problems:
+        lines.append(f"- Log check problems: {len(all_log_problems)}")
     if parse_errors:
         lines.append(f"- Invalid summary files: {len(parse_errors)}")
     if missing_shards:
@@ -401,6 +413,24 @@ def build_summary(files, shards, parse_errors, limit):
         lines.append("")
         lines.append("</details>")
 
+    if all_log_problems:
+        running = len(("\n".join(lines) + "\n").encode("utf-8"))
+        # +2 for the two newline separators the two appended lines below add to the
+        # final "\n".join(lines), the blank line and the block itself. No
+        # SUMMARY_TRAILER_RESERVE_BYTES margin here, this is the last section before
+        # the final return, nothing else gets appended after it.
+        budget = SUMMARY_BUDGET_BYTES - running - 2
+        block = (
+            render_log_problems(
+                all_log_problems, limit, title="Log check problems (global)", max_bytes=budget
+            )
+            if budget > 0
+            else None
+        )
+        if block is not None:
+            lines.append("")
+            lines.append(block)
+
     return "\n".join(lines) + "\n"
 
 
@@ -437,8 +467,12 @@ def self_test():
     test_build_summary_reports_missing_shards_and_deduplicates_tests()
     test_build_summary_truncates_not_passed_tests()
     test_normalize_shard_data_reads_details()
+    test_normalize_shard_data_reads_log_problems()
+    test_build_summary_aggregates_and_dedupes_log_problems()
     test_build_summary_renders_detail_blocks()
     test_build_summary_details_respect_budget()
+    test_build_summary_log_problems_respect_budget()
+    test_build_summary_log_problems_dropped_when_no_room()
     test_details_survive_state_round_trip()
     test_resolve_summary_path_prefers_arg_and_falls_back_to_env()
     test_write_state_round_trip()
@@ -458,6 +492,7 @@ def _sample_shard(
     junit_files=1,
     not_passed_tests=None,
     not_passed_details=None,
+    log_problems=None,
     rerun_used=False,
     rerun_classes=None,
     first_run_not_passed_tests=None,
@@ -466,6 +501,8 @@ def _sample_shard(
         not_passed_tests = []
     if not_passed_details is None:
         not_passed_details = {}
+    if log_problems is None:
+        log_problems = []
     if rerun_classes is None:
         rerun_classes = []
     if first_run_not_passed_tests is None:
@@ -483,6 +520,7 @@ def _sample_shard(
         "total": int(total),
         "not_passed_tests": [str(x) for x in not_passed_tests],
         "not_passed_details": {str(k): str(v) for k, v in not_passed_details.items()},
+        "log_problems": [str(x) for x in log_problems],
         "rerun_used": bool(rerun_used),
         # Kept for potential future reporting; currently not rendered in markdown summary.
         "rerun_classes": [str(x) for x in rerun_classes],
@@ -674,6 +712,45 @@ def test_write_state_round_trip():
         )
 
 
+def test_normalize_shard_data_reads_log_problems():
+    data = {
+        "shard_index": 2,
+        "total_shards": 4,
+        "junit_files": 1,
+        "results": {
+            "passed": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0,
+            "parse_errors": 0,
+            "total": 1,
+            "not_passed_tests": [],
+            "log_problems": ["ERROR something bad", "WARN something else"],
+        },
+    }
+    shard = normalize_shard_data(data, "/tmp/s2.json")
+    assert shard["log_problems"] == ["ERROR something bad", "WARN something else"]
+    # Absence of the key must default to an empty list, not an error.
+    shard_without = normalize_shard_data({"shard_index": 0, "results": {}}, "/tmp/s0.json")
+    assert shard_without["log_problems"] == []
+
+
+def test_build_summary_aggregates_and_dedupes_log_problems():
+    shards = [
+        _sample_shard(shard_index="0", log_problems=["ERROR boom", "WARN hmm"]),
+        _sample_shard(shard_index="1", log_problems=["ERROR boom", "ERROR other"]),
+    ]
+    summary = build_summary(["a.json", "b.json"], shards, [], limit=200)
+    assert "- Log check problems: 3" in summary, f"Expected deduped count 3 in: {summary}"
+    assert "### Log check problems (global)" in summary
+    assert "ERROR boom" in summary
+    assert "ERROR other" in summary
+    # No section when no shard reports any log problem.
+    clean = build_summary(["a.json"], [_sample_shard(shard_index="0")], [], limit=200)
+    assert "### Log check problems (global)" not in clean
+    assert "Log check problems:" not in clean
+
+
 def test_normalize_shard_data_reads_details():
     data = {
         "shard_index": 0,
@@ -745,6 +822,61 @@ def test_build_summary_details_respect_budget():
     assert "truncated, full trace in the artifact" in summary, summary
     assert "and 2 more, full details in the artifact" in summary, summary
     assert encoded_len <= 1000, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_build_summary_log_problems_respect_budget():
+    global SUMMARY_BUDGET_BYTES
+    names = [f"com.example.T{i}.t" for i in range(10)]
+    shards = [
+        _sample_shard(
+            shard_index="0",
+            total_shards="1",
+            failures=10,
+            total=10,
+            not_passed_tests=names,
+            not_passed_details={name: "boom\n" * 200 for name in names},
+            # The failure blocks above already fill the budget on their own. Without
+            # accounting for this section too, appending it unconditionally would push
+            # the summary over SUMMARY_BUDGET_BYTES and GitHub would drop it whole.
+            log_problems=[f"ERROR problem line {i}" for i in range(200)],
+        )
+    ]
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        SUMMARY_BUDGET_BYTES = 1500
+        summary = build_summary(["a.json"], shards, [], limit=100)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert "### Log check problems (global)" in summary, summary
+    assert encoded_len <= 1500, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_build_summary_log_problems_dropped_when_no_room():
+    global SUMMARY_BUDGET_BYTES
+    names = [f"com.example.T{i}.t" for i in range(10)]
+    shards = [
+        _sample_shard(
+            shard_index="0",
+            total_shards="1",
+            failures=10,
+            total=10,
+            not_passed_tests=names,
+            not_passed_details={name: "boom\n" * 200 for name in names},
+            log_problems=[f"ERROR problem line {i}" for i in range(200)],
+        )
+    ]
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        # Enough room for the failure blocks but less than the log-problems
+        # section's fixed scaffold (headers, fences, truncation marker).
+        SUMMARY_BUDGET_BYTES = 800
+        summary = build_summary(["a.json"], shards, [], limit=100)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert "### Log check problems (global)" not in summary, summary
+    assert encoded_len <= 800, f"summary is {encoded_len} bytes, over the budget"
 
 
 def test_details_survive_state_round_trip():

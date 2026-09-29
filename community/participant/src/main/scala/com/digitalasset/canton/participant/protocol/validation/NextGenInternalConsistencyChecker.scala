@@ -13,8 +13,8 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Journal
-import com.digitalasset.daml.lf.transaction.{ErrOr, NextGenContractStateMachine, TransactionError}
+import com.digitalasset.daml.lf.transaction.ContractStateMachine.Journal
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, ErrOr, TransactionError}
 import com.digitalasset.nonempty.NonEmpty
 
 class NextGenInternalConsistencyChecker(
@@ -59,7 +59,7 @@ class NextGenInternalConsistencyChecker(
       hostedKeys: Set[LfGlobalKey],
       txs: Seq[LfTransaction],
   ): Result[Unit] = {
-    val init: Journal = NextGenContractStateMachine.empty()
+    val init: Journal = ContractStateMachine.Empty
     val errOr =
       MonadUtil.foldLeftM(init, txs)((csm, tx) => handleTx(hostedKeys, csm, tx)).map(_ => ())
     errOr.leftMap(err =>

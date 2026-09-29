@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2023-2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
 # Proprietary code. All rights reserved.
 
 import json

@@ -80,6 +80,8 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
   private[metrics] val updates: Item = extend("updates", baseInfo)
   private[metrics] val getUpdate: Item = extend("get_update", baseInfo)
   private[metrics] val getUpdatesPage: Item = extend("get_updates_page", baseInfo)
+  private[metrics] val highestOffsetBeforeOrFirstAt: Item =
+    extend("highest_offset_before_or_first_at", baseInfo)
   private[metrics] val getActiveContracts: Item = extend("get_active_contracts", baseInfo)
   private[metrics] val acs: Item = extend("acs", baseInfo)
   private[metrics] val lookupActiveContract: Item = extend("lookup_active_contract", baseInfo)
@@ -212,6 +214,8 @@ final class ServicesMetrics private[metrics] (
     val getUpdate: Timer =
       openTelemetryMetricsFactory.timer(inventory.getUpdate.info)
     val getUpdatesPage: Timer = openTelemetryMetricsFactory.timer(inventory.getUpdatesPage.info)
+    val highestOffsetBeforeOrFirstAt: Timer =
+      openTelemetryMetricsFactory.timer(inventory.highestOffsetBeforeOrFirstAt.info)
     val getActiveContracts: Timer =
       openTelemetryMetricsFactory.timer(inventory.getActiveContracts.info)
     val acs: Timer =

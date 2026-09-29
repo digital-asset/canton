@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.data
 
 import cats.syntax.parallel.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,9 +19,9 @@ import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.BlockNotFound
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, ProtocolVersionChecksAsyncWordSpec}
-import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -52,14 +51,12 @@ trait SequencerBlockStoreTest
     val aggregationId1 = AggregationId(TestHash.digest(1))
     val aggregationId2 = AggregationId(TestHash.digest(2))
     val aggregationRule1 =
-      AggregationRule.testing(
-        NonEmpty(Seq, alice, bob),
-        PositiveInt.tryCreate(2),
-        testedProtocolVersion,
+      AggregationRule.activeSequencers(
+        testedProtocolVersion
       )
-    val aggregationRule2 = AggregationRule.testing(
-      NonEmpty(Seq, alice, bob, carlos),
-      PositiveInt.tryCreate(3),
+
+    val aggregationRule2 = AggregationRule.activeMediators(
+      MediatorGroupIndex.zero,
       testedProtocolVersion,
     )
 

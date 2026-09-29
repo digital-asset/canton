@@ -12,13 +12,13 @@ import com.digitalasset.daml.lf.interpretation.Error as IErr
 import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
 import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
   ExternalCallResult,
   GlobalKeyWithMaintainers,
   KeyMapping,
   Node,
   NodeId,
   SerializationVersion,
-  NextGenContractStateMachine as ContractStateMachine,
   SubmittedTransaction as SubmittedTx,
   Transaction as Tx,
   TransactionError as TxErr,
@@ -195,7 +195,7 @@ private[lf] object PartialTransaction {
     nodes = HashMap.empty,
     actionNodeSeeds = BackStack.empty,
     context = Context(initialSeeds, committers),
-    csmJournal = ContractStateMachine.empty(),
+    csmJournal = ContractStateMachine.Empty,
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
     externalCallResults = HashMap.empty,

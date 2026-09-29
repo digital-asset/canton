@@ -168,18 +168,9 @@ class UsePostgres(
   }
 
   override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig = {
-    val transformedConfig = {
-      val storageChange = ConfigTransforms.modifyAllStorageConfigs((_, name, storage) =>
-        generateDbConfig(name, storage.parameters, storage.config)
-      )(config)
-
-      if (sys.env.contains("NON_STANDARD_POSTGRES")) {
-        // This environment variable is set by the conformance tests for non-standard Postgres versions.
-        // So the non-standard-config flag is set to disable the Postgres version checks.
-        logger.info(s"Disabling Postgres version checks for conformance test")
-        storageChange.focus(_.parameters.nonStandardConfig).replace(true)
-      } else storageChange
-    }
+    val transformedConfig = ConfigTransforms.modifyAllStorageConfigs((_, name, storage) =>
+      generateDbConfig(name, storage.parameters, storage.config)
+    )(config)
 
     Await.result(
       recreateDatabases(transformedConfig),

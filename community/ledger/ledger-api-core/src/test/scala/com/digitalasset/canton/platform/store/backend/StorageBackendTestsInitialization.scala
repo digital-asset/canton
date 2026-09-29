@@ -10,12 +10,12 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 private[backend] trait StorageBackendTestsInitialization extends Matchers with StorageBackendSpec {
-  this: AnyFlatSpec =>
+  this: AnyFlatSpec & StorageBackendProvider =>
 
   behavior of "StorageBackend (initialization)"
 
   it should "correctly handle repeated initialization" in {
-    val participantId = ParticipantId(Ref.ParticipantId.assertFromString("participant"))
+    val thisParticipantId = ParticipantId(participantId)
     val otherParticipantId = ParticipantId(Ref.ParticipantId.assertFromString("otherParticipant"))
 
     loggerFactory.assertLogs(
@@ -23,7 +23,7 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
         executeSql(
           backend.parameter.initializeParameters(
             ParameterStorageBackend.IdentityParams(
-              participantId = participantId
+              participantId = thisParticipantId
             ),
             loggerFactory,
           )
@@ -41,13 +41,13 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
         executeSql(
           backend.parameter.initializeParameters(
             ParameterStorageBackend.IdentityParams(
-              participantId = participantId
+              participantId = thisParticipantId
             ),
             loggerFactory,
           )
         )
 
-        error.asInstanceOf[MismatchException.ParticipantId].existing shouldBe participantId
+        error.asInstanceOf[MismatchException.ParticipantId].existing shouldBe thisParticipantId
         error.asInstanceOf[MismatchException.ParticipantId].provided shouldBe otherParticipantId
       },
       assertions = _.errorMessage should include(

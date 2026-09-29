@@ -4,13 +4,14 @@
 package com.digitalasset.canton.participant.admin.party
 
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
-  AcsReplicationProgress,
-  AgreementStatus,
   Disconnected,
   PartyReplicationError,
   PartyReplicationFailed,
+  ReplicationMode,
   ReplicationParams,
 }
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationProgress
 
 /** The party replication stage describes the same information as the [[PartyReplicationStatus]],
   * but in a form that describes the "next action" to be taken to advance an Online Party
@@ -86,55 +87,64 @@ object PartyReplicationStage {
     */
   def fromPartyReplicationStatus(status: PartyReplicationStatus): Option[PartyReplicationStage] =
     (status match {
-      case status @ PartyReplicationStatus(p, agreement, auO, reO, acsReplicationO, inO, _, errO) =>
+      case status @ PartyReplicationStatus(
+            p,
+            auO,
+            reO,
+            acsReplicationO,
+            inO,
+            _,
+            replicationMode,
+            errO,
+          ) =>
         errO match {
           case None =>
             Option.when(status.isProgressExpected)(
-              (p, agreement, auO, reO, acsReplicationO, inO, None)
+              (p, auO, reO, acsReplicationO, inO, replicationMode, None)
             )
           case Some(d: Disconnected) =>
             Option.when(status.isProgressExpected)(
-              (p, agreement, auO, reO, acsReplicationO, inO, Some(d))
+              (p, auO, reO, acsReplicationO, inO, replicationMode, Some(d))
             )
           case Some(PartyReplicationFailed(_)) => None
         }
     }).flatMap {
-      case (params, _, None, _, _, _, _) =>
+      case (params, None, None, None, None, _, _) =>
         Some(ObtainingOnboardingTopologyAuthorization(params))
       // File-based replication only
       case (
             params,
-            AgreementStatus.NotNeeded,
             Some(_),
             Some(replicationProgress),
-            _,
             None,
+            None,
+            ReplicationMode.File,
             None,
           ) =>
         Some(AcsReplicationInProgress(params, replicationProgress))
-      case (params, AgreementStatus.NotProposed, Some(_), _, None, _, None) =>
+      case (params, Some(_), _, None, _, ReplicationMode.SequencerChannel, None) =>
         Some(NeedsToReplicatePartyAcs(params))
       case (
             params,
-            _,
             Some(_),
             _,
-            Some(PartyReplicationStatus(_, _, _, None, _, _, _, _)),
+            Some(AcsReplicationStatus(_, _, _, None, false, _)),
             None,
+            ReplicationMode.SequencerChannel,
             None,
           ) =>
         Some(TriggeredPartyAcsReplication(params))
       case (
             params,
-            _,
             Some(_),
             _,
-            Some(PartyReplicationStatus(_, _, _, Some(replicationProgress), _, _, _, _)),
+            Some(AcsReplicationStatus(_, _, Some(_), Some(replicationProgress), _, _)),
             None,
+            ReplicationMode.SequencerChannel,
             None,
           ) =>
         Some(AcsReplicationInProgress(params, replicationProgress))
-      case (params, _, Some(_), _, _, Some(indexingProgress), None) =>
+      case (params, Some(_), _, _, Some(indexingProgress), _, None) =>
         Some(
           if (!indexingProgress.isIndexingCurrentlyAlmostDone)
             IndexingContractActivationChanges(params)

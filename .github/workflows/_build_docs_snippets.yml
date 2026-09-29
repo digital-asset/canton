@@ -93,6 +93,14 @@ jobs:
         with:
           shard-index: ${{ matrix.shard }}
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:

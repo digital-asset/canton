@@ -89,7 +89,9 @@ private[lf] final class TransactionConductor(
             result <- handleCmd(cmd).value
             ctrl = result match {
               case Right(value) => Speedy.Control.Value(value)
-              case Left(excp) => Speedy.Control.Expression(SBuiltinFun.SBThrow(SExpr.SEValue(excp)))
+              case Left(excp) =>
+                cmdMachine.pushKont(KPure(_ => cmdMachine.lookForNextHandler(excp)))
+                Speedy.Control.Value(SValue.SUnit)
             }
             _ = cmdMachine.setControl(ctrl)
             value <- driveCmdMachine(cmdMachine).value
@@ -106,6 +108,8 @@ private[lf] final class TransactionConductor(
         logger = logger,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         profile = profile,
+        onThrow = () => captureThrowContext(),
+        onCatch = () => clearThrowContext(),
       )
     driveCmdMachine(nested)
   }
@@ -116,51 +120,56 @@ private[lf] final class TransactionConductor(
 
   @scala.annotation.nowarn
   def handleCommands(cmds: Seq[Command]): Upd.T[Unit] =
+    // we use foldM to carefully control the order of evaluation:
+    // each command is only handled once the previous one has actually run.
     cmds
-      .traverse {
-        case Command.Create(templateId, argument: SValue.SRecord) =>
-          handleCommand(Question.Cmd.Create(templateId, argument))
-        case Command.ExerciseTemplate(
-              templateId,
-              SValue.SContractId(contractId),
-              choiceId,
-              argument,
-            ) =>
-          handleCommand(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
-        case Command.ExerciseInterface(
-              interfaceId,
-              SValue.SContractId(contractId),
-              choiceId,
-              argument,
-            ) =>
-          handleCommand(
-            Question.Cmd
-              .ExerciseInterface(interfaceId, contractId, choiceId, argument)
-          )
-        case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
-          handleCommand(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
-        case Command.CreateAndExercise(
-              templateId,
-              createArgument: SValue.SRecord,
-              choiceId,
-              choiceArgument,
-            ) =>
-          handleCreateThenExercise(
-            Question.Cmd.Create(templateId, createArgument),
-            Question.Cmd.ExerciseTemplate(templateId, _, choiceId, choiceArgument),
-          )
-        case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
-          handleCommand(Question.Cmd.FetchTemplate(templateId, contractId))
-        case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
-          handleCommand(Question.Cmd.FetchInterface(interfaceId, contractId))
-        case Command.FetchByKey(templateId, key) =>
-          handleCommand(Question.Cmd.FetchByKey(templateId, key))
-      }
+      .foldM[Upd.T, SValue](SValue.SUnit)((_, cmd) =>
+        cmd match {
+          case Command.Create(templateId, argument: SValue.SRecord) =>
+            handleCommand(Question.Cmd.Create(templateId, argument))
+          case Command.ExerciseTemplate(
+                templateId,
+                SValue.SContractId(contractId),
+                choiceId,
+                argument,
+              ) =>
+            handleCommand(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
+          case Command.ExerciseInterface(
+                interfaceId,
+                SValue.SContractId(contractId),
+                choiceId,
+                argument,
+              ) =>
+            handleCommand(
+              Question.Cmd
+                .ExerciseInterface(interfaceId, contractId, choiceId, argument)
+            )
+          case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
+            handleCommand(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
+          case Command.CreateAndExercise(
+                templateId,
+                createArgument: SValue.SRecord,
+                choiceId,
+                choiceArgument,
+              ) =>
+            handleCreateThenExercise(
+              Question.Cmd.Create(templateId, createArgument),
+              Question.Cmd.ExerciseTemplate(templateId, _, choiceId, choiceArgument),
+            )
+          case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
+            handleCommand(Question.Cmd.FetchTemplate(templateId, contractId))
+          case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
+            handleCommand(Question.Cmd.FetchInterface(interfaceId, contractId))
+          case Command.FetchByKey(templateId, key) =>
+            handleCommand(Question.Cmd.FetchByKey(templateId, key))
+        }
+      )
       .map(_ => ())
 
   def finish: Either[SError.Crash, Result] = ptx.finish.map { case (tx, seeds) =>
     Result(
       tx,
+      contractLookupCache.view.mapValues(_._1).toMap,
       zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
       ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
       ptx.csmJournal.contractOrder,
@@ -281,12 +290,40 @@ private[lf] final class TransactionConductor(
     if (compiledPackages.contains(packageId)) Upd.unit
     else needPackage(packageId, ref)
 
+  private[this] var pendingThrowContext: Option[PartialTransaction] = None
+  private def captureThrowContext(): Unit =
+    pendingThrowContext = Some(ptx)
+  private def clearThrowContext(): Unit =
+    pendingThrowContext = None
+
   // ---------------------------------------------------------------------------
   // Pure computations (run on a fresh PureMachine)
   // ---------------------------------------------------------------------------
 
-  private def transactionTrace(numOfCmds: Int): String =
-    "to be implemented"
+  private[lf] def transactionTrace(numOfCmds: Int): String = {
+    def prettyTypeId(typeId: Ref.TypeConId): String =
+      s"${typeId.packageId.take(8)}:${typeId.qualifiedName}"
+    val stringBuilder = new StringBuilder()
+    def addLine(s: String): Unit = {
+      val _ = stringBuilder.addAll("    ").addAll(s).addAll("\n")
+    }
+
+    val traceIterator = pendingThrowContext.getOrElse(ptx).transactionTrace
+
+    traceIterator
+      .take(numOfCmds)
+      .map { case (NodeId(nid), exe) =>
+        val typeId = prettyTypeId(exe.interfaceId.getOrElse(exe.templateId))
+        s"in choice $typeId:${exe.choiceId} on contract ${exe.targetCoid.coid.take(10)} (#$nid)"
+      }
+      .foreach(addLine)
+
+    if (traceIterator.hasNext) {
+      addLine("...")
+    }
+
+    stringBuilder.result()
+  }
 
   private def runPure(
       defRef: SExpr.SDefinitionRef,
@@ -1365,7 +1402,12 @@ private[lf] final class TransactionConductor(
           ) =>
         handleExerciseInterface(ifaceId, choiceName, coid, choiceArg)
       case Question.Cmd.GetTime =>
-        Upd.WithException.liftSuccess(needTime.map(time => SValue.STimestamp(time)))
+        Upd.WithException.liftSuccess(
+          needTime.map { time =>
+            setTimeBoundaries(Time.Range(time, time))
+            SValue.STimestamp(time)
+          }
+        )
       case Question.Cmd.ExternalCall(extensionId, functionId, configHash, input) =>
         Upd.WithException.liftSuccess(
           handleExternalCall(extensionId, functionId, configHash, input)
@@ -1572,8 +1614,7 @@ private[lf] object TransactionConductor {
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
       iterationsBetweenInterruptions: Long = TransactionConductor.iterationsBetweenInterruptions,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      interpretationConfig: interpretation.InterpretationConfig =
-        interpretation.InterpretationConfig.Default,
+      interpretationConfig: interpretation.InterpretationConfig,
       contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
       limits: interpretation.Limits = interpretation.Limits.Lenient,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
@@ -1622,6 +1663,7 @@ private[lf] object TransactionConductor {
 
   private[lf] final case class Result(
       tx: SubmittedTransaction,
+      inputContracts: Map[V.ContractId, FatContractInstance],
       seeds: ImmArray[(NodeId, crypto.Hash)],
       globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
       contractOrder: List[V.ContractId],

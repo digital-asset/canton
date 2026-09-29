@@ -74,11 +74,14 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, Identifier, Template, Value}
 import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.AcsDelta
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.DelayUtil
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.grpc.health.v1.health.HealthCheckResponse
 
 import java.security.KeyPair
@@ -962,4 +965,12 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   override def getJwks(
       request: jose_service.GetJwksRequest
   ): Future[jose_service.GetJwksResponse] = delegate.getJwks(request)
+
+  override def convertRecordTimeToOffset(
+      synchronizerId: SynchronizerId,
+      recordTime: Timestamp,
+  ): Future[Offset] = withTimeout(
+    "Convert record time to offset",
+    delegate.convertRecordTimeToOffset(synchronizerId, recordTime),
+  )
 }

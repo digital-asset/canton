@@ -65,7 +65,6 @@ final case class ViewMessageDecrypter(
         sessionKeyStore,
         snapshot,
         protocolVersion,
-        futureSupervisor,
         loggerFactory,
       ).decryptViews(batch, synchronizerLimits)
 

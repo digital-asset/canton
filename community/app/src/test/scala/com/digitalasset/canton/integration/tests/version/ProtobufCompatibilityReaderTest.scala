@@ -146,6 +146,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Added request time out to time proof requests with 3.6.1
       """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
+      // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -221,6 +223,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Added request time out to time proof requests with 3.6.1
       """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
+      // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
     ),
   )
 

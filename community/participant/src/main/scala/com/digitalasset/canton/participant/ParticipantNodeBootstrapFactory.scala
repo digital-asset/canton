@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.resource.{DbLockCounters, DbLockId, Storage, StorageMultiFactory}
 import com.digitalasset.canton.time.TestingTimeService
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.daml.lf.interpretation
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
 
@@ -44,6 +45,11 @@ trait ParticipantNodeBootstrapFactory {
     enableLfDev = arguments.parameterConfig.devVersionSupport,
     enableLfBeta = arguments.parameterConfig.betaVersionSupport,
     enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
+    executionMode =
+      if (arguments.parameterConfig.engine.enableExperimentalExecutionConductor)
+        interpretation.ExecutionMode.Conductor
+      else
+        interpretation.ExecutionMode.UpdateMachine,
     profileDir = arguments.config.parameters.engine.profileDir,
     snapshotDir = arguments.config.parameters.engine.snapshotDir,
     iterationsBetweenInterruptions =

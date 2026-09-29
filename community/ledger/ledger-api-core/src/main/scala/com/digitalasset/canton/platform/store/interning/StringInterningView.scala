@@ -87,6 +87,8 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
     with UpdatingStringInterningView
     with NamedLogging {
 
+  import StringInterningView.*
+
   private val directEc = DirectExecutionContext(noTracingLogger)
   private val lock = new Mutex()
 
@@ -99,15 +101,6 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
     override def externalize(id: Int): String = raw.idMap(id)
     override def tryExternalize(id: Int): Option[String] = raw.idMap.get(id)
   }
-
-  private val TemplatePrefix = "t|"
-  private val PartyPrefix = "p|"
-  private val SynchronizerIdPrefix = "d|"
-  private val PackageIdPrefix = "i|"
-  private val UserIdPrefix = "u|"
-  private val ParticipantIdPrefix = "n|"
-  private val ChoicePrefix = "c|"
-  private val InterfacePrefix = "f|"
 
   override val templateId: StringInterningDomain[NameTypeConRef] =
     StringInterningDomain.prefixing(
@@ -228,4 +221,15 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       )
     }
   })
+}
+
+object StringInterningView {
+  val TemplatePrefix = "t|"
+  val PartyPrefix = "p|"
+  val SynchronizerIdPrefix = "d|"
+  val PackageIdPrefix = "i|"
+  val UserIdPrefix = "u|"
+  val ParticipantIdPrefix = "n|"
+  val ChoicePrefix = "c|"
+  val InterfacePrefix = "f|"
 }

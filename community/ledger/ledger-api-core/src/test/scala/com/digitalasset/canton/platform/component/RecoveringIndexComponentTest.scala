@@ -77,6 +77,7 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
         consumerFactory = consumerFactory,
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
     })
 

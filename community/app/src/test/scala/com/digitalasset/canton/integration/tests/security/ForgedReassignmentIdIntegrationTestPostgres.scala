@@ -292,13 +292,33 @@ final class ForgedReassignmentIdIntegrationTestPostgres
               entry.loggerName should include(s"participant=$participant")
               entry.message should include("Unable to merge assignment offsets")
             }
+            forAtLeast(1, entries) { entry =>
+              entry.warningMessage should include("Consumer terminated with a failure")
+              entry.throwable.value.getMessage should include(
+                "Unable to update global offsets for reassignments"
+              )
+            }
           },
       )
 
-      assertNotInAcs(Seq(participant1, participant2), daName, cid)
-      assertInAcsSync(Seq(participant1, participant2, participant3), acmeName, cid)
+      loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+        {
+          assertNotInAcs(Seq(participant1, participant2), daName, cid)
+          assertInAcsSync(Seq(participant1, participant2, participant3), acmeName, cid)
 
-      participant3.health.ping(participant3, synchronizerId = Some(acmeId))
+          participant3.health.ping(participant3, synchronizerId = Some(acmeId))
+          participant1.stop()
+          participant2.stop()
+        },
+        entries =>
+          forEvery(entries) { entry =>
+            entry.warningMessage should include("Consumer terminated with a failure")
+            entry.throwable.value.getMessage should (
+              include("Unable to update global offsets for reassignments") or
+                include("Notification upon published reassignment aborted due to shutdown")
+            )
+          },
+      )
     }
   }
 }

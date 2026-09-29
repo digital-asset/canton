@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.sequencer.channel.SequencerChannelProtocolTestExecHelpers
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.admin.party.{
   PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
@@ -202,7 +203,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       def noOpProgressAndCompletionCallback[T]: T => Unit = _ => ()
       def noOpProgressAndCompletionCallback2[T, U]: (T, U) => Unit = (_, _) => ()
       val inMemoryStorageForTesting = new MemoryStorage(loggerFactory, timeouts)
-      val replicationParams = PartyReplicationStatus.ReplicationParams(
+      val replicationParams = AcsReplicationStatus.AcsReplicationParameters(
         requestId,
         alice,
         daId,
@@ -211,11 +212,11 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         serial = PositiveInt.one,
         ParticipantPermission.Observation,
       )
-      val initialStatus = PartyReplicationStatus(
+      val initialStatus = AcsReplicationStatus(
         replicationParams,
         testedProtocolVersion,
         replicationO = Some(
-          PartyReplicationStatus.PersistentProgress(
+          AcsReplicationStatus.PersistentProgress(
             processedContractCount = NonNegativeLong.zero,
             nextPersistenceCounter = RepairCounter.Genesis,
             acsHashO = None,
@@ -408,9 +409,16 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
       val recordOrderPublisher = connectedSynchronizer.ephemeral.recordOrderPublisher
       val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+
+      val partyReplicationStatus =
+        replicationProgressState.get(requestId).map(PartyReplicationStatus.fromAcsReplicationStatus)
+
       Monad[FutureUnlessShutdown]
         .tailRecM(
-          initialStatus.setIndexing().indexingO.getOrElse(fail("indexing just created"))
+          partyReplicationStatus
+            .map(_.setIndexing())
+            .flatMap(_.indexingO)
+            .getOrElse(fail("indexing just created"))
         )(
           targetParticipantIndexingWorkflow
             .indexNextContractActivationChangeBatch(

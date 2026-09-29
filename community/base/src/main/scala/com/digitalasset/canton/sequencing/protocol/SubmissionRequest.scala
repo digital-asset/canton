@@ -29,6 +29,8 @@ import com.digitalasset.canton.version.{
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
+import scala.math.Ordered.orderingToOrdered
+
 /** @param topologyTimestamp
   *   The optional timestamp of the topology to use for processing this submission request. If
   *   [[scala.None$]], the snapshot at the sequencing time of the submission request should be used
@@ -69,6 +71,9 @@ final case class SubmissionRequest private (
 
   lazy val requestType: SubmissionRequestType =
     SubmissionRequestType.submissionRequestType(batch.allRecipients, sender)
+
+  val shouldHaveEmptyTopologyTimestamp: Boolean =
+    representativeProtocolVersion >= SubmissionRequest.emptyCantonTimestampRpv
 
   // Caches the serialized request to be able to do checks on its size without re-serializing
   lazy val toProtoV31: v31.SubmissionRequest =
@@ -196,8 +201,13 @@ final case class SubmissionRequest private (
         )
       }
       builder.addLong(maxSequencingTime.underlying.micros)
-      // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
-      builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
+
+      // If shouldHaveEmptyTopologyTimestamp is true, then the submission request is rejected synchronously
+      if (!shouldHaveEmptyTopologyTimestamp) {
+        // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
+        builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
+      }
+
       rule.input.appendForAggregationId(builder, sender)
 
       val hash = builder.finish()
@@ -223,6 +233,7 @@ object SubmissionRequest
       _.toProtoV31, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
+    // TODO(#36148) When introducing a new proto version after v32, please drop the old aggregation rule
     ProtoVersion(32) -> VersionedProtoCodec.withDependency(
       ProtocolVersion.v36
     )(v32.SubmissionRequest)(
@@ -231,6 +242,10 @@ object SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
   )
+
+  private lazy val emptyCantonTimestampRpv
+      : RepresentativeProtocolVersion[SubmissionRequest.this.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.v36)
 
   override def name: String = "submission request"
 

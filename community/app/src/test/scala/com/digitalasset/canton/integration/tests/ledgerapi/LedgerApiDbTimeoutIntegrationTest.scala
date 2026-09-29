@@ -80,11 +80,7 @@ trait LedgerApiDbTimeoutIntegrationTest
     )
     logger.info("C1 locked")
 
-    loggerFactory.assertEventuallyLogsSeq(
-      SuppressionRule.LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.Level(
-        event.Level.ERROR
-      )
-    )(
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(event.Level.WARN))(
       within = {
         // reassign C1 to acme, this should be blocked on Indexing the assignment because of the lock above
         participant1.ledger_api.commands.submit_assign_async(
@@ -96,14 +92,19 @@ trait LedgerApiDbTimeoutIntegrationTest
         logger.info("Reassignment of C1 started")
       },
       assertion = logs => {
-        val logMessages = logs.map(_.message)
-        logMessages.size shouldBe 1
-        logMessages.forall(_.contains("INDEX_DB_LOCK_TIMEOUT_ERROR")) shouldBe true
-        logMessages.forall(
-          _.contains(
-            "Acquisition of DB Lock timed out (timeout config: \"indexer-config.contract-read-row-db-lock-timeout\": 2500 ms). Lock description: read row lock of contract table"
-          )
-        ) shouldBe true
+        logs.size should be >= 2
+
+        val firstLog = logs.head
+        val secondLog = logs(1)
+
+        firstLog.errorMessage should include("INDEX_DB_LOCK_TIMEOUT_ERROR")
+        firstLog.errorMessage should include(
+          "Acquisition of DB Lock timed out (timeout config: \"indexer-config.contract-read-row-db-lock-timeout\": 2500 ms). Lock description: read row lock of contract table"
+        )
+        secondLog.warningMessage should include("Consumer terminated with a failure")
+        secondLog.throwable.value.getMessage should include(
+          "INTERNAL: An error occurred. Please contact the operator and inquire about the request"
+        )
       },
       maxPollInterval = 100.millis,
     )
@@ -125,14 +126,11 @@ trait LedgerApiDbTimeoutIntegrationTest
     lock.commitAndClose()
     logger.info("C1 unlocked")
 
-    loggerFactory.assertEventuallyLogsSeq(
-      SuppressionRule.LoggerNameContains("DbDispatcher") && SuppressionRule.Level(event.Level.WARN)
-    )(
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(event.Level.WARN))(
       within = (),
       assertion = logs => {
-        val logMessages = logs.map(_.warningMessage)
-        logMessages.size shouldBe 1
-        logMessages.forall(_.contains("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")) shouldBe true
+        logs should have size 1
+        logs.head.warningMessage should include("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")
       },
       maxPollInterval = 100.millis,
     )

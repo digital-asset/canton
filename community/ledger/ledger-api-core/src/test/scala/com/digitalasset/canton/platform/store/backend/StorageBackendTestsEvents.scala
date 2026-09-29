@@ -58,6 +58,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.sql.Connection
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -3452,6 +3453,404 @@ private[backend] trait StorageBackendTestsEvents
       c.setAutoCommit(true)
     }
     queryFullAchs shouldBe Vector()
+  }
+
+  behavior of "convertng record time to offset"
+
+  it should "return offset for exact record time of the command completion" in {
+    val dtos = Vector(
+      dtoCompletion(offset(2L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(1))),
+      dtoCompletion(offset(4L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(3))),
+      dtoCompletion(offset(5L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(5))),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(1)),
+      )
+    ) shouldBe Some(offset(2L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(3)),
+      )
+    ) shouldBe Some(offset(4L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(5)),
+      )
+    ) shouldBe Some(offset(5L))
+  }
+
+  it should "return offset for a record time after of the command completion" in {
+    val dtos = Vector(
+      dtoCompletion(offset(2L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(1))),
+      dtoCompletion(offset(4L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(3))),
+      dtoCompletion(offset(5L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(5))),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(2)),
+      )
+    ) shouldBe Some(offset(2L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(4)),
+      )
+    ) shouldBe Some(offset(4L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(6)),
+      )
+    ) shouldBe Some(offset(5L))
+  }
+
+  it should "return none for a record time before the first command completion for a synchronzier" in {
+    val dtos = Vector(
+      dtoCompletion(offset(2L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10))),
+      dtoCompletion(offset(4L), recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13))),
+      dtoCompletion(
+        offset(5L),
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(2)),
+        synchronizerId = someSynchronizerId2,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(2)),
+      )
+    ) shouldBe None
+  }
+
+  it should "return offset for exact record time of the transaction metadata" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(1)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(4L),
+        event_sequential_id_first = 30L,
+        event_sequential_id_last = 40L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(3)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 50L,
+        event_sequential_id_last = 60L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(5)),
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(1)),
+      )
+    ) shouldBe Some(offset(2L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(3)),
+      )
+    ) shouldBe Some(offset(4L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(5)),
+      )
+    ) shouldBe Some(offset(5L))
+  }
+
+  it should "return offset for a record time after of the transaction metadata" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(1)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(4L),
+        event_sequential_id_first = 30L,
+        event_sequential_id_last = 40L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(3)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 50L,
+        event_sequential_id_last = 60L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(5)),
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(2)),
+      )
+    ) shouldBe Some(offset(2L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(4)),
+      )
+    ) shouldBe Some(offset(4L))
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(6)),
+      )
+    ) shouldBe Some(offset(5L))
+  }
+
+  it should "return none for a record time before the first transaction metadata for a synchronzier" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(4L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(2)),
+        synchronizerId = someSynchronizerId2,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(2)),
+      )
+    ) shouldBe None
+  }
+
+  it should "return smaller of two offsets for exact record time in transaction metadata for a synchronzier" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(4L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+        synchronizerId = someSynchronizerId,
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(20)),
+        synchronizerId = someSynchronizerId,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      )
+    ) shouldBe Some(offset(4L))
+  }
+
+  it should "return larger of two offsets for record time before in transaction metadata for a synchronzier" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(4L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+        synchronizerId = someSynchronizerId,
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(20)),
+        synchronizerId = someSynchronizerId,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(14)),
+      )
+    ) shouldBe Some(offset(5L))
+  }
+
+  it should "return smaller of two offsets for exact record time when one entry is transaction meta and another command completion" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10)),
+      ),
+      dtoCompletion(
+        offset = offset(4L),
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+        synchronizerId = someSynchronizerId,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(5L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      )
+    ) shouldBe Some(offset(4L))
+  }
+
+  it should "return larger of three offsets for record time before when the first on is transaction meta, second on command completion and the last is transaction meta" in {
+    val dtos = Vector(
+      dtoTransactionMeta(
+        offset = offset(2L),
+        event_sequential_id_first = 1L,
+        event_sequential_id_last = 2L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(10)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(3L),
+        event_sequential_id_first = 5L,
+        event_sequential_id_last = 6L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+        synchronizerId = someSynchronizerId,
+      ),
+      dtoCompletion(
+        offset = offset(4L),
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+      ),
+      dtoTransactionMeta(
+        offset = offset(5L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(13)),
+        synchronizerId = someSynchronizerId,
+      ),
+      dtoTransactionMeta(
+        offset = offset(6L),
+        event_sequential_id_first = 10L,
+        event_sequential_id_last = 20L,
+        recordTime = Timestamp.Epoch.add(Duration.ofSeconds(20)),
+        synchronizerId = someSynchronizerId,
+      ),
+    )
+
+    executeSql { conn =>
+      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      ingest(dtos, conn)
+      updateLedgerEnd(offset(6L), 60L)(conn)
+    }
+
+    executeSql(
+      backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        someSynchronizerId,
+        Timestamp.Epoch.add(Duration.ofSeconds(14)),
+      )
+    ) shouldBe Some(offset(5L))
   }
 }
 

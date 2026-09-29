@@ -11,11 +11,9 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTestInterceptor,
-}
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter.ImportFailedException
 import com.digitalasset.canton.participant.store.{
@@ -131,7 +129,7 @@ class PartyReplicationFileImporter(
             // Update the state incrementally after every chunk (= checkpoint)
             _ <- replicationProgressState.updateAcsReplicationProgress(
               requestId,
-              PartyReplicationStatus.EphemeralFileImporterProgress(
+              AcsReplicationStatus.EphemeralFileImporterProgress(
                 checkpoint.processedContractCount,
                 checkpoint.nextPersistenceCounter,
                 acsHashO = None,
@@ -168,7 +166,7 @@ class PartyReplicationFileImporter(
       // Mark the replication as fully complete
       _ <- replicationProgressState.updateAcsReplicationProgress(
         requestId,
-        PartyReplicationStatus.EphemeralFileImporterProgress(
+        AcsReplicationStatus.EphemeralFileImporterProgress(
           finalProgress.processedContractCount,
           finalProgress.nextPersistenceCounter,
           finalProgress.acsHashO,

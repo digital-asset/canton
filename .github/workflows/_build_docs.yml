@@ -81,6 +81,14 @@ jobs:
           test -f community/ledger-api-proto/target/src_managed/main/proto-docs.rst
           test -f community/daml-lf/ledger-api-value-proto/target/src_managed/main/proto-docs.rst.inc
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Package docs with existing release
         uses: ./.github/actions/sbt/execute_sbt_command
         with:

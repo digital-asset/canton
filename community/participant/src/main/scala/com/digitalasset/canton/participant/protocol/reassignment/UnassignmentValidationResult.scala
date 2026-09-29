@@ -131,6 +131,7 @@ object UnassignmentValidationResult {
         ReassignmentValidationError,
         Unit,
       ],
+      packageVettingResult: Option[ReassignmentValidationError],
       submitterCheckResult: Option[ReassignmentValidationError],
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.CommonValidationResult {

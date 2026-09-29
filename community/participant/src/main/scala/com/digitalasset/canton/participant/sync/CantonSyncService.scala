@@ -31,7 +31,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.{
   MalformedInputErrors,
   RoutingInternalError,
 }
-import com.digitalasset.canton.health.{HealthQuasiComponent, HealthStatus, MutableHealthComponent}
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{
   EnrichedVettedPackages,
   ListVettedPackagesOpts,
@@ -271,14 +271,9 @@ class CantonSyncService(
 
   import ShowUtil.*
 
-  def connectedSynchronizerHealth: MutableHealthComponent =
-    connectionsManager.connectedSynchronizerHealth
-  def ephemeralHealth: MutableHealthComponent = connectionsManager.ephemeralHealth
-  def sequencerClientHealth: MutableHealthComponent = connectionsManager.sequencerClientHealth
-  def sequencerConnectionPoolHealth: () => Seq[HealthQuasiComponent] =
-    () => connectionsManager.sequencerConnectionPoolHealthRef.get.apply()
-  def acsCommitmentProcessorHealth: MutableHealthComponent =
-    connectionsManager.acsCommitmentProcessorHealth
+  /** Health components of every connected synchronizer, keyed by physical synchronizer id. */
+  def connectedSynchronizersHealth: ConnectedSynchronizersHealth =
+    connectionsManager.connectedSynchronizersHealth
 
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
     participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration

@@ -103,7 +103,12 @@ abstract class BaseSequencer(
               ),
             )
           } yield ()
-      validateET.flatMap(_ => sendAsyncSignedInternal(signedSubmission))
+      validateET.flatMap(_ => sendAsyncSignedInternal(signedSubmission)).leftMap { rej =>
+        logger.debug(
+          s"Rejecting submission request (${signedSubmission.content.messageId}) synchronously: " + rej
+        )
+        rej
+      }
     }
 
   override def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(

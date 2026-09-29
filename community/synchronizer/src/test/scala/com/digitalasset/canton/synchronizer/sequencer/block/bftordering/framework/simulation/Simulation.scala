@@ -69,7 +69,8 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     traceContextGenerator: TraceContextGenerator,
     loggerFactory: NamedLoggerFactory,
 )(
-    val agenda: Agenda = new Agenda(clock, loggerFactory),
+    val agenda: Agenda =
+      new Agenda(clock, clock.now.add(simSettings.phaseDurations.faulty), loggerFactory),
     futureSimulatorState: FutureSimulatorState = FutureSimulatorState.create(),
 ) {
 
@@ -77,7 +78,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
 
   // onboarding
   onboardingManager.initCommands.foreach { case (command, at) =>
-    agenda.addOne(command, at, ScheduledCommand.DefaultPriority)
+    agenda.addOne(command, at, ScheduledCommand.DefaultPriority, onlyDuringFault = false)
   }
 
   agenda.addOne(
@@ -454,6 +455,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
         ],
       ],
   ): Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, ClientMessageT] = {
+    agenda.setupNewStage(simulationSettings.phaseDurations.faulty)
     val newSim =
       new Simulation(
         topology.copy(

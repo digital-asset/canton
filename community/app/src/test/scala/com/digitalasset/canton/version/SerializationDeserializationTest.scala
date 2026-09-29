@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.participant.GeneratorsParticipant
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantMessage,
@@ -238,6 +239,7 @@ final class SerializationDeserializationTest
           test(SequencerChannelSessionKeyAck, version)
 
           test(PartyReplicationStatus, version)
+          test(AcsReplicationStatus, version)
           test(AcsReplicationSourceParticipantMessage.AcsDigest, version)
           testContext(AcsReplicationSourceParticipantMessage, version, version)
           test(AcsReplicationTargetParticipantMessage, version)

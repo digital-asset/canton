@@ -4375,6 +4375,31 @@ fileComments:
               Set if a party was used in the request, otherwise unspecified.
 
               Optional
+      ConvertRecordTimeToOffsetRequest:
+        message:
+          comments: null
+          fieldComments:
+            record_time: |-
+              The record time to be converted to an offset
+              Required
+            synchronizer_id: |-
+              The ID of the synchronizer
+              If synchronizer_id is set, the synchronizer with this ID will be used. If
+              synchronizer_id is unset and the participant is only connected to a single
+              synchronizer, that synchronizer will be used by default. If synchronizer_id
+              is unset and the participant is connected to multiple synchronizers, the
+              request will error out with CANNOT_AUTODETECT_SYNCHRONIZER
+
+              Optional
+      ConvertRecordTimeToOffsetResponse:
+        message:
+          comments: null
+          fieldComments:
+            offset: |-
+              The participant's offset, the details of the offset field are described in ``community/ledger-api/README.md``.
+              Must be a valid absolute offset (positive integer).
+
+              Required
       GetActiveContractsPageRequest:
         message:
           comments: null
@@ -4590,6 +4615,8 @@ fileComments:
             unassigned_event: Required
     oneOfs:
       ActiveContract: {}
+      ConvertRecordTimeToOffsetRequest: {}
+      ConvertRecordTimeToOffsetResponse: {}
       GetActiveContractsPageRequest: {}
       GetActiveContractsPageResponse: {}
       GetActiveContractsRequest: {}
@@ -4651,6 +4678,8 @@ fileComments:
           Subscriptions started with the returned offset will serve events after this RPC was called.
       - name: GetLatestPrunedOffsets
         comments: Get the latest successfully pruned ledger offsets
+      - name: ConvertRecordTimeToOffset
+        comments: Translate syncrhonizer record time to an offset
   testing/time_service.proto:
     messages:
       GetTimeRequest:

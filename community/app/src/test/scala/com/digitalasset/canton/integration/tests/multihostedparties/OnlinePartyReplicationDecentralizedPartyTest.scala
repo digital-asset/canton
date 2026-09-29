@@ -192,7 +192,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
       val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
       logger.info(s"Waiting for $targetParticipant to be authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
-      tpStatus.agreementStatusO shouldBe defined
+      tpStatus.acsReplicationO.flatMap(_.agreement) shouldBe defined
 
       val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
         decentralizedParty,

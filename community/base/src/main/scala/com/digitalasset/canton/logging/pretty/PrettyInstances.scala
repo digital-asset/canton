@@ -16,8 +16,6 @@ import com.digitalasset.canton.util.{HexString, ThrowableUtil}
 import com.digitalasset.canton.{LedgerUserId, LfPartyId, LfTimestamp, LfVersioned, Uninhabited}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
-import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.ActiveLedgerState
-import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors.*
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
@@ -311,22 +309,6 @@ trait PrettyInstances {
     unnamedParam(_.value),
     unnamedParam(_.traceContext),
   )
-
-  implicit val prettyKeyInputError: Pretty[KeyInputError] = {
-    case InconsistentContractKeyKIError(e: InconsistentContractKey) =>
-      prettyOfClass[InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
-    case DuplicateContractKeyKIError(e: DuplicateContractKey) =>
-      prettyOfClass[DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
-    case DuplicateContractIdKIError(e: DuplicateContractId) =>
-      prettyOfClass[DuplicateContractId](unnamedParam(_.contractId)).treeOf(e)
-  }
-
-  implicit def prettyActiveLedgerState[T: Pretty]: Pretty[ActiveLedgerState[T]] =
-    prettyOfClass[ActiveLedgerState[T]](
-      param("locallyCreatedThisTimeline", _.locallyCreatedThisTimeline),
-      param("consumedBy", _.consumedBy),
-      param("localActiveKeys", _.localActiveKeys),
-    )
 
   implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)
 

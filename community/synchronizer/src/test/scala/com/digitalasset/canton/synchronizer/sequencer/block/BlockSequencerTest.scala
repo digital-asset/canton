@@ -187,7 +187,6 @@ final class BlockSequencerTest
         store,
         dbSequencerStore = fakeDbSequencerStore,
         BlockSequencerConfig(),
-        producePostOrderingTopologyTicks = false,
         balanceStore,
         storage,
         FutureSupervisor.Noop,

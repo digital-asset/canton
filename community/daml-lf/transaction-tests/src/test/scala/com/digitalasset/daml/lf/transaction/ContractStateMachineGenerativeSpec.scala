@@ -30,8 +30,8 @@ import scala.util.Try
 // reasonable. For more extensive testing, see
 // com.digitalasset.canton.integration.tests.modelbased.NextGenContractStateMachineGenerativeSpecLarge which runs
 // nightly and generates a larger number of larger samples.
-class NextGenContractStateMachineGenerativeSpecSmall
-    extends NextGenContractStateMachineGenerativeSpec(
+class ContractStateMachineGenerativeSpecSmall
+    extends ContractStateMachineGenerativeSpec(
       sampleSize = 20,
       maxSamples = 200,
     )
@@ -39,7 +39,7 @@ class NextGenContractStateMachineGenerativeSpecSmall
 /** Abstract base class for generative testing of the contract state machine. Subclasses control the
   * generation parameters (size, sample count, parallelism, etc.).
   */
-abstract class NextGenContractStateMachineGenerativeSpec(
+abstract class ContractStateMachineGenerativeSpec(
     sampleSize: Int,
     maxSamples: Int,
     timeout: FiniteDuration = 365.days,
@@ -50,11 +50,11 @@ abstract class NextGenContractStateMachineGenerativeSpec(
     with Matchers
     with PropertyCheckerResultAssertions {
 
-  import NextGenContractStateMachineGenerativeSpec.*
+  import ContractStateMachineGenerativeSpec.*
 
   private def verifyQueriesMatchContractOrder(
       scenario: Concrete.Scenario,
-      state: NextGenContractStateMachine.Journal,
+      state: ContractStateMachine.Journal,
   ): Either[String, Unit] =
     Try {
       val tx = scenario.ledger(1).commands.map(_.action)
@@ -122,7 +122,7 @@ abstract class NextGenContractStateMachineGenerativeSpec(
   }
 }
 
-object NextGenContractStateMachineGenerativeSpec {
+object ContractStateMachineGenerativeSpec {
 
   // TODO (#31844) The framework should pass the actual template ID
   private val dummyTmplId: Ref.TypeConId = Ref.TypeConId.assertFromString("-dummy-:Mod:T")
@@ -207,10 +207,10 @@ object NextGenContractStateMachineGenerativeSpec {
       keyMap.get(contractId).map(toGlobalKey)
 
     def processAction(
-        state: NextGenContractStateMachine.Journal,
+        state: ContractStateMachine.Journal,
         action: Concrete.Action,
-    ): Either[TransactionError, NextGenContractStateMachine.Journal] = {
-      import NextGenContractStateMachine.Visitor
+    ): Either[TransactionError, ContractStateMachine.Journal] = {
+      import ContractStateMachine.Visitor
       action match {
         case Concrete.Create(contractId, _, _) =>
           state.visitCreate(
@@ -284,10 +284,10 @@ object NextGenContractStateMachineGenerativeSpec {
     }
 
     def processTransaction(
-        state: NextGenContractStateMachine.Journal,
+        state: ContractStateMachine.Journal,
         tx: Concrete.Transaction,
-    ): Either[TransactionError, NextGenContractStateMachine.Journal] =
-      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.Journal]](
+    ): Either[TransactionError, ContractStateMachine.Journal] =
+      tx.foldLeft[Either[TransactionError, ContractStateMachine.Journal]](
         Right(state)
       ) {
         case (Right(s), action) => processAction(s, action)
@@ -297,13 +297,13 @@ object NextGenContractStateMachineGenerativeSpec {
 
   private def processScenario(
       scenario: Concrete.Scenario,
-      stateProp: (Concrete.Scenario, NextGenContractStateMachine.Journal) => Either[String, Unit] =
+      stateProp: (Concrete.Scenario, ContractStateMachine.Journal) => Either[String, Unit] =
         (_, _) => Right(()),
   ): Either[String, Unit] = {
     val keyMap = collectKeys(scenario)
     new TransactionProcessor(keyMap)
       .processTransaction(
-        NextGenContractStateMachine.empty(authorizeRollBack = false),
+        ContractStateMachine.Empty,
         scenario.ledger(1).commands.map(_.action),
       )
       .left

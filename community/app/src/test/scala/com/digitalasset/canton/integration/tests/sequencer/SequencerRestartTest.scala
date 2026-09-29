@@ -5,29 +5,26 @@ package com.digitalasset.canton.integration.tests.sequencer
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.NonNegativeDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalParticipantReference
-import com.digitalasset.canton.crypto.TestHash
+import com.digitalasset.canton.console.LocalMediatorReference
+import com.digitalasset.canton.crypto.{SyncCryptoApi, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.error.MediatorError.InvalidMessage
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.integration.IntegrationTestUtilities.*
 import com.digitalasset.canton.integration.{CommunityIntegrationTest, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.protocol.messages.{EmptyRootHashMessagePayload, RootHashMessage}
-import com.digitalasset.canton.protocol.{LocalRejectError, RootHash}
+import com.digitalasset.canton.protocol.messages.{ConfirmationResultMessage, SignedProtocolMessage}
+import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
-import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult}
+import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
   Batch,
-  MediatorGroupRecipient,
-  MemberRecipient,
+  OpenEnvelope,
   Recipients,
 }
+import com.digitalasset.canton.synchronizer.mediator.MediatorVerdict.MediatorReject
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.nonempty.NonEmpty
 import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
@@ -37,7 +34,7 @@ import org.slf4j.event.Level
 import scala.concurrent.Future
 import scala.concurrent.duration.*
 
-trait SequencerRestartTest { self: CommunityIntegrationTest =>
+trait SequencerRestartTest extends InFlightAggregationTestHelper { self: CommunityIntegrationTest =>
 
   // Those test cases may interfere with each other by sending submissions in the background.
   // Some of the submissions, which started as part of one test case, may time out as part of the next one.
@@ -141,26 +138,15 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
     "restart while aggregating submissions" in { implicit env =>
       import env.*
 
-      // We want to test that the sequencer keeps the aggregation state across restarts.
-      // To that end, we generate a plain root hash message and send it as part of aggregated submissions to the mediator and one participant.
-      // One part is sent before the restart, the other one after.
-      // We check the delivery by looking for the alarms in the logs.
-      val batch = {
-        val rhm = RootHashMessage(
-          RootHash(TestHash.digest(1)),
-          daId,
-          TransactionViewType,
-          CantonTimestamp.Epoch,
-          EmptyRootHashMessagePayload,
-        )
-        Batch.of(
-          testedProtocolVersion,
-          rhm -> Recipients.cc(
-            MediatorGroupRecipient(MediatorGroupIndex.zero),
-            MemberRecipient(participant1.id),
-          ),
-        )
-      }
+      // Ensure the test meets our requirements (two mediators with threshold 2)
+      val med =
+        participant1.topology.mediators
+          .list(sequencers.all.headOption.value.physical_synchronizer_id)
+          .loneElement
+          .item
+      assertResult(2)(med.active.size)
+      assertResult(2)(med.threshold.value)
+
       val ts = env.environment.clock.now
       val maxTs = ts.plusSeconds(300)
       val timestamps = SendRequestTimestamps(
@@ -168,31 +154,24 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
         approximateTimestampForSigning = ts,
         maxSequencingTime = maxTs,
       )
-      val aggregationRule = AggregationRule.testing(
-        NonEmpty(Seq, participant1.id, participant2.id),
-        PositiveInt.tryCreate(2),
-        testedProtocolVersion,
-      )
 
-      def sendAndWait(participant: LocalParticipantReference): Unit = {
-        implicit val metricsContext: MetricsContext = MetricsContext.Empty
-        utils.retry_until_true(
-          participant.underlying.value.sync
-            .readyConnectedSynchronizerById(daId)
-            .nonEmpty
+      def sendAndWait(mediator: LocalMediatorReference): Unit = {
+
+        val (client, cryptoApi) = sequencerClientAndCryptoApiOf(mediator)
+        val batch = this.createAggregationResultMessage(
+          cryptoApi,
+          1,
+          ts,
         )
-        val client = participant.underlying.value.sync
-          .readyConnectedSynchronizerById(daId)
-          .value
-          .sequencerClient
         val callback = SendCallback.future
         val sendAsync = client.send(
           batch,
           timestamps = timestamps,
-          aggregationRule = Some(aggregationRule),
+          aggregationRule =
+            Some(AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)),
           callback = callback,
-        )
-        sendAsync.valueOrFailShutdown("Participant send").futureValue
+        )(traceContext, MetricsContext.Empty)
+        sendAsync.valueOrFailShutdown("Mediator send").futureValue
         callback.future
           .onShutdown(fail("shutdown"))
           .futureValue(Timeout(Span(45, Seconds))) should matchPattern {
@@ -200,8 +179,8 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
         }
       }
 
-      clue("Sending first part of the aggregatable submission from participant 1") {
-        sendAndWait(participant1)
+      clue("Sending first part of the aggregatable submission from mediator 1") {
+        sendAndWait(mediator1)
       }
 
       loggerFactory.suppressWarningsAndErrors {
@@ -212,32 +191,64 @@ trait SequencerRestartTest { self: CommunityIntegrationTest =>
         }
       }
 
-      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-        sendAndWait(participant2),
+      loggerFactory.assertEventuallyLogsSeq(
+        (SuppressionRule.LevelAndAbove(Level.INFO) && SuppressionRule.LoggerNameContains(
+          "TransactionProcessor"
+        )) ||
+          SuppressionRule.LevelAndAbove(Level.WARN)
+      )(
+        sendAndWait(mediator2),
         logs => {
-          val assertSyncServiceAlarm: LogEntry => Assertion = _.shouldBeCantonError(
-            SyncServiceAlarm,
-            _ should include("Received no encrypted view message of type"),
-          )
-          val assertBadRootHashMessages: LogEntry => Assertion = _.shouldBeCantonError(
-            LocalRejectError.MalformedRejects.BadRootHashMessages,
-            _ should include("Received no encrypted view message of type TransactionViewType"),
-          )
-          val assertInvalidMessage: LogEntry => Assertion = _.shouldBeCantonError(
-            InvalidMessage,
-            _ should (include("Received a confirmation response") and include(
-              "with an unknown request id"
-            )),
-          )
-          if (logs.sizeIs > 3) {
-            forAtMost(logs.size - 3, logs)(optionalManySubmissionTimedOut)
-            forAtMost(logs.size - 3, logs)(optionalManyRequestCurrentTime)
+          val assertInvalidRequest: LogEntry => Assertion =
+            _.message should include("for request that is not pending")
+          if (logs.sizeIs > 1) {
+            forAtMost(logs.size - 1, logs)(optionalManySubmissionTimedOut)
+            forAtMost(logs.size - 1, logs)(optionalManyRequestCurrentTime)
           }
-          forAtLeast(1, logs)(assertSyncServiceAlarm)
-          forAtLeast(1, logs)(assertBadRootHashMessages)
-          forAtLeast(1, logs)(assertInvalidMessage)
+
+          forAtLeast(1, logs)(assertInvalidRequest)
         },
       )
     }
   }
+}
+
+trait InFlightAggregationTestHelper {
+  self: CommunityIntegrationTest =>
+
+  protected def createAggregationResultMessage(
+      cryptoOp: SyncCryptoApi,
+      digestSeed: Int,
+      requestId: CantonTimestamp,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Batch[OpenEnvelope[SignedProtocolMessage[ConfirmationResultMessage]]] = {
+    import env.*
+
+    // note, we simulate here the rejection of a bogus request.
+    // the purpose of the test though is just to check that aggregation works across sequencer
+    // switches. but with pv35 we only allow aggregations for sequencers and mediators, which
+    // limits the types of messages we can send.
+    val resultMessage = ConfirmationResultMessage.create(
+      env.sequencers.all.headOption.value.physical_synchronizer_id,
+      TransactionViewType,
+      RequestId(requestId),
+      RootHash(TestHash.digest(digestSeed)),
+      MediatorReject(reason = MediatorError.MalformedMessage.Reject(s"Test$digestSeed"))
+        .toVerdict(testedProtocolVersion),
+    )
+    Batch.of(
+      testedProtocolVersion,
+      SignedProtocolMessage.signAndCreate(resultMessage, cryptoOp, None).futureValueUS.value
+        -> Recipients.cc(env.participant1.id),
+    )
+  }
+
+  def sequencerClientAndCryptoApiOf(
+      mediator: LocalMediatorReference
+  ): (SequencerClient, SyncCryptoApi) = {
+    val tmp = mediator.underlying.value.replicaManager.mediatorRuntime.value.mediator
+    (tmp.sequencerClient, tmp.syncCrypto.currentSnapshotApproximation.futureValueUS)
+  }
+
 }

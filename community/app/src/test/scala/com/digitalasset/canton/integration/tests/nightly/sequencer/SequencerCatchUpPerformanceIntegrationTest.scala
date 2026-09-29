@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.nightly.sequencer
 
+import better.files.File
 import cats.syntax.option.*
-import com.daml.metrics.HistogramDefinition
 import com.daml.metrics.api.MetricQualification
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.testing.InMemoryMetricsFactory.InMemoryMeter
 import com.daml.metrics.api.testing.MetricValues
+import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
@@ -49,7 +51,11 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, NodeLoggingUtil}
 import com.digitalasset.canton.metrics.MetricsConfig.JvmMetrics
-import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.metrics.{
+  MetricsConfig,
+  MetricsFactoryProvider,
+  MetricsReporterConfig,
+}
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -62,6 +68,7 @@ import org.scalatest.Assertion
 
 import java.time.Instant
 import scala.concurrent.duration.*
+import scala.util.chaining.*
 
 /** Usage:
   *
@@ -126,12 +133,21 @@ import scala.concurrent.duration.*
   *   - Wait for the sequencer to restart (you can see a new java process)
   *   - Attach a profiler to the new java process. Make sure you stop profiling before the process
   *     stops.
+  *
+  * Note: scripts/canton-testing/test-sequencer-catchup.sh - which is part of the nightly
+  * performance test runner - uses the following environment variables:
+  * {{{
+  * export NIGHTLY_PERF_RUN=1
+  * export CI=1
+  * }}}
   */
 class SequencerCatchUpPerformanceIntegrationTest
     extends BasePerformanceIntegrationTest
     with SharedEnvironment
     with MetricValues
     with TrafficBalanceSupport {
+
+  private val isNightlyPerformanceBenchmarkRun = sys.env.contains("NIGHTLY_PERF_RUN")
 
   // Manipulate the settings to try different options and scenarios
 
@@ -260,6 +276,7 @@ class SequencerCatchUpPerformanceIntegrationTest
         numSequencers = 4,
         numMediators = 5,
       )
+      .pipe(nightlyPerformanceBenchmarkEnrichment)
       .withManualStart
       .withTeardown { _ =>
         toxiproxyPluginOpt.foreach { toxiproxyPlugin =>
@@ -357,9 +374,20 @@ class SequencerCatchUpPerformanceIntegrationTest
   )
 
   def blockEventCount(sequencer: LocalSequencerReference): Long =
-    sequencer.underlying.value.sequencer.metrics.block.blockEvents.valuesWithContext.toList
-      .map(_._2)
-      .sum
+    sequencer.underlying.value.sequencer.metrics.block.blockEvents match {
+      // When using NoOpMetricsFactory in the PerformanceRunner, we get an InMemoryMeter here that can always sum the block event metrics.
+      // However, for other Meters such as OpenTelemetryMeter, we don't have such a solution, so we fall back to zero.
+      // When NIGHTLY_PERF_RUN is set, we rely on CSV metric reporting, making a fallback to zero appropriate for this case.
+      // Although sequencer4 statistics are not collected directly, the nightly performance test doesn't deal with
+      // this specific metric and instead reports more general metrics.
+      case meter: InMemoryMeter =>
+        meter.valuesWithContext.toList
+          .map(_._2)
+          .sum
+      case other =>
+        logger.info(s"There is no block event count for $other meter so we fall back to 0!")
+        0L
+    }
 
   "Test the speed of the sequencer catch-up" in { implicit env =>
     import env.*
@@ -377,13 +405,13 @@ class SequencerCatchUpPerformanceIntegrationTest
     val runnerP1 =
       new PerformanceRunner(
         p1Config,
-        _ => NoOpMetricsFactory,
+        testMetricsFactory(),
         loggerFactory.append("participant", "participant1"),
       )
     val runnerP2 =
       new PerformanceRunner(
         p2Config,
-        _ => NoOpMetricsFactory,
+        testMetricsFactory(),
         loggerFactory.append("participant", "participant2"),
       )
 
@@ -395,6 +423,17 @@ class SequencerCatchUpPerformanceIntegrationTest
     clue("participant2 connects to sequencer1") {
       participant2.synchronizers.connect_local(sequencer1, daName)
     }
+
+    val measurements =
+      if (isNightlyPerformanceBenchmarkRun)
+        participants.all.map { p =>
+          val parties = p.parties.list().map(_.party)
+          p.ledger_api.updates.start_measuring(
+            parties.toSet,
+            "canton.transactions-emitted",
+          )
+        }
+      else Seq.empty
 
     if (enableTrafficManagement) {
       initializedSynchronizers.foreach { case (_, synchronizer) =>
@@ -434,6 +473,7 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     if (!produceLoadAfterRestart) {
       runners.foreach(_.close())
+      measurements.foreach(_.close())
     }
 
     if (stopOtherNodesDuringCatchUp) {
@@ -511,6 +551,12 @@ class SequencerCatchUpPerformanceIntegrationTest
         mustContainWithClue = Seq.empty,
         // Circuit-breaker-related warn logs are allowed
         mayContain = Seq(
+          _.infoMessage should include(
+            "There is no block event count"
+          ),
+          _.warningMessage should include(
+            "Instrument daml.sequencer.block.events has exceeded the maximum allowed cardinality"
+          ),
           _.warningMessage should include(
             "Sequencer is unhealthy, so disconnecting all members. Overloaded. Can't receive requests at the moment"
           ),
@@ -524,6 +570,7 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     if (produceLoadAfterRestart) {
       runners.foreach(_.close())
+      measurements.foreach(_.close())
     }
   }
 
@@ -562,4 +609,49 @@ class SequencerCatchUpPerformanceIntegrationTest
         assert(!sequencer4.is_running)
     }
   }
+
+  private def testMetricsFactory()(implicit env: FixtureParam): MetricsFactoryProvider =
+    if (isNightlyPerformanceBenchmarkRun) env.environment.metricsRegistry
+    else _ => NoOpMetricsFactory
+
+  private def nightlyPerformanceBenchmarkEnrichment(
+      envDef: EnvironmentDefinition
+  ): EnvironmentDefinition =
+    if (isNightlyPerformanceBenchmarkRun) {
+      val csvReportingInterval = sys.env
+        .get("CSV_REPORTING_INTERVAL")
+        .map(Duration.create)
+        .getOrElse(fail("We need CSV_REPORTING_INTERVAL environment variable to be set!"))
+
+      val reporter = sys.env
+        .get("METRICS_DIR")
+        .map(dir =>
+          MetricsReporterConfig.Csv(
+            directory = File(dir).toJava,
+            interval = config.NonNegativeFiniteDuration.tryFromDuration(csvReportingInterval),
+            filters = Seq(
+              "daml.participant.console",
+              "indexer.events",
+              "sequencer-events",
+              "daml.sequencer.block.events",
+              "canton.performance.failed",
+              "canton.performance.latency",
+              "daml.participant.phase",
+            ).map(c => MetricsFilterConfig(contains = c)),
+          )
+        )
+        .getOrElse(fail("We need METRICS_DIR environment variable to be set!"))
+
+      envDef
+        .addConfigTransforms(
+          _.focus(_.monitoring.metrics.reporters).modify(rs => reporter +: rs),
+          _.focus(_.monitoring.metrics.qualifiers).replace(MetricQualification.All),
+          ConfigTransforms.updateAllParticipantConfigs_(
+            _.focus(_.parameters.warnIfOverloadedFor).replace(None) // no overloaded warnings
+          ),
+          _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(
+            None
+          ), // no overloaded warnings
+        )
+    } else envDef
 }

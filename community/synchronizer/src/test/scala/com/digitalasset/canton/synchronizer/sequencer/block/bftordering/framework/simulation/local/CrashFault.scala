@@ -57,6 +57,7 @@ class CrashFault(
           agenda.addOne(
             CrashNode(node, permanent = true, traceContextGenerator.newTraceContext),
             duration = 1.microsecond,
+            onlyDuringFault = true,
           )
         }
       }
@@ -98,12 +99,14 @@ class CrashFault(
     agenda.addOne(
       CrashNode(node, permanent = false, traceContext),
       duration = 1.microsecond,
+      onlyDuringFault = true,
     )
     agenda.addOne(
       RestartNode(node, traceContext),
       duration = durationUntilRestart.getOrElse(
         settings.crashTimeDistribution.generateRandomDuration(random)
       ),
+      onlyDuringFault = true,
     )
     CrashNodeFaultStatus.Crashed(traceContext)
   }

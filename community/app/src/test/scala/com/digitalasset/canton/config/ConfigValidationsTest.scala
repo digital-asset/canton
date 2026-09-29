@@ -740,6 +740,59 @@ class ConfigValidationsTest extends BaseTestWordSpec {
     }
   }
 
+  "engine experimental execution conductor checks" when {
+    "enabling experimental execution conductor without nonStandardConfig" should {
+      "fail" in {
+        assertErrors(
+          CantonConfig(
+            participants = Map(
+              InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+                parameters = ParticipantNodeParameterConfig(engine =
+                  CantonEngineConfig(enableExperimentalExecutionConductor = true)
+                )
+              )
+            )
+          )
+        )(
+          "Enabling experimental execution conductor on the Daml Engine for participant p1 requires to explicitly set canton.parameters.non-standard-config = true"
+        )
+      }
+    }
+
+    "with default (disabled) experimental execution conductor" should {
+      "succeed" in {
+        assertValid(
+          CantonConfig(
+            participants = Map(
+              InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+                parameters = ParticipantNodeParameterConfig(engine =
+                  CantonEngineConfig(enableExperimentalExecutionConductor = false)
+                )
+              )
+            )
+          )
+        )
+      }
+    }
+
+    "enabling experimental execution conductor with nonStandardConfig" should {
+      "succeed" in {
+        assertValid(
+          CantonConfig(
+            parameters = CantonParameters(nonStandardConfig = true),
+            participants = Map(
+              InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+                parameters = ParticipantNodeParameterConfig(engine =
+                  CantonEngineConfig(enableExperimentalExecutionConductor = true)
+                )
+              )
+            ),
+          )
+        )
+      }
+    }
+  }
+
   "nodes with crypto scheme configurations" should {
     def configWithSchemes(
         signingSchemeConfig: Option[SigningSchemeConfig] = None,

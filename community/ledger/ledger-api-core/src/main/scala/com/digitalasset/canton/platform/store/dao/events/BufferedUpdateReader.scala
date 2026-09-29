@@ -6,16 +6,20 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
-import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  NamedLogging,
+}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
-import com.digitalasset.canton.platform.store.dao.events.TransactionLogUpdatesConversions
 import com.digitalasset.canton.platform.store.dao.{
   BufferedStreamsReader,
   BufferedUpdatePointwiseReader,
@@ -24,11 +28,14 @@ import com.digitalasset.canton.platform.store.dao.{
 }
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.{InternalUpdateFormat, TemplatePartiesFilter}
+import com.digitalasset.canton.topology.SynchronizerId
+import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.{ExecutionContext, Future}
 
+@VisibleForTesting
 private[events] class BufferedUpdateReader(
     delegate: LedgerDaoUpdateReader,
     bufferedUpdatesReader: BufferedStreamsReader[
@@ -40,10 +47,9 @@ private[events] class BufferedUpdateReader(
       GetUpdateResponse,
     ],
     lfValueTranslation: LfValueTranslation,
-    directEC: DirectExecutionContext,
-)(implicit executionContext: ExecutionContext)
-    extends LedgerDaoUpdateReader {
-
+)(val loggerFactory: NamedLoggerFactory)(implicit executionContext: ExecutionContext)
+    extends LedgerDaoUpdateReader
+    with NamedLogging {
   override def getUpdates(
       offsetRange: OffsetRange,
       internalUpdateFormat: InternalUpdateFormat,
@@ -63,7 +69,8 @@ private[events] class BufferedUpdateReader(
     toApiResponse = TransactionLogUpdatesConversions
       .toUpdateResponse(internalUpdateFormat, lfValueTranslation)(
         loggingContext,
-        directEC,
+        ErrorLoggingContext(logger, loggingContext),
+        executionContext,
       ),
     descendingOrder = descendingOrder,
     skipPruningChecks = skipPruningChecks,
@@ -92,9 +99,20 @@ private[events] class BufferedUpdateReader(
       rangeInfo,
       configOverrides,
     )
+
+  override def highestOffsetBeforeOrFirstAt(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] = delegate.highestOffsetBeforeOrFirstAt(
+    synchronizerId,
+    recordTime,
+  )
 }
 
 private[platform] object BufferedUpdateReader {
+
   def apply(
       delegate: LedgerDaoUpdateReader,
       updatesBuffer: InMemoryFanoutBuffer,
@@ -162,7 +180,11 @@ private[platform] object BufferedUpdateReader {
             transactionLogUpdate,
             queryParam._2,
             lfValueTranslation,
-          )(loggingContext, directEC),
+          )(
+            loggingContext,
+            ErrorLoggingContext(loggerFactory.getTracedLogger(getClass), loggingContext),
+            directEC,
+          ),
       )
 
     new BufferedUpdateReader(
@@ -170,7 +192,6 @@ private[platform] object BufferedUpdateReader {
       bufferedUpdatesReader = updatesStreamReader,
       bufferedUpdateReader = updatePointwiseReader,
       lfValueTranslation = lfValueTranslation,
-      directEC = directEC,
-    )
+    )(loggerFactory)
   }
 }

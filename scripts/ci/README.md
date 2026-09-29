@@ -4,7 +4,7 @@
 
 - **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
-    - a **flaky streak** pings the **Flaky Canton** rotation (two people),
+    - a **flaky streak** pings the **Flaky Canton** rotation (three people),
     - a **broken nightly** pings the **CI rota**.
   - **Red-main alert** (`slack_red_main_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.

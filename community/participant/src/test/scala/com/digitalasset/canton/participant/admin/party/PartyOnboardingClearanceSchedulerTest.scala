@@ -270,10 +270,11 @@ class PartyOnboardingClearanceSchedulerTest
 
       "return FlagSet with the upgrade time's immediate successor and schedule a background task if an LSU is announced" in {
         createFixture().flatMap { fixture =>
-          val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
-          // Define a specific future upgrade time to assert against
-          val upgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
-          val expectedSafeTime = upgradeTime.value.immediateSuccessor
+          // The upgrade time lies in the future, whereas the announcement is already effective
+          val upgradeTime = CantonTimestamp.now().plusSeconds(60)
+          val successor = SynchronizerSuccessor(psid.opaque, upgradeTime)
+          val announcementEffectiveAt = EffectiveTime(CantonTimestamp.now().minusSeconds(60))
+          val expectedSafeTime = upgradeTime.immediateSuccessor
 
           val tickPromise = Promise[Unit]()
           when(fixture.mockTimeTracker.awaitTick(any[CantonTimestamp])(any[TraceContext]))
@@ -282,7 +283,7 @@ class PartyOnboardingClearanceSchedulerTest
           // Mock the topology to simulate an active LSU.
           when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
             .thenReturn(
-              FutureUnlessShutdown.pure(Some((successor, upgradeTime)))
+              FutureUnlessShutdown.pure(Some((successor, announcementEffectiveAt)))
             )
 
           fixture.scheduler
@@ -307,18 +308,18 @@ class PartyOnboardingClearanceSchedulerTest
 
       "update an existing scheduled task if polled again and the safe time has changed (e.g. LSU cancelled)" in {
         createFixture().flatMap { fixture =>
-          val successor = SynchronizerSuccessor(psid.opaque, CantonTimestamp.now())
-
           // 1st time: LSU is active.
-          val lsuUpgradeTime = EffectiveTime(CantonTimestamp.now().plusSeconds(60))
-          val lsuSafeTime = lsuUpgradeTime.value.immediateSuccessor
+          val lsuUpgradeTime = CantonTimestamp.now().plusSeconds(60)
+          val successor = SynchronizerSuccessor(psid.opaque, lsuUpgradeTime)
+          val announcementEffectiveAt = EffectiveTime(CantonTimestamp.now().minusSeconds(60))
+          val lsuSafeTime = lsuUpgradeTime.immediateSuccessor
 
           // 2nd time: LSU is cancelled, workflow is called, and a new (earlier) safe time is returned.
           val newSafeTime = CantonTimestamp.now().plusSeconds(10)
 
           // Mock topology to return LSU active, then LSU cancelled
           when(fixture.mockSnapshot.announcedLsu()(any[TraceContext]))
-            .thenReturn(FutureUnlessShutdown.pure(Some((successor, lsuUpgradeTime))))
+            .thenReturn(FutureUnlessShutdown.pure(Some((successor, announcementEffectiveAt))))
             .andThen(
               FutureUnlessShutdown.pure(Option.empty[(SynchronizerSuccessor, EffectiveTime)])
             )

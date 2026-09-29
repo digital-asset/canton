@@ -247,8 +247,8 @@ trait AcsCommitmentRepairIntegrationTest
       participant1.synchronizers.reconnect(daName)
 
       // exchange commitments again, all should be fine
-      createContractsAndCheck(sequencer1, daName)
-      val (_, period2a, _) = createContractsAndCheck(sequencer2, acmeName)
+      val (_, period2da, _) = createContractsAndCheck(sequencer1, daName)
+      val (_, period2acme, _) = createContractsAndCheck(sequencer2, acmeName)
 
       // Corrupt P2's running commitments on da by emptying them in the DB and adding a bogus entry to the DB.
       // We do that while disconnecting P2 from da so upon reconnect P2 initializes its running commitments from the DB.
@@ -260,7 +260,16 @@ trait AcsCommitmentRepairIntegrationTest
       // compute a different commitment for participant1 than it had persisted previously,
       // which triggers an internal error.
       eventually() {
-        participant2.commitments.lastComputedAndSent(acmeName) should contain(period2a.toInclusive)
+        // last computed and sent should be at least period2da, but due to the synchronization in
+        // createContractsAndCheck, it might be higher
+        participant2.commitments
+          .lastComputedAndSent(daName)
+          .value should be >= period2da.toInclusive
+      }
+      eventually() {
+        participant2.commitments.lastComputedAndSent(acmeName) should contain(
+          period2acme.toInclusive
+        )
       }
       participant2.synchronizers.disconnect_all()
       eventually() {

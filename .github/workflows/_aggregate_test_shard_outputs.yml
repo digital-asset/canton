@@ -44,11 +44,12 @@ jobs:
     env:
       CALLER_JOB: ${{ inputs.caller_job }}
       ALLOW_EMPTY_CURRENT_TIMINGS: ${{ inputs.allow_empty_current_timings }}
-      # Prefix for the run-over-run "latest" aggregate artifacts. Keyed on the
-      # per-leg job_name when the caller sets one so that legs sharing a
-      # caller_job (the per-protocol-version _test.yml legs) stop overwriting
-      # each other, and falls back to caller_job for every other caller,
-      # keeping their artifact names unchanged.
+      # Prefix for both the run-over-run "latest" aggregate artifacts and the per-run shard
+      # bundle download pattern below. Keyed on the per-leg job_name when the caller sets one
+      # so that legs sharing a caller_job (github.job is constant per reusable workflow,
+      # regardless of which top-level job/alias invoked it) stop colliding on each other's
+      # artifacts, and falls back to caller_job for every other caller, keeping their artifact
+      # names unchanged.
       LATEST_ARTIFACT_PREFIX: ${{ inputs.job_name != '' && inputs.job_name || inputs.caller_job }}
     steps:
       - name: Checkout
@@ -76,7 +77,7 @@ jobs:
       - name: Download shard bundle artifacts
         uses: actions/download-artifact@v7
         with:
-          pattern: ${{ env.CALLER_JOB }}-bundle-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-*
+          pattern: ${{ env.LATEST_ARTIFACT_PREFIX }}-bundle-run-${{ github.run_id }}-pv-${{ inputs.protocol_version || 'default' }}-*
           path: ${{ env.CALLER_JOB }}/.shard-bundles
         continue-on-error: true
 

@@ -54,8 +54,6 @@ final class GeneratorsSequencer(
       maxSequencingTimestamp <- Arbitrary.arbitrary[CantonTimestamp]
       signatures <- boundedListGen(boundedListGen[Signature])
       senders <- rule.input match {
-        case AggregationRuleInput.Resolved(eligibleSenders, _) =>
-          Gen.const(eligibleSenders.forgetNE)
         case AggregationRuleInput.MediatorGroup(_) =>
           boundedListGen[MediatorId].map(_.widen[Member])
         case AggregationRuleInput.SequencerGroup => boundedListGen[SequencerId].map(_.widen[Member])

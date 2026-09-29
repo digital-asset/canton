@@ -75,8 +75,9 @@ jobs:
                 (error.response?.headers?.['x-ratelimit-remaining'] === '0' ||
                   /rate limit|secondary/i.test(error.message ?? '')));
 
-            // Ask for the oldest first on the very field we measure, so the walk can stop at the
-            // first PR inside the cutoff instead of paginating every open PR.
+            // pulls.list has no draft filter and no result cap, so scan every open PR and
+            // filter to drafts locally. sort/direction can misorder long-untouched PRs, so it
+            // is not trusted; the local sort below is authoritative.
             const iterator = github.paginate.iterator(github.rest.pulls.list, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -88,16 +89,18 @@ jobs:
 
             const stale = [];
             let scanned = 0;
+            let scannedDrafts = 0;
             let skippedLabel = 0;
-            let notDraft = 0;
-            outer: for await (const { data: page } of iterator) {
+            let notStale = 0;
+            for await (const { data: page } of iterator) {
               for (const pr of page) {
                 scanned += 1;
-                // The listing is sorted by the field we measure, so everything after the first
-                // PR inside the cutoff is newer still.
-                if (Date.parse(pr.updated_at) >= cutoff) break outer;
                 if (!pr.draft) {
-                  notDraft += 1;
+                  continue;
+                }
+                scannedDrafts += 1;
+                if (Date.parse(pr.updated_at) >= cutoff) {
+                  notStale += 1;
                   continue;
                 }
                 if ((pr.labels ?? []).some(({ name }) => name === SKIP_LABEL)) {
@@ -110,10 +113,13 @@ jobs:
             }
 
             core.info(
-              `Scanned ${scanned} open PRs (least recently updated first). ${stale.length} stale drafts, ` +
-              `${notDraft} non-draft, ${skippedLabel} skipped by the ${SKIP_LABEL} label. ` +
+              `Scanned ${scanned} open PRs (${scannedDrafts} drafts). ${stale.length} stale, ` +
+              `${notStale} not old enough, ${skippedLabel} skipped by the ${SKIP_LABEL} label. ` +
               `Cutoff: ${new Date(cutoff).toISOString().slice(0, 10)} (${days} days ago).`
             );
+
+            // Sort locally so the per-run cap below closes the oldest stale drafts first.
+            stale.sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
 
             const closingComment = (pr) => {
               const mention = pr.user?.login ? `@${pr.user.login}: ` : '';

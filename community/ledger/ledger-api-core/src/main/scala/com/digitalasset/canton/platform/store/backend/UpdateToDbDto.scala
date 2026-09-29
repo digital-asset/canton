@@ -9,10 +9,7 @@ import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
-  AuthorizationEvent,
-  TopologyEvent,
-}
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Reassignment, Update}
 import com.digitalasset.canton.metrics.{IndexerMetrics, LedgerApiServerMetrics}
@@ -38,7 +35,6 @@ object UpdateToDbDto {
   import Update.*
 
   def apply(
-      participantId: Ref.ParticipantId,
       translation: LfValueSerialization,
       compressionStrategy: CompressionStrategy,
       metrics: LedgerApiServerMetrics,
@@ -59,7 +55,6 @@ object UpdateToDbDto {
       case u: TopologyTransactionEffective =>
         topologyTransactionToDbDto(
           metrics = metrics,
-          participantId = participantId,
           offset = offset,
           serializedTraceContext = serializedTraceContext,
           topologyTransaction = u,
@@ -149,7 +144,6 @@ object UpdateToDbDto {
 
   private def topologyTransactionToDbDto(
       metrics: LedgerApiServerMetrics,
-      participantId: Ref.ParticipantId,
       offset: Offset,
       serializedTraceContext: Array[Byte],
       topologyTransaction: TopologyTransactionEffective,
@@ -187,17 +181,7 @@ object UpdateToDbDto {
             trace_context = serializedTraceContext,
           )
         )
-        val partyEntry = Seq(authorizationEvent)
-          .collect { case active: AuthorizationEvent.ActiveAuthorization => active }
-          .map(_ =>
-            DbDto.PartyEntry(
-              ledger_offset = offset.unwrap,
-              party = Some(party),
-              is_local = Some(participant == participantId),
-            )
-          )
-          .iterator
-        eventPartyToParticipant ++ partyEntry
+        eventPartyToParticipant
     }
 
     val genericEvents = topologyTransaction.genericTopologyEvents.iterator.map {

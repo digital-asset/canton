@@ -10,7 +10,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
   TrafficControlParameters,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
@@ -695,7 +694,6 @@ object SubmissionRequestAmplificationIntegrationTest {
   )
 }
 
-@UnstableTest // TODO(i18777): Remove as soon as this test has been fixed
 class SubmissionRequestAmplificationReferenceIntegrationTestPostgres
     extends SubmissionRequestAmplificationIntegrationTest {
 

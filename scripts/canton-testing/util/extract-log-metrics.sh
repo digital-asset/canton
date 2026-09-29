@@ -11,6 +11,25 @@
 
 set -eu -o pipefail
 
+# -----------------------------------------------------------------------------
+# Pre-processing: Partition COMMON_LOG_FILE if provided
+# -----------------------------------------------------------------------------
+if [[ -n ${COMMON_LOG_FILE:-} ]]; then
+	echo "COMMON_LOG_FILE detected. Splitting into component log files..."
+
+	PARTICIPANTS_LOG_FILE="$LOGS_DIR/participants.split.${CURRENT_JOB_NAME}.log"
+	SYNCHRONIZERS_LOG_FILE="$LOGS_DIR/synchronizers.split.${CURRENT_JOB_NAME}.log"
+
+	# 1. Synchronizers: Match logger context containing sequencer/mediator/domain, excluding participant
+	grep -E '\] .*(synchronizer|domain|sequencer|mediator)' "$COMMON_LOG_FILE" | \
+		grep -Eiv 'participant' > "$SYNCHRONIZERS_LOG_FILE" || true
+
+	# 2. Participants: Match logger context containing participant
+	grep -E '\] .*participant' "$COMMON_LOG_FILE" > "$PARTICIPANTS_LOG_FILE" || true
+	
+	echo "Split complete."
+fi
+
 echo
 echo "***** Extracting log metrics from $SYNCHRONIZERS_LOG_FILE and $PARTICIPANTS_LOG_FILE..."
 
@@ -24,6 +43,7 @@ participants_log_size=$(wc -c < "$PARTICIPANTS_LOG_FILE")
 
 synchronizers_num_warnings_or_errors=$(lnav -n -c ":set-min-log-level warning" "$SYNCHRONIZERS_LOG_FILE" | wc -l)
 synchronizers_log_size=$(wc -c < "$SYNCHRONIZERS_LOG_FILE")
+
 
 cat >> "$DATADOG_METRICS_FILE" <<EOI
 ${DATADOG_METRIC_PREFIX}.log.participants.warnings_or_errors=$((participants_num_warnings_or_errors))

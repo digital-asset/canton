@@ -590,7 +590,7 @@ def test_nightly_streak_detection():
         assert nightly_streak(_nightly_body(prior[:-1])) is False
 
     # the prior failures are non-nightly rows -> ignored -> no streak
-    nonnightly = _nightly_body(prior).replace("nightly_integration_test", "test_with_java17")
+    nonnightly = _nightly_body(prior).replace("nightly_integration_test", "sequential_test")
     with (
         patch.dict(os.environ, env, clear=False),
         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),

@@ -217,7 +217,7 @@ private[lf] object SExpr {
           machine.pushEnv(value)
           Control.Expression(body)
         case None =>
-          machine.handleException(Speedy.SArithmeticError(builtin.name, actuals))
+          machine.throwException(Speedy.SArithmeticError(builtin.name, actuals))
       }
     }
   }

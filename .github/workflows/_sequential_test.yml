@@ -7,6 +7,9 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+      protocol_version:
+        required: true
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: true
@@ -117,6 +120,7 @@ jobs:
           execution_context_size: "1"
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
+          protocol_version: ${{ inputs.protocol_version }}
 
       - name: Stop Postgres container
         if: always()
@@ -132,4 +136,4 @@ jobs:
     with:
       caller_job: sequential_test
       runner: ${{ inputs.runner }}
-      protocol_version: ""
+      protocol_version: ${{ inputs.protocol_version }}

@@ -64,7 +64,7 @@ class SubmitRequestValidator(
         currentLedgerTime,
         currentUtcTime,
       )
-      maxRecordTime <- req.maxRecordTime.traverse(commandsValidator.validateLfTime)
+      maxRecordTime <- req.maxRecordTime.traverse(FieldValidator.validateLfTime)
       costEstimationHints <- CostEstimationHints.fromProto(
         // If not set, defaults to the default instance which enables estimation without hints
         req.estimateTrafficCost.getOrElse(CostEstimationHintsP.defaultInstance)

@@ -115,12 +115,6 @@ class ParallelIndexerSubscriptionSpec
   implicit val materializer: Materializer = Materializer(actorSystem)
   val emptyByteArray = new Array[Byte](0)
 
-  private val someParty = DbDto.PartyEntry(
-    ledger_offset = 1,
-    party = Some(Ref.Party.assertFromString("party")),
-    is_local = Some(true),
-  )
-
   private val someSynchronizerId: SynchronizerId = SynchronizerId.tryFromString("x::synchronizerId")
   private val someTrafficCost: Option[Long] = Some(31000L)
   private val someSynchronizerId2: SynchronizerId =
@@ -348,7 +342,7 @@ class ParallelIndexerSubscriptionSpec
   it should "provide required Batch in happy path case" in {
     val actual = ParallelIndexerSubscription.inputMapper(
       metrics = metrics,
-      toDbDto = _ => _ => Iterator(someParty, someParty),
+      toDbDto = _ => _ => Iterator(someEventPartyToParticipant, someEventPartyToParticipant),
       eventMetricsUpdater = _ => (),
       _ => Vector("1", "2"),
       logger,
@@ -375,12 +369,12 @@ class ParallelIndexerSubscriptionSpec
       ),
       batchTraceContext = TraceContext.empty,
       batch = Vector(
-        someParty,
-        someParty,
-        someParty,
-        someParty,
-        someParty,
-        someParty,
+        someEventPartyToParticipant,
+        someEventPartyToParticipant,
+        someEventPartyToParticipant,
+        someEventPartyToParticipant,
+        someEventPartyToParticipant,
+        someEventPartyToParticipant,
       ),
       batchSize = 3,
       offsetsUpdates = offsetsAndUpdates,
@@ -548,13 +542,13 @@ class ParallelIndexerSubscriptionSpec
         ),
         batchTraceContext = TraceContext.empty,
         batch = Vector(
-          someParty,
+          someEventPartyToParticipant,
           someEventActivate,
           filter.activateStakeholder,
           filter.activateWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
           someCompletion,
-          someParty,
+          someEventPartyToParticipant,
           someEventDeactivate,
           filter.deactivateStakeholder,
           filter.deactivateWitness,
@@ -562,7 +556,7 @@ class ParallelIndexerSubscriptionSpec
           filter.deactivateStakeholder,
           filter.deactivateWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someParty,
+          someEventPartyToParticipant,
           someEventWitnessed,
           filter.variousWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
@@ -572,7 +566,7 @@ class ParallelIndexerSubscriptionSpec
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
           someDynamicSynchronizerParameters,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
-          someParty,
+          someEventPartyToParticipant,
         ),
         batchSize = 3,
         offsetsUpdates = offsetsAndUpdates,
@@ -585,92 +579,92 @@ class ParallelIndexerSubscriptionSpec
     )
     import scala.util.chaining.*
 
-    result.ledgerEnd.lastEventSeqId shouldBe 22
+    result.ledgerEnd.lastEventSeqId shouldBe 26
     result.ledgerEnd.lastStringInterningId shouldBe 1
     result.ledgerEnd.lastPublicationTime shouldBe currentPublicationTime
     result.ledgerEnd.lastOffset shouldBe offset(2)
     result.ledgerEnd.synchronizerIndices shouldBe Map(
       someSynchronizerId -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(10L))
     )
-    result.eventCount shouldBe 7L
+    result.eventCount shouldBe 11L
     result.distinctRawStrings shouldBe Nil
-    result.batch(1).asInstanceOf[DbDto.EventActivate].event_sequential_id shouldBe 16
+    result.batch(1).asInstanceOf[DbDto.EventActivate].event_sequential_id shouldBe 17
     result
       .batch(2)
       .asInstanceOf[DbDto.IdFilterActivateStakeholder]
       .idFilter
-      .event_sequential_id shouldBe 16
+      .event_sequential_id shouldBe 17
     result
       .batch(3)
       .asInstanceOf[DbDto.IdFilterActivateWitness]
       .idFilter
-      .event_sequential_id shouldBe 16
+      .event_sequential_id shouldBe 17
     result.batch(4).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
       transactionMeta.event_sequential_id_first shouldBe 16L
-      transactionMeta.event_sequential_id_last shouldBe 16L
+      transactionMeta.event_sequential_id_last shouldBe 17L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
     result
       .batch(5)
       .asInstanceOf[DbDto.CommandCompletion]
       .publication_time shouldBe currentPublicationTime.toMicros
-    result.batch(7).asInstanceOf[DbDto.EventDeactivate].event_sequential_id shouldBe 17
+    result.batch(7).asInstanceOf[DbDto.EventDeactivate].event_sequential_id shouldBe 19
     result
       .batch(8)
       .asInstanceOf[DbDto.IdFilterDeactivateStakeholder]
       .idFilter
-      .event_sequential_id shouldBe 17
+      .event_sequential_id shouldBe 19
     result
       .batch(9)
       .asInstanceOf[DbDto.IdFilterDeactivateWitness]
       .idFilter
-      .event_sequential_id shouldBe 17
-    result.batch(10).asInstanceOf[DbDto.EventDeactivate].event_sequential_id shouldBe 18
+      .event_sequential_id shouldBe 19
+    result.batch(10).asInstanceOf[DbDto.EventDeactivate].event_sequential_id shouldBe 20
     result
       .batch(11)
       .asInstanceOf[DbDto.IdFilterDeactivateStakeholder]
       .idFilter
-      .event_sequential_id shouldBe 18
+      .event_sequential_id shouldBe 20
     result
       .batch(12)
       .asInstanceOf[DbDto.IdFilterDeactivateWitness]
       .idFilter
-      .event_sequential_id shouldBe 18
+      .event_sequential_id shouldBe 20
     result.batch(13).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
-      transactionMeta.event_sequential_id_first shouldBe 17L
-      transactionMeta.event_sequential_id_last shouldBe 18L
+      transactionMeta.event_sequential_id_first shouldBe 18L
+      transactionMeta.event_sequential_id_last shouldBe 20L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
-    result.batch(15).asInstanceOf[DbDto.EventVariousWitnessed].event_sequential_id shouldBe 19
+    result.batch(15).asInstanceOf[DbDto.EventVariousWitnessed].event_sequential_id shouldBe 22
     result
       .batch(16)
       .asInstanceOf[DbDto.IdFilterVariousWitness]
       .idFilter
-      .event_sequential_id shouldBe 19
+      .event_sequential_id shouldBe 22
     result.batch(17).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
-      transactionMeta.event_sequential_id_first shouldBe 19L
-      transactionMeta.event_sequential_id_last shouldBe 19L
-      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
-    }
-    result.batch(18).asInstanceOf[DbDto.EventPartyToParticipant].event_sequential_id shouldBe 20
-    result.batch(19).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
-      transactionMeta.event_sequential_id_first shouldBe 20L
-      transactionMeta.event_sequential_id_last shouldBe 20L
-      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
-    }
-    result.batch(20).asInstanceOf[DbDto.AcsCommitment].event_sequential_id shouldBe 21
-    result.batch(21).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
       transactionMeta.event_sequential_id_first shouldBe 21L
-      transactionMeta.event_sequential_id_last shouldBe 21L
+      transactionMeta.event_sequential_id_last shouldBe 22L
+      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
+    }
+    result.batch(18).asInstanceOf[DbDto.EventPartyToParticipant].event_sequential_id shouldBe 23
+    result.batch(19).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 23L
+      transactionMeta.event_sequential_id_last shouldBe 23L
+      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
+    }
+    result.batch(20).asInstanceOf[DbDto.AcsCommitment].event_sequential_id shouldBe 24
+    result.batch(21).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 24L
+      transactionMeta.event_sequential_id_last shouldBe 24L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
     result
       .batch(22)
       .asInstanceOf[DbDto.GenericTopologyEvent]
-      .event_sequential_id shouldBe 22
+      .event_sequential_id shouldBe 25
     result.batch(23).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
-      transactionMeta.event_sequential_id_first shouldBe 22L
-      transactionMeta.event_sequential_id_last shouldBe 22L
+      transactionMeta.event_sequential_id_first shouldBe 25L
+      transactionMeta.event_sequential_id_last shouldBe 25L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
     result.batch(25).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
@@ -704,10 +698,10 @@ class ParallelIndexerSubscriptionSpec
         ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
         batchTraceContext = TraceContext.empty,
         batch = Vector(
-          someParty,
-          someParty,
-          someParty,
-          someParty,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
         ),
         batchSize = 3,
         offsetsUpdates = offsetsAndUpdates,
@@ -718,11 +712,11 @@ class ParallelIndexerSubscriptionSpec
         contractStateEvents = Vector.empty,
       ),
     )
-    result.ledgerEnd.lastEventSeqId shouldBe 15
+    result.ledgerEnd.lastEventSeqId shouldBe 19
     result.ledgerEnd.lastStringInterningId shouldBe 25
     result.ledgerEnd.lastOffset shouldBe offset(2)
     result.ledgerEnd.synchronizerIndices shouldBe Map.empty
-    result.eventCount shouldBe 0L
+    result.eventCount shouldBe 4L
   }
 
   private val now = CantonTimestamp.now()
@@ -764,10 +758,10 @@ class ParallelIndexerSubscriptionSpec
             ),
             batchTraceContext = TraceContext.empty,
             batch = Vector(
-              someParty,
-              someParty,
-              someParty,
-              someParty,
+              someEventPartyToParticipant,
+              someEventPartyToParticipant,
+              someEventPartyToParticipant,
+              someEventPartyToParticipant,
             ),
             batchSize = 3,
             offsetsUpdates = offsetsAndUpdates,
@@ -1118,7 +1112,7 @@ class ParallelIndexerSubscriptionSpec
           ),
           batchTraceContext = TraceContext.empty,
           batch = Vector(
-            someParty
+            someEventPartyToParticipant
           ),
           batchSize = 10,
           offsetsUpdates = offsetsAndUpdates,
@@ -1425,10 +1419,10 @@ class ParallelIndexerSubscriptionSpec
         ),
         batchTraceContext = TraceContext.empty,
         batch = Vector(
-          someParty,
-          someParty,
-          someParty,
-          someParty,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
+          someEventPartyToParticipant,
         ),
         batchSize = 3,
         offsetsUpdates = offsetsAndUpdates,
@@ -1498,7 +1492,7 @@ class ParallelIndexerSubscriptionSpec
       notPersistedContractKey = None,
     )
     // unrelated DbDto: skipped
-    val unrelated = someParty
+    val unrelated = someEventPartyToParticipant
 
     val result = ParallelIndexerSubscription.batcher(
       batchF = _ => "ignored",
@@ -1562,7 +1556,7 @@ class ParallelIndexerSubscriptionSpec
       Batch(
         ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
         batchTraceContext = TraceContext.empty,
-        batch = Vector(someParty, someParty),
+        batch = Vector(someEventPartyToParticipant, someEventPartyToParticipant),
         batchSize = 2,
         offsetsUpdates = offsetsAndUpdates,
         missingDeactivatedActivations = Map.empty,

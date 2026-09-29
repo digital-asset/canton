@@ -504,12 +504,31 @@ class Engine(
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
     import TxConductor.Upd
 
+    val conductor = TxConductor(
+      compiledPackages = compiledPackages,
+      preparationTime = preparationTime,
+      initialSeeding = seeding,
+      committers = submitters,
+      logger = machineLogger(validating),
+      authorizationChecker = config.authorizationChecker,
+      iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
+      packageResolution = packageResolution,
+      interpretationConfig = interpretationConfig,
+      contractIdVersion = contractIdVersion,
+      limits = config.transactionLimits,
+      metricPlugins = metricPlugins,
+    )
+
     def loop[X](upd: Upd.Step[X]): Result[X] =
       upd match {
         case Upd.Step.Pure(value) =>
           Result.done(value)
         case Upd.Step.Error(e) =>
-          Result.error(Error.Interpretation.DamlException(e), None)
+          val trace = conductor.transactionTrace(config.transactionTraceMaxLength)
+          Result.error(
+            Error.Interpretation.DamlException(e),
+            Option.when(trace.nonEmpty)(trace),
+          )
         case im: Upd.Step.Impure[x, X] =>
           im.fx match {
             case Upd.NeedPackage(pkgId, context) =>
@@ -527,8 +546,10 @@ class Engine(
                 contract <- Result.needContract(coid)
                 result <- loop(im.resume(contract))
               } yield result
-            case _: Upd.NeedKey =>
-              throw new java.lang.Error("NeedKey not implemented")
+            case Upd.NeedKey(gk, n, progression, _) =>
+              resolveNeedKey(gk, n, progression) { (page, hasStarted) =>
+                loop(im.resume((page, hasStarted)))
+              }
             case Upd.NeedExternalCall(extId, funcId, configHash, input) =>
               for {
                 result <- Result.needExternalCall(extId, funcId, configHash, input)
@@ -554,24 +575,11 @@ class Engine(
         NameOf.qualifiedNameOfCurrentFunc,
         compiledPackages.compiler.unsafeCompile(commands),
       )
-      conductor = TxConductor(
-        compiledPackages = compiledPackages,
-        preparationTime = preparationTime,
-        initialSeeding = seeding,
-        committers = submitters,
-        logger = machineLogger(validating),
-        authorizationChecker = config.authorizationChecker,
-        iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
-        packageResolution = packageResolution,
-        interpretationConfig = interpretationConfig,
-        contractIdVersion = contractIdVersion,
-        limits = config.transactionLimits,
-        metricPlugins = metricPlugins,
-      )
       _ <- loop(conductor.handleCommands(commands.toSeq).start)
       txResult <- Result.done(conductor.finish)
       TxConductor.Result(
         tx,
+        inputContracts,
         seeds,
         globalKeyMapping,
         contractOrder,
@@ -579,9 +587,7 @@ class Engine(
         throw new NotImplementedError("Error handling in conductor.commit not yet implemented")
       )
       usedPackages <- deps(tx)
-    } yield (
-      tx,
-      Tx.Metadata(
+      meta = Tx.Metadata(
         submissionSeed = submissionInfo.map(_.submissionSeed),
         preparationTime = preparationTime,
         usedPackages = usedPackages,
@@ -589,9 +595,10 @@ class Engine(
         nodeSeeds = seeds,
         globalKeyMapping = globalKeyMapping,
         contractOrder = contractOrder,
-      ),
-      conductor.metrics,
-    )
+      )
+      _ <- checkAllowedDeps(usedPackages, interpretationConfig.allowedLanguageVersions)
+      _ <- if (validating) Result.unit else checkTransactionLimits(tx, meta, inputContracts)
+    } yield (tx, meta, conductor.metrics)
   }
 
   /** Interprets the given commands under the authority of @submitters,
@@ -669,6 +676,131 @@ class Engine(
     loggerFactory = loggerFactory,
   )
 
+  private[engine] def checkAllowedDeps(
+      deps: Set[PackageId],
+      allowedLangVersions: Seq[language.LanguageVersion],
+  ): Result[Unit] = {
+    val disallowedPackages =
+      deps.view
+        .map(pkgId => (pkgId, compiledPackages.signatures(pkgId).languageVersion))
+        .filterNot { case (pkgId, langVer) =>
+          (
+            (allowedLangVersions.contains(langVer) || stablePackageIds(pkgId))
+          )
+        }
+
+    disallowedPackages.headOption match {
+      case Some((pkgId, pkg)) =>
+        Result.error(
+          Error.Package.AllowedLanguageVersion(pkgId, pkg, allowedLangVersions)
+        )
+      case None =>
+        Result.unit
+    }
+  }
+
+  private[engine] def checkTransactionLimits(
+      tx: SubmittedTransaction,
+      metadata: Tx.Metadata,
+      inputContracts: Map[ContractId, FatContractInstance],
+  ): Result[Unit] = {
+    val errors =
+      TransactionValidator.validate(tx, metadata, inputContracts, config.transactionLimits)
+
+    Result.assert(errors.isEmpty)(
+      Error.Validation(Error.Validation.TransactionLimitExceeded(errors))
+    )
+  }
+
+  private[this] def resolveNeedKey[R](
+      gk: GlobalKey,
+      n: Int,
+      progression: NeedKeyProgression.CanContinue,
+  )(
+      resume: (
+          Vector[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)],
+          NeedKeyProgression.HasStarted,
+      ) => Result[R]
+  ): Result[R] = {
+    def wrapHasStarted(
+        overflow: Vector[Result.Need.Key.Response.ContractEntry],
+        callerProgression: NeedKeyProgression.HasStarted,
+    ): NeedKeyProgression.HasStarted =
+      if (overflow.nonEmpty)
+        NeedKeyProgression.InProgress(
+          Engine.BufferedKeyContracts(overflow, callerProgression)
+        )
+      else
+        callerProgression match {
+          case inProgress: NeedKeyProgression.InProgress =>
+            NeedKeyProgression.InProgress(
+              Engine.BufferedKeyContracts(Vector.empty, inProgress)
+            )
+          case NeedKeyProgression.Finished =>
+            NeedKeyProgression.Finished
+        }
+
+    def resumeWithNeededEntries(
+        entries: Vector[Result.Need.Key.Response.ContractEntry],
+        callerHasStarted: NeedKeyProgression.HasStarted,
+    ): Result[R] = {
+      import cats.instances.either.*
+      import cats.instances.vector.*
+      import cats.syntax.traverse.*
+      val (enginePage, engineRest) = entries.splitAt(n)
+      enginePage.traverse {
+        case Result.Need.Key.Response.AuthenticableFatContractInstance(
+              contractInstance,
+              expectedHashingMethod,
+              idValidator,
+            ) =>
+          Right((contractInstance, expectedHashingMethod, idValidator))
+        case Result.Need.Key.Response.UnsupportedContractIdVersion(coid) =>
+          Left(interpretation.Error.UnsupportedContractId(coid))
+      } match {
+        case Left(err) => Result.error(Error.Interpretation.DamlException(err))
+        case Right(sanitizedPage) =>
+          resume(sanitizedPage, wrapHasStarted(engineRest, callerHasStarted))
+      }
+    }
+
+    def askCaller(callerToken: NeedKeyProgression.CanContinue): Result[R] =
+      for {
+        response <- Result.needKey(gk, n, callerToken)
+        result <- resumeWithNeededEntries(response.contracts, response.hasStarted)
+      } yield result
+
+    progression match {
+      case NeedKeyProgression.InProgress(
+            Engine.BufferedKeyContracts(overflow, callerProgression)
+          ) =>
+        if (overflow.nonEmpty) {
+          // We have buffered contracts from a previous caller response.
+          // Serve from the buffer without asking the caller.
+          resumeWithNeededEntries(overflow, callerProgression)
+        } else {
+          // Empty buffer — unwrap the caller progression.
+          callerProgression match {
+            case callerCanContinue: NeedKeyProgression.CanContinue =>
+              askCaller(callerCanContinue)
+            case NeedKeyProgression.Finished =>
+              resume(Vector.empty, NeedKeyProgression.Finished)
+          }
+        }
+      case NeedKeyProgression.Unstarted =>
+        // No buffer — ask the caller directly.
+        askCaller(NeedKeyProgression.Unstarted)
+      case NeedKeyProgression.InProgress(_) =>
+        Result.error(
+          Error.Interpretation.Internal(
+            NameOf.qualifiedNameOfCurrentFunc,
+            "Invalid NeedKeyProgression token",
+            None,
+          )
+        )
+    }
+  }
+
   private[engine] def interpretLoop(
       machine: UpdateMachine,
       time: Time.Timestamp,
@@ -679,40 +811,6 @@ class Engine(
     val abort = () => {
       machine.abort()
       Some(machine.transactionTrace(config.transactionTraceMaxLength))
-    }
-
-    def checkAllowedDeps(deps: Set[PackageId]): Result[Unit] = {
-      val allowedLangVersions = machine.interpretationConfig.allowedLanguageVersions
-      val disallowedPackages =
-        deps.view
-          .map(pkgId => (pkgId, compiledPackages.signatures(pkgId).languageVersion))
-          .filterNot { case (pkgId, langVer) =>
-            (
-              (allowedLangVersions.contains(langVer) || stablePackageIds(pkgId))
-            )
-          }
-
-      disallowedPackages.headOption match {
-        case Some((pkgId, pkg)) =>
-          Result.error(
-            Error.Package.AllowedLanguageVersion(pkgId, pkg, allowedLangVersions)
-          )
-        case None =>
-          Result.unit
-      }
-    }
-
-    def checkTransactionLimits(
-        tx: SubmittedTransaction,
-        metadata: Tx.Metadata,
-        inputContracts: Map[ContractId, FatContractInstance],
-    ): Result[Unit] = {
-      val errors =
-        TransactionValidator.validate(tx, metadata, inputContracts, config.transactionLimits)
-
-      Result.assert(errors.isEmpty)(
-        Error.Validation(Error.Validation.TransactionLimitExceeded(errors))
-      )
     }
 
     def finish: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
@@ -853,7 +951,7 @@ class Engine(
 
               case None =>
                 for {
-                  _ <- checkAllowedDeps(deps)
+                  _ <- checkAllowedDeps(deps, machine.interpretationConfig.allowedLanguageVersions)
                   _ <-
                     if (machine.validating) Result.unit
                     else checkTransactionLimits(tx, meta, inputContracts)
@@ -871,7 +969,7 @@ class Engine(
       }
 
     @scala.annotation.tailrec
-    def loop: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
+    def loop: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
       machine.run() match {
 
         case SResultQuestion(question) =>
@@ -908,92 +1006,9 @@ class Engine(
                   _,
                   callback,
                 ) =>
-              // Adapt between the caller (who may return more than n contracts, or
-              // signal Finished while returning n contracts) and the interpreter (which expects at most
-              // n contracts and Finished only when fewer than n are returned).
-              // When the caller returns more than n contracts, the excess is stored in a
-              // BufferedKeyContracts token (an immutable NeedKeyProgression.Token) that is threaded
-              // through subsequent iterations. On the next iteration the engine serves from this
-              // token's buffer before going back to the caller.
-
-              def wrapHasStarted(
-                  overflow: Vector[Result.Need.Key.Response.ContractEntry],
-                  callerProgression: NeedKeyProgression.HasStarted,
-              ): NeedKeyProgression.HasStarted =
-                if (overflow.nonEmpty)
-                  NeedKeyProgression.InProgress(
-                    Engine.BufferedKeyContracts(overflow, callerProgression)
-                  )
-                else
-                  callerProgression match {
-                    case inProgress: NeedKeyProgression.InProgress =>
-                      NeedKeyProgression.InProgress(
-                        Engine.BufferedKeyContracts(Vector.empty, inProgress)
-                      )
-                    case NeedKeyProgression.Finished =>
-                      NeedKeyProgression.Finished
-                  }
-
-              def resumeWithNeededEntries(
-                  entries: Vector[Result.Need.Key.Response.ContractEntry],
-                  callerHasStarted: NeedKeyProgression.HasStarted,
-              ) = {
-                import cats.instances.either.*
-                import cats.instances.vector.*
-                import cats.syntax.traverse.*
-                val (enginePage, engineRest) = entries.splitAt(n)
-                enginePage.traverse {
-                  case Result.Need.Key.Response.AuthenticableFatContractInstance(
-                        contractInstance,
-                        expectedHashingMethod,
-                        idValidator,
-                      ) =>
-                    Right((contractInstance, expectedHashingMethod, idValidator))
-                  case Result.Need.Key.Response.UnsupportedContractIdVersion(coid) =>
-                    Left(interpretation.Error.UnsupportedContractId(coid))
-                } match {
-                  case Left(err) => Result.error(Error.Interpretation.DamlException(err))
-                  case Right(sanitizedPage) =>
-                    callback(sanitizedPage, wrapHasStarted(engineRest, callerHasStarted))
-                    interpretLoop(machine, time, submissionInfo)
-                }
-              }
-
-              def askCaller(callerToken: NeedKeyProgression.CanContinue) =
-                for {
-                  response <- Result.needKey(gk, n, callerToken)
-                  result <- resumeWithNeededEntries(response.contracts, response.hasStarted)
-                } yield result
-
-              canContinue match {
-                case NeedKeyProgression.InProgress(
-                      Engine.BufferedKeyContracts(overflow, callerProgression)
-                    ) =>
-                  if (overflow.nonEmpty) {
-                    // We have buffered contracts from a previous caller response.
-                    // Serve from the buffer without asking the caller.
-                    resumeWithNeededEntries(overflow, callerProgression)
-                  } else {
-                    // Empty buffer — unwrap the caller progression.
-                    callerProgression match {
-                      case callerCanContinue: NeedKeyProgression.CanContinue =>
-                        askCaller(callerCanContinue)
-                      case NeedKeyProgression.Finished =>
-                        callback(Vector.empty, NeedKeyProgression.Finished)
-                        interpretLoop(machine, time, submissionInfo)
-                    }
-                  }
-                case NeedKeyProgression.Unstarted =>
-                  // No buffer — ask the caller directly.
-                  askCaller(NeedKeyProgression.Unstarted)
-                case NeedKeyProgression.InProgress(_) =>
-                  Result.error(
-                    Error.Interpretation.Internal(
-                      NameOf.qualifiedNameOfCurrentFunc,
-                      "Invalid NeedKeyProgression token",
-                      None,
-                    )
-                  )
+              resolveNeedKey(gk, n, canContinue) { (page, hasStarted) =>
+                callback(page, hasStarted)
+                interpretLoop(machine, time, submissionInfo)
               }
 
             case Question.Update.NeedExternalCall(
@@ -1031,7 +1046,6 @@ class Engine(
             detailMsg = Some(machine.transactionTrace(config.transactionTraceMaxLength)),
           )
       }
-    }
 
     loop
   }

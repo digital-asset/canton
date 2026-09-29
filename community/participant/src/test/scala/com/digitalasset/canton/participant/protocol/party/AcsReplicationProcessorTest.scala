@@ -8,27 +8,18 @@ import cats.implicits.toTraverseOps
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.SignatureCheckError.InvalidSignature
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.crypto.{
-  Hash,
-  LtHash16Blake3,
-  Signature,
-  SigningKeyUsage,
-  SynchronizerCryptoClient,
-  SynchronizerSnapshotSyncCryptoApi,
-  TestHash,
-}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerUpdate
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTestInterceptor,
-}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters
 import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
@@ -45,15 +36,9 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.util.{CreatesActiveContracts, TimeOfChange}
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  Member,
-  PartyId,
-  PhysicalSynchronizerId,
-  SynchronizerId,
-}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -138,8 +123,8 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
       val inMemoryStorageForTesting = new MemoryStorage(loggerFactory, timeouts)
       val sourceParticipantId = DefaultTestIdentities.participant1
       val targetParticipantId = DefaultTestIdentities.participant2
-      val initialStatus = PartyReplicationStatus(
-        PartyReplicationStatus.ReplicationParams(
+      val initialStatus = AcsReplicationStatus(
+        AcsReplicationParameters(
           addPartyRequestId,
           alice,
           psid.logical,
@@ -150,7 +135,7 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
         ),
         testedProtocolVersion,
         replicationO = Some(
-          PartyReplicationStatus.PersistentProgress(
+          AcsReplicationStatus.PersistentProgress(
             processedContractCount = NonNegativeLong.zero,
             nextPersistenceCounter = RepairCounter.Genesis,
             acsHashO = None,
@@ -220,7 +205,7 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
         loggerFactory = processorLoggerFactory,
         testOnlyInterceptor = new PartyReplicationTestInterceptor {
           override def onTargetParticipantProgress(
-              progress: PartyReplicationStatus.AcsReplicationProgress
+              progress: AcsReplicationStatus.AcsReplicationProgress
           )(implicit
               traceContext: TraceContext
           ): PartyReplicationTestInterceptor.ProceedOrWait = tpProceedOrWait

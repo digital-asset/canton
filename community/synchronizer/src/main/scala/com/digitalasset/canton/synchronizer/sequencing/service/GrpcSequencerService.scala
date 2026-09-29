@@ -435,7 +435,11 @@ class GrpcSequencerService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
     InFlightAggregationHandler
-      .senderIsAuthorizedAndAggregationRuleIsWellFormed(sender, aggregationRule, snapshot)
+      .senderIsAuthorizedAndAggregationRuleIsWellFormed(
+        sender,
+        aggregationRule,
+        snapshot,
+      )
       .leftMap(message => invalid(messageId.toProtoPrimitive, sender)(message))
 
   private def invalid(messageIdP: String, sender: Member)(

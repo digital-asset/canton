@@ -4,24 +4,19 @@
 package com.digitalasset.canton.synchronizer.block.update
 
 import com.digitalasset.canton.BaseTestWordSpec
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
-import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
 import scala.collection.immutable.SortedMap
 
 class InFlightAggregationsTest extends BaseTestWordSpec {
 
-  private def mkRule(senders: Seq[Member]): AggregationRule =
-    AggregationRule.testing(
-      eligibleSenders = NonEmpty.from(senders).value,
-      threshold = PositiveInt.one,
-      protocolVersion = testedProtocolVersion,
+  private def mkRule: AggregationRule =
+    AggregationRule.senderDedup(
+      protocolVersion = testedProtocolVersion
     )
 
   private def mkAggId(str: String) =
@@ -36,13 +31,13 @@ class InFlightAggregationsTest extends BaseTestWordSpec {
       val agg1 = InFlightAggregation.tryCreate(
         aggregatedSenders = SortedMap.empty,
         maxSequencingTimestamp = ts2,
-        rule = mkRule(Seq(DefaultTestIdentities.mediatorId)),
+        rule = mkRule,
       )
       val agg1Id = mkAggId("aaaa")
       val agg2 = InFlightAggregation.tryCreate(
         aggregatedSenders = SortedMap.empty,
         maxSequencingTimestamp = ts1,
-        rule = mkRule(Seq(DefaultTestIdentities.participant1)),
+        rule = mkRule,
       )
       val agg2Id = mkAggId("bbbb")
 

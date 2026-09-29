@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SyncCryptoError
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -25,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -82,6 +84,7 @@ class IssSegmentModule[E <: Env[E]](
     emptyBlockCreationTimeout: FiniteDuration,
     consensusEnableFlushingSegment: Boolean,
     consensusFlushingMinBlocks: Int,
+    windowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt],
     viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
@@ -409,14 +412,12 @@ class IssSegmentModule[E <: Env[E]](
           )
         }
         if (toRetransmit.commitCerts.nonEmpty) {
-          p2pNetworkOut.asyncSend(
-            P2PNetworkOut.send(
-              P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
-                Consensus.RetransmissionsMessage
-                  .RetransmissionResponse(epoch.currentMembership.myId, toRetransmit.commitCerts)
-              ),
-              destinationBftNodeId = from,
-            )
+          RetransmissionsManager.sendRetransmissionResponse(
+            p2pNetworkOut,
+            epoch.currentMembership.myId,
+            from,
+            toRetransmit.commitCerts,
+            windowSizeForRetransmissionOfCommitCertificates,
           )
         }
 

@@ -48,12 +48,15 @@ import org.apache.pekko.testkit.TestKit
 import org.apache.pekko.{Done, NotUsed}
 import org.scalacheck.Arbitrary
 import org.scalactic.Equality
+import org.scalactic.source.Position
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.matchers.dsl.MatcherFactory1
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.Span
+import org.slf4j.event.Level
 
+import java.io.IOException
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 import scala.annotation.tailrec
@@ -1139,6 +1142,7 @@ class PekkoUtilTest
               },
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
       firstFail.trySuccess(())
@@ -1175,6 +1179,7 @@ class PekkoUtilTest
         consumerFactory = _ => _ => consumerPromise.future.map(Future.successful(_)),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       Threading.sleep(10)
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
@@ -1203,6 +1208,7 @@ class PekkoUtilTest
         consumerFactory = _ => _ => outerPromise.future,
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       // Initiate shutdown while the outer Future is still pending. Because
       // initialization is in progress, the queue is not yet considered done.
@@ -1270,6 +1276,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1315,6 +1322,7 @@ class PekkoUtilTest
         consumerFactory = _ => _ => consumerPromise.future.map(Future.successful(_)),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1379,6 +1387,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.futureValue
       shutdownPromise.isCompleted shouldBe false
@@ -1429,6 +1438,7 @@ class PekkoUtilTest
             },
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
       shutdownPromise.isCompleted shouldBe false
@@ -1437,11 +1447,11 @@ class PekkoUtilTest
       shutdownPromise.isCompleted shouldBe false
       loggerFactory.assertEventuallyLogsSeq(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.LevelAndAbove(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.LevelAndAbove(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntries => {
-          logEntries should have size (3)
+          logEntries should have size 3
           logEntries.head.infoMessage should include(
             "Before shutting down, preventing further initialization retries"
           )
@@ -1451,12 +1461,13 @@ class PekkoUtilTest
           logEntries(2).debugMessage should include(
             "Consumer initialization is in progress, shutdown signal will be propagated to consumer"
           )
+
         },
       )
       // subsequent shutdown has no effect
       loggerFactory.assertLogs(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.Level(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.Level(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntry => logEntry.debugMessage should include("Already shutting down, nothing to do"),
@@ -1518,17 +1529,19 @@ class PekkoUtilTest
             },
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.firstSuccessfulConsumerInitialization.isCompleted shouldBe false
       isShuttingDownObserved.isCompleted shouldBe false
       // shutdown while consumer initialization is still in progress
       loggerFactory.assertEventuallyLogsSeq(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.LevelAndAbove(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.LevelAndAbove(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntries => {
-          logEntries should have size (3)
+          logEntries should have size 3
+
           logEntries.head.infoMessage should include(
             "Before shutting down, preventing further initialization retries"
           )
@@ -1570,6 +1583,7 @@ class PekkoUtilTest
           },
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       firstConsumerInitializationFailedPromise.future.futureValue
       Threading.sleep(10)
@@ -1578,11 +1592,11 @@ class PekkoUtilTest
       // shutdown should be interrupting the waiting for retry
       loggerFactory.assertEventuallyLogsSeq(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.LevelAndAbove(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.LevelAndAbove(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntries => {
-          logEntries should have size (3)
+          logEntries should have size 3
           logEntries.head.infoMessage should include(
             "Before shutting down, preventing further initialization retries"
           )
@@ -1597,7 +1611,7 @@ class PekkoUtilTest
       // subsequent shutdown has no effect
       loggerFactory.assertLogs(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.Level(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.Level(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntry => logEntry.debugMessage should include("Already shutting down, nothing to do"),
@@ -1637,6 +1651,7 @@ class PekkoUtilTest
           },
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       // info 1
       initializationStartedPromise.get().future.futureValue
@@ -1704,11 +1719,11 @@ class PekkoUtilTest
       // shutting down after initialization started, and waiting until the async shutdown finishes
       loggerFactory.assertEventuallyLogsSeq(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.LevelAndAbove(org.slf4j.event.Level.DEBUG)
+          SuppressionRule.LevelAndAbove(Level.DEBUG)
       )(
         recoveringQueue.shutdown(),
         logEntries => {
-          logEntries should have size (3)
+          logEntries should have size 3
           logEntries.head.infoMessage should include(
             "Before shutting down, preventing further initialization retries"
           )
@@ -1718,12 +1733,187 @@ class PekkoUtilTest
           logEntries(2).debugMessage should include(
             "Consumer initialization is in progress, shutdown signal will be propagated to consumer"
           )
+
         },
       )
       // error 3, but as shutting down, no more errors are reported
       initializationContinuePromise.get().trySuccess(())
       recoveringQueue.done.futureValue
       recoveringQueue.firstSuccessfulConsumerInitialization.failed.futureValue
+    }
+
+    "log INFO if the failure is a known, retryable error below threshold" in assertAllStagesStopped {
+      val initializationStartedPromise = new AtomicReference(Promise[Unit]())
+      val initializationContinuePromise = new AtomicReference(Promise[Throwable]())
+
+      val whitelistedError = new IOException("transient")
+      val otherError = new IndexOutOfBoundsException("other")
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 2,
+        bufferSize = 2,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 2,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = _ =>
+          _ => {
+            val f = initializationContinuePromise.get().future.map(throw _)
+            initializationStartedPromise.get().trySuccess(())
+            f
+          },
+        consumerName = "indexer",
+        healthStateChanged = () => (),
+        defaultLogLevelIsInfo = {
+          case e: IOException if e.getMessage == whitelistedError.getMessage => true
+          case _ => false
+        },
+      )
+
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
+        {
+          // matches pattern - info
+          initializationStartedPromise.get().future.futureValue
+          initializationStartedPromise.set(Promise())
+          initializationContinuePromise.getAndSet(Promise()).trySuccess(whitelistedError)
+        },
+        logs => {
+          logs should have size 2
+          logs.head.infoMessage should include("Consumer initialization failed (attempt #1)")
+          logs.head.throwable.value shouldBe whitelistedError
+          logs.last.infoMessage should include("Initializing consumer")
+        },
+      )
+
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+        {
+          // different error - warn
+          initializationStartedPromise.get().future.futureValue
+          initializationStartedPromise.set(Promise())
+          initializationContinuePromise.getAndSet(Promise()).trySuccess(otherError)
+        },
+        logs => {
+          logs.loneElement.warningMessage should include(
+            "Consumer initialization failed (attempt #2)"
+          )
+          logs.loneElement.throwable.value shouldBe otherError
+        },
+      )
+
+      loggerFactory.assertLogs(
+        {
+          // over the threshold - warn
+          initializationStartedPromise.get().future.futureValue
+          initializationStartedPromise.set(Promise())
+          initializationContinuePromise.getAndSet(Promise()).trySuccess(whitelistedError)
+        },
+        logEntry => {
+          logEntry.warningMessage should include("Consumer initialization failed (attempt #3)")
+          logEntry.throwable.value shouldBe whitelistedError
+        },
+      )
+
+      recoveringQueue.shutdown()
+      recoveringQueue.done.futureValue
+    }
+
+    "log WARN if the consumer terminates in unhealthy status" in assertAllStagesStopped {
+      val consumerDone = new AtomicReference[Promise[Done]](Promise.successful(Done))
+      val committedIndex = new AtomicLong(0)
+      val offerAttempts = new AtomicInteger(0)
+
+      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
+        maxBlockedOffer = 2,
+        bufferSize = 10,
+        loggerFactory = loggerFactory,
+        retryStategy = PekkoUtil.exponentialRetryWithCap(
+          minWait = 2,
+          multiplier = 2,
+          cap = 10,
+        ),
+        retryAttemptWarnThreshold = 2,
+        retryAttemptErrorThreshold = 200,
+        uncommittedWarnTreshold = 100,
+        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+        consumerFactory = commit =>
+          _ =>
+            Future.successful(Future {
+              val donePromise = Promise[Done]()
+              consumerDone.set(donePromise)
+              FutureQueueConsumer(
+                futureQueue = new FutureQueue[(Long, Int)] {
+                  override def offer(elem: (Long, Int)): Future[Done] =
+                    // fail the first two attempts
+                    if (offerAttempts.incrementAndGet() > 2) {
+                      commit(elem._1)
+                      committedIndex.set(elem._1)
+                      Future.successful(Done)
+                    } else {
+                      Future.never
+                    }
+
+                  override def shutdown(): Unit = donePromise.trySuccess(Done).discard
+
+                  override def done: Future[Done] = donePromise.future
+                },
+                fromExclusive = committedIndex.get(),
+              )
+            }),
+        consumerName = "indexer",
+        healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
+      )
+
+      // failing only succeeds for a consumer which is initialized and not terminated yet, so this
+      // waits for the next consumer, and then lets it fail
+      def failFreshConsumer(): Unit =
+        eventually()(consumerDone.get().tryFailure(new Exception("boom")) shouldBe true)
+
+      def failAndAssertLog(expectedLevel: Level)(implicit pos: Position): Unit =
+        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
+          failFreshConsumer(),
+          logs => {
+            logs.count(_.message == "Consumer terminated with a failure") shouldBe 1
+            forEvery(logs) { log =>
+              log.message match {
+                case "Consumer terminated with a failure" => log.level shouldBe expectedLevel
+                case "Initializing consumer..." | "Consumer initialized" => succeed
+                case other => fail(s"Unexpected log message: $other")
+              }
+            }
+          },
+        )
+
+      failAndAssertLog(Level.INFO)
+
+      // the consumer being initialised without uncommitted events, so it is healthy
+      // the even will not be committed on the first try
+      recoveringQueue.offer(1).futureValue
+      eventually()(offerAttempts.get() shouldBe 1)
+      always()(committedIndex.get() shouldBe 0L)
+      failAndAssertLog(Level.INFO)
+
+      // the consumer will restart as unhealthy due to uncommitted event,
+      // and the event will not be committed on the second try
+      eventually()(offerAttempts.get() shouldBe 2)
+      always()(committedIndex.get() shouldBe 0L)
+      failAndAssertLog(Level.WARN)
+
+      // the event will be committed on the third try, and the consumer will be healthy again
+      eventually() {
+        offerAttempts.get() shouldBe 3
+        committedIndex.get() shouldBe 1L
+      }
+      failAndAssertLog(Level.INFO)
+
+      recoveringQueue.shutdown()
+      recoveringQueue.done.futureValue
     }
 
     "consumer offer failure should trigger a warning and proper recovery" in assertAllStagesStopped {
@@ -1777,6 +1967,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1857,6 +2048,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -1939,6 +2131,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -2017,6 +2210,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -2096,6 +2290,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => false,
       )
       recoveringQueue.offer(1).futureValue
       recoveringQueue.offer(2).futureValue
@@ -2108,6 +2303,7 @@ class PekkoUtilTest
           offerGated.trySuccess(())
           recoveringQueue.done.futureValue
         },
+        _.warningMessage should include("Consumer terminated with a failure"),
         _.errorMessage should include(
           "Program error. The next uncommitted after recovery is not the next element."
         ),
@@ -2168,6 +2364,7 @@ class PekkoUtilTest
               }),
           consumerName = "indexer",
           healthStateChanged = () => (),
+          defaultLogLevelIsInfo = _ => true,
         )
         val testF = Future {
           val inputFixture = Iterator.iterate(1)(_ + 1).take(inputSize).toList
@@ -2200,7 +2397,7 @@ class PekkoUtilTest
 
       loggerFactory.assertLogsSeq(
         SuppressionRule.LoggerNameContains("RecoveringFutureQueueImpl") &&
-          SuppressionRule.Level(org.slf4j.event.Level.WARN)
+          SuppressionRule.Level(Level.WARN)
       )(
         Range
           .inclusive(
@@ -2209,14 +2406,18 @@ class PekkoUtilTest
           ) // high parallelism is not high load: this test is waiting most of the time
           .map(_ => Future(Range.inclusive(1, 2).foreach(_ => test())))
           .foreach(_.futureValue(PatienceConfiguration.Timeout(Span.Max))),
-        logentries =>
-          logentries.foldLeft(succeed) { case (_, entry) =>
-            if (entry.level == org.slf4j.event.Level.WARN) {
-              entry.warningMessage should include(
-                "blocked offer calls pending at the time of the shutdown. It is recommended that shutdown gracefully"
-              )
-            } else succeed
-          },
+        logentries => {
+          logentries.foldLeft(succeed) {
+            case (_, entry)
+                if entry.message.startsWith("Consumer initialization failed") ||
+                  entry.message.startsWith("Consumer terminated with a failure") ||
+                  entry.message.contains(
+                    "blocked offer calls pending at the time of the shutdown. It is recommended that shutdown gracefully"
+                  ) =>
+              entry.level shouldBe Level.WARN
+            case (_, entry) => fail(s"Unexpected log entry: $entry")
+          }
+        },
       )
     }
 
@@ -2270,6 +2471,7 @@ class PekkoUtilTest
             }),
         consumerName = "indexer",
         healthStateChanged = () => (),
+        defaultLogLevelIsInfo = _ => true,
       )
       val start = System.nanoTime()
       Iterator
@@ -2330,33 +2532,39 @@ class PekkoUtilTest
               ),
           consumerName = "indexer",
           healthStateChanged = healthStateCollector.listener,
+          defaultLogLevelIsInfo = _ => true,
         )
       ) { recoveringQueue =>
         healthStateCollector.attachTo(recoveringQueue)
 
         recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
-        recoveringQueue.offer(1).futureValue
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
-        healthStateCollector.clear()
-        recoveringQueue.offer(2).discard
-        recoveringQueue.offer(3).discard
-        recoveringQueue.offer(5).futureValue
-        eventually() {
-          recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
-          healthStateCollector.get.size should be >= 10
-        }
-        healthStateCollector.get should contain only ComponentHealthState.failed(
-          "Initializing indexer"
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          {
+            recoveringQueue.offer(1).futureValue
+            recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+            healthStateCollector.clear()
+            recoveringQueue.offer(2).discard
+            recoveringQueue.offer(3).discard
+            recoveringQueue.offer(5).futureValue
+            eventually() {
+              recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
+              healthStateCollector.get.size should be >= 10
+            }
+            healthStateCollector.get should contain only ComponentHealthState.failed(
+              "Initializing indexer"
+            )
+            shouldBreakOn5 = false
+            eventually() {
+              healthStateCollector.get.lastOption.value should equal(ComponentHealthState.Ok())
+              recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+            }
+          },
+          forEvery(_)(_.warningMessage shouldBe "Consumer terminated with a failure"),
         )
-        shouldBreakOn5 = false
-        eventually() {
-          healthStateCollector.get.lastOption.value should equal(ComponentHealthState.Ok())
-          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
-        }
       }
     }
 
-    "report unhealthy status intil indexer is initialized" in {
+    "report unhealthy status until indexer is initialized" in {
       val indexerReady = Promise[Done]()
       val indexerFinished = Promise[Done]()
 
@@ -2383,6 +2591,7 @@ class PekkoUtilTest
           consumerFactory = mockIndexerFactory,
           consumerName = "indexer",
           healthStateChanged = healthStateCollector.listener,
+          defaultLogLevelIsInfo = _ => true,
         )
       ) { recoveringQueue =>
         healthStateCollector.attachTo(recoveringQueue)
@@ -2419,6 +2628,7 @@ class PekkoUtilTest
             consumerFactory = _ => _ => Future.failed(new Exception("initialization failed")),
             consumerName = "indexer",
             healthStateChanged = healthStateCollector.listener,
+            defaultLogLevelIsInfo = _ => true,
           )
         ) { recoveringQueue =>
           healthStateCollector.attachTo(recoveringQueue)
@@ -2472,6 +2682,7 @@ class PekkoUtilTest
             consumerFactory = mockIndexerFactory,
             consumerName = "indexer",
             healthStateChanged = healthStateCollector.listener,
+            defaultLogLevelIsInfo = _ => true,
           )
         ) { recoveringQueue =>
           healthStateCollector.attachTo(recoveringQueue)
@@ -2515,6 +2726,7 @@ class PekkoUtilTest
             _ => Future.successful(Future.successful(FutureQueueConsumer[Int](futureQueueMock, 0))),
           consumerName = "indexer",
           healthStateChanged = healthStateCollector.listener,
+          defaultLogLevelIsInfo = _ => true,
         )
       ) { recoveringQueue =>
         healthStateCollector.attachTo(recoveringQueue)
@@ -2577,6 +2789,7 @@ class PekkoUtilTest
               ),
           consumerName = "indexer",
           healthStateChanged = healthStateCollector.listener,
+          defaultLogLevelIsInfo = _ => true,
         )
       ) { recoveringQueue =>
         healthStateCollector.attachTo(recoveringQueue)

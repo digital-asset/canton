@@ -61,6 +61,13 @@ inputs:
     description: Whether to run the GCP KMS setup helper before executing the crash-recovery suite.
     default: 'false'
     required: false
+  job_name:
+    description: >-
+      Distinct name of the calling leg (top-level workflow job), passed through to
+      cleanup_test_job to keep shard bundle artifacts from colliding when several legs share
+      github.job. Defaults to github.job when empty.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -106,6 +113,7 @@ runs:
         test_file: ${{ inputs.test_file }}
         timeout: 240m
         timings_file: ${{ inputs.timings_file }}
+        job_name: ${{ inputs.job_name }}
 
     - name: Pack external log files into single file
       if: always()
@@ -120,6 +128,6 @@ runs:
         monitor_pid: ${{ steps.run_sbt_tests.outputs.monitor_pid }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
         shard_index: ${{ inputs.shard_index }}
-        collect_postgres_query_stats: "true"
         report_to_datadog: "true"
+        job_name: ${{ inputs.job_name }}
         test_job_success: ${{ steps.run_sbt_tests.outcome == 'success' }}

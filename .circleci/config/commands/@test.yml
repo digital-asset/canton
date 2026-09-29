@@ -461,7 +461,6 @@ run_crash_recovery_tests:
       default: false
     protocol_version:
       type: string
-      default: ""
   steps:
     - set_canton_protocol_version:
         protocol_version: << parameters.protocol_version >>
@@ -481,8 +480,7 @@ run_crash_recovery_tests:
         name: Pack external log files into single file
         command: find log -name "external-*" | xargs --no-run-if-empty tar cvf log/all-external-jobs.tar
         when: always
-    - cleanup_test_job:
-        collect_postgres_query_stats: true
+    - cleanup_test_job
     - when:
         condition: << parameters.succeed_on_error >>
         steps:
@@ -517,7 +515,6 @@ set_canton_protocol_version:
   parameters:
     protocol_version:
       type: string
-      default: ""
   steps:
     - run:
         name: Set optionally specified protocol version
@@ -526,6 +523,13 @@ set_canton_protocol_version:
             echo "export CANTON_PROTOCOL_VERSION=<< parameters.protocol_version >>" >> $BASH_ENV
             echo "Canton will use protocol version << parameters.protocol_version >>"
           fi
+
+allow_automatic_protocol_version:
+  steps:
+    - run:
+        name: Set CANTON_AUTOMATIC_PROTOCOL_VERSION=1
+        command: |
+          echo "export CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> $BASH_ENV
 
 set_external_parties:
   steps:

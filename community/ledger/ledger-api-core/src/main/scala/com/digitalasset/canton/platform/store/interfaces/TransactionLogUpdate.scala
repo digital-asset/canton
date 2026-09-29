@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
-import com.digitalasset.canton.ledger.participant.state.{Reassignment, ReassignmentInfo, Update}
+import com.digitalasset.canton.ledger.participant.state.{ReassignmentInfo, Update}
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.EventSequentialId
 import com.digitalasset.canton.platform.{ContractId, Identifier}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
@@ -17,7 +17,12 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{PackageName, Party}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.value.Value as LfValue
+import com.digitalasset.daml.lf.transaction.{
+  CreationTime,
+  FatContractInstance,
+  GlobalKeyWithMaintainers,
+}
+import com.digitalasset.daml.lf.value.{Value, Value as LfValue}
 
 /** Generic ledger update event.
   *
@@ -60,6 +65,13 @@ object TransactionLogUpdate {
     * @param transactionHash
     *   Hash of the transaction (for externally signed transactions only)
     */
+
+  // using the FatContract Instance type from PersistentContractInstance
+  // these are the same instances in memory as we hold within the cache, so we can avoid copy
+  type FatContractInstanceWithCreatedAt = FatContractInstance {
+    type CreatedAtTime <: CreationTime.CreatedAt
+  }
+
   final case class TransactionAccepted(
       updateId: String,
       commandId: String,
@@ -91,6 +103,33 @@ object TransactionLogUpdate {
     )
   }
 
+  sealed trait ReassignmentEvent extends Product with Serializable {
+    val stakeholders: Set[Ref.Party]
+    val templateId: Ref.Identifier
+    val packageName: Ref.PackageName
+  }
+
+  final case class Assign(
+      reassignmentCounter: Long,
+      nodeId: Int,
+      contractId: Value.ContractId,
+      stakeholders: Set[Party],
+      templateId: Ref.Identifier,
+      packageName: Ref.PackageName,
+      createdContractInstance: FatContractInstanceWithCreatedAt,
+  ) extends ReassignmentEvent
+
+  final case class Unassign(
+      contractId: Value.ContractId,
+      templateId: Ref.Identifier,
+      packageName: Ref.PackageName,
+      stakeholders: Set[Ref.Party],
+      assignmentExclusivity: Option[Timestamp],
+      reassignmentCounter: Long,
+      nodeId: Int,
+      keyOpt: Option[GlobalKeyWithMaintainers],
+  ) extends ReassignmentEvent
+
   final case class ReassignmentAccepted(
       updateId: String,
       commandId: String,
@@ -99,7 +138,7 @@ object TransactionLogUpdate {
       recordTime: Timestamp,
       completionStreamResponseO: Option[CompletionStreamResponse],
       reassignmentInfo: ReassignmentInfo,
-      reassignment: Reassignment.Batch,
+      reassignment: Seq[ReassignmentEvent],
       synchronizerId: String,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
@@ -168,10 +207,8 @@ object TransactionLogUpdate {
       treeEventWitnesses: Set[Party],
       flatEventWitnesses: Set[Party],
       submitters: Set[Party],
-      createArgument: LfValue.VersionedValue,
-      createSignatories: Set[Party],
-      createObservers: Set[Party],
       authenticationData: Bytes,
+      createdContractInstance: FatContractInstanceWithCreatedAt,
   ) extends Event {
     def witnesses(transactionShape: TransactionShape): Set[Party] =
       transactionShape match {

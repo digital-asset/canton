@@ -39,11 +39,22 @@ FILTERED_METRICS_DATA="$(jq --slurp "
   " $TELEGRAF_METRICS_FILES)"
 
 query-metrics() {
+  # If FILTERED_METRICS_DATA is empty array or null, default directly to 0
+  if [[ -z "$FILTERED_METRICS_DATA" || "$FILTERED_METRICS_DATA" == "[]" || "$FILTERED_METRICS_DATA" == "null" ]] \
+       && [[ "${KNOWN_MISSING_TELEGRAF_METRICS:-false}" == "true" ]]; then
+    echo "0"
+    return 0
+  fi
+
   RESULT="$(jq "$1" <<<"$FILTERED_METRICS_DATA")"
 
   if [[ $RESULT == "null" ]] || [[ -z $RESULT ]]; then
-    echo "Missing telegraf data. Query: $1" >&2
-    kill -s TERM "$TOP_PID"
+    if [[ "${KNOWN_MISSING_TELEGRAF_METRICS:-false}" == "true" ]]; then
+      echo "0"
+    else
+      echo "Missing telegraf data. Query: $1" >&2
+      kill -s TERM "$TOP_PID"
+    fi
   else
     echo "$RESULT"
   fi
@@ -55,8 +66,10 @@ resource-usage-at() {
 
   query-metrics "
     map(select($LOWER_TS <= .timestamp and .timestamp <= $UPPER_TS and $2 and .fields.$3 != null)) |
-    max_by(.timestamp) |
-    .fields.$3"
+    if length == 0 then null else
+      max_by(.timestamp) |
+      .fields.$3
+    end"
 }
 
 summed-resource-usage-at() {
@@ -65,10 +78,12 @@ summed-resource-usage-at() {
 
   query-metrics "
     map(select($LOWER_TS <= .timestamp and .timestamp <= $UPPER_TS and $2 and .fields.$3 != null)) |
-    group_by(.timestamp) |
-    max_by(.[0].timestamp) |
-    map(.fields.$3) |
-    add"
+    if length == 0 then null else
+      group_by(.timestamp) |
+      max_by(.[0].timestamp) |
+      map(.fields.$3) |
+      add
+    end"
 }
 
 ### Disk usage per transaction

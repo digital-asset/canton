@@ -3,12 +3,20 @@
 
 package com.digitalasset.canton.platform.indexer.ha
 
+import cats.instances.future.*
+import cats.syntax.monadError.*
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LoggingContextWithTrace,
+  NamedLoggerFactory,
+  TracedLogger,
+}
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend
 import com.digitalasset.canton.platform.store.backend.DBLockStorageBackend.{Lock, LockId, LockMode}
+import com.digitalasset.canton.platform.store.dao.DatabaseSelfServiceError
 import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.KillSwitch
 
@@ -107,6 +115,10 @@ object HaCoordinator {
     val indexerLockId = storageBackend.lock(haConfig.indexerLockId)
     val indexerWorkerLockId = storageBackend.lock(haConfig.indexerWorkerLockId)
     val preemptableSequence = PreemptableSequence(timer, loggerFactory)
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext(logger, LoggingContextWithTrace.empty)
+
+    val adaptErrors = DatabaseSelfServiceError.adapt
 
     new HaCoordinator {
       override def protectedExecution(
@@ -133,87 +145,82 @@ object HaCoordinator {
         def acquireMainLock(connection: Connection, fromHealthCheck: Boolean = false): Unit =
           acquireLock(connection, indexerLockId, LockMode.Exclusive, fromHealthCheck).discard
 
-        preemptableSequence.executeSequence { sequenceHelper =>
-          import sequenceHelper.*
-          logger.info("Starting IndexDB HA Coordinator")
-          for {
-            mainConnection <- go[Connection](mainConnectionFactory())
-            _ = logger.debug("Step 1: creating main-connection - DONE")
-            _ = registerRelease {
-              logger.debug("Releasing main connection...")
-              mainConnection.close()
-              logger.debug("Step 8: Released main connection")
-              logger.info("Stepped down as leader, IndexDB HA Coordinator shut down")
-            }
-            _ = logger.info("Waiting to be elected as leader")
-            _ <- retry(
-              waitMillisBetweenRetries = haConfig.mainLockAcquireRetryTimeout.duration.toMillis,
-              maxAmountOfRetries = haConfig.mainLockAcquireMaxRetries.unwrap,
-              retryable = _.isInstanceOf[CannotAcquireLockException],
-            )(acquireMainLock(mainConnection))
-            _ = logger.info("Elected as leader: starting initialization")
-            _ = logger.info("Waiting for previous IndexDB HA Coordinator to finish work")
-            _ = logger.debug(
-              "Step 2: acquire exclusive Indexer Main Lock on main-connection - DONE"
-            )
-            exclusiveWorkerLock <- retry[Lock](
-              waitMillisBetweenRetries = haConfig.workerLockAcquireRetryTimeout.duration.toMillis,
-              maxAmountOfRetries = haConfig.workerLockAcquireMaxRetries.unwrap,
-              retryable = _.isInstanceOf[CannotAcquireLockException],
-            )(
-              acquireLock(
-                mainConnection,
-                indexerWorkerLockId,
-                LockMode.Exclusive,
+        preemptableSequence
+          .executeSequence { sequenceHelper =>
+            import sequenceHelper.*
+            logger.info("Starting IndexDB HA Coordinator")
+            (for {
+              mainConnection <- go[Connection](mainConnectionFactory())
+              _ = logger.debug("Step 1: creating main-connection - DONE")
+              _ = registerRelease {
+                logger.debug("Releasing main connection...")
+                mainConnection.close()
+                logger.debug("Step 8: Released main connection")
+                logger.info("Stepped down as leader, IndexDB HA Coordinator shut down")
+              }
+              _ = logger.info("Waiting to be elected as leader")
+              _ <- retry(
+                waitMillisBetweenRetries = haConfig.mainLockAcquireRetryTimeout.duration.toMillis,
+                maxAmountOfRetries = haConfig.mainLockAcquireMaxRetries.unwrap,
+                retryable = _.isInstanceOf[CannotAcquireLockException],
+              )(acquireMainLock(mainConnection))
+              _ = logger.info("Elected as leader: starting initialization")
+              _ = logger.info("Waiting for previous IndexDB HA Coordinator to finish work")
+              _ = logger.debug(
+                "Step 2: acquire exclusive Indexer Main Lock on main-connection - DONE"
               )
-            )
-            _ = logger.info(
-              "Previous IndexDB HA Coordinator finished work, starting DB connectivity polling"
-            )
-            _ = logger.debug(
-              "Step 3: acquire exclusive Indexer Worker Lock on main-connection - DONE"
-            )
-            _ <- go(storageBackend.release(exclusiveWorkerLock)(mainConnection))
-            _ = logger.debug(
-              "Step 4: release exclusive Indexer Worker Lock on main-connection - DONE"
-            )
-            mainLockChecker <- go[PollingChecker](
-              new PollingChecker(
-                periodMillis = haConfig.mainLockCheckerPeriod.duration.toMillis,
-                checkBody = acquireMainLock(mainConnection, fromHealthCheck = true),
-                killSwitch =
-                  handle.killSwitch, // meaning: this PollingChecker will shut down the main preemptableSequence
-                loggerFactory = loggerFactory,
+              exclusiveWorkerLock <- retry[Lock](
+                waitMillisBetweenRetries = haConfig.workerLockAcquireRetryTimeout.duration.toMillis,
+                maxAmountOfRetries = haConfig.workerLockAcquireMaxRetries.unwrap,
+                retryable = _.isInstanceOf[CannotAcquireLockException],
+              )(acquireLock(mainConnection, indexerWorkerLockId, LockMode.Exclusive))
+              _ = logger.info(
+                "Previous IndexDB HA Coordinator finished work, starting DB connectivity polling"
               )
-            )
-            _ = logger.debug(
-              "Step 5: activate periodic checker of the exclusive Indexer Main Lock on the main connection - DONE"
-            )
-            _ = registerRelease {
-              logger.debug(
-                "Releasing periodic checker of the exclusive Indexer Main Lock on the main connection..."
+              _ = logger.debug(
+                "Step 3: acquire exclusive Indexer Worker Lock on main-connection - DONE"
               )
-              logger.info("Stepping down as leader, stopping DB connectivity polling")
-              mainLockChecker.close()
-              logger.debug(
-                "Step 7: Released periodic checker of the exclusive Indexer Main Lock on the main connection"
+              _ <- go(storageBackend.release(exclusiveWorkerLock)(mainConnection))
+              _ = logger.debug(
+                "Step 4: release exclusive Indexer Worker Lock on main-connection - DONE"
               )
-            }
-            protectedHandle <- goF(initializeExecution { workerConnection =>
-              // this is the checking routine on connection creation
-              // step 1: acquire shared worker-lock
-              logger.debug(s"Preparing worker connection. Step 1: acquire lock.")
-              acquireLock(workerConnection, indexerWorkerLockId, LockMode.Shared).discard
-              // step 2: check if main connection still holds the lock
-              logger.debug(s"Preparing worker connection. Step 2: checking main lock.")
-              mainLockChecker.check()
-              logger.debug(s"Preparing worker connection DONE.")
-            })
-            _ = logger.debug("Step 6: initialize protected execution - DONE")
-            _ = logger.info("Elected as leader: initialization complete")
-            _ <- merge(protectedHandle)
-          } yield ()
-        }
+              mainLockChecker <- go[PollingChecker](
+                new PollingChecker(
+                  periodMillis = haConfig.mainLockCheckerPeriod.duration.toMillis,
+                  checkBody = acquireMainLock(mainConnection, fromHealthCheck = true),
+                  killSwitch =
+                    handle.killSwitch, // meaning: this PollingChecker will shut down the main preemptableSequence
+                  loggerFactory = loggerFactory,
+                )
+              )
+              _ = logger.debug(
+                "Step 5: activate periodic checker of the exclusive Indexer Main Lock on the main connection - DONE"
+              )
+              _ = registerRelease {
+                logger.debug(
+                  "Releasing periodic checker of the exclusive Indexer Main Lock on the main connection..."
+                )
+                logger.info("Stepping down as leader, stopping DB connectivity polling")
+                mainLockChecker.close()
+                logger.debug(
+                  "Step 7: Released periodic checker of the exclusive Indexer Main Lock on the main connection"
+                )
+              }
+              protectedHandle <- goF(initializeExecution { workerConnection =>
+                // this is the checking routine on connection creation
+                // step 1: acquire shared worker-lock
+                logger.debug(s"Preparing worker connection. Step 1: acquire lock.")
+                acquireLock(workerConnection, indexerWorkerLockId, LockMode.Shared).discard
+                // step 2: check if main connection still holds the lock
+                logger.debug(s"Preparing worker connection. Step 2: checking main lock.")
+                mainLockChecker.check()
+                logger.debug(s"Preparing worker connection DONE.")
+              })
+              _ = logger.debug("Step 6: initialize protected execution - DONE")
+              _ = logger.info("Elected as leader: initialization complete")
+              _ <- merge(protectedHandle)
+            } yield ()).adaptError(adaptErrors)
+          }
       }
     }
   }

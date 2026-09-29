@@ -21,13 +21,13 @@ inputs:
     description: Postgres username
     required: true
   image:
-    description: Postgres Docker image. When empty, defaults to the pinned query-stats image below.
+    description: Postgres Docker image.
     required: false
     default: ""
   enable-query-stats:
     description: Whether to start Postgres with the pg_store_plans/pg_stat_statements flags. Disable this for vanilla postgres images that lack those extensions.
     required: false
-    default: "true"
+    default: "false" # TODO(i29772): Enable by default to gather query stats
   initdb-mount-path:
     description: Action-relative path to directory mounted to /docker-entrypoint-initdb.d. If empty, no initdb directory is mounted.
     required: false
@@ -54,15 +54,22 @@ runs:
       shell: bash
       env:
         INPUT_IMAGE: ${{ inputs.image }}
+        ENABLE_QUERY_STATS: ${{ inputs.enable-query-stats }}
       run: |
         set -euo pipefail
 
-        # Single source of truth for the pinned image, kept in sync by hand (the build-image
-        # bump script only rewrites .circleci/config). Callers can override via the image input.
-        if [[ -n "$INPUT_IMAGE" ]]; then
-          image="$INPUT_IMAGE"
-        else
+        if [[ "$ENABLE_QUERY_STATS" == "true" ]]; then
+          if [[ -n "$INPUT_IMAGE" ]]; then
+            echo "Error: an explicit image ('$INPUT_IMAGE') was provided together with enable-query-stats=true." >&2
+            echo "The query-stats configuration requires the custom query-stats image, so these options are mutually exclusive." >&2
+            echo "Either drop the explicit image input or set enable-query-stats=false." >&2
+            exit 1
+          fi
+          # TODO(i36276): Bump to PG18
           image="digitalasset/query-stats-postgres:17-343483aee440"
+        else
+          # Single source of truth for the default vanilla image.
+          image="${INPUT_IMAGE:-postgres:18}"
         fi
 
         echo "Using Postgres image: $image"

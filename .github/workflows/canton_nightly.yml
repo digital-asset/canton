@@ -94,26 +94,27 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  unstable_test:
-    name: Unstable Test
+  unstable_test_36:
+    name: Unstable Test 36
     needs: [pick_runner, package_community]
     uses: ./.github/workflows/_unstable_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  test_with_java17:
-    name: Test With Java 17
+  test_36_with_java17:
+    name: Test 36 With Java 17
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       override_java_version_for_tests: "17"
-      protocol_version: ""
+      protocol_version: "36"
       job_name: test_with_java17
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_37:
+  test_37:
     name: Test Protocol Version 37
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_test.yml
@@ -121,16 +122,17 @@ jobs:
     with:
       override_java_version_for_tests: ""
       protocol_version: "37"
-      job_name: test_protocol_version_37
+      job_name: test_37
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  ledger_api_compatibility_tests:
+  ledger_api_compatibility_tests_36:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   protocol_continuity_test_all:
     name: Protocol Continuity Test All
@@ -140,13 +142,14 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  stability_crash_recovery_test:
+  stability_crash_recovery_test_36:
     name: Stability Crash Recovery Test
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   package_jsonapi:
     name: Package JSON API
@@ -168,23 +171,24 @@ jobs:
       is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  external_parties_test:
-    name: External Parties Test
+  external_parties_test_36:
+    name: External Parties Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_external_parties_test.yml
     secrets: inherit
     with:
       override_java_version_for_tests: ""
-      protocol_version: ""
+      protocol_version: "36"
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  nightly_integration_test:
-    name: Nightly Integration Test
+  nightly_integration_test_36:
+    name: Nightly Integration Test 36
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_nightly_integration_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   notify:
     name: Notify on Failure
@@ -197,16 +201,16 @@ jobs:
       - build_scaladoc
       - build_docs_snippets
       - build_docs
-      - unstable_test
-      - test_with_java17
-      - test_protocol_version_37
-      - ledger_api_compatibility_tests
+      - unstable_test_36
+      - test_36_with_java17
+      - test_37
+      - ledger_api_compatibility_tests_36
       - protocol_continuity_test_all
-      - stability_crash_recovery_test
+      - stability_crash_recovery_test_36
       - package_jsonapi
       - assembly_ledger_api_test_tool
-      - external_parties_test
-      - nightly_integration_test
+      - external_parties_test_36
+      - nightly_integration_test_36
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

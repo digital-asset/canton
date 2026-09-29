@@ -15,7 +15,11 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.ScalaDurationOps
 
-class Agenda(clock: SimClock, loggerFactory: NamedLoggerFactory) {
+class Agenda(
+    clock: SimClock,
+    private var timeForFaults: CantonTimestamp,
+    loggerFactory: NamedLoggerFactory,
+) {
   private val logger = loggerFactory.getLogger(getClass)
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -65,17 +69,27 @@ class Agenda(clock: SimClock, loggerFactory: NamedLoggerFactory) {
       command: Command,
       duration: FiniteDuration,
       priority: ScheduledCommand.Priority = ScheduledCommand.DefaultPriority,
+      onlyDuringFault: Boolean = false,
   ): Unit =
-    addOne(command, clock.now.plus(duration.toJava), priority)
+    addOne(command, clock.now.plus(duration.toJava), priority, onlyDuringFault)
 
   def addOne(
       command: Command,
       at: CantonTimestamp,
       priority: ScheduledCommand.Priority,
+      onlyDuringFault: Boolean,
   ): Unit = {
     require(at >= clock.now, s"$at >= ${clock.now}")
-    queue.addOne(ScheduledCommand(command, at, nextCommandSequencerNumber, priority))
-    updateCache(command, at, priority)
+    val atToUse = if (onlyDuringFault) {
+      require(
+        clock.now <= timeForFaults,
+        s"onlyDuringFault is true but current time ${clock.now} is after $timeForFaults",
+      )
+      at.min(timeForFaults)
+    } else at
+
+    queue.addOne(ScheduledCommand(command, atToUse, nextCommandSequencerNumber, priority))
+    updateCache(command, atToUse, priority)
     nextCommandSequencerNumber += 1
   }
 
@@ -132,6 +146,10 @@ class Agenda(clock: SimClock, loggerFactory: NamedLoggerFactory) {
       i.tickId != tickId
     case _ => true
   }
+
+  def setupNewStage(faultyDuration: FiniteDuration): Unit =
+    timeForFaults = clock.now.add(faultyDuration)
+
 }
 
 object Agenda {

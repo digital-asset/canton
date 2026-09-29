@@ -245,7 +245,7 @@ object TopologyTransaction
         supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
         _.toProtoV30,
       ),
-      // TODO(#35499): Switch to stable PV
+      // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
       ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.dev)(v31.TopologyTransaction)(
         supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
         _.toProtoV31,

@@ -497,7 +497,6 @@ trait IndexComponentLoadTestBase
         logger.warn(
           s"$action $current/$numOfUpdates, ${100L * current / numOfUpdates}% (since last: ${current - last}, $reportRate update/seconds) (avg: $avgRate update/seconds, estimated minutes left: $minutesLeft)..."
         )
-        reportMetric(s"$action current rate", reportRate.toFloat)
       }
     })
     Source
@@ -558,10 +557,6 @@ trait IndexComponentLoadTestBase
     ).discard
     val timeSpan = seconds(System.currentTimeMillis - startTime)
     logger.warn(s"Ingestion cycle completed in $timeSpan seconds")
-    reportMetric(
-      "ingestion cycle time seconds",
-      (System.currentTimeMillis - startTime) / 1000.0f,
-    )
     logAchsState()
   }
 

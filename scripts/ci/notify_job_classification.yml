@@ -11,21 +11,21 @@
 # `notify` and `canton_build_required_gate` are excluded (they report status, not
 # build health), like the guard excludes them from the aggregators' `needs`.
 test_jobs:
-  - test
-  - test_requires_external_kms
-  - sequential_test
-  - test_protocol_version_35
-  - test_protocol_version_35_requires_external_kms
-  - test_protocol_version_dev
-  - ledger_api_compatibility_tests
+  - test_36
+  - test_36_requires_external_kms
+  - sequential_test_36
+  - test_35
+  - test_35_requires_external_kms
+  - test_dev
+  - ledger_api_compatibility_tests_36
   - protocol_continuity_test_latest
   - smoke_test
   - test_data_continuity_dumps
-  - toxiproxy_test_fast
-  - toxiproxy_test_fast_requires_external_kms
-  - unstable_test
-  - variations_test
-  - variations_test_selected_users
+  - toxiproxy_test_fast_36
+  - toxiproxy_test_fast_36_requires_external_kms
+  - unstable_test_36
+  - variations_test_36
+  - variations_test_36_selected_users
 infra_jobs:
   - pick_runner
   - setup_and_validation
@@ -42,5 +42,5 @@ infra_jobs:
   - test_docker_images
   # Runs cleanup_test_job with report_to_datadog: false, so it never feeds the
   # flaky pipeline. Alert here, otherwise its failures would be silent.
-  - crash_recovery_test
-  - crash_recovery_test_requires_external_kms
+  - crash_recovery_test_36
+  - crash_recovery_test_36_requires_external_kms

@@ -107,6 +107,7 @@ final class PreIssConsensusModule[E <: Env[E]](
               metrics,
               loggerFactory,
               config.consensusEnableLogEndOfEpochProgress,
+              config.consensusWindowSizeForRetransmissionOfCommitCertificates,
               rateLimiterNanoTime = rateLimiterNanoTime,
             ),
             dependencies,

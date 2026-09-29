@@ -77,8 +77,7 @@ object SequencerMetaFactory {
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(
-      sequencerConfig: SequencerConfig,
-      producePostOrderingTopologyTicks: Boolean,
+      sequencerConfig: SequencerConfig
   )(implicit executionContext: ExecutionContextExecutor): SequencerFactory =
     sequencerConfig match {
       case databaseConfig: SequencerConfig.Database =>
@@ -160,7 +159,6 @@ object SequencerMetaFactory {
           config,
           publicApi,
           blockSequencerConfig,
-          producePostOrderingTopologyTicks,
           health,
           storage,
           protocolVersion,
@@ -178,7 +176,6 @@ object SequencerMetaFactory {
           SequencerDriver.DriverApiVersion,
           rawConfig,
           blockSequencerConfig,
-          producePostOrderingTopologyTicks,
           health,
           storage,
           protocolVersion,

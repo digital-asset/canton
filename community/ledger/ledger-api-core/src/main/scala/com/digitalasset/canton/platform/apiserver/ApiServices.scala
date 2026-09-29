@@ -144,6 +144,7 @@ object ApiServices {
     val maximumLedgerTimeService: MaximumLedgerTimeService = indexService
     val completionsService: IndexCompletionsService = indexService
     val partyManagementService: IndexPartyManagementService = indexService
+    val stateService: IndexStateService = indexService
 
     val (readServices, ledgerApiUpdateService) = {
       implicit val ec: ExecutionContext = queryExecutionContext
@@ -192,7 +193,7 @@ object ApiServices {
           new ApiStateService(
             acsService = activeContractsService,
             syncService = syncService,
-            updateService = updateService,
+            stateService = stateService,
             participantId = participantId,
             config = stateServiceConfig,
             metrics = metrics,
