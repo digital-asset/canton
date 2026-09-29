@@ -54,9 +54,6 @@ trait SequencerParameters {
   *   been delivered for mediators. On pv36, this is always enabled, for all nodes.
   * @param disableSubmissionChecksForTesting
   *   Whether to disable submission checks for testing purposes. This should only be used in tests.
-  * @param disableAggregationRuleSizeCheckForTesting
-  *   Whether to disable the aggregation rule size check for testing purposes. This should only be
-  *   used in tests.
   * @param disableReleaseVersionHandshakeCheck
   *   If set to true, then the sequencer will skip checking that the client binary aligns 100% with
   *   the server binary when the server is running an unstable protocol version.
@@ -81,10 +78,9 @@ final case class SequencerNodeParameters(
     delayRequestsBeforeLsuTrafficInit: Boolean,
     enableRejectDeliveredAggregationsOnPv35: Seq[String],
     disableSubmissionChecksForTesting: Boolean = false,
-    disableAggregationRuleSizeCheckForTesting: Boolean = false,
     lsuConfig: SequencerLsuConfig,
     disableReleaseVersionHandshakeCheck: Boolean = false,
-    enablePrevalidation: Boolean = true,
+    enablePrevalidation: Boolean = true, // can be removed in 3.7
     enableAsyncSequencerLogging: Boolean = false,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters

@@ -34,6 +34,10 @@ message ComponentStatus {
   message StatusData {
     optional string description = 1;
   }
+  // Optional metadata labels
+  // For participant nodes, it can be  "synchronizer" -> physical synchronizer id for components
+  // that exist once per connected synchronizer.
+  map<string, string> labels = 6;
 }
 
 message NotInitialized {

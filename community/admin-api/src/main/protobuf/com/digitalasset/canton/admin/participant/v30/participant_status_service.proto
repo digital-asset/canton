@@ -6,12 +6,18 @@ syntax = "proto3";
 package com.digitalasset.canton.admin.participant.v30;
 
 import "com/digitalasset/canton/admin/health/v30/status_service.proto";
+import "com/digitalasset/canton/topology/admin/v30/common.proto";
 
 service ParticipantStatusService {
   rpc ParticipantStatus(ParticipantStatusRequest) returns (ParticipantStatusResponse);
 }
 
-message ParticipantStatusRequest {}
+message ParticipantStatusRequest {
+  // If set, restricts the response to the given synchronizer: node-level components are always
+  // included, while connected synchronizers and synchronizer-labeled components are included only
+  // if they match. A logical synchronizer id matches all its physical instances.
+  optional com.digitalasset.canton.topology.admin.v30.Synchronizer synchronizer_id = 1;
+}
 
 message ConnectedSynchronizer {
   enum Health {

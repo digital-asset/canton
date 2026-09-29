@@ -26,17 +26,16 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   TransactionTreeConversionError,
 }
 import com.digitalasset.canton.participant.store.ContractLookup
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
   WithoutSuffixes,
 }
-import com.digitalasset.canton.protocol.{GenContractInstance, *}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractHasher
-import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -206,18 +205,6 @@ object TransactionTreeFactory {
       extends PrettyPrintingCompanion[MissingContractKeyLookupError] {
     override protected val pretty: Pretty[MissingContractKeyLookupError] =
       prettyOfClass(unnamedParam(_.key))
-  }
-
-  final case class ContractKeyResolutionError(error: LegacyTransactionErrors.KeyInputError)
-      extends TransactionTreeConversionError {
-    override def prettyCompanion: PrettyPrintingCompanion[ContractKeyResolutionError] =
-      ContractKeyResolutionError
-  }
-
-  object ContractKeyResolutionError extends PrettyPrintingCompanion[ContractKeyResolutionError] {
-    override protected val pretty: Pretty[ContractKeyResolutionError] = prettyOfClass(
-      unnamedParam(_.error)
-    )
   }
 
   final case class FailedToHashContact(error: String) extends TransactionTreeConversionError {

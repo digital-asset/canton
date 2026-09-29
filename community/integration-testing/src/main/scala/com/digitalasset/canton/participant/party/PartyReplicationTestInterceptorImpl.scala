@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.participant.party
 
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTestInterceptor,
-}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.SourceParticipantStore
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -16,7 +14,7 @@ class PartyReplicationTestInterceptorImpl extends PartyReplicationTestIntercepto
       traceContext: TraceContext
   ): PartyReplicationTestInterceptor.ProceedOrWait = PartyReplicationTestInterceptor.Proceed
 
-  override def onTargetParticipantProgress(progress: PartyReplicationStatus.AcsReplicationProgress)(
+  override def onTargetParticipantProgress(progress: AcsReplicationStatus.AcsReplicationProgress)(
       implicit traceContext: TraceContext
   ): PartyReplicationTestInterceptor.ProceedOrWait = PartyReplicationTestInterceptor.Proceed
 }
@@ -39,11 +37,11 @@ object PartyReplicationTestInterceptorImpl {
     * of the target participant store).
     */
   def targetParticipantProceedsIf(
-      canProceed: PartyReplicationStatus.AcsReplicationProgress => Boolean
+      canProceed: AcsReplicationStatus.AcsReplicationProgress => Boolean
   ): PartyReplicationTestInterceptorImpl =
     new PartyReplicationTestInterceptorImpl {
       override def onTargetParticipantProgress(
-          progress: PartyReplicationStatus.AcsReplicationProgress
+          progress: AcsReplicationStatus.AcsReplicationProgress
       )(implicit
           traceContext: TraceContext
       ): PartyReplicationTestInterceptor.ProceedOrWait = proceedIf(canProceed(progress))
@@ -53,11 +51,11 @@ object PartyReplicationTestInterceptorImpl {
     * the contents of the target participant store).
     */
   def targetParticipantEvaluates(
-      evaluate: PartyReplicationStatus.AcsReplicationProgress => PartyReplicationTestInterceptor.ProceedOrWait
+      evaluate: AcsReplicationStatus.AcsReplicationProgress => PartyReplicationTestInterceptor.ProceedOrWait
   ): PartyReplicationTestInterceptorImpl =
     new PartyReplicationTestInterceptorImpl {
       override def onTargetParticipantProgress(
-          progress: PartyReplicationStatus.AcsReplicationProgress
+          progress: AcsReplicationStatus.AcsReplicationProgress
       )(implicit
           traceContext: TraceContext
       ): PartyReplicationTestInterceptor.ProceedOrWait = evaluate(progress)

@@ -102,6 +102,10 @@ trait CantonSynchronizerNodeDeprecations {
           to = Seq("unsafe-sequencer-channel-support"),
         )
       )
+      override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
+        // removed as the feature is now always enabled and the flag is no longer needed (https://github.com/DACH-NY/canton/issues/30769)
+        DeprecatedConfigPath[String]("produce-post-ordering-topology-ticks", since = "3.7.0")
+      )
     }
 
   implicit val mediatorConfigReaderDeprecations: DeprecatedFieldsFor[MediatorConfig] =

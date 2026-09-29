@@ -5,7 +5,7 @@
 #
 
 ###############################################################################
-# Runs the nightly performance test to replay recorded events.
+# Runs the nightly performance test to replay the previously recorded events.
 ###############################################################################
 
 set -eu -o pipefail

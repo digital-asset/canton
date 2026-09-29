@@ -18,13 +18,13 @@ import com.digitalasset.canton.mediator.admin.v30
 import com.digitalasset.canton.mediator.admin.v30.SequencerConnectionServiceGrpc.SequencerConnectionService
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
+import com.digitalasset.canton.sequencing.client.RichSequencerClient
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
 import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnectionPool,
   SequencerConnectionPoolFactory,
 }
-import com.digitalasset.canton.sequencing.client.{RichSequencerClient, SequencerClient}
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   SequencerConnectionValidation,
@@ -159,7 +159,6 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       registry: CantonMutableHandlerRegistry,
       synchronizerConfigurationStore: MediatorSynchronizerConfigurationStore,
       connectionPoolFactory: SequencerConnectionPoolFactory,
-      sequencerClient: SequencerClient,
       tracingConfig: TracingConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -168,9 +167,9 @@ object GrpcSequencerConnectionService extends HasLoggerName {
       materializer: Materializer,
       traceContext: TraceContext,
   ): UpdateSequencerClient = {
-    val clientO = new AtomicReference[Option[RichSequencerClient]](None)
     implicit val namedLoggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
+    val clientO = new AtomicReference[Option[RichSequencerClient]](None)
     registry.addServiceU(
       SequencerConnectionService.bindService(
         new GrpcSequencerConnectionService(
@@ -234,7 +233,7 @@ object GrpcSequencerConnectionService extends HasLoggerName {
 
               _ <- EitherT.right(synchronizerConfigurationStore.saveConfiguration(newConfig))
             } yield (),
-          sequencerClient.logout _,
+          () => clientO.get().fold(EitherT.pure[FutureUnlessShutdown, Status](()))(_.logout()),
           loggerFactory,
         ),
         executionContext,

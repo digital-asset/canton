@@ -1015,6 +1015,7 @@ object BuildCommon {
         DamlProjects.executors,
         DamlProjects.`rs-grpc-bridge`,
         DamlProjects.`rs-grpc-pekko`,
+        DamlProjects.`testing-utils` % Test,
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,
@@ -1377,7 +1378,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
         libraryDependencies ++= Seq(
           testcontainers,
           testcontainers_postgresql,
@@ -1416,7 +1417,7 @@ object BuildCommon {
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
       )
 
     lazy val microbench = project
@@ -1428,7 +1429,7 @@ object BuildCommon {
         // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
         // by ensuring this task never runs in assembly plugin in debug mode.
         assembly / logLevel := Level.Info,
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.4.0",
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
         Compile / compile / wartremoverErrors ~= (_.filterNot(
           _.clazz == "com.digitalasset.canton.EnforceVisibleForTesting"
         )),

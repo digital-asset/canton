@@ -103,6 +103,14 @@ jobs:
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
           previous-timings-resolved: "true"
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Run latest protocol continuity tests
         uses: ./.github/actions/test/run_tests
         with:

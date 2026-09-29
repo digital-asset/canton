@@ -5,11 +5,13 @@ syntax = "proto3";
 
 package com.digitalasset.canton.participant.protocol.v30;
 
+import "com/digitalasset/canton/participant/protocol/v30/acs_replication.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
 import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 // The PartyReplicationStatus describes the various pieces of state of a party replication.
+// Persisted to DB via PendingOperationStore
 message PartyReplicationStatus {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
@@ -24,32 +26,6 @@ message PartyReplicationStatus {
     com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 7;
   }
 
-  // Sequencer channel agreement hasn't been proposed by target participant yet.
-  message AgreementNotProposed {}
-
-  // Sequencer channel agreement has been proposed by target participant but not yet accepted by source participant.
-  message AgreementProposed {}
-
-  // Agreement among participants to replicate the ACS via sequencer channel.
-  message AgreementExists {
-    // Daml admin workflow ACS replication contract id.
-    // required
-    string contract_id = 1;
-
-    // Agreement time as determined by the record time of the Daml admin workflow agreement.
-    // required
-    google.protobuf.Timestamp agreed_at = 2;
-
-    // Sequencer hosting the channel for ACS replication.
-    string sequencer_uid = 3;
-  }
-
-  // Sequencer channel agreement is not needed either because the ACS replication has been finished or it's file-based.
-  message AgreementNotNeeded {}
-
-  // Sequencer channel agreement has been archived because the ACS has been replicated.
-  message AgreementArchived {}
-
   // Authorization by party owners and target participant to onboard the party.
   message PartyReplicationAuthorization {
     // The timestamp at which the party onboarding authorization becomes effective
@@ -63,22 +39,6 @@ message PartyReplicationStatus {
     // - the party participates in Daml transactions according to its target participant hosting permission.
     // required
     bool is_onboarding_flag_cleared = 2;
-  }
-
-  // Progress of ACS replication.
-  message AcsReplicationProgress {
-    // Non negative running total (odometer)  of ACS contracts sent by the source or persisted by the target participant.
-    // required
-    uint64 processed_contract_count = 1;
-    // The next counter to use for persistence on the target participant
-    // required, not used and always -1 on the source participant
-    uint64 next_persistence_counter = 2;
-    // The homomorphic hash bytes of the portion of the ACS replicated so far
-    // optional, not present if and only if processed_contract_count is zero or for file-based replication
-    optional bytes acs_hash = 3;
-    // Whether replication has been fully processed the ACS.
-    // required
-    bool fully_processed_acs = 4;
   }
 
   // Progress of ACS indexing the Ledger Api.
@@ -120,34 +80,37 @@ message PartyReplicationStatus {
     string error_message = 2;
   }
 
+  // File-based or sequencer channel-based replication mode.
+  enum ReplicationMode {
+    REPLICATION_MODE_UNSPECIFIED = 0;
+    // File-based replication mode.
+    REPLICATION_MODE_FILE = 1;
+    // SequencerChannel-based replication mode.
+    REPLICATION_MODE_SEQUENCER_CHANNEL = 2;
+  }
+
   // Static party replication parameters.
   // required
   ReplicationParameters parameters = 1;
-  // Sequencer channel agreement.
-  // optional, set if there is an agreement to replicate the ACS via sequencer channel.
-  oneof agreement_status {
-    AgreementNotProposed not_proposed = 2;
-    AgreementProposed proposed = 3;
-    AgreementExists exists = 4;
-    AgreementNotNeeded not_needed = 5;
-    AgreementArchived archived = 6;
-  }
   // Topology authorization.
   // optional, set once the party onboarding has been authorized via topology.
-  PartyReplicationAuthorization authorization = 7;
+  PartyReplicationAuthorization authorization = 2;
   // ACS replication progress.
   // optional, set once the ACS replication has started.
-  AcsReplicationProgress replication = 8;
+  AcsReplicationStatus.AcsReplicationProgress replication = 3;
   // Indexing progress.
   // optional, set once indexing of the ACS has started.
-  AcsIndexingProgress indexing = 9;
+  AcsIndexingProgress indexing = 4;
   // Whether the party has been successfully replicated to the target participant,
   // i.e. whether party replication has succeeded and is done.
   // required
-  bool has_completed = 10;
+  bool has_completed = 5;
   // Error details.
   // optional, set when there is a transient or terminal error.
-  PartyReplicationError error_message = 11;
-  // TODO(#35267) use a separate AcsReplicationStatus message here and remove `AcsReplicationProgress replication = 8` above
-  PartyReplicationStatus acs_replication_status = 12;
+  PartyReplicationError error_message = 6;
+  // Status of the ACS replication progress.
+  // Optional, used for SequencerChannel-based replication.
+  AcsReplicationStatus acs_replication_status = 7;
+  // File-based or SequencerChannel-based replication mode.
+  ReplicationMode replication_mode = 8;
 }

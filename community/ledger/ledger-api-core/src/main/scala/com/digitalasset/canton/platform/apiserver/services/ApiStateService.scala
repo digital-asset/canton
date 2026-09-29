@@ -24,10 +24,11 @@ import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
   FormatValidator,
   ParticipantOffsetValidator,
+  StateServiceRequestValidator,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.{
-  IndexUpdateService,
+  IndexStateService,
   IndexActiveContractsService as ACSBackend,
 }
 import com.digitalasset.canton.ledger.participant.state.{SyncService, SynchronizerIndex}
@@ -57,7 +58,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ApiStateService(
     acsService: ACSBackend,
     syncService: SyncService,
-    updateService: IndexUpdateService,
+    stateService: IndexStateService,
     metrics: LedgerApiServerMetrics,
     participantId: LedgerParticipantId,
     config: StateServiceConfig,
@@ -154,7 +155,7 @@ final class ApiStateService(
       val pointer = nextPageOpt.map(_._2)
       val activeAtOffset = consolidatedActiveAt match {
         case Some(offset) => Some(offset)
-        case None => updateService.currentLedgerEnd().map(_.lastOffset)
+        case None => stateService.currentLedgerEnd().map(_.lastOffset)
       }
 
       for {
@@ -269,7 +270,7 @@ final class ApiStateService(
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
         synchronizerIds => {
-          val ledgerEnd = updateService.currentLedgerEnd()
+          val ledgerEnd = stateService.currentLedgerEnd()
           ledgerEnd match {
             case Some(end) =>
               val (unmatched, matched) = synchronizerIds
@@ -324,7 +325,7 @@ final class ApiStateService(
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
-    updateService
+    stateService
       .latestPrunedOffset()
       .map { prunedUptoInclusive =>
         GetLatestPrunedOffsetsResponse(
@@ -345,4 +346,38 @@ final class ApiStateService(
       .filter(_.nonEmpty)
       .map(workflowId => LoggingEntries(logging.workflowId(workflowId)))
       .getOrElse(LoggingEntries())
+
+  /** Translate syncrhonizer record time to an offset
+    */
+  override def convertRecordTimeToOffset(
+      request: ConvertRecordTimeToOffsetRequest
+  ): Future[ConvertRecordTimeToOffsetResponse] = {
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+
+    val synchronizerToIndexMap = stateService
+      .currentLedgerEnd()
+      .map(_.synchronizerIndices)
+      .getOrElse(Map())
+
+    StateServiceRequestValidator
+      .validateConvertRecordTimeToOffsetRequest(request, synchronizerToIndexMap)
+      .fold(
+        failure => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, failure)),
+        request =>
+          stateService
+            .highestOffsetBeforeOrFirstAt(request.synchronizerId, request.recordTime)
+            .flatMap {
+              case Some(offset) =>
+                Future.successful(ConvertRecordTimeToOffsetResponse(offset.unwrap))
+              case None =>
+                Future.failed(
+                  RequestValidationErrors.NotFound.RecordTime
+                    .Reject(request.synchronizerId, request.recordTime)
+                    .asGrpcError
+                )
+            },
+      )
+      .thereafter(logger.logErrorsOnCall[ConvertRecordTimeToOffsetResponse])
+  }
 }

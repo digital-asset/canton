@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationError.PackageIdUnknownOrUnvetted
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.PackageIdUnknownOrUnvetted
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient

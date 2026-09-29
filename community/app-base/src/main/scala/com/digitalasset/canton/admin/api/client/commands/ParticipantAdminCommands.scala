@@ -2927,8 +2927,9 @@ object ParticipantAdminCommands {
   }
 
   object Health {
-    final case class ParticipantStatusCommand()
-        extends GrpcAdminCommand[
+    final case class ParticipantStatusCommand(
+        synchronizerId: Option[Synchronizer] = None
+    ) extends GrpcAdminCommand[
           v30.ParticipantStatusRequest,
           v30.ParticipantStatusResponse,
           admin.NodeStatus[admin.ParticipantStatus],
@@ -2946,7 +2947,7 @@ object ParticipantAdminCommands {
         service.participantStatus(request)
 
       override protected def createRequest(): Either[String, v30.ParticipantStatusRequest] = Right(
-        v30.ParticipantStatusRequest()
+        v30.ParticipantStatusRequest(synchronizerId = synchronizerId.map(_.toProtoV30))
       )
 
       override protected def handleResponse(

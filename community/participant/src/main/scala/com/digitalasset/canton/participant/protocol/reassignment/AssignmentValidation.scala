@@ -33,6 +33,7 @@ import com.digitalasset.canton.participant.store.ReassignmentStore.{
 }
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.Target
@@ -138,6 +139,7 @@ private[reassignment] class AssignmentValidation(
         assignmentRequest,
       )
       _ <- EitherT.fromEither(ReassignmentValidation.checkStakeholders(assignmentRequest))
+
     } yield ()
 
     for {
@@ -171,15 +173,38 @@ private[reassignment] class AssignmentValidation(
           .value
           .map(_.swap.toOption)
 
+      packageVettingResult <- checkTargetPackagesVetted(
+        parsedRequest.fullViewTree,
+        parsedRequest.snapshot.ipsSnapshot,
+      )
+
     } yield AssignmentValidationResult.CommonValidationResult(
       activenessResult = activenessResult,
       participantSignatureVerificationResult = participantSignatureVerificationResult,
       contractAuthenticationResultF = contractAuthenticationResultF,
+      packageVettingResult = packageVettingResult,
       submitterCheckResult = submitterCheckResult,
       reassignmentIdResult = reassignmentIdResult,
       multiSynchronizerFeatureFlagCheckResult = multiSynchronizerCheckResult,
     )
   }
+
+  private def checkTargetPackagesVetted(
+      fullTree: FullAssignmentTree,
+      targetTopology: TopologySnapshot,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[ReassignmentValidationError]] =
+    ReassignmentValidation
+      .checkPackagesVetted(
+        stakeholders = fullTree.contracts.stakeholders,
+        contractIds = fullTree.contracts.contractIds.toSet,
+        packageIds = fullTree.contracts.targetPackageIds.unwrap,
+        topologySnapshot = targetTopology,
+        synchronizerId = fullTree.targetSynchronizer.unwrap,
+      )
+      .value
+      .map(_.swap.toOption)
 
   def performValidationForReassigningParticipants(
       parsedRequest: ParsedReassignmentRequest[FullAssignmentTree],

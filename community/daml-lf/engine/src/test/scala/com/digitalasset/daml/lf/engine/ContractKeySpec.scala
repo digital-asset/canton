@@ -19,7 +19,7 @@ import com.digitalasset.daml.lf.data.Ref.{
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error.Interpretation as IErr
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
-import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
 import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
@@ -48,6 +48,9 @@ import java.util.zip.ZipInputStream
 import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 
+class ContractKeySpecUpdateMachine extends ContractKeySpec(ExecutionMode.UpdateMachine)
+class ContractKeySpecConductor extends ContractKeySpec(ExecutionMode.Conductor)
+
 @SuppressWarnings(
   Array(
     "org.wartremover.warts.Any",
@@ -55,7 +58,7 @@ import scala.language.implicitConversions
     "org.wartremover.warts.Product",
   )
 )
-class ContractKeySpec
+abstract class ContractKeySpec(executionMode: ExecutionMode)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
@@ -67,7 +70,8 @@ class ContractKeySpec
   private[this] val version = SerializationVersion.minContractKeys
   private[this] val contractIdVersion = ContractIdVersion.V2
 
-  private[this] val suffixLenientEngine = Engine.DevEngine(loggerFactory)
+  private[this] val suffixLenientEngine =
+    new Engine(Engine.DevConfig.copy(executionMode = executionMode), loggerFactory)
   private[this] val compiledPackages = ConcurrentCompiledPackages(
     suffixLenientEngine.config.getCompilerConfig
   )

@@ -9,10 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTopologyWorkflow,
-}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -65,15 +62,15 @@ class AcsReplicationTopologyWorkflow(
     *   authorized
     */
   private[party] def verifyOnboardingTopology(
-      params: PartyReplicationStatus.ReplicationParams,
+      params: AcsReplicationStatus.AcsReplicationParameters,
       connectedSynchronizer: ConnectedSynchronizer,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Option[(EffectiveTime, PositiveInt)]] = {
     val topologyContext =
       PartyReplicationTopologyWorkflow.SynchronizerTopologyContext(connectedSynchronizer)
-    val PartyReplicationStatus
-      .ReplicationParams(
+    val AcsReplicationStatus
+      .AcsReplicationParameters(
         requestId,
         partyId,
         _,
@@ -122,14 +119,14 @@ class AcsReplicationTopologyWorkflow(
     * change conflicts with party replication.
     */
   private def verifyAuthorizedTopology(
-      params: PartyReplicationStatus.ReplicationParams,
+      params: AcsReplicationStatus.AcsReplicationParameters,
       partyToParticipantTopologyPartyAdded: StoredTopologyTransaction[
         TopologyChangeOp.Replace,
         PartyToParticipant,
       ],
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val PartyReplicationStatus
-      .ReplicationParams(
+    val AcsReplicationStatus
+      .AcsReplicationParameters(
         requestId,
         partyId,
         _,

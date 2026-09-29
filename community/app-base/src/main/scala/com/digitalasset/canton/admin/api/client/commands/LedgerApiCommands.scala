@@ -129,6 +129,8 @@ import com.daml.ledger.api.v2.reassignment_commands.{
 }
 import com.daml.ledger.api.v2.state_service.StateServiceGrpc.StateServiceStub
 import com.daml.ledger.api.v2.state_service.{
+  ConvertRecordTimeToOffsetRequest,
+  ConvertRecordTimeToOffsetResponse,
   GetActiveContractsRequest,
   GetActiveContractsResponse,
   GetConnectedSynchronizersRequest,
@@ -192,7 +194,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
-import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
+import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -2416,6 +2418,30 @@ object LedgerApiCommands {
           response: GetLedgerEndResponse
       ): Either[String, Long] =
         Right(response.offset)
+    }
+
+    final case class ConvertRecordTimeToOffset(
+        synchronizerId: SynchronizerId,
+        recordTime: CantonTimestamp,
+    ) extends BaseCommand[
+          ConvertRecordTimeToOffsetRequest,
+          ConvertRecordTimeToOffsetResponse,
+          Offset,
+        ] {
+      override protected def submitRequest(
+          service: StateServiceStub,
+          request: ConvertRecordTimeToOffsetRequest,
+      ): Future[ConvertRecordTimeToOffsetResponse] = service.convertRecordTimeToOffset(request)
+      override protected def createRequest(): Either[String, ConvertRecordTimeToOffsetRequest] =
+        Right(
+          ConvertRecordTimeToOffsetRequest(
+            Some(recordTime.toProtoTimestamp),
+            synchronizerId.toProtoPrimitive,
+          )
+        )
+      override protected def handleResponse(
+          response: ConvertRecordTimeToOffsetResponse
+      ): Either[String, Offset] = Right(Offset.tryFromLong(response.offset))
     }
 
     final case class GetConnectedSynchronizers(partyId: Option[LfPartyId])

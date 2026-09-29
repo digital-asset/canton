@@ -16,7 +16,11 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
+import com.digitalasset.canton.console.{
+  CommandFailure,
+  LocalParticipantReference,
+  ParticipantReference,
+}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,12 +35,13 @@ import com.digitalasset.canton.integration.tests.security.SecurityTestHelpers
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound
-import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.UnvettedPackages
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.protocol.ContractInstance
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
 import com.digitalasset.canton.protocol.messages.{LocalApprove, Verdict}
@@ -52,10 +57,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.{LfPackageId, config}
+import com.digitalasset.canton.{LfPackageId, SynchronizerAlias, config}
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.scalatest.Assertion
+import org.slf4j.event.Level
 
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -426,6 +432,18 @@ sealed trait PackageVettingIntegrationTest
 
       // Let participant2 maliciously unassign the contract from da.
 
+      def search(
+          participant: LocalParticipantReference,
+          alias: SynchronizerAlias,
+      ): Option[ContractInstance] =
+        participant.testing
+          .acs_search(
+            alias,
+            exactId = iouId,
+            limit = PositiveInt.one,
+          )
+          .headOption
+
       val helpers = ReassignmentDataHelpers(
         contract = iouInstance,
         sourceSynchronizer = Source(daId),
@@ -464,35 +482,92 @@ sealed trait PackageVettingIntegrationTest
 
       val unassignment = events.unassignments(participant2).futureValue.loneElement
 
-      participant2.testing
-        .acs_search(daName, exactId = iouId, limit = PositiveInt.one) shouldBe empty
+      search(participant2, daName) shouldBe None
 
       // Let p2 assign the contract to acme.
 
-      logger.info("Assigning contract to acme...")
+      // An attempt to assign this contract fails because the package is not vetted on participant4
+      def tryAssign(assertion: Seq[LogEntry] => Assertion): Unit =
+        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+          participant2.ledger_api.commands.submit_assign_async(
+            participant2.adminParty,
+            unassignment.reassignmentId,
+            daId,
+            acmeId,
+          ),
+          assertion,
+        )
 
-      loggerFactory.assertLogs(
-        participant2.ledger_api.commands.submit_assign(
-          participant2.adminParty,
-          unassignment.reassignmentId,
-          daId,
-          acmeId,
-          timeout = None,
+      logger.info("Attempting to assign contract to acme")
+      tryAssign { le =>
+        val entry = le.loneElement
+        entry.shouldBeCantonErrorCode(ModelConformance)
+        entry.mdc("participant") shouldBe "participant2"
+        entry.warningMessage should include regex "synchronizer2::.*Participant PAR::participant4.*has not vetted "
+      }
+
+      logger.info("Maliciously attempting to assign contract to acme")
+      replacingConfirmationResponses(
+        participant2,
+        sequencer2,
+        acmeId,
+        withLocalVerdict(
+          LocalApprove(testedProtocolVersion),
+          _ => Set(participant2.adminParty.toLf),
         ),
-        // participant4 complains due to missing package
-        _.shouldBeCantonErrorCode(ModelConformance),
-      )
+      ) {
+        tryAssign { le =>
+          val entry = le.filter(_.mdc("participant").contains("participant4")).loneElement
+          entry.shouldBeCantonErrorCode(ModelConformance)
+          entry.warningMessage should include regex "contract authentication failure for.*MissingPackage"
+
+          // Warnings from malicious participant2
+          le.count(_.mdc("participant").contains("participant2")) shouldBe 3
+        }
+
+        // Now load the dar into participant4, that will allow contract authentication, but do not vet it.
+        participant4.dars.upload(
+          CantonTestsPath,
+          vetAllPackages = false,
+          synchronizeVetting = false,
+          synchronizerId = acmeId,
+        )
+
+        tryAssign { le =>
+          val entry = le.filter(_.mdc("participant").contains("participant4")).loneElement
+          entry.shouldBeCantonErrorCode(ModelConformance)
+          entry.warningMessage should include regex "synchronizer2.*Participant PAR::participant4::.*has not vetted"
+
+          // Warnings from malicious participant2
+          le.count(_.mdc("participant").contains("participant2")) shouldBe 3
+
+        }
+
+      }
+
+      // The unassigned contract is not assigned to acme so is in limbo (the malicious party's problem).
+      search(participant2, acmeName) shouldBe None
+      search(participant4, acmeName) shouldBe None
 
       // Both participants remain responsive.
       assertPingSucceeds(participant2, participant4)
 
-      // The contract is active for participant2 (as well as any honest participant who has vetted the package), but not for participant4.
-      // Hence, there is a ledger fork!
-      participant2.testing
-        .acs_search(acmeName, exactId = iouId, limit = PositiveInt.one)
-        .loneElement
-      participant4.testing
-        .acs_search(acmeName, exactId = iouId, limit = PositiveInt.one) shouldBe empty
+      // Now load the dar into participant4 to allow the assignment
+      participant4.dars.upload(
+        CantonTestsPath,
+        vetAllPackages = true,
+        synchronizeVetting = true,
+        synchronizerId = acmeId,
+      )
+
+      tryAssign(le => le shouldBe empty)
+
+      // The contracts are now assigned
+      eventually() {
+        search(participant2, acmeName).isDefined shouldBe true
+        search(participant4, acmeName).isDefined shouldBe true
+      }
+
   }
 
   "The topology manager" when {

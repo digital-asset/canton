@@ -11,15 +11,10 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
   SequencerConnections,
 }
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
-import com.digitalasset.canton.console.{
-  CommandFailure,
-  LocalParticipantReference,
-  ParticipantReference,
-}
-import com.digitalasset.canton.crypto.TestHash
+import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.EnvironmentDefinition.buildBaseEnvironmentDefinition
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -32,23 +27,16 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.lifecycle.UnlessShutdown
-import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.protocol.RootHash
-import com.digitalasset.canton.protocol.messages.{
-  DefaultOpenEnvelope,
-  EmptyRootHashMessagePayload,
-  RootHashMessage,
-}
+import com.digitalasset.canton.sequencing.client.SendResult
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
-import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
-import org.slf4j.event.Level
 
 import java.time.Duration
 import scala.concurrent.Promise
@@ -58,27 +46,26 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
     extends CommunityIntegrationTest
     with SharedEnvironment
     with OnboardsNewSequencerNode
-    with ReliabilityTestSuite {
+    with ReliabilityTestSuite
+    with InFlightAggregationTestHelper {
 
   protected val synchronizerInitializationTimeout: Duration = Duration.ofSeconds(20)
   implicit private val metricsContext: MetricsContext = MetricsContext.Empty
 
   /** Hook for allowing sequencer integrations to adjust the base test config */
-  protected def additionalConfigTransforms: ConfigTransform =
-    ConfigTransforms.identity
+  protected def additionalConfigTransforms: ConfigTransform = ConfigTransforms.identity
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     buildBaseEnvironmentDefinition(
       numParticipants = 3,
       numSequencers = 2,
-      numMediators = 1,
+      numMediators = 2,
     ).withNetworkBootstrap { implicit env =>
-      new NetworkBootstrapper(EnvironmentDefinition.S1M1)
+      new NetworkBootstrapper(EnvironmentDefinition.S1M2)
     }.addConfigTransforms(
       ConfigTransforms.setExitOnFatalFailures(false),
-      ConfigTransforms.updateAllSequencerConfigs_(
-        _.focus(_.parameters.disableAggregationRuleSizeCheckForTesting).replace(true)
-      ),
+      _.focus(_.parameters.timeouts.processing.sequencerInfo)
+        .replace(NonNegativeDuration.ofSeconds(5)),
     )
 
   private def modifyConnection(
@@ -95,10 +82,11 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
   }
 
   private var aggregationSequenced2: CantonTimestamp = _
+  private var requestId: CantonTimestamp = _
   private var maxSequencingTimeOfAggregation: CantonTimestamp = _
-  private var aggregatedBatch: Batch[DefaultOpenEnvelope] = _
-  private var aggregationRule1: AggregationRule = _
-  private var aggregationRule2: AggregationRule = _
+
+  private val aggregationRule: AggregationRule =
+    AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)
 
   s"using an environment with 2 $name sequencer nodes and a synchronizer configured with only one of them" should {
     "bootstrap a synchronizer and have ping working" in { implicit env =>
@@ -109,53 +97,31 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       participant1.health.ping(participant3, timeout = 30.seconds)
     }
 
-    def sequencerClientOf(
-        participant: LocalParticipantReference,
-        synchronizerId: SynchronizerId,
-    ): SequencerClient =
-      participant.underlying.value.sync
-        .readyConnectedSynchronizerById(synchronizerId)
-        .value
-        .sequencerClient
-
     "setup in-flight aggregation" in { implicit env =>
       import env.*
 
-      val p1SequencerClient = sequencerClientOf(participant1, daId)
+      val (m1SequencerClient, m1Crypto) = sequencerClientAndCryptoApiOf(mediator1)
 
-      // First aggregation will remain in-flight while we switch sequencers
-      aggregationRule1 = AggregationRule.testing(
-        NonEmpty(Seq, participant1.id, participant3.id),
-        PositiveInt.tryCreate(2),
-        testedProtocolVersion,
-      )
       val now = environment.now
+      requestId = now
       maxSequencingTimeOfAggregation = now.add(
         Duration.ofMinutes(2)
       ) // cannot exceed the DynamicSynchronizerParameters.sequencerAggregateSubmissionTimeout (defaults to 5m)
-      aggregatedBatch = Batch.of(
-        testedProtocolVersion,
-        RootHashMessage(
-          RootHash(TestHash.digest(1)),
-          daId,
-          TransactionViewType,
-          CantonTimestamp.Epoch,
-          EmptyRootHashMessagePayload,
-        ) -> Recipients.cc(mediator1.id),
-      )
 
+      // First aggregation will remain in-flight while we switch sequencers
       TraceContext.withNewTraceContext("agg1") { implicit traceContext =>
         logger.debug("Sending aggregation 1 part 1")
         val send1ResultPromise = Promise[UnlessShutdown[SendResult]]()
-        p1SequencerClient
+
+        m1SequencerClient
           .send(
-            aggregatedBatch,
+            createAggregationResultMessage(m1Crypto, 1, requestId),
             timestamps = SendRequestTimestamps(
               topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
-            aggregationRule = Some(aggregationRule1),
+            aggregationRule = Some(aggregationRule),
             callback = send1ResultPromise.success,
           )
           .valueOrFailShutdown("send aggregation 1 part 1")
@@ -164,40 +130,36 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       }
 
       // Second aggregation is delivered before we switch sequencers, but must be deduplicated afterwards
-      aggregationRule2 = AggregationRule.testing(
-        NonEmpty(Seq, participant1.id, participant3.id),
-        PositiveInt.tryCreate(2),
-        testedProtocolVersion,
-      )
-      val p3SequencerClient = sequencerClientOf(participant3, daId)
+
+      val (m2SequencerClient, m2Crypto) = sequencerClientAndCryptoApiOf(mediator2)
       TraceContext.withNewTraceContext("agg2") { implicit traceContext =>
         logger.debug("Sending aggregation 2 part 1")
         val send2ResultPromise = Promise[UnlessShutdown[SendResult]]()
-        val send2 = p1SequencerClient
+        val send2 = m1SequencerClient
           .send(
-            Batch.empty(testedProtocolVersion),
+            createAggregationResultMessage(m1Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
               topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
             messageId = MessageId.tryCreate("aggregation-2-part-1a"),
-            aggregationRule = Some(aggregationRule2),
+            aggregationRule = Some(aggregationRule),
             callback = send2ResultPromise.success,
           )
           .valueOrFailShutdown("send aggregation 2 part 1a")
 
         val send3ResultPromise = Promise[UnlessShutdown[SendResult]]()
-        val send3 = p3SequencerClient
+        val send3 = m2SequencerClient
           .send(
-            Batch.empty(testedProtocolVersion),
+            createAggregationResultMessage(m2Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
               topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
             messageId = MessageId.tryCreate("aggregation-2-part-1b"),
-            aggregationRule = Some(aggregationRule2),
+            aggregationRule = Some(aggregationRule),
             callback = send3ResultPromise.success,
           )
           .valueOrFailShutdown("send aggregation 2 part 1b")
@@ -219,12 +181,13 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
     "bootstrap command be idempotent and have no effect if called again" in { implicit env =>
       import env.*
       val newSynchronizerId = bootstrap.synchronizer(
-        EnvironmentDefinition.S1M1.synchronizerName,
-        EnvironmentDefinition.S1M1.sequencers,
-        EnvironmentDefinition.S1M1.mediators,
-        synchronizerOwners = EnvironmentDefinition.S1M1.synchronizerOwners,
-        synchronizerThreshold = EnvironmentDefinition.S1M1.synchronizerThreshold,
+        EnvironmentDefinition.S1M2.synchronizerName,
+        EnvironmentDefinition.S1M2.sequencers,
+        EnvironmentDefinition.S1M2.mediators,
+        synchronizerOwners = EnvironmentDefinition.S1M2.synchronizerOwners,
+        synchronizerThreshold = EnvironmentDefinition.S1M2.synchronizerThreshold,
         staticSynchronizerParameters = EnvironmentDefinition.defaultStaticSynchronizerParameters,
+        mediatorThreshold = EnvironmentDefinition.S1M2.mediatorThreshold,
       )
       newSynchronizerId shouldBe daId
       participant1.health.ping(participant1, timeout = 30.seconds)
@@ -253,9 +216,37 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       // sequencer2.stop()
       // sequencer2.start()
 
+      // do a self ping to check if seq2 is functional
+      participant1.health.ping(participant1)
+
+    }
+
+    "reconnect p1 with threshold=2 and ensure seq2 works" in { implicit env =>
+      import env.*
+      // we'll connect p2 with threshold=2 so we'll catch ledger forks
+      val (config, _, _) = participant1.synchronizers.list_registered().loneElement
+      participant1.synchronizers.modify(
+        config.synchronizerAlias,
+        _.copy(sequencerConnections =
+          SequencerConnections.tryMany(
+            sequencers.local.map(_.sequencerConnection),
+            sequencerTrustThreshold = PositiveInt.two,
+            sequencerLivenessMargin = NonNegativeInt.zero,
+          )
+        ),
+      )
+      participant1.synchronizers.disconnect_all()
+      participant1.synchronizers.reconnect_all()
+      val (config2, _, _) = participant1.synchronizers.list_registered().loneElement
+      assertResult(2)(config2.sequencerConnections.connections.size)
+      participant1.health.ping(participant1)
+    }
+
+    "connect new participant2 and ensure newly onboarded sequencer works" in { implicit env =>
+      import env.*
+
       participant2.synchronizers.connect_local(sequencer2, daName)
       participant1.health.ping(participant2, timeout = 30.seconds)
-
       // restarting the new node after some activity is also an important scenario to check
       sequencer2.stop()
       sequencer2.start()
@@ -295,24 +286,27 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
 
     "new sequencer correctly aggregates existing in-flight submissions" in { implicit env =>
       import env.*
-      // participant3 now talks to the newly onboarded sequencer
 
-      val p3SequencerClient = sequencerClientOf(participant3, daId)
+      // switch over m2 to seq2
+      val conn2 = sequencer2.sequencerConnection
+      mediator2.sequencer_connection.set(SequencerConnections.single(conn2))
+      mediator2.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn2))
+
+      val (m2SequencerClient, m2Crypto) = sequencerClientAndCryptoApiOf(mediator2)
       TraceContext.withNewTraceContext("agg1_2") { implicit traceContext =>
         logger.debug("Sending aggregation 1 part 2")
         val send1ResultPromise = Promise[UnlessShutdown[SendResult]]()
-        // This should deliver the bogus root hash message to mediator1
-        // When the mediator switches below to the other sequencer,
-        // we'd see a ledger fork if the sequencers disagreed on the delivery of this event.
-        p3SequencerClient
+        // This should deliver the bogus reject verdict from the first aggregation
+        // or produce a ledger fork if seq2 is inconsistent
+        m2SequencerClient
           .send(
-            aggregatedBatch,
+            createAggregationResultMessage(m2Crypto, 1, requestId),
             timestamps = SendRequestTimestamps(
               topologyTimestamp = None,
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
-            aggregationRule = Some(aggregationRule1),
+            aggregationRule = Some(aggregationRule),
             callback = send1ResultPromise.success,
           )
           .valueOrFailShutdown("send aggregation 1 part 2")
@@ -324,15 +318,15 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       TraceContext.withNewTraceContext("agg2_2") { implicit traceContext =>
         logger.debug("Sending aggregation 2 part 2")
         val send2ResultPromise = Promise[UnlessShutdown[SendResult]]()
-        p3SequencerClient
+        m2SequencerClient
           .send(
-            Batch.empty(testedProtocolVersion),
+            createAggregationResultMessage(m2Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
               topologyTimestamp = None,
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
-            aggregationRule = Some(aggregationRule2),
+            aggregationRule = Some(aggregationRule),
             callback = send2ResultPromise.success,
           )
           .valueOrFailShutdown("send aggregation 2 part 2")
@@ -365,45 +359,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       }
     }
 
-    // TODO(#14573): this documents a bug and is ignored for the normal tests
-    "mediator cannot change sequencer due to a connection due to a tombstoned subscription" ignore {
-      implicit env =>
-        // This situation happens due to the sequencer client requesting the last event from the sequencer when connecting
-        // and comparing it with the last event it got before. Due to a tombstone the sequencer counter will not match the
-        // last received event and is expected to produce an exception while connecting
-        import env.*
-
-        val conn1 = sequencer1.sequencerConnection
-        mediator1.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn1))
-
-        val conn2 = sequencer2.sequencerConnection
-        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-          {
-            mediator1.sequencer_connection.set(SequencerConnections.single(conn2))
-            mediator1.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn2))
-          },
-          logs => {
-            inside(logs) {
-              case x if x.exists(_.message.contains("InvalidCounter")) => succeed
-            }
-            inside(logs) {
-              case x
-                  if x.exists(
-                    _.message.contains("Closing resilient sequencer subscription due to error")
-                  ) =>
-                succeed
-            }
-          },
-        )
-        mediator1.sequencer_connection.set(SequencerConnections.single(conn1))
-        mediator1.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn1))
-        // without stop/start mediator remain non-functional as SequencersTransportState is in the shutdown state
-        mediator1.stop()
-        mediator1.start()
-
-        participant1.health.ping(participant2, timeout = 30.seconds)
-    }
-
     "reconnect participant3 to sequencer 1" in { implicit env =>
       logger.debug("reconnect participant3 to sequencer 1")
       import env.*
@@ -411,31 +366,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       modifyConnection(participant3, daName, sequencer1.sequencerConnection)
 
       participant3.health.ping(participant1, timeout = 30.seconds)
-    }
-
-    // TODO(#16245): Reincarnate this, currently doesn't work due to sequencer connection aliases and BFT sequencer transport change not being supported
-    "mediator can change sequencer connection" ignore { implicit env =>
-      import env.*
-
-      // needed to prevent the mediator from getting a tombstone on re-connection reading the last message
-      participant1.health.ping(participant3, timeout = 30.seconds)
-
-      val conn1 = sequencer1.sequencerConnection
-      mediator1.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn1))
-
-      val conn2 = sequencer2.sequencerConnection
-      mediator1.sequencer_connection.set(SequencerConnections.single(conn2))
-      mediator1.sequencer_connection.get() shouldBe Some(SequencerConnections.single(conn2))
-      participant1.health.ping(participant2, timeout = 30.seconds)
-
-      mediator1.sequencer_connection.modify_connections(
-        _.addEndpoints(SequencerAlias.Default, conn1).value
-      )
-
-      mediator1.sequencer_connection.get() shouldBe Some(
-        SequencerConnections.single(SequencerConnection.merge(Seq(conn2, conn1)).value)
-      )
-      participant1.health.ping(participant2, timeout = 30.seconds)
     }
 
     "participant 3 can eventually change the connection to sequencer 2" in { implicit env =>

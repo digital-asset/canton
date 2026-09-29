@@ -6,7 +6,7 @@ on:
         default: ""
         type: string
       protocol_version:
-        default: ""
+        required: true
         type: string
       runner:
         required: true
@@ -71,32 +71,15 @@ jobs:
         with:
           shard-index: ${{ matrix.shard }}
 
-      - name: Set Canton Protocol Version
-        if: inputs.protocol_version != ''
-        env:
-          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
-        run: |
-          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
-          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
-        shell: bash
-
       - name: Set external parties test mode
         shell: bash
         run: |
           echo "CANTON_TEST_EXTERNAL_PARTIES=true" >> "$GITHUB_ENV"
           echo "Canton will use external parties for capable tests"
 
-      - name: Prepare test inputs and timings
-        uses: ./.github/actions/test/prepare_test_inputs_with_timings
-        with:
-          timings-artifact-name: ${{ github.job }}-timings-latest
-          timings-path: ${{ github.job }}/.timings
-          github-token: ${{ github.token }}
-
       - name: Run Ordinary Tests
         uses: ./.github/actions/test/run_ordinary_tests
         with:
-          collect_postgres_query_stats: "true"
           execution_context_size: "8"
           exclude_unstable_tests: "true"
           num_test_buckets: "12"
@@ -106,6 +89,7 @@ jobs:
           shard_index: ${{ matrix.shard }}
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
+          protocol_version: ${{ inputs.protocol_version }}
 
       - name: Stop Postgres container
         if: always()
@@ -121,4 +105,4 @@ jobs:
     with:
       caller_job: external_parties_test
       runner: ${{ inputs.runner }}
-      protocol_version: ''
+      protocol_version: ${{ inputs.protocol_version }}

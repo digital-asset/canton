@@ -21,6 +21,8 @@ LATE_EVENT_PERCENTILE="$2"
 load-metrics() {
 	local metric_file="$1"
 	local prefix="$2"
+	# Note: 'flt' is evaluated as a Python regular expression (re.search).
+	# If filtering with literal special regex characters like '.', '?', or '*', keep in mind they are evaluated as regex patterns.
 	local flt="${3:-}"
 	local calc_time="${4:-}"
 
@@ -29,6 +31,8 @@ load-metrics() {
 	if [[ "$prefix" == *SEQUENCER* && "${KNOWN_MISSING_SEQUENCER_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
 	elif [[ "$prefix" == *MEDIATOR* && "${KNOWN_MISSING_MEDIATOR_METRICS:-false}" == "true" ]]; then
+		is_known_missing_metrics="true"
+	elif [[ "$prefix" == *PARTICIPANT* && "${KNOWN_MISSING_PARTICIPANT_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
 	elif [[ "$prefix" == *FAILED_TRADER* && "${KNOWN_MISSING_FAILED_TRADER_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
@@ -53,12 +57,13 @@ load-metrics() {
 	eval "$(read-csv-metric.py "$METRICS_DIR/$metric_file" "$prefix" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt" "$calc_time")"
 }
 
-load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX "measurement=canton.transactions-emitted"
+# Note: the third parameter, is a regex string
+load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX "measurement=canton\.transactions-emitted"
 # the indexer metrics include many events, but we are only interested in the indexer event updates
 load-metrics "participant1.daml.participant.api.indexer.events.csv" "UPDATES" "PerformanceTest" "calc_test_time"
 load-metrics participant1.synchronizer.daml.sequencer-client.handler.sequencer-events.csv PARTICIPANT_EVENTS
 load-metrics mediator.daml.sequencer-client.handler.sequencer-events.csv MEDIATOR_EVENTS
-load-metrics canton.performance.failed.csv FAILED_TRADER1 "role=participant1-trader1"
+load-metrics canton.performance.failed.csv FAILED_TRADER1 "role=(participant1-trader1|0Trad)"
 
 # Starting point for general throughput measurements
 # shellcheck disable=SC2034

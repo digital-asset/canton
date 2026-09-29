@@ -563,7 +563,8 @@ trait LedgerApiParticipantPruningTest
       logger.info("Waited 5 seconds")
 
       loggerFactory.assertLogsSeq(
-        SuppressionRule.Level(event.Level.INFO) &&
+        SuppressionRule.LevelAndAbove(event.Level.WARN) ||
+          SuppressionRule.Level(event.Level.INFO) &&
           SuppressionRule.LoggerNameContains("ParallelIndexerSubscription")
       )(
         within = {
@@ -575,11 +576,16 @@ trait LedgerApiParticipantPruningTest
           reassignmentF.futureValue
         },
         assertion = logs => {
-          val logMessages: Set[String] = logs.map(_.message).toSet
-          logMessages.contains(
+          val (infoLogs, warnLogs) = logs.partition(_.level == event.Level.INFO)
+          val infoMessages = infoLogs.map(_.message)
+          infoMessages should contain(
             "Found 1 missing contracts during indexing. Likely because pruning. Restarting indexer to recover the missing contracts."
-          ) shouldBe true
-          logMessages.contains("Needed to re-insert 1 contracts during indexing.") shouldBe true
+          )
+          infoMessages should contain("Needed to re-insert 1 contracts during indexing.")
+          warnLogs.loneElement.warningMessage should include("Consumer terminated with a failure")
+          warnLogs.loneElement.throwable.value.getMessage should include(
+            "Restarting indexer due to attempt to store events relying on missing internal contract IDs."
+          )
         },
       )
 

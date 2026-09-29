@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.modelbased
 
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachineGenerativeSpec
+import com.digitalasset.daml.lf.transaction.ContractStateMachineGenerativeSpec
 
 import scala.concurrent.duration.DurationInt
 
-class NextGenContractStateMachineGenerativeSpecLarge
-    extends NextGenContractStateMachineGenerativeSpec(
+class ContractStateMachineGenerativeSpecLarge
+    extends ContractStateMachineGenerativeSpec(
       sampleSize = 30,
       maxSamples = Int.MaxValue,
       timeout = 10.minutes,

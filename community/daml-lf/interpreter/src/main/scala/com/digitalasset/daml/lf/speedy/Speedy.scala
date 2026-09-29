@@ -22,6 +22,7 @@ import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
+import com.google.common.annotations.VisibleForTesting
 
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.ArraySeq
@@ -370,46 +371,52 @@ private[lf] object Speedy {
     ): Control[Question.Update] =
       throw SError.Crash(location, "unexpected update machine in cmd context")
 
-    /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or re-thrown by
-      * the builtin SBTryHandler. If a rollback of an effectful node is attempted, we error out with
-      * the rollback error. If a catch-handler is found, we initiate execution of the handler code
-      * (which might decide to re-throw). Otherwise we call unhandledException to apply the message
-      * function to the exception payload, producing a text message.
+    /** throwException is called when an exception is thrown by the builtin SBThrow;
+      * lookForNextHandler is called when it is re-thrown by the builtin SBTryHandler. If a rollback
+      * of an effectful node is attempted, we error out with the rollback error. If a catch-handler
+      * is found, we initiate execution of the handler code (which might decide to re-throw).
+      * Otherwise we call unhandledException to apply the message function to the exception payload,
+      * producing a text message.
       */
-    private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] = {
+    private[speedy] override def throwException(excep: SValue.SAny): Control[Nothing] = {
+      // Capture the throw site before unwinding rewrites ptx while passing non-catching handlers.
+      pendingThrowContext = Some(ptx)
+      lookForNextHandler(excep)
+    }
+
+    private[speedy] override def lookForNextHandler(excep: SValue.SAny): Control[Nothing] = {
       @tailrec
-      def unwind(
-          ptx: PartialTransaction
-      ): Control[Nothing] =
+      def unwind(): Control[Nothing] =
         if (kontDepth() == 0) {
           unhandledException(excep)
         } else {
           popKont() match {
             case handler: KTryCatchV1Handler[Question.Update] =>
-              // The machine's ptx is updated even if the handler does not catch the exception.
-              // This may cause the transaction trace to report the error from the handler's location.
-              // Ideally we should embed the trace into the exception directly.
               ptx.rollbackTry match {
                 case Left(rollbackErr) =>
                   abort()
                   Control.Error(rollbackErr)
                 case Right(newPtx) =>
-                  this.ptx = newPtx
+                  ptx = newPtx
                   handler.restore()
                   popTempStackToBase()
                   pushEnv(excep) // payload on stack where handler expects it
                   Control.Expression(handler.handler)
               }
             case KCloseExercise =>
-              unwind(ptx.abortExercises)
+              ptx = ptx.abortExercises
+              unwind()
             case KPreventException =>
               unhandledException(excep)
             case _ =>
-              unwind(ptx)
+              unwind()
           }
         }
-      unwind(ptx)
+      unwind()
     }
+
+    private[speedy] override def exceptionCaught(): Unit =
+      pendingThrowContext = None
 
     /** Tracks the lower and upper bounds on the ledger time for a given Daml interpretation run. At
       * any point during interpretation, the interpretation up to then is invariant for any ledger
@@ -493,6 +500,10 @@ private[lf] object Speedy {
 
     private[speedy] var lastCommand: Option[Command] = None
 
+    // Partial transaction snapshot at the throw site of the exception currently in flight, so
+    // transactionTrace starts where it was thrown rather than where unwinding stopped.
+    private[this] var pendingThrowContext: Option[PartialTransaction] = None
+
     def transactionTrace(numOfCmds: Int): String = {
       def prettyTypeId(typeId: TypeConId): String =
         s"${typeId.packageId.take(8)}:${typeId.qualifiedName}"
@@ -503,7 +514,7 @@ private[lf] object Speedy {
         val _ = stringBuilder.addAll("    ").addAll(s).addAll("\n")
       }
 
-      val traceIterator = ptx.transactionTrace
+      val traceIterator = pendingThrowContext.getOrElse(ptx).transactionTrace
 
       traceIterator
         .take(numOfCmds)
@@ -549,6 +560,7 @@ private[lf] object Speedy {
     private val iterationsBetweenInterruptions: Long = 10000
 
     @throws[SError.InterpretationError]
+    @VisibleForTesting
     def apply(
         compiledPackages: CompiledPackages,
         preparationTime: Time.Timestamp,
@@ -637,7 +649,12 @@ private[lf] object Speedy {
       throw SError.Crash(location, "unexpected pure machine in cmd")
 
     /** Pure Machine does not handle exceptions */
-    private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
+    private[speedy] override def throwException(excep: SValue.SAny): Control[Nothing] =
+      lookForNextHandler(excep)
+
+    private[speedy] override def exceptionCaught(): Unit = ()
+
+    private[speedy] override def lookForNextHandler(excep: SValue.SAny): Control[Nothing] =
       unhandledException(excep)
 
     @nowarn("msg=dead code following this construct")
@@ -683,7 +700,14 @@ private[lf] object Speedy {
 
     private[this] val hasGasBudget = initialGasBudget.isDefined
 
-    private[speedy] def handleException(excep: SValue.SAny): Control[Q]
+    // Fresh-throw entry: subclasses may record the throw site before handling.
+    private[speedy] def throwException(excep: SValue.SAny): Control[Q]
+
+    // Unwinds the kont stack to the next try-catch handler; runs it or reports it unhandled.
+    private[speedy] def lookForNextHandler(excep: SValue.SAny): Control[Q]
+
+    // Called when a try-catch handler catches an exception; subclasses may drop recorded state.
+    private[speedy] def exceptionCaught(): Unit
 
     private[speedy] def trace(message: String): Unit = logger.trace(message, getLastLocation)
     private[speedy] def warn(message: String): Unit = logger.warn(message, getLastLocation)
@@ -936,6 +960,9 @@ private[lf] object Speedy {
               case Control.Expression(exp) =>
                 control = exp.execute(this)
                 loop()
+              case Control.Suspend(thunk) =>
+                control = thunk()
+                loop()
               case Control.Question(res) =>
                 SResultQuestion(res)
               case Control.Complete(value: SValue) =>
@@ -1073,6 +1100,8 @@ private[lf] object Speedy {
         logger: MachineLogger,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
         profile: Profile = newProfile,
+        onThrow: () => Unit = () => (),
+        onCatch: () => Unit = () => (),
     ): CmdMachine =
       new CmdMachine(
         sexpr = expr,
@@ -1080,6 +1109,8 @@ private[lf] object Speedy {
         profile = profile,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         logger = logger,
+        onThrow = onThrow,
+        onCatch = onCatch,
       )
 
     @throws[PackageNotFound]
@@ -1112,6 +1143,7 @@ private[lf] object Speedy {
     @throws[CompilationError]
     // Construct a machine for running an update expression, only used for
     // testing
+    @VisibleForTesting
     private[lf] def fromUpdateSExpr(
         compiledPackages: CompiledPackages,
         transactionSeed: crypto.Hash,
@@ -1231,6 +1263,10 @@ private[lf] object Speedy {
       override val profile: Profile,
       override val iterationsBetweenInterruptions: Long,
       logger: MachineLogger,
+      // The CmdMachine has no ptx; it only signals throw/catch so the owner (the
+      // TransactionConductor) can snapshot its own ptx at the throw site.
+      onThrow: () => Unit = () => (),
+      onCatch: () => Unit = () => (),
   ) extends Machine[Question.Cmd](
         costModel = CostModel.Empty,
         initialGasBudget = None,
@@ -1250,7 +1286,14 @@ private[lf] object Speedy {
     ): Control[Question.Cmd] =
       f(this)
 
-    private[speedy] override def handleException(excep: SValue.SAny): Control[Question.Cmd] = {
+    private[speedy] override def throwException(excep: SValue.SAny): Control[Question.Cmd] = {
+      onThrow()
+      lookForNextHandler(excep)
+    }
+
+    private[speedy] override def exceptionCaught(): Unit = onCatch()
+
+    private[speedy] override def lookForNextHandler(excep: SValue.SAny): Control[Question.Cmd] = {
       @tailrec
       def unwind(): Control[Question.Cmd] =
         if (kontDepth() == 0) {
@@ -1279,13 +1322,14 @@ private[lf] object Speedy {
   object Control {
     final case class Value(v: SValue) extends Control[Nothing]
     final case class Expression(e: SExpr) extends Control[Nothing]
+    final case class Suspend[Q](thunk: () => Control[Q]) extends Control[Q]
     final case class Question[Q](res: Q) extends Control[Q]
     final case class Complete(res: SValue) extends Control[Nothing]
     final case class Error(err: interpretation.Error) extends Control[Nothing]
     final case object WeAreUnset extends Control[Nothing]
 
     implicit object `Defer Control` extends cats.Defer[Control] {
-      override def defer[A](x: => Control[A]): Control[A] = x
+      override def defer[A](x: => Control[A]): Control[A] = Suspend(() => x)
     }
   }
 

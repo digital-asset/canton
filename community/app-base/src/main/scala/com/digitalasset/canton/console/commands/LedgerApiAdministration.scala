@@ -104,7 +104,7 @@ import com.digitalasset.canton.console.{
   RemoteParticipantReference,
 }
 import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
-import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
+import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
@@ -1648,6 +1648,17 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.StateService.LedgerEnd(Seq())
+          )
+        }
+
+      @Help.Summary("Find offset for a synchronizer record time")
+      def offsetForRecordTime(
+          synchronizerId: SynchronizerId,
+          recordTime: CantonTimestamp,
+      ): Offset =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.StateService.ConvertRecordTimeToOffset(synchronizerId, recordTime)
           )
         }
 

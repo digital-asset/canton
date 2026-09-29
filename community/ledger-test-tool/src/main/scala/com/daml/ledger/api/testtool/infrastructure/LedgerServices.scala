@@ -146,6 +146,8 @@ import com.daml.ledger.api.v2.package_service.{
 }
 import com.daml.ledger.api.v2.state_service.StateServiceGrpc.StateService
 import com.daml.ledger.api.v2.state_service.{
+  ConvertRecordTimeToOffsetRequest,
+  ConvertRecordTimeToOffsetResponse,
   GetActiveContractsPageRequest,
   GetActiveContractsPageResponse,
   GetActiveContractsRequest,
@@ -629,6 +631,22 @@ private final class LedgerServicesJson(
     ): Future[GetLatestPrunedOffsetsResponse] =
       clientCall(JsStateService.getLastPrunedOffsetsEndpoint, ())
 
+    /** Translate syncrhonizer record time to an offset
+      */
+    override def convertRecordTimeToOffset(
+        request: ConvertRecordTimeToOffsetRequest
+    ): Future[ConvertRecordTimeToOffsetResponse] =
+      clientCall(
+        JsStateService.convertRecordTimeToOffset,
+        (
+          request.recordTime.getOrElse(
+            sys.error(
+              s"Mandatory record_time parameter was not supplied in  ${classOf[ConvertRecordTimeToOffsetRequest].getSimpleName}"
+            )
+          ),
+          Some(request.synchronizerId),
+        ),
+      )
   }
 
   def partyManagement: PartyManagementService = new PartyManagementService {

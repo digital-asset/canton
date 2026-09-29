@@ -219,7 +219,7 @@ manual_protocol_continuity_tests:
         requires:
           - compile
 
-manual_ledger_api_compatibility_tests:
+manual_ledger_api_compatibility_test_36:
   when:
     and:
       - equal: [ ledger-api-compatibility-test, << pipeline.parameters.manual_job >> ]
@@ -233,7 +233,9 @@ manual_ledger_api_compatibility_tests:
           - azure-self-cache
           - maven-mirror
           - da-images
-    - ledger_api_compatibility_tests:
+    - ledger_api_compatibility_test:
+        name: ledger_api_compatibility_test_36
+        protocol_version: "36"
         context:
           - datadog
           - artifactory
@@ -272,6 +274,8 @@ manual_toxiproxy_slow_test:
     # Included so that we have a way of manually running all slow toxiproxy tests.
     # It's a bit of a hack, as the job may also run tests no related to toxiproxy.
     - unstable_test_slow:
+        name: unstable_test_slow_36
+        protocol_version: "36"
         context:
           - datadog
           - artifactory
@@ -352,9 +356,9 @@ manual_topology_chaos_test:
         requires:
           - print_tests
 
-manual_test_protocol_version_36:
+manual_test_pv_36:
   when:
-    equal: [ test-protocol-version-36, << pipeline.parameters.manual_job >> ]
+    equal: [ test-36, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -364,7 +368,7 @@ manual_test_protocol_version_36:
           - maven-mirror
           - da-images
     - test:
-        name: test_protocol_version_36
+        name: test_36
         protocol_version: "36"
         context:
           - datadog
@@ -380,9 +384,9 @@ manual_test_protocol_version_36:
         requires:
           - compile
 
-manual_test_protocol_version_37:
+manual_test_pv_37:
   when:
-    equal: [ test-protocol-version-37, << pipeline.parameters.manual_job >> ]
+    equal: [ test-37, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -392,7 +396,7 @@ manual_test_protocol_version_37:
           - maven-mirror
           - da-images
     - test:
-        name: test_protocol_version_37
+        name: test_37
         protocol_version: "37"
         context:
           - datadog
@@ -408,9 +412,9 @@ manual_test_protocol_version_37:
         requires:
           - compile
 
-manual_test_protocol_version_dev:
+manual_test_pv_dev:
   when:
-    equal: [ test-protocol-version-dev, << pipeline.parameters.manual_job >> ]
+    equal: [ test-dev, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -420,7 +424,7 @@ manual_test_protocol_version_dev:
           - maven-mirror
           - da-images
     - test:
-        name: test_protocol_version_dev
+        name: test_dev
         protocol_version: "dev"
         context:
           - datadog
@@ -800,6 +804,8 @@ manual_nightly_integration_test:
           - aws_kms_testing
           - gcp_kms_testing
     - nightly_integration_test:
+        name: nightly_integration_test_36
+        protocol_version: "36"
         context:
           - datadog
           - artifactory
@@ -866,6 +872,8 @@ manual_nightly_test_bftordering:
           - maven-mirror
           - da-images
     - nightly_integration_test_bftordering_only:
+        name: nightly_integration_test_36_bftordering_only
+        protocol_version: "36"
         context:
           - datadog
           - artifactory

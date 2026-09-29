@@ -20,25 +20,21 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStage.*
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
+  AcsReplicationFailed,
+  AcsReplicationParameters,
   AgreementStatus,
   Disconnected,
   EphemeralFileImporterProgress,
   EphemeralSequencerChannelProgress,
   PartyReplicationAuthorization,
-  PartyReplicationFailed,
   PersistentProgress,
-  ReplicationParams,
 }
-import com.digitalasset.canton.participant.admin.party.PartyReplicator.{
-  AddPartyRequestId,
-  PartyReplicationArguments,
-}
-import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStage.*
-import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTestInterceptor,
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.{
+  AcsReplicationArguments,
+  AcsReplicationRequestId,
 }
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence
@@ -47,10 +43,7 @@ import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantProcessor,
   AcsReplicationTargetParticipantProcessor,
 }
-import com.digitalasset.canton.participant.store.{
-  AcsReplicationStateManager,
-  PartyReplicationStateManager,
-}
+import com.digitalasset.canton.participant.store.AcsReplicationStateManager
 import com.digitalasset.canton.participant.sync.{CantonSyncService, ConnectedSynchronizer}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch
 import com.digitalasset.canton.protocol.LfContractId
@@ -76,7 +69,6 @@ import scala.util.chaining.scalaUtilChainingOps
 /** Acts on behalf of the participant's ACS replication requests handling asynchronous requests and
   * driving progress in its execution queue and based on state from the AcsReplicationStateManager.
   */
-// TODO(#35267) use AcsReplicationStatus and parameters instead of PartyReplicationStatus
 // TODO(#35267) some auxiliary methods are duplicated here and in PartyReplicator
 final class AcsReplicator(
     participantId: ParticipantId,
@@ -136,14 +128,14 @@ final class AcsReplicator(
     * workflow service.
     */
   private[admin] def replicateAcsAsync(
-      args: PartyReplicationArguments,
-      requestId: AcsReplicationRequestId,
+      args: AcsReplicationArguments
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, PartyReplicationStatus] =
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] =
     executionQueue.executeEUS(
       {
-        val PartyReplicationArguments(
+        val AcsReplicationArguments(
+          requestId,
           partyId,
           synchronizerId,
           sourceParticipantId,
@@ -178,8 +170,8 @@ final class AcsReplicator(
             syncPersistentState.topologyStore,
           )
           _ <- EitherT.fromEither[FutureUnlessShutdown](ensureCanReplicateAcs())
-          newStatus = PartyReplicationStatus(
-            PartyReplicationStatus.ReplicationParams(
+          newStatus = AcsReplicationStatus(
+            AcsReplicationStatus.AcsReplicationParameters(
               requestId,
               partyId,
               synchronizerId,
@@ -251,7 +243,7 @@ final class AcsReplicator(
     executeAsync(requestId, s"progress party replication $requestId")(
       acsReplicationStateManager
         .get(requestId)
-        .flatMap(AcsReplicationStage.fromPartyReplicationStatus)
+        .flatMap(AcsReplicationStage.fromAcsReplicationStatus)
         .fold(EitherTUtil.unitUS[String]) {
           // Stages listed in order of occurrence
           // TODO(#35267) remove this step completely
@@ -330,12 +322,10 @@ final class AcsReplicator(
     val noSessionKey = false
     ensureParticipantStateAndSynchronizerConnectedWithChannelSupport(requestId) {
       case (
-            PartyReplicationStatus(
+            AcsReplicationStatus(
               params,
-              PartyReplicationStatus.AgreementStatus.Exists(_, agreedAt, sequencerId),
+              AcsReplicationStatus.AgreementStatus.Exists(_, agreedAt, sequencerId),
               Some(PartyReplicationAuthorization(onboardingAt, _)),
-              _,
-              _,
               _,
               _,
               _,
@@ -453,13 +443,11 @@ final class AcsReplicator(
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     ensureParticipantStateAndSynchronizerConnectedWithChannelSupport(requestId) {
       case (
-            PartyReplicationStatus(
+            AcsReplicationStatus(
               params,
-              PartyReplicationStatus.AgreementStatus.Exists(_, _, sequencerId),
+              AcsReplicationStatus.AgreementStatus.Exists(_, _, sequencerId),
               Some(PartyReplicationAuthorization(effectiveAt, _)),
               Some(EphemeralSequencerChannelProgress(_, _, _, _, Some(processor))),
-              _,
-              _,
               _,
               Some(Disconnected(_)),
             ),
@@ -552,12 +540,12 @@ final class AcsReplicator(
       )
 
   // TODO(#35267) remove verification of serial and onboarding flag
-  private def verifyOnboardingTopology(requestId: AddPartyRequestId)(implicit
+  private def verifyOnboardingTopology(requestId: AcsReplicationRequestId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     ensureParticipantStateAndSynchronizerConnectedWithChannelSupport(requestId) {
       case (
-            PartyReplicationStatus(params, _, None, _, _, _, _, _),
+            AcsReplicationStatus(params, _, None, _, _, _),
             connectedSynchronizer,
             _,
           ) =>
@@ -636,11 +624,9 @@ final class AcsReplicator(
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     ensureParticipantStateAndSynchronizerConnected(requestId) {
       case (
-            previous @ PartyReplicationStatus(
+            previous @ AcsReplicationStatus(
               params,
               agreementO,
-              _,
-              _,
               _,
               _,
               false, // not completed
@@ -652,7 +638,7 @@ final class AcsReplicator(
           isAgreementArchived <- EitherT.right[String](
             (agreementO, damlAdminWorkflowO.get) match {
               case (
-                    PartyReplicationStatus.AgreementStatus.Exists(damlAgreementCid, _, sequencerId),
+                    AcsReplicationStatus.AgreementStatus.Exists(damlAgreementCid, _, sequencerId),
                     Some(workflow),
                   ) =>
                 workflow.markAcsReplicationAgreementDone(
@@ -661,7 +647,7 @@ final class AcsReplicator(
                   damlAgreementCid,
                   traceContext,
                 )
-              case (PartyReplicationStatus.AgreementStatus.Archived, Some(_)) =>
+              case (AcsReplicationStatus.AgreementStatus.Archived, Some(_)) =>
                 FutureUnlessShutdown.pure(true)
               case _ => FutureUnlessShutdown.pure(false)
             }
@@ -670,13 +656,13 @@ final class AcsReplicator(
           statusUpdates = {
             def statusUpdate(
                 condition: Boolean,
-                update: PartyReplicationStateManager.Modification,
-            ): Seq[PartyReplicationStateManager.Modification] =
+                update: AcsReplicationStateManager.Modification,
+            ): Seq[AcsReplicationStateManager.Modification] =
               if (condition) Seq(update) else Seq.empty
 
             statusUpdate(
               isAgreementArchived,
-              _.setAgreementStatus(PartyReplicationStatus.AgreementStatus.Archived),
+              _.setAgreementStatus(AcsReplicationStatus.AgreementStatus.Archived),
             )
               ++ statusUpdate(
                 isAgreementArchived || agreementO.isEmpty, // not sure isEmpty should be here
@@ -688,7 +674,7 @@ final class AcsReplicator(
             if (statusUpdates.nonEmpty) {
               // Compose potentially multiple modifications into a single modification.
               val combinedModification = statusUpdates
-                .foldLeft[PartyReplicationStateManager.Modification](
+                .foldLeft[AcsReplicationStateManager.Modification](
                   // Seed the modification chain with a dummy modification that returns the previous status.
                   identity
                 ) { case (composedModifications, nextModification) =>
@@ -708,7 +694,7 @@ final class AcsReplicator(
     }
 
   private def proposeAcsReplicationSequencerChannel(
-      replicationParams: ReplicationParams
+      replicationParams: AcsReplicationParameters
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
       adminWorkflow <- EitherT.fromEither[FutureUnlessShutdown](
@@ -747,7 +733,7 @@ final class AcsReplicator(
         replicationParams.requestId,
         replicationStatus => {
           val withoutError = replicationStatus.modifyErrorO(_ => None)
-          withoutError.setAgreementStatus(PartyReplicationStatus.AgreementStatus.Proposed)
+          withoutError.setAgreementStatus(AcsReplicationStatus.AgreementStatus.Proposed)
         },
       )
     } yield ()
@@ -812,12 +798,12 @@ final class AcsReplicator(
             .toRight(s"Unknown ACS replication $requestId")
         )
         _ <- status match {
-          case PartyReplicationStatus(_, _, _, _, _, _, _, None) =>
+          case AcsReplicationStatus(_, _, _, _, _, None) =>
             acsReplicationStateManager.update_(
               requestId,
               _.modifyErrorO(_ => Some(Disconnected(message))),
             )
-          case PartyReplicationStatus(_, _, _, _, _, _, _, Some(_)) =>
+          case AcsReplicationStatus(_, _, _, _, _, Some(_)) =>
             EitherTUtil.unitUS[String]
           case unexpectedStatus =>
             EitherT.leftT[FutureUnlessShutdown, Unit](
@@ -846,7 +832,7 @@ final class AcsReplicator(
                 s"ACS replication $requestId has unexpectedly encountered error after previous error $prevError. Ignoring new error: $err"
               )
             )
-            Some(PartyReplicationFailed(err))
+            Some(AcsReplicationFailed(err))
           },
         )
         .fold(updateErr => logger.warn(s"$updateErr: $err"), _ => logger.warn(err))
@@ -897,7 +883,7 @@ final class AcsReplicator(
 
   private def ensureParticipantStateAndSynchronizerConnected(requestId: AcsReplicationRequestId)(
       matchIfStateIsAsExpected: PartialFunction[
-        (PartyReplicationStatus, ConnectedSynchronizer),
+        (AcsReplicationStatus, ConnectedSynchronizer),
         EitherT[FutureUnlessShutdown, String, Unit],
       ]
   ): EitherT[FutureUnlessShutdown, String, Unit] = for {
@@ -945,7 +931,7 @@ final class AcsReplicator(
       requestId: AcsReplicationRequestId
   )(
       matchIfStateIsAsExpected: PartialFunction[
-        (PartyReplicationStatus, ConnectedSynchronizer, SequencerChannelClient),
+        (AcsReplicationStatus, ConnectedSynchronizer, SequencerChannelClient),
         EitherT[FutureUnlessShutdown, String, Unit],
       ]
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
@@ -1053,15 +1039,13 @@ final class AcsReplicator(
       .collectFirst {
         case (
               id,
-              status @ PartyReplicationStatus(
+              status @ AcsReplicationStatus(
                 _,
                 _,
                 _,
                 _,
                 _,
-                _,
-                _,
-                Some(PartyReplicationStatus.PartyReplicationFailed(errorMsg)),
+                Some(AcsReplicationStatus.AcsReplicationFailed(errorMsg)),
               ),
             ) =>
           (id, status, errorMsg)
@@ -1092,19 +1076,19 @@ final class AcsReplicator(
     ) {
       acsReplicationStateManager
         .findByAgreementContractId(contractId)
-        .fold(EitherT.pure[FutureUnlessShutdown, String](Option.empty[AddPartyRequestId]))(
+        .fold(EitherT.pure[FutureUnlessShutdown, String](Option.empty[AcsReplicationRequestId]))(
           replicationStatus =>
             for {
               requestId <- EitherT.fromEither[FutureUnlessShutdown](
                 (replicationStatus.agreementStatus match {
-                  case _: PartyReplicationStatus.AgreementStatus.Exists =>
+                  case _: AcsReplicationStatus.AgreementStatus.Exists =>
                     Some(replicationStatus.params.requestId)
                   case _ => None
                 }).toRight(s"No existing agreement for contract id $contractId")
               )
               _ <- acsReplicationStateManager.update_(
                 requestId,
-                _.setAgreementStatus(PartyReplicationStatus.AgreementStatus.Archived),
+                _.setAgreementStatus(AcsReplicationStatus.AgreementStatus.Archived),
               )
             } yield Some(requestId)
         )
@@ -1216,8 +1200,8 @@ final class AcsReplicator(
         _ => FutureUnlessShutdown.unit,
         { case (response, protocolVersion) =>
           // Upon success indicate that the SP has processed the proposal.
-          val newStatus = PartyReplicationStatus(
-            PartyReplicationStatus.ReplicationParams(
+          val newStatus = AcsReplicationStatus(
+            AcsReplicationStatus.AcsReplicationParameters(
               response.requestId,
               response.partyId,
               response.synchronizerId,
@@ -1273,9 +1257,9 @@ final class AcsReplicator(
     executeAsync(agreementParams.requestId, "process agreement of ACS replication") {
       val requestId = agreementParams.requestId
       val paramsReceived =
-        PartyReplicationStatus.ReplicationParams.fromAgreementParams(agreementParams)
+        AcsReplicationStatus.AcsReplicationParameters.fromAgreementParams(agreementParams)
       val agreement =
-        PartyReplicationStatus.AgreementStatus.Exists(
+        AcsReplicationStatus.AgreementStatus.Exists(
           damlAgreementCid,
           agreedAt,
           agreementParams.sequencerId,
@@ -1302,7 +1286,7 @@ final class AcsReplicator(
                 s"Latest synchronizer $synchronizerId config $latestSynchronizerConnectionConfig has no physical synchronizer id set"
               )
           )
-          agreementReceived = PartyReplicationStatus(
+          agreementReceived = AcsReplicationStatus(
             paramsReceived,
             psid.protocolVersion,
             agreementStatus = agreement,
@@ -1313,7 +1297,7 @@ final class AcsReplicator(
         )
       }
 
-      def processExpectedAgreement(statusO: Option[PartyReplicationStatus]) =
+      def processExpectedAgreement(statusO: Option[AcsReplicationStatus]) =
         for {
           status <- EitherT.fromEither[FutureUnlessShutdown](
             statusO.toRight(s"Unknown request id $requestId")
@@ -1375,13 +1359,11 @@ final class AcsReplicator(
       acsReplicationStateManager.collect[AcsReplicationProcessor] {
         case (
               _,
-              PartyReplicationStatus(
+              AcsReplicationStatus(
                 _,
                 _,
                 _,
                 Some(EphemeralSequencerChannelProgress(_, _, _, _, Some(processor))),
-                _,
-                _,
                 _,
                 _,
               ),
@@ -1407,7 +1389,6 @@ object AcsReplicator {
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       serial: PositiveInt,
-      timestamp: CantonTimestamp,
       participantPermission: ParticipantPermission,
   )
 

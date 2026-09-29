@@ -45,6 +45,16 @@ inputs:
     description: Optional suffix appended to selected-tests artifact names
     required: false
     default: ''
+  job_name:
+    description: >-
+      Distinct name of the calling leg (top-level workflow job), passed through to
+      run_tests / cleanup_test_job to keep shard bundle artifacts from colliding when several
+      legs share github.job. Defaults to github.job when empty.
+    required: false
+    default: ''
+  protocol_version:
+    description: Protocol version for the tests
+    required: true
 
 outputs:
   sbt_test_command:
@@ -54,6 +64,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Set Canton Protocol Version
+      env:
+        CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+      run: |
+        echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+        echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+      shell: bash
+
     - name: Build SBT command
       id: build-sbt-command
       shell: bash
@@ -113,6 +131,7 @@ runs:
         test_file: ${{ inputs.test_file }}
         timings_file: ${{ inputs.timings_file }}
         artifact_name_suffix: ${{ inputs.artifact_name_suffix }}
+        job_name: ${{ inputs.job_name }}
         # GNU-timeout cap on each sbt invocation (main run and failed-only rerun). The sbt test run
         # itself finishes well under 22 minutes with precompiled classes restored, so 40m is about 2x
         # headroom. Killing the sbt process here rather than relying on the job-level timeout-minutes

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates.
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
 # Proprietary code. All rights reserved.
 #
 
@@ -29,6 +29,8 @@ test-with-recording.sh "$@"
 
 # This relies on the result of `test-with-recording.sh`
 test-participant-replay.sh "$@"
+
+test-sequencer-catchup.sh "$@"
 
 echo
 echo "***** Deleting recordings..."

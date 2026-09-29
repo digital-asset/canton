@@ -104,10 +104,10 @@ class OnboardingClearanceScheduler(
       lsuO: Option[(SynchronizerSuccessor, EffectiveTime)]
   )(implicit traceContext: TraceContext): Unit =
     lsuO match {
-      case Some((successor, upgradeTime)) =>
+      case Some((successor, _)) =>
         if (lsuAnnouncementLogged.compareAndSet(false, true)) {
           logger.info(
-            s"Onboarding flag clearances will be deferred or retried silently in the background because of announced LSU for $psid (successor: $successor, upgrade time: $upgradeTime)."
+            s"Onboarding flag clearances will be deferred or retried silently in the background because of announced LSU for $psid (successor: ${successor.psid}, upgrade time: ${successor.upgradeTime})."
           )
         }
       case None =>
@@ -209,8 +209,8 @@ class OnboardingClearanceScheduler(
       _ = logLsuAnnouncedOnce(lsuO)
 
       outcome <- lsuO match {
-        case Some((_, upgradeTime)) =>
-          val safeTime = upgradeTime.immediateSuccessor.value
+        case Some((successor, _)) =>
+          val safeTime = successor.upgradeTime.immediateSuccessor
 
           logger.debug(
             s"Deferring synchronous clearance for $partyId to the background loop until safe time $safeTime due to active LSU."
@@ -362,14 +362,12 @@ class OnboardingClearanceScheduler(
       _ = logLsuAnnouncedOnce(lsuO)
 
       _ <- lsuO match {
-        case Some((successor, upgradeTime)) =>
+        case Some((successor, _)) =>
           // Silent Retry: This triggers the active polling of the Backoff retry policy,
           // ensuring we catch an early cancellation of the LSU.
           EitherT.leftT[FutureUnlessShutdown, Unit](
-            OnboardingClearanceScheduler.ClearanceAttemptError.LsuAnnounced(
-              successor,
-              upgradeTime,
-            ): OnboardingClearanceScheduler.ClearanceAttemptError
+            OnboardingClearanceScheduler.ClearanceAttemptError
+              .LsuAnnounced(successor): OnboardingClearanceScheduler.ClearanceAttemptError
           )
         case None =>
           // Check the store before allowing the workflow to proceed
@@ -408,7 +406,7 @@ class OnboardingClearanceScheduler(
           ()
       }
       .leftMap {
-        case err @ OnboardingClearanceScheduler.ClearanceAttemptError.LsuAnnounced(_, _) =>
+        case err @ OnboardingClearanceScheduler.ClearanceAttemptError.LsuAnnounced(_) =>
           // Return the pure marker so our ExceptionRetryPolicy catches it and silences the loop log
           err
         case err =>
@@ -629,10 +627,9 @@ object OnboardingClearanceScheduler {
     def message: String
   }
   object ClearanceAttemptError {
-    final case class LsuAnnounced(successor: SynchronizerSuccessor, upgradeTime: EffectiveTime)
-        extends ClearanceAttemptError {
+    final case class LsuAnnounced(successor: SynchronizerSuccessor) extends ClearanceAttemptError {
       override def message: String =
-        s"Synchronizer upgrade announced for $successor at $upgradeTime"
+        s"Synchronizer upgrade announced for ${successor.psid} at ${successor.upgradeTime}"
     }
     final case object NoPendingClearanceRecord extends ClearanceAttemptError {
       override def message: String = "No pending clearance record found"
@@ -656,7 +653,7 @@ object OnboardingClearanceScheduler {
       ErrorKind.UnknownErrorKind
 
     override def retryLogLevel(outcome: Try[Any]): Option[Level] = outcome match {
-      case Success(Left(ClearanceAttemptError.LsuAnnounced(_, _))) =>
+      case Success(Left(ClearanceAttemptError.LsuAnnounced(_))) =>
         // By returning TRACE/DEBUG here, we instruct Canton's RetryWithDelay engine
         // to not emit the "Retrying after X delay" INFO/WARN messages for this expected condition.
         Some(Level.DEBUG)

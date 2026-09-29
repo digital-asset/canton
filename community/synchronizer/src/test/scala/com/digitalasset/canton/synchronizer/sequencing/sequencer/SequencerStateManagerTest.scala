@@ -44,6 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.RateLimitManagerT
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.memory.InMemoryTrafficConsumedStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.StoreBasedSynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
@@ -59,7 +60,6 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   config,
 }
-import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -102,12 +102,8 @@ class SequencerStateManagerTest
   private val ts100 = ts0.plusSeconds(100)
   private val ts101 = ts0.plusSeconds(101)
 
-  private lazy val aggregationRule1 =
-    AggregationRule.testing(
-      NonEmpty(Seq, alice, bob),
-      PositiveInt.tryCreate(2),
-      testedProtocolVersion,
-    )
+  private val aggregationRule1 =
+    AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)
 
   private def aggregationRequestFor(
       sender: Member,
@@ -122,15 +118,14 @@ class SequencerStateManagerTest
       aggregationRule = Some(rule),
     )
 
-  private lazy val aggregationRequest1Bob = aggregationRequestFor(bob, aggregationRule1).futureValue
+  private lazy val aggregationRequest1Bob =
+    aggregationRequestFor(bob, AggregationRule.senderDedup(testedProtocolVersion)).futureValue
   @unused
   private lazy val aggregationId1 =
     aggregationRequest1Bob.content
       .aggregationId(topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto)
       .value
-
-  private lazy val aggregationRule2 =
-    AggregationRule.testing(NonEmpty(Seq, alice), PositiveInt.one, testedProtocolVersion)
+  private lazy val aggregationRule2 = AggregationRule.senderDedup(testedProtocolVersion)
   private lazy val aggregationRequest2 = aggregationRequestFor(alice, aggregationRule2).futureValue
   @unused
   private lazy val aggregationId2 =
@@ -375,7 +370,6 @@ class SequencerStateManagerTest
       defaultRateLimiter,
       drSequencingTimeUpperBound = None,
       getAnnouncedLsu = None,
-      producePostOrderingTopologyTicks = false,
       consistencyChecks = true,
       parameters = BlockProcessingParameters(
         orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,

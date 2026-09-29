@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.admin.party.acsreplication
 import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -93,8 +92,7 @@ object AcsReplicationAgreementParams {
     .transform
 
   def fromAgreedReplicationStatus(
-      // TODO(#35267) switch to AcsReplicationStatus.AcsReplicationParameters
-      params: PartyReplicationStatus.ReplicationParams,
+      params: AcsReplicationStatus.AcsReplicationParameters,
       sequencerId: SequencerId,
   ): AcsReplicationAgreementParams = params
     .into[AcsReplicationAgreementParams]

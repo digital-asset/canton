@@ -28,9 +28,7 @@ object SubmissionRequestValidations {
         .map(
           _.input
             .resolveToMembers(submission.sender, snapshot)
-            .map(_.eligibleSenders.toSet incl submission.sender)
-            // This is backwards compatible with pv34 as this can only fail with the aggregation
-            // rules introduced into pv35.
+            .map(_ incl submission.sender)
             .leftMap(
               MemberCheckError.InvalidAggregationRule(_): MemberCheckError
             )
@@ -42,7 +40,13 @@ object SubmissionRequestValidations {
         )
     val allRecipients = submission.batch.allMembers
     sendersET.flatMap { senders =>
-      // TODO(#19476): Why we don't check group recipients here?
+      // We don't check for group members because group members are automatically added as members
+      // by the sequencer.
+      // This is because the notification of member changes will inform the SequencerRuntime
+      // before it updates the cryptoApi (val executionOrder: Int = 1) which means
+      // that a topology snapshot that delivers the updated member can only be accessed
+      // after the member registration completed!
+      // Therefore, we don't need to check for mediator and sequencer group members.
       val allMembers = allRecipients ++ senders
       EitherT {
         for {
@@ -72,7 +76,7 @@ object SubmissionRequestValidations {
     def toSequencerDeliverError: SequencerDeliverError
     def toSendAsyncClientError: SendAsyncClientError
   }
-  object MemberCheckError {
+  private object MemberCheckError {
 
     final case class InvalidAggregationRule(str: String) extends MemberCheckError {
       override def toSequencerDeliverError: SequencerDeliverError =

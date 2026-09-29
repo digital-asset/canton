@@ -46,7 +46,6 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         SequencerDriver.DriverApiVersion,
         ReferenceSequencerDriver.Config(StorageConfig.Memory()),
         BlockSequencerConfig(),
-        producePostOrderingTopologyTicks = false,
         health = None,
         storage,
         testedProtocolVersion,
@@ -93,9 +92,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
       enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
-      disableAggregationRuleSizeCheckForTesting = true,
       lsuConfig = SequencerLsuConfig(),
-      enablePrevalidation = true,
     )
 
   "Reference sequencer" when runSequencerApiTests()

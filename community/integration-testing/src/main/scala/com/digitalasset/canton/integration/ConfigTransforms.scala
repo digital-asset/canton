@@ -29,7 +29,6 @@ import com.digitalasset.canton.participant.config.{
   TestingTimeServiceConfig,
 }
 import com.digitalasset.canton.platform.apiserver.SeedService
-import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
@@ -99,11 +98,6 @@ object ConfigTransforms {
     BaseTest.testedProtocolVersion
   )
 
-  private val generousRateLimiting: ConfigTransform =
-    updateAllParticipantConfigs_(
-      _.focus(_.ledgerApi.rateLimit).replace(Some(RateLimitingConfig.Default))
-    )
-
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
@@ -111,11 +105,8 @@ object ConfigTransforms {
     Seq(
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,
-      ConfigTransforms.generousRateLimiting,
       ConfigTransforms.enableAdvancedCommands(FeatureFlag.Preview),
       ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing),
-      // Needed for enabling engine.enableAdditionalConsistencyChecks
-      ConfigTransforms.enableNonStandardConfig,
       ConfigTransforms.updateAllParticipantConfigs_(
         _.focus(_.parameters.adminWorkflow.bongTestMaxLevel)
           .replace(NonNegativeInt.tryCreate(20))
@@ -134,7 +125,6 @@ object ConfigTransforms {
       ConfigTransforms.setExitOnFatalFailures(false),
       // tests must be able to observe security alarms without the participant crashing
       ConfigTransforms.setCrashAfterFailedValidation(false),
-      ConfigTransforms.useNewAggregator(true),
       // Safe-to-prune checks rely on the indexer streams signalling offset advancements even if there is no activity.
       ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
         config.NonNegativeFiniteDuration.ofSeconds(1)
@@ -216,6 +206,14 @@ object ConfigTransforms {
     */
   def setNonStandardConfig(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.nonStandardConfig).replace(enable)
+
+  def enableExperimentalExecutionConductor: Seq[ConfigTransform] =
+    Seq(
+      setNonStandardConfig(true),
+      updateAllParticipantConfigs_(
+        _.focus(_.parameters.engine.enableExperimentalExecutionConductor).replace(true)
+      ),
+    )
 
   private def setGlobalDevVersionSupport(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.devVersionSupport).replace(enable)

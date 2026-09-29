@@ -4,35 +4,18 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.BaseTestWordSpec
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Signature, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
-import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import java.time.Duration
 import java.util.UUID
 
-class SubmissionRequestTest extends BaseTestWordSpec {
-
-  private def mkAggregationRule(
-      eligibleSenders: Seq[Member],
-      threshold: PositiveInt,
-  ): AggregationRule =
-    AggregationRule.testing(
-      NonEmpty.from(eligibleSenders).value,
-      threshold,
-      testedProtocolVersion,
-    )
-
-  private lazy val defaultAggregationRule = mkAggregationRule(
-    NonEmpty
-      .from(Seq[Member](DefaultTestIdentities.participant1, DefaultTestIdentities.participant2))
-      .value,
-    PositiveInt.tryCreate(1),
-  )
+final class SubmissionRequestTest extends BaseTestWordSpec {
 
   private lazy val defaultTopologyTimestamp = Some(
     CantonTimestamp.Epoch.add(Duration.ofSeconds(1))
@@ -45,7 +28,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
       Batch.empty(testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
       topologyTimestamp = defaultTopologyTimestamp,
-      Some(defaultAggregationRule),
+      Some(AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)),
       Option.empty[SequencingSubmissionCost],
       testedProtocolVersion,
     )
@@ -89,25 +72,23 @@ class SubmissionRequestTest extends BaseTestWordSpec {
         defaultSubmissionRequest.copy(topologyTimestamp = Some(CantonTimestamp.MaxValue)),
         defaultSubmissionRequest.copy(topologyTimestamp = Some(CantonTimestamp.Epoch)),
         defaultSubmissionRequest.copy(aggregationRule =
-          Some(
-            mkAggregationRule(
-              Seq(DefaultTestIdentities.participant1, DefaultTestIdentities.participant3),
-              threshold = PositiveInt.one,
-            )
-          )
+          Some(AggregationRule.senderDedup(testedProtocolVersion))
         ),
         defaultSubmissionRequest.copy(aggregationRule =
-          Some(
-            mkAggregationRule(
-              Seq(DefaultTestIdentities.participant1, DefaultTestIdentities.participant2),
-              threshold = PositiveInt.two,
-            )
-          )
+          Some(AggregationRule.activeSequencers(testedProtocolVersion))
         ),
       )
 
       val aggregationIds = differentRequests.map(_.aggregationId(TestHash))
-      aggregationIds.distinct.size shouldBe differentRequests.size
+
+      val expectedAggregationIdsCount =
+        if (testedProtocolVersion == ProtocolVersion.v35)
+          differentRequests.size
+        else
+          // In pv 36 and above, the topology timestamp (that should be empty) is not part of the hash
+          differentRequests.size - 3
+
+      aggregationIds.distinct.size shouldBe expectedAggregationIdsCount
 
     }
 
@@ -133,7 +114,7 @@ class SubmissionRequestTest extends BaseTestWordSpec {
 
       val requestsWithoutSignatures = Seq(
         submissionRequestWithEnvelope1,
-        submissionRequestWithEnvelope1.copy(sender = DefaultTestIdentities.participant3),
+        submissionRequestWithEnvelope1.copy(sender = DefaultTestIdentities.daMediator),
         submissionRequestWithEnvelope1.copy(messageId = MessageId.fromUuid(new UUID(10, 10))),
       )
 

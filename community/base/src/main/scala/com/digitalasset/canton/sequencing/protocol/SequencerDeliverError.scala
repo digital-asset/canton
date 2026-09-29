@@ -51,13 +51,13 @@ sealed abstract class SequencerDeliverErrorCode(id: String, category: ErrorCateg
 @Explanation("""Delivery errors wrapped into sequenced events""")
 object SequencerErrors extends SequencerErrorGroup {
   @Explanation("""
-      |This error occurs when the sequencer receives an invalid submission request, e.g. it has an
-      |aggregation rule with an unreachable threshold.
-      |Malformed requests will not emit any deliver event.
+                 |This error occurs when the sequencer receives an invalid submission request, e.g. it has an
+                 |aggregation rule with an unreachable threshold.
+                 |Malformed requests will not emit any deliver event.
       """)
   @Resolution("""
-      |Check if the sender is running an attack.
-      |If you can rule out an attack, please reach out to Canton support.
+                |Check if the sender is running an attack.
+                |If you can rule out an attack, please reach out to Canton support.
       """)
   case object SubmissionRequestMalformed
       extends AlarmErrorCode(id = "SEQUENCER_SUBMISSION_REQUEST_MALFORMED", redactDetails = false) {
@@ -75,6 +75,20 @@ object SequencerErrors extends SequencerErrorGroup {
         Error(submissionRequest.sender.toProtoPrimitive, submissionRequest.messageId.unwrap, error)
     }
   }
+
+  @Explanation("""
+                 |This error occurs when the sequencer receives an invalid submission request.
+                 |The request will be rejected so that the sender can be charged for the submission attempt.
+      """)
+  @Resolution("""
+                |Check if the sender is running an attack.
+                |If you can rule out an attack, please reach out to Canton support.
+      """)
+  case object SubmissionRequestMalformedAndRejected
+      extends SequencerDeliverErrorCode(
+        id = "SEQUENCER_SUBMISSION_REQUEST_MALFORMED_REJECTED",
+        ErrorCategory.UnredactedSecurityAlert,
+      )
 
   @Explanation(
     """This error occurs when the sequencer cannot accept submission request due to the current state of the system."""

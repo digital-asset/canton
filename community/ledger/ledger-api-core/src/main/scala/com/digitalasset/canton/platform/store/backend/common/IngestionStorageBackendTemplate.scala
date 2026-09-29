@@ -40,7 +40,6 @@ private[backend] class IngestionStorageBackendTemplate(
           .eventSeqIdIsGreater("event_sequential_id", lastEventSequentialId)}",
       SQL"DELETE FROM lapi_filter_various_witness WHERE ${QueryStrategy
           .eventSeqIdIsGreater("event_sequential_id", lastEventSequentialId)}",
-      SQL"DELETE FROM lapi_party_entries WHERE ${QueryStrategy.offsetIsGreater("ledger_offset", ledgerOffset)}",
       SQL"DELETE FROM lapi_events_party_to_participant WHERE ${QueryStrategy
           .eventSeqIdIsGreater("event_sequential_id", lastEventSequentialId)}",
       SQL"DELETE FROM lapi_events_generic_topology_events WHERE ${QueryStrategy

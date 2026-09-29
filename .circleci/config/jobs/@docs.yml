@@ -32,6 +32,7 @@ build_docs_snippets:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 6
   steps:
+    - allow_automatic_protocol_version
     - run_tests:
         command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD\" checkErrors"
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.docs\\.snippet"

@@ -310,10 +310,17 @@ object SequentialWriteDaoSpec {
     )
   )
 
-  private val someParty = DbDto.PartyEntry(
-    ledger_offset = 1,
-    party = Some(Ref.Party.assertFromString("party")),
-    is_local = Some(true),
+  private val someParty = DbDto.EventPartyToParticipant(
+    event_sequential_id = 0,
+    event_offset = 1,
+    update_id = new Array[Byte](0),
+    party_id = Ref.Party.assertFromString("party"),
+    participant_id = Ref.ParticipantId.assertFromString("participant"),
+    participant_permission = 1,
+    participant_authorization_event = 1,
+    synchronizer_id = SynchronizerId.tryFromString("x::synchronizer"),
+    record_time = 1,
+    trace_context = serializableTraceContext,
   )
 
   private val someEventActivate = DbDto.EventActivate(

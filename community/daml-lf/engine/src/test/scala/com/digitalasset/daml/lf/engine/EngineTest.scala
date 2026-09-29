@@ -70,8 +70,8 @@ class EngineTestExceptionsKeyCidV2
 
 class EngineTestCmdCidV1 extends EngineTest(ContractIdVersion.V1, ExecutionMode.Conductor)
 class EngineTestCmdCidV2 extends EngineTest(ContractIdVersion.V2, ExecutionMode.Conductor)
-//class EngineTestKeyCmdCidV1 extends EngineTestKey(ContractIdVersion.V1, ExecutionMode.Conductor)
-//class EngineTestKeyCmdCidV2 extends EngineTestKey(ContractIdVersion.V2, ExecutionMode.Conductor)
+class EngineTestKeyCmdCidV1 extends EngineTestKey(ContractIdVersion.V1, ExecutionMode.Conductor)
+class EngineTestKeyCmdCidV2 extends EngineTestKey(ContractIdVersion.V2, ExecutionMode.Conductor)
 
 class EngineTestExceptionsKeyCmdCidV1
     extends EngineTestExceptionsKey(ContractIdVersion.V1, ExecutionMode.Conductor)
@@ -570,7 +570,6 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
     }
 
     "be validated" in {
-      assumeUpd
       val ntx = SubmittedTransaction(Normalization.normalizeTx(tx))
       val validated = suffixLenientEngine
         .validate(
@@ -1151,8 +1150,6 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
   }
 
   "getTime set dependsOnTime flag" in {
-    assumeUpd
-
     val templateId = Identifier(basicTestsPkgId, "BasicTests:TimeGetter")
 
     def run(choiceName: ChoiceName) = {
@@ -1309,8 +1306,6 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
     }
 
     "be validable in whole" in {
-      assumeUpd
-
       def validate(tx: SubmittedTransaction, metaData: Tx.Metadata) =
         for {
           submitter <- tx.guessSubmitter
@@ -1968,7 +1963,6 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
 
     "engine submissions" should {
       "fail with excessive choice authorizers" in {
-        assumeUpd
         val interpretResult =
           res
             .flatMap { cmds =>
@@ -3036,10 +3030,6 @@ class EngineTestHelpers(
   import Matchers.*
 
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
-
-  // TODO(https://github.com/digital-asset/daml/issues/23173)
-  //  fix the conductor to support all tests
-  def assumeUpd = assume(executionMode == ExecutionMode.UpdateMachine)
 
   @SuppressWarnings(Array("org.wartremover.warts.Any"))
   implicit val resultEq: Equality[Either[Error, SValue]] = {

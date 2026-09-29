@@ -23,7 +23,12 @@ import java.sql.*
 object DatabaseSelfServiceError {
   def apply(
       exception: Throwable
-  )(implicit errorLoggingContext: ErrorLoggingContext): Throwable = exception match {
+  )(implicit errorLoggingContext: ErrorLoggingContext): Throwable =
+    adapt.applyOrElse(exception, identity[Throwable])
+
+  def adapt(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): PartialFunction[Throwable, Throwable] = {
     // This frequently occurs when running with H2, because H2 does not properly implement the serializable
     // isolation level. This causes unexpected constraint violation exceptions when running with H2 in the presence
     // of contention. For now, we retry on these exceptions.
@@ -35,8 +40,6 @@ object DatabaseSelfServiceError {
     case ex: PSQLException => checkPSQLException(ex)
     case ex: BatchUpdateException if ex.getCause != null => DatabaseSelfServiceError(ex.getCause)
     case ex: SQLException => nonRetryable(ex)
-    // Don't handle other exceptions that can be thrown from non-client interactions (e.g. index initialization)
-    case ex => ex
   }
 
   def isNetworkTimeoutException(exception: PSQLException): Boolean =

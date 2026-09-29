@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature, SigningKeyUsage}
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -16,10 +16,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContract
-import com.digitalasset.canton.participant.admin.party.{
-  PartyReplicationStatus,
-  PartyReplicationTestInterceptor,
-}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.*
 import com.digitalasset.canton.participant.store
@@ -255,7 +253,7 @@ final class AcsReplicationSourceParticipantProcessor private (
 
         _ <- replicationProgressState.updateAcsReplicationProgress(
           requestId,
-          PartyReplicationStatus.EphemeralSequencerChannelProgress(
+          AcsReplicationStatus.EphemeralSequencerChannelProgress(
             sentContractCount,
             RepairCounter.Genesis, // write-persistence not used by SP
             Some(acsReader.getAcsDigestHash),

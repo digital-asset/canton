@@ -17,7 +17,8 @@ trait HealthQuasiComponent extends HealthElement {
   def isOk: Boolean = getState.toComponentHealthState.isOk
   def isDegraded: Boolean = getState.toComponentHealthState.isDegraded
   def isFatal: Boolean = getState.toComponentHealthState.isFatal
-  def toComponentStatus: ComponentStatus = ComponentStatus(name, getState.toComponentHealthState)
+  def toComponentStatus: ComponentStatus =
+    ComponentStatus(name, getState.toComponentHealthState, labels = Map.empty)
 
   override def closingState: State
 }

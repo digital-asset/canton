@@ -81,6 +81,7 @@ final class IndexServiceOwner(
 
   def acquire()(implicit context: ResourceContext): Resource[IndexService] = {
     val ledgerDao = createLedgerReadDao(
+      participantId = participantId,
       ledgerEndCache = inMemoryState.ledgerEndCache,
       achsStateCache = inMemoryState.achsStateCache,
       stringInterning = inMemoryState.stringInterningView,
@@ -116,6 +117,7 @@ final class IndexServiceOwner(
         dbDispatcher = dbSupport.dbDispatcher,
         eventStorageBackend = dbSupport.storageBackendFactory
           .readStorageBackend(
+            participantId,
             inMemoryState.ledgerEndCache,
             inMemoryState.stringInterningView,
             loggerFactory,
@@ -246,6 +248,7 @@ final class IndexServiceOwner(
   }
 
   private def createLedgerReadDao(
+      participantId: Ref.ParticipantId,
       ledgerEndCache: LedgerEndCache,
       achsStateCache: AchsStateCache,
       stringInterning: StringInterning,
@@ -260,7 +263,7 @@ final class IndexServiceOwner(
       commandExecutionContext = commandExecutionContext,
       metrics = metrics,
       readStorageBackend = dbSupport.storageBackendFactory
-        .readStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
+        .readStorageBackend(participantId, ledgerEndCache, stringInterning, loggerFactory),
       parameterStorageBackend =
         dbSupport.storageBackendFactory.createParameterStorageBackend(stringInterning),
       ledgerEndCache = ledgerEndCache,

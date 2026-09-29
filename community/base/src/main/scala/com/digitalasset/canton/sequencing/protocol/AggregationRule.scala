@@ -15,11 +15,10 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.v30
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
@@ -35,7 +34,6 @@ import com.digitalasset.canton.version.{
   VersioningCompanion,
 }
 import com.digitalasset.nonempty.NonEmpty
-import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.immutable.SortedMap
 import scala.concurrent.ExecutionContext
@@ -90,7 +88,7 @@ sealed trait AggregationRuleInput extends PrettyPrinting {
   def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, AggregationRuleInput.Resolved]
+  ): EitherT[FutureUnlessShutdown, String, NonEmpty[Set[Member]]]
 
   /** Append info on this aggregation rule to the hash builder deterministically
     *
@@ -156,88 +154,20 @@ object AggregationRuleInput extends HasLoggerName {
   private val magicNumberSequencerGroup = 0x02
   private val magicNumberSenderDedup = 0x03
 
-  final case class Resolved(
-      eligibleSenders: NonEmpty[Seq[Member]],
-      threshold: PositiveInt,
-  ) extends AggregationRuleInput {
-
-    override def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
-        traceContext: TraceContext,
-        executionContext: ExecutionContext,
-    ): EitherT[FutureUnlessShutdown, String, AggregationRuleInput.Resolved] = EitherT.rightT(this)
-
-    override protected def pretty: Pretty[Resolved] = prettyResolved
-
-    def appendForAggregationId(builder: HashBuilder, sender: Member): Unit = {
-      builder.addInt(eligibleSenders.size)
-      eligibleSenders.foreach(member => builder.addString(member.toProtoPrimitive))
-      builder.addInt(threshold.value)
-    }
-
-    /** The sequencing timestamp at which this aggregatable submission was delivered, if so. */
-    override def computeDeliveredAt(
-        aggregatedSignatures: SortedMap[Member, AggregationBySender],
-        snapshot: SyncCryptoApi,
-    )(implicit
-        loggingContext: NamedLoggingContext,
-        executionContext: ExecutionContext,
-    ): FutureUnlessShutdown[Option[(CantonTimestamp, SortedMap[Member, AggregationBySender])]] =
-      FutureUnlessShutdown.pure(
-        Option
-          .when(aggregatedSignatures.sizeCompare(threshold.value) >= 0)(
-            aggregatedSignatures.values
-              .map(_.sequencingTimestamp)
-              // tryAggregate will reject any addition of signatures after the event is delivered.
-              // This means that the max sequencing timestamp is the one when we shipped the event.
-              .maxOption
-              .map((_, aggregatedSignatures))
-          )
-          .flatten
-      )
-
-    override def checkInvariant(
-        aggregatedSenders: Map[Member, AggregationBySender],
-        maxSequencingTimestamp: CantonTimestamp,
-    ): Either[String, Unit] = {
-      val uneligibleAggregated = aggregatedSenders.keys.filterNot(eligibleSenders.contains)
-      for {
-        _ <- Either.cond(
-          uneligibleAggregated.isEmpty,
-          (),
-          show"non-eligible members' submission requests have been aggregated: ${uneligibleAggregated.toSeq}",
-        )
-        _ <- super.checkInvariant(aggregatedSenders, maxSequencingTimestamp)
-      } yield ()
-    }
-  }
-
-  private val prettyResolved: Pretty[Resolved] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    prettyOfClass[Resolved](
-      param("threshold", _.threshold),
-      param("eligible members", _.eligibleSenders),
-    )
-  }
-
   final case class MediatorGroup(index: NonNegativeInt) extends AggregationRuleInput {
     override def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
         traceContext: TraceContext,
         executionContext: ExecutionContext,
-    ): EitherT[FutureUnlessShutdown, String, AggregationRuleInput.Resolved] =
+    ): EitherT[FutureUnlessShutdown, String, NonEmpty[Set[Member]]] =
       EitherT(
         snapshot
           .mediatorGroup(index)
           .map(_.flatMap { group =>
-            NonEmpty.from(group.active).map((_, group))
+            NonEmpty.from(group.active: Seq[Member])
           })
           .map(
-            _.toRight(s"Mediator group with index $index does not exist at ${snapshot.timestamp}")
-              .map { case (active, group) =>
-                Resolved(
-                  eligibleSenders = active,
-                  threshold = group.threshold,
-                )
-              }
+            _.map(_.toSet)
+              .toRight(s"Mediator group with index $index does not exist at ${snapshot.timestamp}")
           )
       )
 
@@ -386,7 +316,7 @@ object AggregationRuleInput extends HasLoggerName {
             .map((_, SortedMap.from(validAggregations)))
         } else {
           loggingContext.info(
-            s"Not enough valid aggregations (had=${aggregatedSignatures.size}, valid=${validAggregations.size}, threshold=${threshold.value}) to meet the threshold, cannot deliver yet"
+            s"Not enough valid aggregations (had=${aggregatedSignatures.size}, valid=${validAggregations.size}, threshold=${threshold.value}, eligible=${eligibleAggregations.size}) to meet the threshold, cannot deliver yet"
           )
           None
         }
@@ -397,19 +327,14 @@ object AggregationRuleInput extends HasLoggerName {
     override def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
         traceContext: TraceContext,
         executionContext: ExecutionContext,
-    ): EitherT[FutureUnlessShutdown, String, AggregationRuleInput.Resolved] =
+    ): EitherT[FutureUnlessShutdown, String, NonEmpty[Set[Member]]] =
       EitherT(
         snapshot
           .sequencerGroup()
           .map(_.flatMap { group =>
-            NonEmpty.from(group.active).map((_, group))
+            NonEmpty.from(group.active: Seq[Member])
           })
-          .map(_.toRight(s"No sequencers at ${snapshot.timestamp}").map { case (active, group) =>
-            Resolved(
-              eligibleSenders = active,
-              threshold = group.threshold,
-            )
-          })
+          .map(_.map(_.toSet).toRight(s"No sequencers at ${snapshot.timestamp}"))
       )
     override protected def pretty: Pretty[SequencerGroup.type] = prettySequencerGroup
     def appendForAggregationId(builder: HashBuilder, sender: Member): Unit =
@@ -442,13 +367,9 @@ object AggregationRuleInput extends HasLoggerName {
     override def resolveToMembers(sender: Member, snapshot: TopologySnapshot)(implicit
         traceContext: TraceContext,
         executionContext: ExecutionContext,
-    ): EitherT[FutureUnlessShutdown, String, AggregationRuleInput.Resolved] =
-      EitherT.rightT(
-        Resolved(
-          eligibleSenders = NonEmpty.mk(Seq, sender),
-          threshold = PositiveInt.one,
-        )
-      )
+    ): EitherT[FutureUnlessShutdown, String, NonEmpty[Set[Member]]] =
+      EitherT.rightT(NonEmpty.mk(Set, sender))
+
     override protected def pretty: Pretty[SenderDedup.type] = prettySenderDedup
     def appendForAggregationId(builder: HashBuilder, sender: Member): Unit = {
       builder.addInt(magicNumberSenderDedup)
@@ -494,13 +415,13 @@ object AggregationRuleInput extends HasLoggerName {
   * delivered.
   *
   * Aggregatable submissions are grouped by their [[SubmissionRequest.aggregationId]]. An
-  * aggregatable submission's envelopes are delivered to their recipients when the
-  * [[AggregationRuleInput.Resolved.threshold]]-th submission request in its group has been
-  * sequenced. The aggregatable submission request that triggers the threshold defines the
-  * sequencing timestamp (and thus the sequencer counters) for all delivered envelopes. The sender
-  * of an aggregatable submission request receives a receipt of delivery immediately when its
-  * request was sequenced, not when its envelopes were delivered. When the envelopes are actually
-  * delivered, no further delivery receipt is sent.
+  * aggregatable submission's envelopes are delivered to their recipients when the number of
+  * sequenced submission requests in its group reaches the threhsold. The threshold is computed from
+  * the topology state at sequencing time of the last submission. The aggregatable submission
+  * request that triggers the threshold defines the sequencing timestamp (and thus the sequencer
+  * counters) for all delivered envelopes. The sender of an aggregatable submission request receives
+  * a receipt of delivery immediately when its request was sequenced, not when its envelopes were
+  * delivered. When the envelopes are actually delivered, no further delivery receipt is sent.
   *
   * So a threshold of 1 means that no aggregation takes place and the event is sequenced and
   * delivered immediately. In this case, one can completely omit the aggregation rule in the
@@ -519,11 +440,6 @@ final case class AggregationRule(
 
   private[canton] def toProtoV30: v30.AggregationRule =
     input match {
-      case AggregationRuleInput.Resolved(eligibleSenders, threshold) =>
-        v30.AggregationRule(
-          eligibleMembers = eligibleSenders.map(_.toProtoPrimitive.toProtoUnvalidated),
-          threshold = threshold.value,
-        )
       case AggregationRuleInput.MediatorGroup(index) =>
         v30.AggregationRule(
           eligibleMembers = Seq(MediatorGroupRecipient(index).toProtoPrimitive.toProtoUnvalidated),
@@ -557,26 +473,8 @@ object AggregationRule
     )
   )
 
-  @VisibleForTesting
-  def testing(
-      eligibleSenders: NonEmpty[Seq[Member]],
-      threshold: PositiveInt,
-      protocolVersion: ProtocolVersion,
-  ): AggregationRule =
-    AggregationRule(AggregationRuleInput.Resolved(eligibleSenders, threshold))(
-      protocolVersionRepresentativeFor(protocolVersion)
-    )
-
   def senderDedup(protocolVersion: ProtocolVersion): AggregationRule =
     AggregationRule(AggregationRuleInput.SenderDedup)(
-      protocolVersionRepresentativeFor(protocolVersion)
-    )
-
-  def sequencerTimeAdvancingRequest(
-      sequencers: NonEmpty[Seq[SequencerId]],
-      protocolVersion: ProtocolVersion,
-  ): AggregationRule =
-    AggregationRule(AggregationRuleInput.Resolved(sequencers, threshold = PositiveInt.one))(
       protocolVersionRepresentativeFor(protocolVersion)
     )
 
@@ -601,7 +499,7 @@ object AggregationRule
       pvv: ProtocolVersionValidation,
       proto: v30.AggregationRule,
   ): ParsingResult[AggregationRule] = {
-    val v30.AggregationRule(eligibleMembersP, thresholdP) = proto
+    val v30.AggregationRule(eligibleMembersP, _ignoredThresholdP) = proto
 
     def ruleFromRecipients(recipients: List[Recipient]): ParsingResult[AggregationRuleInput] =
       recipients match {
@@ -609,28 +507,13 @@ object AggregationRule
           Right(AggregationRuleInput.MediatorGroup(index))
         case SequencersOfSynchronizer :: Nil => Right(AggregationRuleInput.SequencerGroup)
         case Nil => Right(AggregationRuleInput.SenderDedup)
-        case other =>
-          val members = other.collect { case member: MemberRecipient =>
-            member.member
-          }
-          for {
-            membersNE <- NonEmpty
-              .from(members)
-              .toRight(
-                ProtoDeserializationError.FieldNotSet(
-                  s"Sequence eligible_members not set or empty"
-                )
-              )
-            _ <- Either.cond(
-              members.sizeCompare(other) == 0,
-              (),
-              ProtoDeserializationError.InvariantViolation(
-                "eligible_members",
-                s"Recipients of unequal type in aggregation rule $eligibleMembersP",
-              ),
+        case _ =>
+          Left(
+            ProtoDeserializationError.InvariantViolation(
+              "eligible_members",
+              s"Invalid aggregation rule with num recipients ${eligibleMembersP.size}",
             )
-            threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
-          } yield AggregationRuleInput.Resolved(membersNE, threshold)
+          )
       }
 
     for {

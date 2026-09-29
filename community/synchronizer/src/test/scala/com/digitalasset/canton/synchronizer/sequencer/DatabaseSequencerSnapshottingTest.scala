@@ -18,7 +18,12 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer as CantonSequencer
 import com.digitalasset.canton.synchronizer.sequencer.store.{DbSequencerStoreTest, SequencerStore}
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{MediatorId, TestingIdentityFactory, TestingTopology}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  MediatorId,
+  TestingIdentityFactory,
+  TestingTopology,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.Materializer
 
@@ -31,11 +36,15 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
   )(implicit materializer: Materializer): CantonSequencer =
     createSequencerWithSnapshot(None)
 
+  // Note that this test cannot use `mediatorId` from SequencerApiTest as the test here
+  // creates another topology factory and doesn't reuse the one in the test fixture.
+  private val myMediatorId = DefaultTestIdentities.mediatorId
+
   private val crypto = TestingIdentityFactory(
-    TestingTopology(),
+    TestingTopology(), // uses the default test identity
     loggerFactory,
     DynamicSynchronizerParameters.initialValues(testedProtocolVersion),
-  ).forOwnerAndSynchronizer(owner = mediatorId, psid)
+  ).forOwnerAndSynchronizer(owner = myMediatorId, psid)
 
   def createSequencerWithSnapshot(
       initialState: Option[SequencerInitialState]
@@ -86,7 +95,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
 
       val messageContent = "hello"
       val messageContent2 = "hello2"
-      val sender: MediatorId = mediatorId
+      val sender: MediatorId = myMediatorId
       val recipients = Recipients.cc(sender)
 
       val request: SubmissionRequest = createSendRequest(sender, messageContent, recipients)

@@ -1319,6 +1319,57 @@ abstract class EventStorageBackendTemplate(
 
   }
 
+  override def lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+      synchronizerId: SynchronizerId,
+      beforeOrAtRecordTime: Timestamp,
+  )(connection: Connection): Option[Offset] =
+    ledgerEndCache.apply().flatMap { ledgerEnd =>
+      val internalizedSynchronizerId = stringInterning.synchronizerId.internalize(synchronizerId)
+      val recordTimeMicros = beforeOrAtRecordTime.micros
+
+      val queryOffset = SQL"""SELECT * FROM (
+    SELECT COALESCE (
+    (
+        (
+            SELECT event_offset as result
+            FROM lapi_update_meta
+            WHERE synchronizer_id = $internalizedSynchronizerId and record_time = $recordTimeMicros
+            AND ${QueryStrategy.offsetIsLessOrEqual("event_offset", Some(ledgerEnd.lastOffset))}
+            ORDER by event_offset ASC
+            LIMIT 1
+        ) UNION ALL (
+            SELECT completion_offset as result
+            FROM lapi_command_completions
+            WHERE synchronizer_id = $internalizedSynchronizerId and record_time = $recordTimeMicros
+            AND ${QueryStrategy
+          .offsetIsLessOrEqual("completion_offset", Some(ledgerEnd.lastOffset))}
+            ORDER by completion_offset ASC
+            LIMIT 1
+        ) ORDER BY result ASC LIMIT 1
+    ),
+    (
+        (
+            SELECT event_offset as result
+            FROM lapi_update_meta
+            WHERE synchronizer_id = $internalizedSynchronizerId and record_time < $recordTimeMicros
+            AND ${QueryStrategy.offsetIsLessOrEqual("event_offset", Some(ledgerEnd.lastOffset))}
+            ORDER by record_time DESC, event_offset DESC
+            LIMIT 1
+        ) UNION ALL (
+            SELECT completion_offset as result
+            FROM lapi_command_completions
+            WHERE synchronizer_id = $internalizedSynchronizerId and record_time < $recordTimeMicros
+            AND ${QueryStrategy
+          .offsetIsLessOrEqual("completion_offset", Some(ledgerEnd.lastOffset))}
+            ORDER by record_time DESC, completion_offset DESC
+            LIMIT 1
+        ) ORDER BY result DESC LIMIT 1
+    )
+) as result) as offsets where result is not null"""
+
+      queryOffset.asSingleOpt(CommonRowDefs.offset("result").rowParser)(connection)
+    }
+
   def lastRecordTimeBeforeOrAtSynchronizerOffset(
       synchronizerId: SynchronizerId,
       beforeOrAtOffsetInclusive: Offset,

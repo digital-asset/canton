@@ -211,12 +211,6 @@ message PartyReplicationStatus {
     uint32 topology_serial = 6;
   }
 
-  // Agreement among participants to replicate the ACS via sequencer channel.
-  message SequencerChannelAgreement {
-    // Sequencer hosting the channel for ACS replication.
-    string sequencer_uid = 1;
-  }
-
   // Authorization by party owners and target participant to onboard the party.
   message PartyReplicationAuthorization {
     // The timestamp at which the party onboarding authorization becomes effective
@@ -249,33 +243,67 @@ message PartyReplicationStatus {
   message PartyReplicationError {
     // Error message.
     // required
-    string error_message = 2;
+    string error_message = 1;
+  }
+
+  // Way of replicating party ACS.
+  enum ReplicationMode {
+    REPLICATION_MODE_UNSPECIFIED = 0;
+    // ACS replicated via a file (exported from SP and imported to TP).
+    REPLICATION_MODE_FILE = 1;
+    // ACS replicated via sequencer channel.
+    REPLICATION_MODE_SEQUENCER_CHANNEL = 2;
+  }
+
+  // Status of the sequencer channel-based ACS replication.
+  message AcsReplicationStatus {
+    // Agreement among participants to replicate the ACS via sequencer channel.
+    message SequencerChannelAgreement {
+      // Sequencer hosting the channel for ACS replication.
+      string sequencer_uid = 1;
+    }
+
+    // Error message when disconnected or operator intervention needed.
+    message AcsReplicationError {
+      // Error message.
+      // required
+      string error_message = 1;
+    }
+
+    // Sequencer channel agreement for ACS replication.
+    // required for ACS-based replication
+    SequencerChannelAgreement agreement = 1;
+    // Whether replicating the ACS via sequencer channel has completed.
+    bool has_completed = 2;
+    // ACS replication error.
+    // optional, set when there is a transient or terminal error.
+    AcsReplicationError error_message = 3;
   }
 
   // Static party replication parameters.
   // required
   ReplicationParameters parameters = 1;
-  // Sequencer channel agreement.
-  // optional, set if there is an agreement to replicate the ACS via sequencer channel.
-  SequencerChannelAgreement agreement = 2;
   // Topology authorization.
   // optional, set once the party onboarding has been authorized via topology.
-  PartyReplicationAuthorization authorization = 3;
+  PartyReplicationAuthorization authorization = 2;
   // ACS replication progress.
   // optional, set once the ACS replication has started.
-  AcsReplicationProgress replication = 4;
+  AcsReplicationProgress replication = 3;
   // Indexing progress.
   // optional, set once indexing of the ACS has started.
-  AcsIndexingProgress indexing = 5;
+  AcsIndexingProgress indexing = 4;
   // Whether the party has been successfully replicated to the target participant,
   // i.e. whether party replication has succeeded and is done.
   // required
-  bool has_completed = 6;
+  bool has_completed = 5;
   // Error details.
   // optional, set when there is a transient or terminal error.
-  PartyReplicationError error_message = 7;
-  // TODO(#35267) replace with AcsReplicationStatus and remove AcsReplicationProgress replication = 4;
-  PartyReplicationStatus acs_replication_status = 8;
+  PartyReplicationError error_message = 6;
+  // ACS replication status.
+  // optional, set if the ACS is replicated via sequencer channel.
+  AcsReplicationStatus acs_replication_status = 7;
+  // File-based or sequencer channel-based ACS replication mode.
+  ReplicationMode replication_mode = 8;
 }
 
 // Enum indicating the permission level of the party on the target participant.

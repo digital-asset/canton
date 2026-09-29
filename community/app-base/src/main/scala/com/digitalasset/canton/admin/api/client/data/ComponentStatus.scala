@@ -13,6 +13,7 @@ import com.digitalasset.canton.admin.api.client.data.ComponentHealthState.{
   UnhealthyState,
 }
 import com.digitalasset.canton.admin.health.v30 as protoV30
+import com.digitalasset.canton.health.ComponentStatus as ComponentStatusInternal
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -20,7 +21,21 @@ import com.digitalasset.canton.util.ShowUtil
 import io.circe.Encoder
 import io.circe.generic.semiauto.deriveEncoder
 
-final case class ComponentStatus(name: String, state: ComponentHealthState) extends PrettyPrinting {
+/** Status of a node component
+  *
+  * @param name
+  *   name of the component
+  * @param state
+  *   current health state of the component
+  * @param labels
+  *   arbitrary key-value labels attached to the component (for example, the synchronizer id for
+  *   synchronizer-scoped components)
+  */
+final case class ComponentStatus(
+    name: String,
+    state: ComponentHealthState,
+    labels: Map[String, String],
+) extends PrettyPrinting {
   override protected val pretty: Pretty[ComponentStatus] = ComponentStatus.componentStatusPretty
 }
 
@@ -35,21 +50,25 @@ object ComponentStatus {
         ComponentStatus(
           dependency.name,
           ComponentHealthState.Ok(value.description),
+          dependency.labels,
         ).asRight
       case protoV30.ComponentStatus.Status.Degraded(value) =>
         ComponentStatus(
           dependency.name,
           Degraded(UnhealthyState(value.description)()),
+          dependency.labels,
         ).asRight
       case protoV30.ComponentStatus.Status.Failed(value) =>
         ComponentStatus(
           dependency.name,
           Failed(UnhealthyState(value.description)()),
+          dependency.labels,
         ).asRight
       case protoV30.ComponentStatus.Status.Fatal(value) =>
         ComponentStatus(
           dependency.name,
           Fatal(UnhealthyState(value.description)()),
+          dependency.labels,
         ).asRight
     }
 
@@ -59,6 +78,20 @@ object ComponentStatus {
     import Pretty.*
     prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
   }
+
+  /** Renders component statuses for display: node-level components as flat lines, followed by a
+    * "Synchronizers:" section with one sub-section per synchronizer for components labeled with a
+    * synchronizer id. See [[com.digitalasset.canton.health.ComponentStatus.renderEntries]].
+    */
+  def renderGrouped(components: Seq[ComponentStatus]): Seq[String] =
+    ComponentStatusInternal.renderEntries(components.map { component =>
+      ComponentStatusInternal.RenderEntry(
+        name = component.name,
+        synchronizerLabel = component.labels.get(ComponentStatusInternal.SynchronizerLabelKey),
+        stateText = component.state.toString,
+        fullLine = component.toString,
+      )
+    })
 }
 
 /** Generic State implementation of a component This can be used as a base health state for most

@@ -11,12 +11,13 @@ import "com/digitalasset/canton/protocol/v30/topology.proto";
 import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
-// The PartyReplicationStatus describes the various pieces of state of a party replication.
+// Describes the various pieces of state of an ACS  replication.
+// Persisted to DB via PendingOperationStore either as a part of PartyReplicationStatus
+// or independently by AcsReplicationStateManager.
 message AcsReplicationStatus {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   // Static parameters that do not change throughout a single ACS replication operation.
-  // TODO(#35267) Use this in the replication status endpoint
   message AcsReplicationParameters {
     string request_id = 1;
     string party_id = 2;
@@ -25,8 +26,8 @@ message AcsReplicationStatus {
     string target_participant_uid = 5;
     // TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
     uint32 topology_serial = 6;
-    google.protobuf.Timestamp timestamp = 7;
-    com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 8;
+    // TODO(#35267) remove from here because ACS replicator doesn't need to know about permission
+    com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 7;
   }
 
   // Sequencer channel agreement hasn't been proposed by target participant yet.
@@ -49,9 +50,7 @@ message AcsReplicationStatus {
     string sequencer_uid = 3;
   }
 
-  // Sequencer channel agreement is not needed either because the ACS replication has been finished or it's file-based.
-  message AgreementNotNeeded {}
-
+  // Sequencer channel agreement has been archived after the ACS had been fully replicated.
   message AgreementArchived {}
 
   // Progress of ACS replication.
@@ -62,9 +61,11 @@ message AcsReplicationStatus {
     // The next counter to use for persistence on the target participant
     // required, not used and always -1 on the source participant
     uint64 next_persistence_counter = 2;
-    // Whether replication has been fully processed the ACS.
-    // required
-    bool fully_processed_acs = 3;
+    // The homomorphic hash bytes of the portion of the ACS replicated so far
+    // optional, not present if and only if processed_contract_count is zero or for file-based replication
+    optional bytes acs_hash = 3;
+    // Whether replication has been fully processed the ACS. Required
+    bool fully_processed_acs = 4;
   }
 
   // Error message when disconnected or operator intervention needed.
@@ -87,6 +88,22 @@ message AcsReplicationStatus {
     string error_message = 2;
   }
 
+  // TODO (#35267) remove once authorization is no longer used in AcsReplicator
+  // Authorization by party owners and target participant to onboard the party.
+  message PartyReplicationAuthorization {
+    // The timestamp at which the party onboarding authorization becomes effective
+    // and the ACS snapshot for replication is based on.
+    // required
+    google.protobuf.Timestamp onboarding_at = 1;
+
+    // Whether the party is fully onboarded to the target participant.
+    // A value of true means:
+    // - The party's ACS has been completely replicated to the target participant, and
+    // - the party participates in Daml transactions according to its target participant hosting permission.
+    // required
+    bool is_onboarding_flag_cleared = 2;
+  }
+
   // Static ACS replication parameters.
   // required
   AcsReplicationParameters parameters = 1;
@@ -96,10 +113,11 @@ message AcsReplicationStatus {
     AgreementNotProposed not_proposed = 2;
     AgreementProposed proposed = 3;
     AgreementExists exists = 4;
-    AgreementNotNeeded not_needed = 5; // TODO(#35267) probably not needed this because a sequencer channel is always needed
-    AgreementArchived archived = 6;
+    AgreementArchived archived = 5;
   }
-  // TODO (#35267) add a timestamp to replace topology authorization in PartyReplicationStatus
+  // TODO (#35267) remove once authorization is no longer used in AcsReplicator
+  // Authorization by party owners and target participant to onboard the party.
+  PartyReplicationAuthorization authorization = 6;
   // I can use ProtoTimestamp which can be obtained from CantonTimestamp
   // Then I can use ledgerApiStore.lastSynchronizerOffset...
   // Or we could just pass offset as long and it's up to client to provide it (maybe that's the best)

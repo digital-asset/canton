@@ -4,6 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.implicits.showInterpolator
+import com.digitalasset.base.error.ErrorCategory
+import com.digitalasset.base.error.ErrorCategory.UnredactedSecurityAlert
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.sequencing.protocol.{
@@ -108,6 +110,10 @@ object SubmissionOutcome {
 
   /** The submission was fully discarded, no error is delivered to sender, no messages are sent to
     * the members.
+    *
+    * Use discard only when no rejection can safely be delivered. Discarded requests are not paid
+    * for and therefore pose a risk of DoS attacks. Therefore, they are only used for edge cases but
+    * normally, filtered out by the submitting sequencer.
     */
   case object Discard extends SubmissionOutcome {
     override def updateTrafficReceipt(trafficReceiptO: Option[TrafficReceipt]): SubmissionOutcome =
@@ -151,20 +157,28 @@ object SubmissionOutcome {
         submission: SubmissionRequest,
         sequencingTime: CantonTimestamp,
         sequencerError: SequencerDeliverError,
+        context: Option[String] = None,
+        reportError: Boolean = true,
     )(implicit
-        traceContext: TraceContext,
-        loggingContext: ErrorLoggingContext,
+        loggingContext: ErrorLoggingContext
     ): Reject = {
-      loggingContext.debug(
-        show"Rejecting submission request ${submission.messageId} from ${submission.sender} with error ${sequencerError.code
-            .toMsg(sequencerError.cause, correlationId = None, limit = None)}"
-      )
-
+      if (reportError) {
+        def message =
+          show"Rejecting submission request ${submission.messageId} from ${submission.sender} with error ${sequencerError.code
+              .toMsg(sequencerError.cause, correlationId = None, limit = None)}" + context
+            .map(s => s" due to $s")
+            .getOrElse("")
+        if (
+          sequencerError.code.category == ErrorCategory.SecurityAlert || sequencerError.code.category == UnredactedSecurityAlert
+        )
+          loggingContext.warn(message)
+        else loggingContext.debug(message)
+      }
       new Reject(
         submission,
         sequencingTime,
         sequencerError.rpcStatusWithoutLoggingContext(),
-        traceContext,
+        loggingContext.traceContext,
         trafficReceiptO = None,
       )
     }

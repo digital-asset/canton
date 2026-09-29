@@ -7,17 +7,21 @@ import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.apiserver.FatContractInstanceHelper
 import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
 import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.protocol.{LfContractId, LfSerializationVersion, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorServiceGeneric}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, HasExecutorServiceGeneric, LfValue}
+import com.digitalasset.daml.lf.crypto.Hash
+import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.apache.pekko.{Done, NotUsed}
 import org.scalatest.Assertion
@@ -263,6 +267,105 @@ class BufferedStreamsReaderSpec
         streamElements should contain theSameElementsInOrderAs fetchedElements
       }
     }
+
+    "reuse the same ContractInstance reference from TransactionLogUpdate without copying" in new StaticTestScope {
+      val party = Ref.Party.assertFromString("Alice")
+      val templateId = Ref.Identifier.assertFromString("pkg:Mod:Entity")
+      val packageName = Ref.PackageName.assertFromString("pkg-name")
+      val contractId =
+        LfContractId.V1(
+          Hash.assertFromBytes(Bytes.fromByteArray("%32s".format("contract-id-1").getBytes))
+        )
+      val argument = LfValue.ValueUnit
+      val authenticationData = com.digitalasset.daml.lf.data.Bytes.Empty // Array.empty[Byte]
+
+      val contractInstance =
+        FatContractInstanceHelper.buildFatContractInstance(
+          templateId = templateId,
+          packageName = packageName,
+          contractId = contractId,
+          argument = argument,
+          createdAt = Time.Timestamp.Epoch,
+          authenticationData = authenticationData,
+          signatories = Set(party),
+          stakeholders = Set(party),
+          keyOpt = None,
+          version = LfSerializationVersion.V1,
+        )
+
+      val createdEvent =
+        TransactionLogUpdate.CreatedEvent(
+          eventOffset = offset1,
+          updateId = "updateid",
+          nodeId = 1,
+          eventSequentialId = 1L,
+          contractId = contractId,
+          ledgerEffectiveTime = Timestamp.Epoch,
+          templateId = templateId,
+          representativePackageId = PackageId.fromInt(1),
+          packageName = contractInstance.packageName,
+          packageVersion = None,
+          commandId = "String",
+          workflowId = "String",
+          keyInfo = None,
+          treeEventWitnesses = Set(party),
+          flatEventWitnesses = Set(party),
+          submitters = Set(party),
+          authenticationData = Bytes.Empty,
+          createdContractInstance = contractInstance,
+        )
+
+      val tx = transaction(1).copy(events =
+        Vector(createdEvent.copy(createdContractInstance = contractInstance))
+      )
+
+      val buffer = new InMemoryFanoutBuffer(
+        maxBufferSize = 3,
+        metrics = metrics,
+        maxBufferedChunkSize = 3,
+        loggerFactory = loggerFactory,
+      )
+      buffer.push(tx)
+
+      val result =
+        new BufferedStreamsReader[Object, TransactionLogUpdate.TransactionAccepted](
+          inMemoryFanoutBuffer = buffer,
+          fetchFromPersistence = failingPersistenceFetch,
+          bufferedStreamEventsProcessingParallelism = 2,
+          metrics = metrics,
+          streamName = "some_tx_stream",
+          loggerFactory,
+        )(executorService)
+          .stream[TransactionLogUpdate.TransactionAccepted](
+            offsetRange = OffsetRange(
+              startInclusive = offset1,
+              endInclusive = offset1,
+            ),
+            persistenceFetchArgs = new Object,
+            bufferFilter = {
+              case accepted: TransactionLogUpdate.TransactionAccepted => Some(accepted)
+              case _ => None
+            },
+            toApiResponse = tx => Future.successful(tx),
+            descendingOrder = false,
+            skipPruningChecks = false,
+            limit = None,
+          )
+          .runWith(Sink.seq)
+          .futureValue
+
+      result should have size 1
+
+      val streamedTx = result.head._2
+      val streamedInstance = streamedTx match {
+        case accepted: TransactionLogUpdate.TransactionAccepted =>
+          accepted.events.collect { case e: TransactionLogUpdate.CreatedEvent =>
+            e.createdContractInstance
+          }.head
+      }
+
+      streamedInstance should be theSameInstanceAs contractInstance
+    }
   }
 
   "stream (dynamic)" when {
@@ -498,7 +601,7 @@ object BufferedStreamsReaderSpec {
       val streamElements: ArrayBuffer[(Offset, String)] =
         ArrayBuffer.empty[(Offset, String)]
 
-      private val failingPersistenceFetch = new FetchFromPersistence[Object, String] {
+      def failingPersistenceFetch[T] = new FetchFromPersistence[Object, T] {
         override def apply(
             offsetRange: OffsetRange,
             descendingOrder: Boolean,
@@ -507,7 +610,7 @@ object BufferedStreamsReaderSpec {
             limit: Option[Int],
         )(implicit
             loggingContext: LoggingContextWithTrace
-        ): Source[(Offset, String), NotUsed] = fail(
+        ): Source[(Offset, T), NotUsed] = fail(
           s"Unexpected call to fetch from persistence offsetRange=$offsetRange, descendingOrder=$descendingOrder"
         )
       }

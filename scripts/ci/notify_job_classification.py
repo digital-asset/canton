@@ -90,7 +90,7 @@ def test_alerting_failures_empty_when_only_tests_fail():
 
 def test_load_classification_reads_the_real_file():
     test_jobs, infra_jobs = load_classification()
-    assert "test" in test_jobs
+    assert "test_36" in test_jobs
     assert "compile" in infra_jobs
     assert test_jobs.isdisjoint(infra_jobs)
 

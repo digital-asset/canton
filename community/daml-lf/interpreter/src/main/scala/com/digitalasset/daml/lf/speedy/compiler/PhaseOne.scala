@@ -37,6 +37,7 @@ private[compiler] object PhaseOne {
   )
 
   private val SUGetTime = SEBuiltin(SBUGetTime)
+  private val SCGetTime = SEBuiltin(SBCGetTime)
 
   // corresponds to Daml-LF expression variable.
   case class VarRef(name: ExprVarName)
@@ -746,7 +747,10 @@ private[lf] final class PhaseOne(
           }
         }
       case UpdateGetTime =>
-        Return(SUGetTime)
+        config.cmdMode match {
+          case ExecutionMode.Conductor => Return(SCGetTime)
+          case ExecutionMode.UpdateMachine => Return(SUGetTime)
+        }
       case UpdateLedgerTimeLT(time) =>
         compileExp(env, time) { time =>
           config.cmdMode match {

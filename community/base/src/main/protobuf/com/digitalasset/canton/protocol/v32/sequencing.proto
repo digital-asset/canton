@@ -73,6 +73,8 @@ message SubmissionRequest {
   optional int64 topology_timestamp = 6;
 
   // Optional rule used to aggregate requests.
+  // Note that the threshold parameter is ignored for p35 and later. Also, the list of eligible members is
+  // restricted to very specific recipients. Anything else will be rejected as invalid argument / parse error.
   v30.AggregationRule aggregation_rule = 7;
 
   // Optional submission cost computed by the sender. Must be provided if traffic control is enabled on the receiving synchronizer.

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import cats.syntax.option.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.DirectExecutionContext
@@ -88,129 +87,106 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, ApiResponse), NotUsed] = {
-    def toApiResponseStream(
-        slice: Vector[(Offset, BufferOut)]
+    def continue(
+        offsetRange: OffsetRange,
+        limit: Option[Int],
     ): Source[(Offset, ApiResponse), NotUsed] =
-      if (slice.isEmpty) Source.empty
-      else
-        Source(slice)
-          .mapAsync(bufferedStreamEventsProcessingParallelism) { case (offset, payload) =>
-            bufferReaderMetrics.fetchedBuffered.inc()
-            Timed.future(
-              bufferReaderMetrics.conversion,
-              Future.delegate {
-                toApiResponse(payload).map(offset -> _)(directEc)
-              },
-            )
-          }
+      Source
+        .futureSource(Future {
+          val bufferSlice = Timed.value(
+            bufferReaderMetrics.slice,
+            inMemoryFanoutBuffer.slice(
+              range = offsetRange,
+              filter = bufferFilter,
+              limit = limit,
+              reverseOrder = descendingOrder,
+            ),
+          )
+          val (fromPersistenceBeforeImfo, remaining) = bufferSlice match {
+            case Some(slice) =>
+              bufferReaderMetrics.sliceSize.update(slice.fromImfo.size)(MetricsContext.Empty)
+              val rangeBeforeSlice = offsetRange.before(slice.offsetRange)
+              val rangeAfterSlice = offsetRange.after(slice.offsetRange)
+              // The result from this function requires that the three offset ranges to follow each other in emission order
+              // therefore for descending order we have to swap the ranges.
+              if (descendingOrder) rangeAfterSlice -> rangeBeforeSlice
+              else rangeBeforeSlice -> rangeAfterSlice
 
-    val source = Source
-      .unfoldAsync(offsetRange.some) {
-        case Some(currentRange) =>
-          Future {
-            val bufferSlice = Timed.value(
-              bufferReaderMetrics.slice,
-              inMemoryFanoutBuffer.slice(
-                range = currentRange,
-                filter = bufferFilter,
-                limit = limit,
-                reverseOrder = descendingOrder,
-              ),
-            )
-            bufferSlice match {
-              case None =>
-                Some(
-                  (
-                    None,
-                    fetchFromPersistence(
-                      offsetRange = currentRange,
-                      filter = persistenceFetchArgs,
-                      descendingOrder = descendingOrder,
-                      skipPruningChecks = skipPruningChecks,
-                      limit = limit,
-                    ),
-                  )
+            case None =>
+              Some(offsetRange) -> None
+          }
+          def fromPersistenceBeforeImfoSource(limit: Option[Int]) =
+            fromPersistenceBeforeImfo
+              .map(range =>
+                fetchFromPersistence(
+                  offsetRange = range,
+                  filter = persistenceFetchArgs,
+                  descendingOrder = descendingOrder,
+                  skipPruningChecks = skipPruningChecks,
+                  limit = limit,
                 )
-              case Some(slice) =>
-                bufferReaderMetrics.sliceSize.update(slice.fromImfo.size)(MetricsContext.Empty)
-
-                if (descendingOrder) {
-                  limit match {
-                    case Some(l) =>
-                      val remainingRange = currentRange.before(slice.offsetRange)
-                      Some(
-                        (
-                          None,
-                          remainingRange match {
-                            case Some(persistenceRange) if slice.fromImfo.sizeIs < l =>
-                              toApiResponseStream(slice.fromImfo).concat(
-                                fetchFromPersistence(
-                                  offsetRange = persistenceRange,
-                                  filter = persistenceFetchArgs,
-                                  descendingOrder = descendingOrder,
-                                  skipPruningChecks = skipPruningChecks,
-                                  limit = Some(l - slice.fromImfo.size),
-                                )
-                              )
-                            case _ => toApiResponseStream(slice.fromImfo)
-                          },
-                        )
-                      )
-                    case _ =>
-                      Some(
-                        (
-                          currentRange.before(slice.offsetRange),
-                          toApiResponseStream(slice.fromImfo),
-                        )
-                      )
-                  }
-                } else {
-                  val sourceFromPersistence = currentRange.before(slice.offsetRange) match {
-                    case None =>
-                      Source.empty
-                    case Some(persistenceRange) =>
-                      fetchFromPersistence(
-                        offsetRange = persistenceRange,
-                        filter = persistenceFetchArgs,
-                        descendingOrder = descendingOrder,
-                        skipPruningChecks = skipPruningChecks,
-                        limit = limit,
-                      )
-                  }
-
-                  limit match {
-                    case None =>
-                      Some(
-                        (
-                          currentRange.after(slice.offsetRange),
-                          sourceFromPersistence.concat(toApiResponseStream(slice.fromImfo)),
-                        )
-                      )
-                    case Some(l) =>
-                      Some(
-                        (
-                          None,
-                          sourceFromPersistence.foldConcat(0)((count, _) => count + 1)(count =>
-                            toApiResponseStream(slice.fromImfo.take(l - count))
-                          ),
-                        )
-                      )
-                  }
-                }
-            }
-          }
-        case _ => Future.successful(None)
-      }
-      .flatten
+              )
+              .getOrElse(Source.empty)
+          def continuationSource(limit: Option[Int]) =
+            remaining
+              .map(continue(_, limit))
+              .getOrElse(Source.empty)
+          concatLimitedSource(
+            fromPersistenceBeforeImfoSource,
+            concatLimitedSource(
+              bufferResponseStream(
+                slice = bufferSlice.map(_.fromImfo).getOrElse(Vector.empty),
+                toApiResponse = toApiResponse,
+              ),
+              continuationSource,
+            ),
+          )(limit)
+        })
+        .mapMaterializedValue(_ => NotUsed)
 
     Timed
-      .source(bufferReaderMetrics.fetchTimer, source)
+      .source(bufferReaderMetrics.fetchTimer, continue(offsetRange, limit))
       .map { tx =>
         bufferReaderMetrics.fetchedTotal.inc()
         tx
       }
   }
 
+  private def bufferResponseStream[BufferOut](
+      slice: Vector[(Offset, BufferOut)],
+      toApiResponse: BufferOut => Future[ApiResponse],
+  )(limit: Option[Int]): Source[(Offset, ApiResponse), NotUsed] =
+    if (slice.isEmpty) Source.empty
+    else
+      Source(limit match {
+        case Some(limit) => slice.take(limit)
+        case None => slice
+      })
+        .mapAsync(bufferedStreamEventsProcessingParallelism) { case (offset, payload) =>
+          bufferReaderMetrics.fetchedBuffered.inc()
+          Timed.future(
+            bufferReaderMetrics.conversion,
+            Future.delegate {
+              toApiResponse(payload).map(offset -> _)(directEc)
+            },
+          )
+        }
+
+  private type LimitedSource = Option[Int] => Source[(Offset, ApiResponse), NotUsed]
+  private def concatLimitedSource(
+      a: LimitedSource,
+      b: LimitedSource,
+  ): LimitedSource = {
+    case Some(limit) =>
+      a(Some(limit)).foldConcat(0)((count, _) => count + 1) { count =>
+        val newLimit = limit - count
+        if (newLimit > 0) b(Some(newLimit))
+        else Source.empty
+      }
+
+    case None =>
+      a(None).concatLazy(b(None))
+  }
 }
 
 private[platform] object BufferedStreamsReader {

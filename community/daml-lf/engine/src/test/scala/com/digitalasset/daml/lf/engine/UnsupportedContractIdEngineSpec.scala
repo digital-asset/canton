@@ -15,8 +15,8 @@ import com.digitalasset.daml.lf.value.ContractIdVersion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-//class UnsupportedContractIdEngineSpecConductor
-//    extends UnsupportedContractIdEngineSpec(ExecutionMode.Conductor)
+class UnsupportedContractIdEngineSpecConductor
+    extends UnsupportedContractIdEngineSpec(ExecutionMode.Conductor)
 
 class UnsupportedContractIdEngineSpecUpdateMachine
     extends UnsupportedContractIdEngineSpec(ExecutionMode.UpdateMachine)
@@ -36,8 +36,6 @@ abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
   private val now = Time.Timestamp.now()
   private val withKeyTemplateId = Ref.Identifier(basicTestsPkgId, "BasicTests:WithKey")
   private val withKeySKey = mkSValuePair(SValue.SParty(alice), SValue.SInt64(42))
-
-  def assumeUpd = assume(executionMode == ExecutionMode.UpdateMachine)
 
   /** Drive a program past the needs that can be answered automatically (packages, prefetch,
     * interruptions), stopping at the first contract/key/external-call suspension (or the result).
@@ -111,8 +109,6 @@ abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
     }
 
     "return UnsupportedContractId Error when a NeedKey response contains only UnsupportedContractIdVersion" in {
-      assumeUpd
-
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 
@@ -142,8 +138,6 @@ abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
     }
 
     "defer unsupported overflow entries when first NeedKey entry is supported" in {
-      assumeUpd
-
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 

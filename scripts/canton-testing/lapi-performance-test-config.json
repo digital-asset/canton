@@ -5,9 +5,9 @@
       "stages": [
         {
           "stage_name": "insert_base_preparation",
-          "scala_test": "InsertPerfTest",
-          "file_pattern": "insert_perf",
-          "description": "Insert",
+          "scala_test": "InsertPrepareTest",
+          "file_pattern": "prepare_perf",
+          "description": "Initial insert",
           "new_db": true,
           "xmx": "64G"
         },
@@ -52,7 +52,7 @@
           "lower": 6000
         },
         {
-          "name": "ingesting_20_cn_nfr_current_rate",
+          "name": "ingesting_20_cn_nfr_avg_rate",
           "description": "ingestion average rate (update/seconds)",
           "upper": 10000,
           "lower": 1000

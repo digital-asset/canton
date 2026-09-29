@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.*
 import cats.syntax.functor.*
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -19,13 +18,10 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentVal
   ReassigningParticipantValidation,
   ValidationErrorOr,
 }
-import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationError.PackageIdUnknownOrUnvetted
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationResult.ReassigningParticipantValidationResult
-import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationValidator
-import com.digitalasset.canton.protocol.{LfContractId, Stakeholders}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -90,11 +86,16 @@ private[reassignment] class UnassignmentValidation(
 }
 
 private[reassignment] object UnassignmentValidation {
+
   type ValidationErrorOr[A] = EitherT[
     FutureUnlessShutdown,
     ReassignmentProcessorError,
     A,
   ]
+
+  private def validationErrorFromUnitEither[A](f: EitherT[FutureUnlessShutdown, A, Unit])(implicit
+      ec: ExecutionContext
+  ): ValidationErrorOr[Option[A]] = EitherT.right(f.value.map(e => e.swap.toOption))
 
   class CommonUnassignmentValidator(
       val activenessF: FutureUnlessShutdown[ActivenessResult],
@@ -108,7 +109,7 @@ private[reassignment] object UnassignmentValidation {
     ): ValidationErrorOr[Option[ReassignmentValidationError]] = {
       val fullTree = parsedRequest.fullViewTree
 
-      EitherT.right(
+      validationErrorFromUnitEither(
         ReassignmentValidation
           .checkSubmitter(
             ReassignmentRef(fullTree.contracts.contractIds.toSet),
@@ -117,8 +118,6 @@ private[reassignment] object UnassignmentValidation {
             participantId = fullTree.submitterMetadata.submittingParticipant,
             stakeholders = fullTree.contracts.stakeholders.all,
           )
-          .value
-          .map(_.swap.toOption)
       )
     }
 
@@ -138,25 +137,44 @@ private[reassignment] object UnassignmentValidation {
           ReassignmentValidation.checkStakeholders(parsedRequest.fullViewTree)
         )
       } yield ()
+      packageVettingErrors <- checkSourcePackagesVetted(
+        parsedRequest.fullViewTree,
+        Source(parsedRequest.snapshot.ipsSnapshot),
+      )
       submitterCheckResult <- checkSubmitterCheckResult(parsedRequest)
       // check multi-synchronizer flag is enabled on the source synchronizer
-      multiSynchronizerCheckResult <- EitherT.right(
+      multiSynchronizerCheckResult <- validationErrorFromUnitEither(
         ReassignmentValidation
           .checkMultiSynchronizerEnabled(
             topologySnapshot = parsedRequest.snapshot.ipsSnapshot,
             stakeholders = parsedRequest.fullViewTree.stakeholders,
             psid = parsedRequest.fullViewTree.sourceSynchronizer.unwrap,
           )
-          .value
-          .map(_.swap.toOption)
       )
     } yield UnassignmentValidationResult.CommonValidationResult(
       activenessResult,
       participantSignatureVerificationResult,
       contractAuthenticationResultF,
+      packageVettingErrors,
       submitterCheckResult,
       multiSynchronizerCheckResult,
     )
+
+    // check the package of the template is vetted
+    private def checkSourcePackagesVetted(
+        fullTree: FullUnassignmentTree,
+        sourceTopology: Source[TopologySnapshot],
+    ): ValidationErrorOr[Option[ReassignmentValidationError]] =
+      validationErrorFromUnitEither(
+        ReassignmentValidation
+          .checkPackagesVetted(
+            stakeholders = fullTree.contracts.stakeholders,
+            contractIds = fullTree.contracts.contractIds.toSet,
+            packageIds = fullTree.contracts.sourcePackageIds.unwrap,
+            topologySnapshot = sourceTopology.unwrap,
+            synchronizerId = fullTree.sourceSynchronizer.unwrap,
+          )
+      )
   }
 
   final class ReassigningParticipantUnassignmentValidator(
@@ -177,41 +195,19 @@ private[reassignment] object UnassignmentValidation {
           ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
         )
 
-    private def checkPackagesVetted(
-        stakeholders: Stakeholders,
-        contractIds: Set[LfContractId],
-        packageIds: Set[LfPackageId],
-        topologySnapshot: TopologySnapshot,
-        synchronizerId: PhysicalSynchronizerId,
-    ): ValidationErrorOr[Option[ReassignmentValidationError]] =
-      EitherT.right(
-        UsableSynchronizers
-          .checkPackagesVetted(
-            synchronizerId,
-            topologySnapshot,
-            stakeholders.all.map(_ -> packageIds).toMap,
-            topologySnapshot.timestamp,
-          )
-          .value
-          .map(
-            _.swap.toOption.map(u =>
-              PackageIdUnknownOrUnvetted(contractIds, u.unknownTo, synchronizerId)
-            )
-          )
-      )
-
     // check the package of the template is vetted
     private def checkTargetPackagesVetted(
         fullTree: FullUnassignmentTree,
         targetTopology: Target[TopologySnapshot],
     ): ValidationErrorOr[Option[ReassignmentValidationError]] =
-      checkPackagesVetted(
-        stakeholders = fullTree.contracts.stakeholders,
-        // TODO(#29199): Use target package IDs
-        contractIds = fullTree.contracts.contractIds.toSet,
-        packageIds = fullTree.contracts.packageIds,
-        topologySnapshot = targetTopology.unwrap,
-        synchronizerId = fullTree.targetSynchronizer.unwrap,
+      validationErrorFromUnitEither(
+        ReassignmentValidation.checkPackagesVetted(
+          stakeholders = fullTree.contracts.stakeholders,
+          contractIds = fullTree.contracts.contractIds.toSet,
+          packageIds = fullTree.contracts.targetPackageIds.unwrap,
+          topologySnapshot = targetTopology.unwrap,
+          synchronizerId = fullTree.targetSynchronizer.unwrap,
+        )
       )
 
     // check the declared reassigning participants are included in the computed ones and sufficient
@@ -239,17 +235,18 @@ private[reassignment] object UnassignmentValidation {
     ): ValidationErrorOr[ReassigningParticipantValidationResult] =
       for {
         participantsErrors <- checkReassigningParticipants(parsedRequest, targetTopology)
-        vettingErrors <- checkTargetPackagesVetted(parsedRequest.fullViewTree, targetTopology)
+        packageVettingErrors <- checkTargetPackagesVetted(
+          parsedRequest.fullViewTree,
+          targetTopology,
+        )
         // check multi-synchronizer flag is enabled on the target synchronizer
-        multiSynchronizerCheckResult <- EitherT.right(
+        multiSynchronizerCheckResult <- validationErrorFromUnitEither(
           ReassignmentValidation
             .checkMultiSynchronizerEnabled(
               topologySnapshot = targetTopology.unwrap,
               stakeholders = parsedRequest.fullViewTree.stakeholders,
               psid = parsedRequest.fullViewTree.targetSynchronizer.unwrap,
             )
-            .value
-            .map(_.swap.toOption)
         )
       } yield {
         val contractAuthenticationResultF =
@@ -259,7 +256,7 @@ private[reassignment] object UnassignmentValidation {
           )
         ReassigningParticipantValidationResult(
           contractAuthenticationResultF,
-          participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList,
+          participantsErrors.toList ++ packageVettingErrors.toList ++ multiSynchronizerCheckResult.toList,
         )
       }
 

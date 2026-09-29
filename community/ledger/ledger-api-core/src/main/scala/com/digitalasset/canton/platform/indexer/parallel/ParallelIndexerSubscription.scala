@@ -173,7 +173,6 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
               metrics = metrics,
               toDbDto = mapInSpan(
                 UpdateToDbDto(
-                  participantId = participantId,
                   translation = translation,
                   compressionStrategy = compressionStrategy,
                   metrics = metrics,
@@ -837,7 +836,6 @@ object ParallelIndexerSubscription {
             eventSeqId += 1
             dbDto.copy(event_sequential_id = eventSeqId)
 
-          case unChanged: DbDto.PartyEntry => unChanged
           case unChanged: DbDto.StringInterningDto => unChanged
           case unChanged: DbDto.SequencerIndexMoved => unChanged
         }

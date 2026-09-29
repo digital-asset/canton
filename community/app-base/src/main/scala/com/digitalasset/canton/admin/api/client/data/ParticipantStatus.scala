@@ -53,7 +53,7 @@ final case class ParticipantStatus(
         s"Connected synchronizers: ${multiline(connectedHealthySynchronizers.map(_.toString))}",
         s"Unhealthy synchronizers: ${multiline(connectedUnhealthySynchronizers.map(_.toString))}",
         s"Active: $active",
-        s"Components: ${multiline(components.map(_.toString))}",
+        s"Components: ${multiline(ComponentStatus.renderGrouped(components))}",
         s"Version: $version",
         s"Supported protocol version(s): ${supportedProtocolVersions.mkString(", ")}",
       ).mkString(System.lineSeparator())

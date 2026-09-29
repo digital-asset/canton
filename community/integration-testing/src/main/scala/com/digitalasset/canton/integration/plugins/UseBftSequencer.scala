@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.plugins
 
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton
-import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -36,6 +35,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   BftBlockOrderingP2PSendDelayConfig,
   BftBlockOrderingStandalonePeerConfig,
   BftBlockOrderingStandaloneTopologyDelayConfig,
+  DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
@@ -65,6 +65,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import com.digitalasset.canton.util.SingleUseCell
+import com.digitalasset.canton.{UniquePortGenerator, config}
 import monocle.macros.GenLens
 import monocle.macros.syntax.lens.*
 import org.scalatest.EitherValues
@@ -104,6 +105,8 @@ final class UseBftSequencer(
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
+    consensusWindowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] =
+      DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
     // Use a longer topology warn timeout in tests to avoid flakes under concurrent CI load.
     consensusNewEpochTopologyWarnTimeout: FiniteDuration = 10.seconds,
     sequencingParameters: Option[topology.SequencingParameters] = None,
@@ -203,6 +206,8 @@ final class UseBftSequencer(
                     ),
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
                     consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
+                    consensusWindowSizeForRetransmissionOfCommitCertificates =
+                      consensusWindowSizeForRetransmissionOfCommitCertificates,
                     minRequestsInBatch = minRequestsInBatch,
                     maxBatchCreationInterval = maxBatchCreationInterval,
                     availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
@@ -473,10 +478,14 @@ final class UseBftSequencer(
         signingPublicKeyProtoFile = pubKeyFile.toJava,
         segmentLength = standaloneConfig.segmentLength,
         pbftViewChangeTimeout = standaloneConfig.pbftViewChangeTimeout.underlying,
+        pbftViewChangeTimeoutStep = standaloneConfig.pbftViewChangeTimeoutStep,
+        pbftViewChangeTimeoutUpperBound = standaloneConfig.pbftViewChangeTimeoutUpperBound,
         blacklistLeaderSelectionPolicyConfig =
           standaloneConfig.blacklistLeaderSelectionPolicyConfig,
         maxRequestsInBatch = standaloneConfig.maxRequestsInBatch,
         maxBatchesPerBlockProposal = standaloneConfig.maxBatchesPerBlockProposal,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+          standaloneConfig.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
         peers = otherInitialNames
           .map { otherInitialInstanceName =>
             BftBlockOrderingStandalonePeerConfig(
@@ -559,10 +568,13 @@ object UseBftSequencer {
 
   final case class UseStandaloneConfig(
       pbftViewChangeTimeout: PositiveFiniteDuration,
+      pbftViewChangeTimeoutStep: config.NonNegativeFiniteDuration,
+      pbftViewChangeTimeoutUpperBound: config.NonNegativeFiniteDuration,
       segmentLength: Long,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short,
       maxBatchesPerBlockProposal: Short,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
       testSlowdown: Option[TestSlowdownConfig],
   )
 }

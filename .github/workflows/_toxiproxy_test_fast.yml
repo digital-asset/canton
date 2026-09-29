@@ -9,6 +9,12 @@ on:
       include_only_requires_external_kms_tests:
         type: boolean
         default: false
+      job_name:
+        default: toxiproxy_test_fast
+        type: string
+      protocol_version:
+        required: true
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: false
@@ -57,7 +63,7 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: toxiproxy_test_fast-timings-latest
+          artifact-name: ${{ inputs.job_name }}-timings-latest
 
   toxiproxy_test_fast:
     name: Toxiproxy Test Fast (shard ${{ matrix.shard }})
@@ -104,10 +110,18 @@ jobs:
           shard-index: ${{ matrix.shard }}
           network-mode: host
 
+      - name: Set Canton Protocol Version
+        env:
+          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+        run: |
+          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
@@ -139,6 +153,7 @@ jobs:
           shard_index: ${{ matrix.shard }}
           num_parallel_tasks: '1'
           timings_file: ${{ github.job }}/.timings/timings.json
+          job_name: ${{ inputs.job_name }}
           include_patterns: |
             ^com\.digitalasset\.canton\.integration\.tests\.toxiproxy\.fast
 
@@ -161,5 +176,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: toxiproxy_test_fast
+      job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
-      protocol_version: ""
+      protocol_version: ${{ inputs.protocol_version }}

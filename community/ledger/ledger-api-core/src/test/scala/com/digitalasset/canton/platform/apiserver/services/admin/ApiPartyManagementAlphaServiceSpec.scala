@@ -103,7 +103,12 @@ class ApiPartyManagementAlphaServiceSpec
         val (mockEndpoints, mockStore, mockIdpExists) = mockedServices()
 
         val expectedResponse = GetAddPartyStatusResponse(
-          Some(LapiPartyReplicationStatus(LapiPartyReplicationStatus.State.STATE_IN_PROGRESS, None))
+          Some(
+            LapiPartyReplicationStatus(
+              LapiPartyReplicationStatus.State.STATE_IN_PROGRESS,
+              None,
+            )
+          )
         )
 
         when(mockEndpoints.getAddPartyStatus(any[GetAddPartyStatusRequest]))

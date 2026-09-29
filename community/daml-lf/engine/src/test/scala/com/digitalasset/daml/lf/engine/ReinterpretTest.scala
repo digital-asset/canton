@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.command.ReplayCommand
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
-import com.digitalasset.daml.lf.interpretation.InterpretationConfig
+import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -32,10 +32,15 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.zip.ZipInputStream
 import scala.language.implicitConversions
 
-class ReinterpretTestV2 extends ReinterpretTest(LanguageVersion.Major.V2)
+class ReinterpretTestV2UpdateMachine
+    extends ReinterpretTest(LanguageVersion.Major.V2, ExecutionMode.UpdateMachine)
+class ReinterpretTestV2Conductor
+    extends ReinterpretTest(LanguageVersion.Major.V2, ExecutionMode.Conductor)
 
-class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
-    extends AnyWordSpec
+abstract class ReinterpretTest(
+    majorLanguageVersion: LanguageVersion.Major,
+    executionMode: ExecutionMode,
+) extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
     with EitherValues
@@ -78,6 +83,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     EngineConfig(
       allowedLanguageVersions = language.LanguageVersion.allLfVersions,
       forbidLocalContractIds = true,
+      executionMode = executionMode,
     ),
     loggerFactory,
   )

@@ -8,7 +8,6 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.*
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DbConfig,
@@ -442,7 +441,6 @@ trait ReplicatedParticipantTest
 
 }
 
-@UnstableTest // TODO(i20783): Remove as soon as this test has been fixed
 class ReplicatedParticipantTestPostgres extends ReplicatedParticipantTest {
   setupPlugins(new UsePostgres(loggerFactory))
 

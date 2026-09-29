@@ -33,10 +33,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentVal
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   NonReassigningParticipantsDeclared,
+  PackageIdUnknownOrUnvetted,
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
 }
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, Recipients}
 import com.digitalasset.canton.topology.*
@@ -44,13 +46,12 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
-import scala.annotation.unused
 import scala.collection.immutable.SortedSet
 
 class UnassignmentValidationTest
@@ -93,6 +94,8 @@ class UnassignmentValidationTest
 
   private val wrongTemplateId =
     LfTemplateId.assertFromString("unassignmentvalidatoionpackage:wrongtemplate:id")
+
+  private val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
 
   private def testMetadata(
       signatories: Set[LfPartyId] = Set(signatory),
@@ -138,10 +141,12 @@ class UnassignmentValidationTest
         confirmingParticipant -> Seq(
           ExampleTransactionFactory.packageId,
           wrongTemplateId.packageId,
+          invalidPackageId,
         ),
         observingParticipant -> Seq(
           ExampleTransactionFactory.packageId,
           wrongTemplateId.packageId,
+          invalidPackageId,
         ),
         aliceParticipant -> Seq(ExampleTransactionFactory.packageId),
         bobParticipant -> Seq(ExampleTransactionFactory.packageId),
@@ -160,44 +165,12 @@ class UnassignmentValidationTest
       validation.isSuccessful.futureValueUS shouldBe true
     }
 
-    @unused def testContractValidationAgainstRepresentativePackage(
-        invalidRpId: ReassignmentTag[LfPackageId]
-    ): Unit = {
-
-      val expected = "bad-contract"
-
-      val failingContractValidator =
-        new TestValidator(Map((contract.contractId, invalidRpId.unwrap) -> expected))
-
-      inside(
-        performValidation(
-          contract,
-          contractValidator = failingContractValidator,
-          sourceValidationPackageId = invalidRpId match {
-            case Source(pkgId) => Some(pkgId)
-            case Target(_) => None
-          },
-          targetValidationPackageId = invalidRpId match {
-            case Source(_) => None
-            case Target(pkgId) => Some(pkgId)
-          },
-        ).futureValueUS.value.commonValidationResult.contractAuthenticationResultF.futureValueUS.left.value
-      ) { case ContractValidationError(ref, contractId, representativePackageId, reason) =>
-        ref shouldBe ReassignmentRef(contract.contractId)
-        contractId shouldBe contract.contractId
-        representativePackageId shouldBe invalidRpId.unwrap
-        reason should include(expected)
-      }
-    }
-
-    val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
     val invalidContractReason = "invalid-contract"
     val failingContractValidator =
       new TestValidator(Map((contract.contractId, invalidPackageId) -> invalidContractReason))
 
     "create a common validation failure if the contract fails to validate against the source package" in {
       val result = performValidation(
-        contract,
         contractValidator = failingContractValidator,
         sourceValidationPackageId = Some(invalidPackageId),
       ).futureValueUS.value
@@ -215,7 +188,6 @@ class UnassignmentValidationTest
 
     "create a reassigning participant validation failure if the contract fails to validate against the target package" in {
       val result = performValidation(
-        contract,
         contractValidator = failingContractValidator,
         targetValidationPackageId = Some(invalidPackageId),
       ).futureValueUS.value
@@ -228,6 +200,40 @@ class UnassignmentValidationTest
         representativePackageId shouldBe invalidPackageId
         reason should include(invalidContractReason)
       }
+    }
+
+    val unvettedPackageId = LfPackageId.assertFromString("unvetted-package-id")
+
+    "create a common validation failure if the source validation package is unvetted" in {
+      val result = performValidation(
+        sourceValidationPackageId = Some(unvettedPackageId)
+      ).futureValueUS.value
+
+      val expected = PackageIdUnknownOrUnvetted(
+        Set(contract.contractId),
+        List(observingParticipant, confirmingParticipant).map(
+          PackageUnknownTo(unvettedPackageId, _)
+        ),
+        sourceSynchronizer.unwrap,
+      )
+      result.commonValidationResult.packageVettingResult.value shouldBe expected
+      result.reassigningParticipantValidationResult.errors shouldBe empty
+    }
+
+    "create a reassigning validation failure if the target validation package is unvetted" in {
+      val result = performValidation(
+        targetValidationPackageId = Some(unvettedPackageId)
+      ).futureValueUS.value
+      val expected = PackageIdUnknownOrUnvetted(
+        Set(contract.contractId),
+        List(observingParticipant, confirmingParticipant).map(
+          PackageUnknownTo(unvettedPackageId, _)
+        ),
+        targetSynchronizer.unwrap,
+      )
+      result.reassigningParticipantValidationResult.errors.loneElement shouldBe expected
+      result.commonValidationResult.packageVettingResult shouldBe None
+
     }
 
     "fail when inconsistent stakeholders are given" in {
@@ -268,7 +274,7 @@ class UnassignmentValidationTest
           FullUnassignmentTree(
             UnassignmentViewTree(commonData, view, Source(testedProtocolVersion), pureCrypto)
           ),
-          Some(Target(identityFactory.topologySnapshot())),
+          Target(identityFactory.topologySnapshot()),
         ).futureValueUS.value.commonValidationResult.contractAuthenticationResultF.futureValueUS
       }
 
@@ -354,7 +360,7 @@ class UnassignmentValidationTest
           performValidation(
             contract = contract,
             identityFactory = mkTestingTopology(participants*),
-            targetTopology = Some(Target(mkTestingTopology(participants*).topologySnapshot())),
+            targetTopology = Target(mkTestingTopology(participants*).topologySnapshot()),
           ).futureValueUS.value.commonValidationResult.multiSynchronizerFeatureFlagCheckResult
 
         commonValidation(contract) shouldBe Some(
@@ -391,7 +397,7 @@ class UnassignmentValidationTest
           performValidation(
             contract = contract,
             identityFactory = mkTestingTopology(participants*),
-            targetTopology = Some(Target(mkTestingTopology(participants*).topologySnapshot())),
+            targetTopology = Target(mkTestingTopology(participants*).topologySnapshot()),
             reassigningParticipantsOverride = Set(aliceParticipant, bobParticipant),
             validatingParticipant = aliceParticipant,
           ).futureValueUS.value.reassigningParticipantValidationResult.errors
@@ -435,26 +441,27 @@ class UnassignmentValidationTest
       signatureO: Option[Signature],
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
   ): ParsedReassignmentRequest[FullUnassignmentTree] = ParsedReassignmentRequest(
-    RequestCounter(1),
-    CantonTimestamp.Epoch,
-    SequencerCounter(1),
-    view,
-    recipients,
-    signatureO,
-    None,
+    rc = RequestCounter(1),
+    requestTimestamp = CantonTimestamp.Epoch,
+    sc = SequencerCounter(1),
+    fullViewTree = view,
+    recipients = recipients,
+    signatureO = signatureO,
+    submitterMetadataO = None,
     isFreshOwnTimelyRequest = true,
     areContractsUnknown = false,
-    Seq.empty,
-    sourceMediator,
-    cryptoSnapshot,
-    cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
-    reassignmentId,
-    NonNegativeLong.tryCreate(915),
+    malformedPayloads = Seq.empty,
+    mediator = sourceMediator,
+    snapshot = cryptoSnapshot,
+    synchronizerParameters =
+      cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
+    reassignmentId = reassignmentId,
+    trafficCost = NonNegativeLong.tryCreate(915),
   )
 
   private def validateUnassignmentTree(
       fullUnassignmentTree: FullUnassignmentTree,
-      targetTopology: Option[Target[TopologySnapshot]],
+      targetTopology: Target[TopologySnapshot],
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       validatingParticipant: ParticipantId = confirmingParticipant,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
@@ -483,12 +490,7 @@ class UnassignmentValidationTest
         FutureUnlessShutdown,
         UnknownPhysicalSynchronizer,
         Target[TopologySnapshot],
-      ] = EitherT.fromEither[FutureUnlessShutdown](
-        targetTopology.toRight(
-          UnknownPhysicalSynchronizer(targetPsid.unwrap, "test: no target topology")
-        )
-      )
-
+      ] = EitherT.pure(targetTopology)
     }
 
     val unassignmentValidation = new UnassignmentValidation(
@@ -510,9 +512,7 @@ class UnassignmentValidationTest
       submitter: LfPartyId = signatory,
       validatingParticipant: ParticipantId = confirmingParticipant,
       identityFactory: TestingIdentityFactory = identityFactory,
-      targetTopology: Option[Target[TopologySnapshot]] = Some(
-        Target(identityFactory.topologySnapshot())
-      ),
+      targetTopology: Target[TopologySnapshot] = Target(identityFactory.topologySnapshot()),
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       sourceValidationPackageId: Option[LfPackageId] = None,
       targetValidationPackageId: Option[LfPackageId] = None,

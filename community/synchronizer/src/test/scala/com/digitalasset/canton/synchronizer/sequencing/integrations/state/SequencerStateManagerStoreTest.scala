@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencing.integrations.state
 
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.PositiveFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -14,9 +13,9 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
-import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.ActorSystem
@@ -87,6 +86,9 @@ trait SequencerStateManagerStoreTest
     val alice = ParticipantId(UniqueIdentifier.tryCreate("participant", "alice"))
     val bob = ParticipantId(UniqueIdentifier.tryCreate("participant", "bob"))
     val carlos = ParticipantId(UniqueIdentifier.tryCreate("participant", "carlos"))
+    val malice = MediatorId(UniqueIdentifier.tryFromProtoPrimitive("malice::med"))
+    val mob = MediatorId(UniqueIdentifier.tryFromProtoPrimitive("mob::med"))
+    val marlie = MediatorId(UniqueIdentifier.tryFromProtoPrimitive("marlie::med"))
     val allMembers = Seq(alice, bob, carlos)
 
     val t1 = ts(1)
@@ -123,36 +125,33 @@ trait SequencerStateManagerStoreTest
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
         val aggregationId3 = AggregationId(TestHash.digest(3))
-        val rule = AggregationRule.testing(
-          NonEmpty(Seq, alice, bob),
-          threshold = PositiveInt.tryCreate(2),
-          testedProtocolVersion,
+
+        val rule = AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)
+        val signatureMalice1 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice1"),
+          malice.fingerprint,
         )
-        val signatureAlice1 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice1"),
-          alice.fingerprint,
+        val signatureMalice2 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice2"),
+          malice.fingerprint,
         )
-        val signatureAlice2 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice2"),
-          alice.fingerprint,
-        )
-        val signatureAlice3 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice3"),
-          alice.fingerprint,
+        val signatureMalice3 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice3"),
+          malice.fingerprint,
         )
         val signatureBob = SymbolicCrypto.signature(
           ByteString.copyFromUtf8("signatureBob"),
-          bob.fingerprint,
+          mob.fingerprint,
         )
 
         val inFlightAggregation1 = InFlightAggregation(
           rule = rule,
           maxSequencingTimestamp = t4,
-          alice -> AggregationBySender(
+          malice -> AggregationBySender(
             t2,
-            Seq(Seq(signatureAlice1), Seq(signatureAlice2, signatureAlice3)),
+            Seq(Seq(signatureMalice1), Seq(signatureMalice2, signatureMalice3)),
           ),
-          bob -> AggregationBySender(t3, Seq(Seq(signatureBob), Seq.empty)),
+          mob -> AggregationBySender(t3, Seq(Seq(signatureBob), Seq.empty)),
         )
         val inFlightAggregation2 = InFlightAggregation(
           rule = rule,
@@ -161,9 +160,9 @@ trait SequencerStateManagerStoreTest
         val inFlightAggregation3 = InFlightAggregation(
           rule = rule,
           maxSequencingTimestamp = t4,
-          alice -> AggregationBySender(
+          malice -> AggregationBySender(
             t4.immediatePredecessor,
-            Seq(Seq(signatureAlice1), Seq.empty, Seq(signatureAlice2)),
+            Seq(Seq(signatureMalice1), Seq.empty, Seq(signatureMalice2)),
           ),
         )
 
@@ -172,7 +171,7 @@ trait SequencerStateManagerStoreTest
           inFlightAggregationsQueryInterval,
         ) {
           (for {
-            _ <- allMembers.parTraverse(member =>
+            _ <- Seq(malice, mob, marlie).parTraverse(member =>
               sequencerStore.registerMember(member, CantonTimestamp.now())
             )
             _ <- store.addInFlightAggregationUpdates(
@@ -209,7 +208,7 @@ trait SequencerStateManagerStoreTest
               aggregationId1 -> inFlightAggregation1
                 .focus(_.aggregatedSenders)
                 // bob's aggregation happened later
-                .modify(_.removed(bob))
+                .modify(_.removed(mob))
             )
             head3.byId shouldBe Map(
               aggregationId1 -> inFlightAggregation1
@@ -232,41 +231,38 @@ trait SequencerStateManagerStoreTest
 
         val aggregationId1 = AggregationId(TestHash.digest(1))
         val aggregationId2 = AggregationId(TestHash.digest(2))
-        val rule = AggregationRule.testing(
-          NonEmpty(Seq, alice, bob, carlos),
-          threshold = PositiveInt.tryCreate(2),
-          testedProtocolVersion,
+
+        val rule = AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)
+        val signatureMalice1 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice1"),
+          malice.fingerprint,
         )
-        val signatureAlice1 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice1"),
-          alice.fingerprint,
+        val signatureMalice2 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice2"),
+          malice.fingerprint,
         )
-        val signatureAlice2 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice2"),
-          alice.fingerprint,
+        val signatureMalice3 = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMalice3"),
+          malice.fingerprint,
         )
-        val signatureAlice3 = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureAlice3"),
-          alice.fingerprint,
-        )
-        val signatureBob = SymbolicCrypto.signature(
-          ByteString.copyFromUtf8("signatureBob"),
-          bob.fingerprint,
+        val signatureMob = SymbolicCrypto.signature(
+          ByteString.copyFromUtf8("signatureMob"),
+          mob.fingerprint,
         )
 
         val inFlightAggregation1 = InFlightAggregation(
           rule = rule,
           maxSequencingTimestamp = t3,
-          alice -> AggregationBySender(
+          malice -> AggregationBySender(
             t1,
-            Seq(Seq(signatureAlice1), Seq(signatureAlice2, signatureAlice3)),
+            Seq(Seq(signatureMalice1), Seq(signatureMalice2, signatureMalice3)),
           ),
-          bob -> AggregationBySender(t2, Seq(Seq(signatureBob), Seq.empty)),
+          mob -> AggregationBySender(t2, Seq(Seq(signatureMob), Seq.empty)),
         )
         val inFlightAggregation2 = InFlightAggregation(
           rule = rule,
           maxSequencingTimestamp = t3.immediateSuccessor,
-          aggregatedSenders = alice -> AggregationBySender(t2, Seq.fill(3)(Seq.empty)),
+          aggregatedSenders = malice -> AggregationBySender(t2, Seq.fill(3)(Seq.empty)),
         )
 
         conditionallySuppressLogWarnings(
@@ -274,7 +270,7 @@ trait SequencerStateManagerStoreTest
           inFlightAggregationsQueryInterval,
         ) {
           (for {
-            _ <- allMembers.parTraverse(member =>
+            _ <- Seq(malice, mob, marlie).parTraverse(member =>
               sequencerStore.registerMember(member, CantonTimestamp.now())
             )
             _ <- store.addInFlightAggregationUpdates(

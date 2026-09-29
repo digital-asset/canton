@@ -504,9 +504,9 @@ sealed abstract class HasTxNodes[Tx] {
   def contractOrder: Either[TxErr, List[ContractId]] =
     contractStateMachine.map(_.contractOrder)
 
-  private[this] def contractStateMachine: Either[TxErr, NextGenContractStateMachine.Journal] =
-    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.Journal]](
-      Right(NextGenContractStateMachine.empty(NextGenContractStateMachine.Mode.Key))
+  private[this] def contractStateMachine: Either[TxErr, ContractStateMachine.Journal] =
+    foldInExecutionOrder[Either[TxErr, ContractStateMachine.Journal]](
+      Right(ContractStateMachine.Empty)
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
@@ -728,35 +728,6 @@ object Transaction {
       f2: Bytes => Bytes,
   ): Either[String, CommittedTransaction] =
     submittedTransaction.suffixCid(f1, f2).map(CommittedTransaction(_))
-
-  /** The state of a key at the beginning of the transaction.
-    */
-  sealed trait KeyInput extends Product with Serializable {
-    def toKeyMapping: LegacyContractStateMachine.KeyMapping
-    def isActive: Boolean
-  }
-
-  /** No active contract with the given key.
-    */
-  sealed trait KeyInactive extends KeyInput {
-    override def toKeyMapping: LegacyContractStateMachine.KeyMapping = None
-    override def isActive: Boolean = false
-  }
-
-  /** A contract with the key will be created so the key must be inactive.
-    */
-  final case object KeyCreate extends KeyInactive
-
-  /** Negative key lookup so the key mus tbe inactive.
-    */
-  final case object NegativeKeyLookup extends KeyInactive
-
-  /** Key must be mapped to this active contract.
-    */
-  final case class KeyActive(cid: Value.ContractId) extends KeyInput {
-    override def toKeyMapping: LegacyContractStateMachine.KeyMapping = Some(cid)
-    override def isActive: Boolean = true
-  }
 
   sealed abstract class ChildrenRecursion
   object ChildrenRecursion {

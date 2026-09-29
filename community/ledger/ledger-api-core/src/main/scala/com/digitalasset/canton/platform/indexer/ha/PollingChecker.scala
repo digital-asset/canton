@@ -81,7 +81,7 @@ class PollingChecker(
 
       case Failure(ex) =>
         logger.info(s"Check failed (${ex.getMessage}). Calling KillSwitch/abort.")
-        killSwitch.abort(new Exception("check failed, killSwitch aborted", ex))
+        killSwitch.abort(new PollingCheckException(ex))
         throw ex
     }
   })

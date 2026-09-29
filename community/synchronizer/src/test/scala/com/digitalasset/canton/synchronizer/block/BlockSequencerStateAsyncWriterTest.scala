@@ -29,10 +29,9 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   InFlightAggregationUpdates,
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficConsumedStore
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.FixtureAsyncWordSpecLike
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -150,10 +149,8 @@ class BlockSequencerStateAsyncWriterTest
   private lazy val fresh =
     FreshInFlightAggregation(
       CantonTimestamp.Epoch,
-      AggregationRule.testing(
-        eligibleSenders = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
-        threshold = PositiveInt.one,
-        protocolVersion = testedProtocolVersion,
+      AggregationRule.senderDedup(
+        protocolVersion = testedProtocolVersion
       ),
     )
   private lazy val agg1 = InFlightAggregationUpdate(

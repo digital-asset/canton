@@ -779,19 +779,6 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
       testBuilder.interfaces.result().toSet shouldBe Set()
     }
 
-    "provide correct strings for interning for party entry" in {
-      val testBuilder = new TestBuilder
-      dtoPartyEntry(Offset.tryFromLong(1L)).provideInternedStrings(testBuilder)
-      testBuilder.parties.result().toSet shouldBe Set("party")
-      testBuilder.templates.result().toSet shouldBe Set()
-      testBuilder.packages.result().toSet shouldBe Set()
-      testBuilder.syncs.result().toSet shouldBe Set()
-      testBuilder.users.result().toSet shouldBe Set()
-      testBuilder.ps.result().toSet shouldBe Set()
-      testBuilder.choices.result().toSet shouldBe Set()
-      testBuilder.interfaces.result().toSet shouldBe Set()
-    }
-
     "provide correct strings for interning for sequencer index moved" in {
       val testBuilder = new TestBuilder
       DbDto.SequencerIndexMoved(someSynchronizerId).provideInternedStrings(testBuilder)

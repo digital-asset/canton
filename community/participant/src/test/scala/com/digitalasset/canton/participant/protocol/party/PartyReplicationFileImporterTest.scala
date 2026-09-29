@@ -12,8 +12,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.data.ActiveContract
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.store.AcsReplicationProgress
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
@@ -46,16 +46,16 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
 
   // A lightweight fake to track state updates without needing a real database
   class FakeAcsReplicationProgress extends AcsReplicationProgress {
-    var state: Option[PartyReplicationStatus.AcsReplicationProgress] = None
+    var state: Option[AcsReplicationStatus.AcsReplicationProgress] = None
 
     override def getAcsReplicationProgress(
         requestId: AddPartyRequestId
-    )(implicit traceContext: TraceContext): Option[PartyReplicationStatus.AcsReplicationProgress] =
+    )(implicit traceContext: TraceContext): Option[AcsReplicationStatus.AcsReplicationProgress] =
       state
 
     override def updateAcsReplicationProgress(
         requestId: AddPartyRequestId,
-        progress: PartyReplicationStatus.AcsReplicationProgress,
+        progress: AcsReplicationStatus.AcsReplicationProgress,
     )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
       state = Some(progress)
       EitherT.pure[FutureUnlessShutdown, String](())
@@ -75,7 +75,7 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
       val fakeProgress = new FakeAcsReplicationProgress()
 
       fakeProgress.state = Some(
-        PartyReplicationStatus.EphemeralFileImporterProgress(
+        AcsReplicationStatus.EphemeralFileImporterProgress(
           NonNegativeLong.zero,
           RepairCounter.Genesis,
           acsHashO = None,

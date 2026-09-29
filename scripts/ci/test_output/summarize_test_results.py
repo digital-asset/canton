@@ -70,6 +70,21 @@ def parse_args():
             "surviving the rerun."
         ),
     )
+    parser.add_argument(
+        "--found-problems",
+        default="found_problems.txt",
+        help=(
+            "Path to the log-check problems file written by check-logs.sh. These are "
+            "log-scan failures (e.g. checkErrors) that fail the build without producing a "
+            "JUnit report, so they would otherwise be invisible in this summary."
+        ),
+    )
+    parser.add_argument(
+        "--log-problem-line-cap",
+        type=int,
+        default=500,
+        help="Maximum number of characters to keep per log-check problem line.",
+    )
     return parser.parse_args()
 
 
@@ -216,6 +231,84 @@ def cap_detail_text(text, trace_lines):
     return "\n".join(shown)
 
 
+def read_log_problems(path, line_cap):
+    """Read the offending WARN/ERROR lines that check-logs.sh recorded, if any.
+
+    check-logs.sh appends the log lines that were not ignored to found_problems.txt
+    (see output_problems in scripts/ci/io-utils.sh). The build then fails via the
+    checkErrors sbt task, but those lines never make it into a JUnit report, so they
+    are surfaced here alongside the failed tests.
+    """
+    if not path or not os.path.isfile(path):
+        return []
+
+    problems = []
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for raw_line in f:
+            line = raw_line.rstrip("\n")
+            if not line.strip():
+                continue
+            problems.append(line)
+
+    # Deduplicate the raw lines first, in case a check ran more than once, so
+    # distinct problems that happen to share their first line_cap characters
+    # aren't collapsed into one by the display cap below.
+    deduped = list(dict.fromkeys(problems))
+
+    if line_cap:
+        deduped = [line[:line_cap] + " [...]" if len(line) > line_cap else line for line in deduped]
+
+    return deduped
+
+
+def render_log_problems(log_problems, limit, title="Log check problems", max_bytes=None):
+    """Render a single collapsible block holding the log-check problem lines.
+
+    Uses one fenced code block (a dynamic fence so a backtick in a log line cannot
+    close it early) rather than per-line detail blocks, since these are raw log
+    lines, not per-test failures. The aggregate reuses this with a "(global)" title.
+
+    When `max_bytes` is set, the body is byte-truncated so the rendered block fits
+    within that budget, the same guard `render_detail` applies to failure traces,
+    so a shard with many/long log lines cannot push the summary over GitHub's
+    limit and get it dropped entirely. Returns `None` if even the truncated
+    scaffold (headers, fences, truncation marker) does not fit in `max_bytes`,
+    so the caller can drop the block instead of exceeding the budget anyway.
+    """
+    total = len(log_problems)
+    shown = log_problems[:limit]
+    body_text = "\n".join(shown)
+    if total > len(shown):
+        body_text += f"\n... and {total - len(shown)} more, full log in the artifact"
+    fence = fence_for(body_text)
+    header = f"### {title}"
+    summary = f"<details><summary>Show log check problems ({total}, shown {len(shown)})</summary>"
+    if max_bytes is not None:
+        marker = "... (truncated, full log in the artifact)"
+        scaffold = "\n".join([header, summary, "", fence, "", marker, fence, "", "</details>"])
+        allowed = max_bytes - len(scaffold.encode("utf-8"))
+        if allowed < 0:
+            return None
+        encoded = body_text.encode("utf-8")
+        if allowed < len(encoded):
+            body_text = encoded[:allowed].decode("utf-8", errors="ignore")
+            return "\n".join(
+                [header, summary, "", fence, body_text, marker, fence, "", "</details>"]
+            )
+    return "\n".join(
+        [
+            header,
+            summary,
+            "",
+            fence,
+            body_text,
+            fence,
+            "",
+            "</details>",
+        ]
+    )
+
+
 def build_summary(args, files, results, rerun_metadata=None):
     failures_unique = results.get("failures_unique", results["failures"])
     errors_unique = results.get("errors_unique", results["errors"])
@@ -239,6 +332,9 @@ def build_summary(args, files, results, rerun_metadata=None):
             lines.append("- Failed-only rerun: no")
     if results["parse_errors"]:
         lines.append(f"- XML parse errors: {results['parse_errors']}")
+    log_problems = results.get("log_problems", [])
+    if log_problems:
+        lines.append(f"- Log check problems: {len(log_problems)}")
     lines.append("")
 
     if rerun_metadata is not None and rerun_metadata.get("rerun_used", False):
@@ -262,40 +358,64 @@ def build_summary(args, files, results, rerun_metadata=None):
     not_passed = results["not_passed_tests"]
     if not not_passed:
         lines.append("- none")
-        return "\n".join(lines) + "\n"
-
-    total_not_passed = len(not_passed)
-    lines.append(f"Failed or errored tests: {total_not_passed}")
-    lines.append("")
-
-    running = len(("\n".join(lines) + "\n").encode("utf-8"))
-    shown_count = 0
-    for name in not_passed[: args.limit]:
-        block = render_detail(name, details.get(name, ""), args.trace_lines)
-        block_bytes = len(block.encode("utf-8")) + 1
-        if running + block_bytes > SUMMARY_BUDGET_BYTES:
-            if shown_count == 0:
-                # Even the first block overflows the budget (a single very long
-                # failure line is not bounded by --trace-lines). Byte-truncate it
-                # so the summary still renders instead of GitHub dropping it whole,
-                # then defer the rest to the artifact.
-                budget = SUMMARY_BUDGET_BYTES - running - SUMMARY_TRAILER_RESERVE_BYTES
-                block = render_detail(
-                    name, details.get(name, ""), args.trace_lines, max_bytes=budget
-                )
-                lines.append(block)
-                shown_count += 1
-            break
-        lines.append(block)
-        running += block_bytes
-        shown_count += 1
-
-    remaining = total_not_passed - shown_count
-    if remaining > 0:
+    else:
+        total_not_passed = len(not_passed)
+        lines.append(f"Failed or errored tests: {total_not_passed}")
         lines.append("")
-        lines.append(f"- and {remaining} more, full details in the artifact")
+
+        running = len(("\n".join(lines) + "\n").encode("utf-8"))
+        shown_count = 0
+        for name in not_passed[: args.limit]:
+            block = render_detail(name, details.get(name, ""), args.trace_lines)
+            block_bytes = len(block.encode("utf-8")) + 1
+            if running + block_bytes > SUMMARY_BUDGET_BYTES:
+                if shown_count == 0:
+                    # Even the first block overflows the budget (a single very long
+                    # failure line is not bounded by --trace-lines). Byte-truncate it
+                    # so the summary still renders instead of GitHub dropping it whole,
+                    # then defer the rest to the artifact.
+                    budget = SUMMARY_BUDGET_BYTES - running - SUMMARY_TRAILER_RESERVE_BYTES
+                    block = render_detail(
+                        name, details.get(name, ""), args.trace_lines, max_bytes=budget
+                    )
+                    lines.append(block)
+                    shown_count += 1
+                break
+            lines.append(block)
+            running += block_bytes
+            shown_count += 1
+
+        remaining = total_not_passed - shown_count
+        if remaining > 0:
+            lines.append("")
+            lines.append(f"- and {remaining} more, full details in the artifact")
+
+    if log_problems:
+        running = len(("\n".join(lines) + "\n").encode("utf-8"))
+        # +2 for the two newline separators the two appended lines below add to the
+        # final "\n".join(lines), the blank line and the block itself. No
+        # SUMMARY_TRAILER_RESERVE_BYTES margin here, this is the last section before
+        # the final return, nothing else gets appended after it.
+        budget = SUMMARY_BUDGET_BYTES - running - 2
+        block = (
+            render_log_problems(log_problems, args.limit, max_bytes=budget) if budget > 0 else None
+        )
+        if block is not None:
+            lines.append("")
+            lines.append(block)
 
     return "\n".join(lines) + "\n"
+
+
+def shrink_budget_for_existing_summary(summary_path):
+    # A prior invocation in this same job (the pre-rerun summary) may already
+    # have written into this step summary file. GitHub caps the whole file per
+    # job, not per invocation, so shrink this invocation's own budget by what
+    # is already used, otherwise two budget-respecting writes could still add
+    # up past the shared limit and get the whole thing dropped.
+    global SUMMARY_BUDGET_BYTES
+    if summary_path and os.path.isfile(summary_path):
+        SUMMARY_BUDGET_BYTES = max(SUMMARY_BUDGET_BYTES - os.path.getsize(summary_path), 0)
 
 
 def main():
@@ -310,12 +430,15 @@ def main():
             with open(rerun_path, encoding="utf-8") as src:
                 rerun_metadata = json.load(src)
 
+    summary_path = args.summary_path or os.environ.get("GITHUB_STEP_SUMMARY", "")
+    shrink_budget_for_existing_summary(summary_path)
+
     results = gather_results(files)
+    results["log_problems"] = read_log_problems(args.found_problems, args.log_problem_line_cap)
     summary = build_summary(args, files, results, rerun_metadata=rerun_metadata)
 
     print(summary)
 
-    summary_path = args.summary_path or os.environ.get("GITHUB_STEP_SUMMARY", "")
     if summary_path:
         with open(summary_path, "a", encoding="utf-8") as out:
             out.write(summary)
@@ -329,7 +452,7 @@ def main():
 
 
 def build_json_payload(args, files, results, rerun_metadata):
-    # Line-capped details in the JSON let the aggregate render traces, the full traces stay in the test-summary.md artifact.
+    # Line-capped details in the JSON let the aggregate render traces, the full traces stay in this shard's own GHA step summary.
     details = results.get("not_passed_details", {})
     results_for_json = {key: value for key, value in results.items() if key != "not_passed_details"}
     results_for_json["not_passed_details"] = {
@@ -359,9 +482,19 @@ def self_test():
     test_build_summary_limit()
     test_build_summary_respects_budget()
     test_build_summary_truncates_oversized_first_block()
+    test_build_summary_log_problems_respects_budget()
     test_cap_detail_text_short_passthrough()
     test_cap_detail_text_line_caps()
     test_json_output_keeps_capped_details()
+    test_read_log_problems_reads_dedupes_and_caps()
+    test_read_log_problems_dedupes_before_capping()
+    test_read_log_problems_missing_file()
+    test_build_summary_includes_log_problems()
+    test_build_summary_log_problems_without_failures()
+    test_build_summary_log_problems_dropped_when_no_room()
+    test_shrink_budget_for_existing_summary_reduces_by_file_size()
+    test_shrink_budget_for_existing_summary_floors_at_zero()
+    test_shrink_budget_for_existing_summary_missing_file_is_noop()
     print("All self-checks passed")
 
 
@@ -479,6 +612,91 @@ def _make_args(shard_index="1", total_shards="4", limit=100, trace_lines=60):
         trace_lines=trace_lines,
     )
     return args
+
+
+def test_read_log_problems_reads_dedupes_and_caps():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "found_problems.txt")
+        long_line = "x" * 120
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("first ERROR line\n")
+            f.write("\n")  # blank lines are dropped
+            f.write("first ERROR line\n")  # exact duplicate collapses
+            f.write("second WARN line\n")
+            f.write(long_line + "\n")
+        problems = read_log_problems(path, line_cap=100)
+        assert problems == [
+            "first ERROR line",
+            "second WARN line",
+            "x" * 100 + " [...]",
+        ], f"Unexpected log problems: {problems}"
+
+
+def test_read_log_problems_dedupes_before_capping():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "found_problems.txt")
+        shared_prefix = "x" * 100
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(shared_prefix + " first tail\n")
+            f.write(shared_prefix + " second tail\n")
+        problems = read_log_problems(path, line_cap=100)
+        # Both lines share their first 100 characters but are distinct problems,
+        # so capping before deduplication must not collapse them into one.
+        assert problems == [
+            shared_prefix + " [...]",
+            shared_prefix + " [...]",
+        ], f"Unexpected log problems: {problems}"
+
+
+def test_read_log_problems_missing_file():
+    assert read_log_problems("does-not-exist.txt", line_cap=500) == []
+    assert read_log_problems("", line_cap=500) == []
+
+
+def test_build_summary_includes_log_problems():
+    args = _make_args()
+    results = {
+        "passed": 3,
+        "failures": 1,
+        "failures_unique": 1,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 4,
+        "not_passed_classes": ["com.example.Bar"],
+        "not_passed_tests": ["com.example.Bar.testB"],
+        "not_passed_details": {"com.example.Bar.testB": "boom"},
+        "log_problems": ["2026-09-18 14:34:09 [x] ERROR Unsupported access to ActorContext"],
+    }
+    summary = build_summary(args, ["a.xml"], results)
+    assert "- Log check problems: 1" in summary, f"Missing count line in: {summary}"
+    assert "### Log check problems" in summary
+    assert "ERROR Unsupported access to ActorContext" in summary
+    # Failed tests still render, log problems come after them.
+    assert summary.index("com.example.Bar.testB") < summary.index("### Log check problems")
+
+
+def test_build_summary_log_problems_without_failures():
+    args = _make_args()
+    results = {
+        "passed": 5,
+        "failures": 0,
+        "failures_unique": 0,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 5,
+        "not_passed_classes": [],
+        "not_passed_tests": [],
+        "log_problems": ["ERROR log-scan caught this without any failed test"],
+    }
+    summary = build_summary(args, ["a.xml"], results)
+    # The early "- none" path must not swallow the log-problems section.
+    assert "- none" in summary
+    assert "### Log check problems" in summary
+    assert "ERROR log-scan caught this without any failed test" in summary
 
 
 def test_build_summary_no_failures():
@@ -635,6 +853,120 @@ def test_build_summary_truncates_oversized_first_block():
     assert "truncated, full trace in the artifact" in summary, summary
     assert "and 2 more, full details in the artifact" in summary, summary
     assert encoded_len <= 1000, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_build_summary_log_problems_respects_budget():
+    global SUMMARY_BUDGET_BYTES
+    args = _make_args(limit=100, trace_lines=1000)
+    names = [f"com.example.T{i}.t" for i in range(10)]
+    results = {
+        "passed": 0,
+        "failures": 10,
+        "failures_unique": 10,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 10,
+        "not_passed_classes": [f"com.example.T{i}" for i in range(10)],
+        "not_passed_tests": names,
+        "not_passed_details": {name: "boom\n" * 200 for name in names},
+        # The failure blocks above already fill the budget on their own (as in
+        # test_build_summary_respects_budget). Without accounting for this
+        # section too, appending it unconditionally would push the summary
+        # over SUMMARY_BUDGET_BYTES and GitHub would drop it whole.
+        "log_problems": [f"ERROR problem line {i}" for i in range(200)],
+    }
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        SUMMARY_BUDGET_BYTES = 1500
+        summary = build_summary(args, [], results)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert "### Log check problems" in summary, summary
+    assert encoded_len <= 1500, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_build_summary_log_problems_dropped_when_no_room():
+    global SUMMARY_BUDGET_BYTES
+    args = _make_args(limit=100, trace_lines=1000)
+    names = [f"com.example.T{i}.t" for i in range(10)]
+    results = {
+        "passed": 0,
+        "failures": 10,
+        "failures_unique": 10,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 10,
+        "not_passed_classes": [f"com.example.T{i}" for i in range(10)],
+        "not_passed_tests": names,
+        "not_passed_details": {name: "boom\n" * 200 for name in names},
+        "log_problems": [f"ERROR problem line {i}" for i in range(200)],
+    }
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        # Just 5 bytes less than test_build_summary_log_problems_respects_budget
+        # above, which is enough room for the failure blocks but leaves less
+        # than the log-problems section's fixed scaffold (headers, fences,
+        # truncation marker).
+        SUMMARY_BUDGET_BYTES = 1495
+        summary = build_summary(args, [], results)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert "### Log check problems" not in summary, summary
+    assert encoded_len <= 1495, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_shrink_budget_for_existing_summary_reduces_by_file_size():
+    global SUMMARY_BUDGET_BYTES
+    original = SUMMARY_BUDGET_BYTES
+    with tempfile.TemporaryDirectory() as tmp:
+        summary_path = os.path.join(tmp, "step-summary.md")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            f.write("x" * 300)
+        try:
+            SUMMARY_BUDGET_BYTES = 1000
+            shrink_budget_for_existing_summary(summary_path)
+            assert SUMMARY_BUDGET_BYTES == 700, (
+                f"Expected budget shrunk to 700, got {SUMMARY_BUDGET_BYTES}"
+            )
+        finally:
+            SUMMARY_BUDGET_BYTES = original
+
+
+def test_shrink_budget_for_existing_summary_floors_at_zero():
+    global SUMMARY_BUDGET_BYTES
+    original = SUMMARY_BUDGET_BYTES
+    with tempfile.TemporaryDirectory() as tmp:
+        summary_path = os.path.join(tmp, "step-summary.md")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            f.write("x" * 2000)
+        try:
+            SUMMARY_BUDGET_BYTES = 1000
+            shrink_budget_for_existing_summary(summary_path)
+            assert SUMMARY_BUDGET_BYTES == 0, (
+                f"Expected budget floored at 0, got {SUMMARY_BUDGET_BYTES}"
+            )
+        finally:
+            SUMMARY_BUDGET_BYTES = original
+
+
+def test_shrink_budget_for_existing_summary_missing_file_is_noop():
+    global SUMMARY_BUDGET_BYTES
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        SUMMARY_BUDGET_BYTES = 1000
+        shrink_budget_for_existing_summary("")
+        shrink_budget_for_existing_summary("/nonexistent/path/step-summary.md")
+        assert SUMMARY_BUDGET_BYTES == 1000, (
+            f"Expected budget unchanged, got {SUMMARY_BUDGET_BYTES}"
+        )
+    finally:
+        SUMMARY_BUDGET_BYTES = original
 
 
 def test_cap_detail_text_short_passthrough():

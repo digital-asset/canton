@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -52,7 +51,6 @@ import scala.concurrent.duration.*
   * This test originally started to test sequencer aggregation performance with 5 mediators and
   * threshold 5
   */
-@UnstableTest // TODO(i28815): Remove as soon as this test has been fixed
 class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))
 
@@ -310,6 +308,8 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             // The logs look fine though, so assuming too much load from other tests that delays the shutdown.
             // The 3s shutdown is hard coded in CloseableServer / defaultGracefulShutdownTimeout
             "shutdown did not complete gracefully in allotted",
+            // May happen if the sequencer is down while the participant tries to submit a periodic acknowledgement to it
+            "Failed to acknowledge clean timestamp (usually because sequencer is down)",
           ),
           Seq(),
         )

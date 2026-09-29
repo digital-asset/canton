@@ -77,11 +77,14 @@ import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.javaapi.data.codegen.{ContractCompanion, ContractId, Exercised, Update}
 import com.daml.ledger.javaapi.data.{Command, Identifier, Template, Value}
 import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.MonadUtil
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.grpc.health.v1.health.HealthCheckResponse
 
 import java.security.KeyPair
@@ -710,6 +713,11 @@ trait ParticipantTestContext extends UserManagementTestContext {
   )
 
   def getJwks(request: GetJwksRequest): Future[GetJwksResponse]
+
+  def convertRecordTimeToOffset(
+      synchronizerId: SynchronizerId,
+      recordTime: Timestamp,
+  ): Future[Offset]
 }
 
 object ParticipantTestContext {

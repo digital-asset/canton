@@ -30,6 +30,7 @@ import com.digitalasset.canton.platform.store.backend.{
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.daml.lf.data.Ref
 
 object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageBackendFactory {
 
@@ -41,8 +42,12 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
   ): ParameterStorageBackend =
     new ParameterStorageBackendImpl(H2QueryStrategy, stringInterning)
 
-  override def createPartyStorageBackend(ledgerEndCache: LedgerEndCache): PartyStorageBackend =
-    new PartyStorageBackendTemplate(ledgerEndCache)
+  override def createPartyStorageBackend(
+      participantId: Ref.ParticipantId,
+      ledgerEndCache: LedgerEndCache,
+      stringInterning: StringInterning,
+  ): PartyStorageBackend =
+    new PartyStorageBackendTemplate(participantId, ledgerEndCache, stringInterning)
 
   override def createPartyRecordStorageBackend: PartyRecordStorageBackend =
     PartyRecordStorageBackendImpl

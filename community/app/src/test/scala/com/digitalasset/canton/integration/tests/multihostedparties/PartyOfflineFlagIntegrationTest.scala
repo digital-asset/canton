@@ -91,7 +91,7 @@ final class PartyOfflineFlagIntegrationTest
       aliceOnP1 shouldBe aliceOnP2
     }
 
-    // TODO(#35499): Remove onlyRunWith ProtocolVersion.dev once the feature is stable
+    // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
     "allow setting and unsetting the isOffline flag for a party" onlyRunWith ProtocolVersion.dev in {
       implicit env =>
         import env.*
@@ -133,7 +133,7 @@ final class PartyOfflineFlagIntegrationTest
         )
     }
 
-    // TODO(#35499): Remove/revisit onlyRunLessThan ProtocolVersion.dev once the feature is stable
+    // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
     "ensure that setting the isOffline flag for a party has no effect on non-dev protocol versions" onlyRunLessThan ProtocolVersion.dev in {
       implicit env =>
         import env.*
