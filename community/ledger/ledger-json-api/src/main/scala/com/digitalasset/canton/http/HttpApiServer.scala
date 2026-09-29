@@ -12,6 +12,7 @@ import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.Logging.instanceUUIDLogCtx
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.PackagePreferenceBackend
@@ -33,6 +34,7 @@ object HttpApiServer extends NoTracing {
       authInterceptor: AuthInterceptor,
       packagePreferenceBackend: PackagePreferenceBackend,
       trafficEnforcementEnabled: Boolean,
+      deprecatedApiGate: DeprecatedApiGate,
       apiLoggingConfig: ApiLoggingConfig,
   )(implicit
       jsonApiMetrics: HttpApiMetrics
@@ -52,6 +54,7 @@ object HttpApiServer extends NoTracing {
           packageSyncService,
           packagePreferenceBackend,
           trafficEnforcementEnabled,
+          deprecatedApiGate,
           apiLoggingConfig,
           loggerFactory,
         )(

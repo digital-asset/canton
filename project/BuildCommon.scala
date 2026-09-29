@@ -1016,6 +1016,7 @@ object BuildCommon {
         DamlProjects.executors,
         DamlProjects.`rs-grpc-bridge`,
         DamlProjects.`rs-grpc-pekko`,
+        DamlProjects.`testing-utils` % Test,
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,

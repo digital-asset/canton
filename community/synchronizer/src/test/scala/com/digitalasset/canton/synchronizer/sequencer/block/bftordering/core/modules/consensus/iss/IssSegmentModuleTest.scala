@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressionRule
@@ -18,6 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.DelayCount
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.ViewChangeTimeoutCalculator
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentState.RetransmissionResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.bootstrapEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
@@ -56,6 +58,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.SegmentCancelledEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.Start
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.SegmentStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
@@ -2493,6 +2496,157 @@ class IssSegmentModuleTest
         context.delayedMessages shouldBe Seq(nestedTimeout)
       }
     }
+
+    "receiving retransmission request" should {
+      def createCommitCertificate(i: Int): CommitCertificate = {
+        val blockMetadata = secondEpochBlockMetadata4Nodes(i)
+        val prePrepare = PrePrepare.create(
+          blockMetadata,
+          ViewNumber.First,
+          oneRequestOrderingBlock3Ack,
+          CanonicalCommitSet(Set.empty),
+          myId,
+        )
+        CommitCertificate(
+          prePrepare.fakeSign,
+          Seq(
+            commitFromPrePrepare(prePrepare)(from = myId),
+            commitFromPrePrepare(prePrepare)(from = otherIds(0)),
+            commitFromPrePrepare(prePrepare)(from = otherIds(1)),
+          ),
+        )
+      }
+
+      "retransmit missing messages and commit certificates" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext
+        val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
+        val segmentState = mock[SegmentState]
+        val epoch = Epoch(
+          SecondEpochInfo,
+          Membership.forTesting(myId, otherNodes = otherIds.toSet),
+          Membership.forTesting(myId, otherNodes = otherIds.toSet),
+        )
+        when(segmentState.epoch).thenReturn(epoch)
+        when(segmentState.segment).thenReturn(
+          epoch.segments.find(_.originalLeader == myId).getOrElse(fail(""))
+        )
+        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+          p2pNetworkOutModuleRef = fakeRecordingModule(p2pBuffer),
+          otherNodes = otherIds.toSet,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        )(epochInfo = SecondEpochInfo, overrideSegmentState = Some(segmentState))
+
+        consensus.receive(ConsensusSegment.Start)
+        context.runPipedMessagesAndReceiveOnModule(consensus)
+
+        val from = otherIds(0)
+        val commitCertificate = createCommitCertificate(0)
+
+        val otherMessage = mock[PbftNetworkMessage]
+        val fromStatus = mock[SegmentStatus.Incomplete]
+
+        when(segmentState.messagesToRetransmit(from, fromStatus)).thenReturn(
+          RetransmissionResult(
+            messages = Seq(otherMessage.fakeSign),
+            commitCerts = Seq(commitCertificate),
+          )
+        )
+
+        consensus.receive(
+          ConsensusSegment.RetransmissionsMessage
+            .RetransmissionRequest(from, fromStatus)
+        )
+
+        p2pBuffer should contain theSameElementsAs Seq[P2PNetworkOut.Message](
+          P2PNetworkOut
+            .send(
+              P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(otherMessage.fakeSign),
+              from,
+            ),
+          P2PNetworkOut.send(
+            P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+              Consensus.RetransmissionsMessage
+                .RetransmissionResponse(
+                  myId,
+                  Seq(commitCertificate),
+                )
+            ),
+            from,
+          ),
+        )
+      }
+
+      "break up commit certificates so they are not too big" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext
+        val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
+        val segmentState = mock[SegmentState]
+        val epoch = Epoch(
+          SecondEpochInfo,
+          Membership.forTesting(myId, otherNodes = otherIds.toSet),
+          Membership.forTesting(myId, otherNodes = otherIds.toSet),
+        )
+        when(segmentState.epoch).thenReturn(epoch)
+        when(segmentState.segment).thenReturn(
+          epoch.segments.find(_.originalLeader == myId).getOrElse(fail(""))
+        )
+        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+          p2pNetworkOutModuleRef = fakeRecordingModule(p2pBuffer),
+          otherNodes = otherIds.toSet,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        )(
+          epochInfo = SecondEpochInfo,
+          overrideSegmentState = Some(segmentState),
+          overrideRetransmissionWindow = Some(2),
+        )
+
+        consensus.receive(ConsensusSegment.Start)
+        context.runPipedMessagesAndReceiveOnModule(consensus)
+
+        val from = otherIds(0)
+        val cc0 = createCommitCertificate(0)
+        val cc1 = createCommitCertificate(1)
+        val cc2 = createCommitCertificate(2)
+
+        val fromStatus = mock[SegmentStatus.Incomplete]
+
+        when(segmentState.messagesToRetransmit(from, fromStatus)).thenReturn(
+          RetransmissionResult(
+            messages = Seq.empty,
+            commitCerts = Seq(cc0, cc1, cc2),
+          )
+        )
+
+        consensus.receive(
+          ConsensusSegment.RetransmissionsMessage
+            .RetransmissionRequest(from, fromStatus)
+        )
+
+        p2pBuffer should contain theSameElementsAs Seq[P2PNetworkOut.Message](
+          P2PNetworkOut.send(
+            P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+              Consensus.RetransmissionsMessage
+                .RetransmissionResponse(
+                  myId,
+                  Seq(cc0, cc1),
+                )
+            ),
+            from,
+          ),
+          P2PNetworkOut.send(
+            P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+              Consensus.RetransmissionsMessage
+                .RetransmissionResponse(
+                  myId,
+                  Seq(cc2),
+                )
+            ),
+            from,
+          ),
+        )
+      }
+    }
   }
 
   "ViewChangeTimeoutCalculator" should {
@@ -2550,7 +2704,9 @@ class IssSegmentModuleTest
       epochInfo: EpochInfo = bootstrapEpoch(TestBootstrapTopologyActivationTime).info.next(
         epochLength,
         TopologyActivationTime(CantonTimestamp.MinValue.immediateSuccessor),
-      )
+      ),
+      overrideSegmentState: Option[SegmentState] = None,
+      overrideRetransmissionWindow: Option[Int] = None,
   ): IssSegmentModule[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
     implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
@@ -2564,7 +2720,7 @@ class IssSegmentModuleTest
       )
     }
     val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
-    val segmentState = {
+    val segmentState = overrideSegmentState.getOrElse {
       val segment = epoch.segments.find(_.originalLeader == leader).getOrElse(fail(""))
       new SegmentState(
         segment,
@@ -2591,6 +2747,11 @@ class IssSegmentModuleTest
       config.consensusEmptyBlockCreationTimeout,
       config.consensusEnableFlushingSegment,
       consensusFlushingMinBlocks,
+      overrideRetransmissionWindow
+        .map(PositiveInt.tryCreate)
+        .orElse(
+          config.consensusWindowSizeForRetransmissionOfCommitCertificates
+        ),
       config.viewChangeTimeoutOverride,
       metrics,
       timeouts,

@@ -34,8 +34,10 @@ class JsTrafficService(
     ledgerClient: LedgerClient,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
-)(implicit val authInterceptor: AuthInterceptor, val executionContext: ExecutionContext)
-    extends Endpoints
+)(implicit
+    val authInterceptor: AuthInterceptor,
+    val executionContext: ExecutionContext,
+) extends Endpoints
     with NamedLogging {
 
   @SuppressWarnings(Array("org.wartremover.warts.Serializable"))

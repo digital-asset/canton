@@ -55,7 +55,7 @@ class ByteStringStreamObserverWithContext[T, Context](
         _ <- Try(byteBuffer.getAndUpdate(b1 => b1.concat(converter(value))).discard)
       } yield ()
     processRequest match {
-      case Failure(exception) => requestComplete.failure(exception)
+      case Failure(exception) => requestComplete.tryFailure(exception).discard
       case Success(_) => () // Nothing to do, just move on to the next request
     }
   }

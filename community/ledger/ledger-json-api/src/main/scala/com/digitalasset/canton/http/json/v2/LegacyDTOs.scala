@@ -9,7 +9,7 @@ import com.daml.ledger.api.v2.{offset_checkpoint, reassignment}
 import com.google.protobuf.ByteString
 
 /** Data structures that replicate legacy gRPC messages for backwards compatibility */
-// TODO(#27734) remove when json legacy endpoints are removed
+// TODO(#35974) remove when json legacy endpoints are removed
 object LegacyDTOs {
   final case class TreeEvent(
       kind: TreeEvent.Kind

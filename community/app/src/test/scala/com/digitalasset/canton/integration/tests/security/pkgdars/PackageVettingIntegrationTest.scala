@@ -1163,10 +1163,10 @@ trait AdminApiVettingOperations {
     ParticipantTopologyManagerError.CannotVetDueToMissingPackages
 }
 
-class PackageVettingIntegrationTestInMemory_AdminApi
+final class PackageVettingIntegrationTestInMemory_AdminApi
     extends PackageVettingIntegrationTest
     with AdminApiVettingOperations
 
-class PackageVettingIntegrationTestInMemory_LedgerApi
+final class PackageVettingIntegrationTestInMemory_LedgerApi
     extends PackageVettingIntegrationTest
     with LedgerApiVettingOperations

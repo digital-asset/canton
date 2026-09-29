@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
@@ -120,6 +121,7 @@ object ApiServiceOwner {
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      deprecatedApiGate: DeprecatedApiGate,
       externalCallHandler: ExternalCallHandler,
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
       lookupSynchronizerCryptoClient: SynchronizerId => Option[SynchronizerCryptoClient],
@@ -234,6 +236,7 @@ object ApiServiceOwner {
         pureCryptoApi = pureCryptoApi,
         partyReplicationEndpointsO = partyReplicationEndpointsO,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
+        deprecatedApiGate = deprecatedApiGate,
         externalCallHandler = externalCallHandler,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext

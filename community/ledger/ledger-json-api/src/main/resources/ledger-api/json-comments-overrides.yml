@@ -3,13 +3,13 @@ messages:
     message:
       fieldComments:
         verbose: |-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+          Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
           If enabled, values served over the API will contain more information than strictly necessary to interpret the data.
           In particular, setting the verbose flag to true triggers the ledger to include labels, record and variant type ids
           for record fields.
           Optional for backwards compatibility, if defined update_format must be unset
         filter: |-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+          Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
           Requesting parties with template filters.
           Template filters must be empty for GetUpdateTrees requests.
           Optional for backwards compatibility, if defined update_format must be unset
@@ -27,7 +27,7 @@ messages:
   TransactionFilter:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
         Used both for filtering create and archive events as well as for filtering transaction trees.
       fieldComments:
         filtersByParty: |-
@@ -47,12 +47,12 @@ messages:
           with the per-party filter as described above.
   JsSubmitAndWaitForTransactionTreeResponse:
     message:
-      comments: Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+      comments: "Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0."
       fieldComments: {}
   JsTransactionTree:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Complete view of an on-ledger transaction.
       fieldComments:
         updateId: |-
@@ -98,32 +98,32 @@ messages:
   TransactionTree:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Complete view of an on-ledger transaction.
       fieldComments: {}
   JsGetTransactionResponse:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
       fieldComments:
         transaction: Required
   JsGetTransactionTreeResponse:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
       fieldComments:
         transaction: Required
   GetTransactionByIdRequest:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
       fieldComments:
         updateId: |-
           The ID of a particular transaction.
           Must be a valid LedgerString (as described in ``value.proto``).
           Required
         requestingParties: |-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+          Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
           The parties whose events the client expects to see.
           Events that are not visible for the parties in this collection will not be present in the response.
           Each element must be a valid PartyIdString (as described in ``value.proto``).
@@ -139,14 +139,14 @@ messages:
   GetTransactionByOffsetRequest:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
       fieldComments:
           offset: |-
             The offset of the transaction being looked up.
             Must be a valid absolute offset (positive integer).
             Required
           requestingParties: |-
-            Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+            Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
             The parties whose events the client expects to see.
             Events that are not visible for the parties in this collection will not be present in the response.
             Each element must be a valid PartyIdString (as described in ``value.proto``).
@@ -163,12 +163,12 @@ messages:
     message:
       fieldComments:
         verbose: |-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+          Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
           If enabled, values served over the API will contain more information than strictly necessary to interpret the data.
           In particular, setting the verbose flag to true triggers the ledger to include labels for record fields.
           Optional, if specified event_format must be unset.
         filter: |-
-          Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+          Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true`; it will be removed in the Canton version 3.7.0.
           Templates to include in the served snapshot, per party.
           Optional, if specified event_format must be unset, if not specified event_format must be set.
         eventFormat: |-
@@ -182,12 +182,12 @@ messages:
   JsGetUpdateTreesResponse:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
       fieldComments: {}
   TreeEvent:
     message:
       comments: |-
-        Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
+        Deprecated: disabled unless `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`; it will be removed in the Canton version 3.7.0.
         Each tree event message type below contains a ``witness_parties`` field which
         indicates the subset of the requested parties that can see the event
         in question.

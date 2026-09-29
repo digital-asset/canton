@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors.{
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.RequestValidationErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.version.ApiDeprecation
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.language.{LookupError, Reference}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -419,6 +420,37 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
             "ledger_effective_time" -> ledgerEffectiveTime.toString,
             "time_boundaries" -> timeBoundaries.toString,
           ),
+        )
+  }
+
+  @Explanation(
+    """This error is emitted when a request uses a Ledger API or JSON Ledger API endpoint or request field
+      |that was deprecated in an earlier Canton release and is disabled by default in the current one.
+      |The error message names the releases that deprecated and disabled the API and, if already decided,
+      |the release that removes it."""
+  )
+  @Resolution(
+    """Migrate your application to the replacement endpoint or request fields. As a temporary measure,
+      |the deprecated APIs can be re-enabled with the feature flag named in the error message (for example
+      |`canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true` for the
+      |endpoints deprecated in Canton 3.4) in the participant configuration."""
+  )
+  object DeprecatedApiDisabled
+      extends ErrorCode(
+        id = "DEPRECATED_API_DISABLED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+
+    /** @param api
+      *   the deprecated endpoint, gRPC method or request fields that were used
+      * @param deprecation
+      *   the deprecation wave the `api` belongs to
+      */
+    final case class Reject(api: String, deprecation: ApiDeprecation)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = deprecation.disabledMessage(api),
+          extraContext = Map("api" -> api, "deprecated_in" -> deprecation.deprecatedIn.toString),
         )
   }
 

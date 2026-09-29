@@ -46,11 +46,12 @@ class BaseDigestProcessorTest
     with HasExecutionContext {
 
   "BaseDigestProcessor" should {
-    def checkHealth(proc: BaseDigestProcessor, expected: AcsCommitmentHealthState) = {
-      proc.health.getState shouldBe expected.componentHealthState
-      proc.metrics.digestProcessorHealth.getValue shouldBe expected.metricValue
+    def checkHealth(proc: BaseDigestProcessor, expected: AcsCommitmentHealthState) =
+      eventually() {
+        proc.health.getState shouldBe expected.componentHealthState
+        proc.metrics.digestProcessorHealth.getValue shouldBe expected.metricValue
+      }
 
-    }
     "report health during successful startup" in {
       val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
       val proc = new TestDigestProcessor(startupPromise.futureUS)
@@ -59,14 +60,18 @@ class BaseDigestProcessorTest
       val startingFuture = proc.start()
       checkHealth(proc, AcsCommitmentHealthState.Starting)
 
+      val stoppingPromise = Promise[Unit]()
       val promiseKillSwitch = new PromiseKillSwitch()
-      startupPromise.outcome_((promiseKillSwitch, promiseKillSwitch.promise.future))
+      val allStoppingFutures =
+        Future.sequence(Seq(promiseKillSwitch.promise.future, stoppingPromise.future)).map(_ => ())
+      startupPromise.outcome_((promiseKillSwitch, allStoppingFutures))
 
       startingFuture.futureValueUS
       checkHealth(proc, AcsCommitmentHealthState.Started)
 
       val stoppingFuture = proc.stop()
       checkHealth(proc, AcsCommitmentHealthState.Stopping)
+      stoppingPromise.success(())
 
       stoppingFuture.futureValueUS
       checkHealth(proc, AcsCommitmentHealthState.Stopped)

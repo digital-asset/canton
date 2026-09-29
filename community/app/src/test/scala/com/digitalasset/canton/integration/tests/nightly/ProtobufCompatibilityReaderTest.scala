@@ -123,13 +123,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Previously present field "4" with name "base_request" on message "RegisterKmsSigningKeyRequest" was deleted.""",
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Previously present oneof "public_key" on message "RegisterKmsSigningKeyResponse" was deleted.""",
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Field "1" with name "public_key" on message "RegisterKmsSigningKeyResponse" moved from inside to outside a oneof.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionRequest" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
       // CantonBFT blacklisting
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
+      // Added request time out to time proof requests with 3.6.1
+      """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -171,11 +168,8 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Previously present field "4" with name "base_request" on message "RegisterKmsSigningKeyRequest" was deleted.""",
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Previously present oneof "public_key" on message "RegisterKmsSigningKeyResponse" was deleted.""",
       """com/digitalasset/canton/crypto/admin/v30/vault_service.proto:Field "1" with name "public_key" on message "RegisterKmsSigningKeyResponse" moved from inside to outside a oneof.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionRequest" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
-      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
+      // Added request time out to time proof requests with 3.6.1
+      """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
     ),
   )
 

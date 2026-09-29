@@ -90,7 +90,7 @@ object TestUtils extends FutureHelpers {
       TraceContext.createNew("wait-for-target-time")
     logger.debug(s"Waiting for node $forNode to reach target time $targetTime")
 
-    val assertion = BaseTest.eventually() {
+    val assertion = BaseTest.eventually(retryOnTestFailuresOnly = false) {
       // send time proofs until we see a successful deliver with
       // a sequencing time greater than or equal to the target time.
       logger.debug(s"Sending time proof to node $forNode")
@@ -107,6 +107,7 @@ object TestUtils extends FutureHelpers {
         )
         .succeedOnFutureCompleteOrShutdown
 
+      // this throws an exception if the future times out or fails, which we want to retry (therefore retryOnTestFailuresOnly=true above)
       val sendResult = sendCallback.future.futureValueUS
       logger.debug(s"Received send result for time proof $sendResult from node $forNode")
       sendResult should matchPattern {

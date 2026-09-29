@@ -50,6 +50,23 @@ no action is needed unless the parameter was set explicitly:
 
 The old name is no longer accepted, so a configuration that still sets it is rejected at startup.
 
+### Logback upgraded to 1.6
+
+The `<if condition=` syntax is now deprecated due to [security vulnerabilities](https://github.com/qos-ch/logback/releases/tag/v_1.5.37). The recommended style is to use the `<condition ...><if>` syntax.
+
+For more information on conditional configuration see:
+https://logback.qos.ch/manual/configuration-conditional.html
+
+### Rate limiting of gRPC requests
+
+Ported Splice's rate limiter into Canton, so that both can share one implementation. A limit is
+expressed as a rate per second with an optional sustained rate over a longer window, and can be
+applied overall, per gRPC method, and per client IP, with overrides for individual IP addresses or IP
+networks in CIDR notation.
+
+The rate limiter is not used by any Canton server yet, so there is no behavior change and no
+configuration change is required. Wiring it into the gRPC servers follows in a later change.
+
 ### Topic A
 Template for a bigger topic
 #### Background
@@ -93,6 +110,54 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
 - A `type = party-jwt` can be added to `participants.<participant>.ledger-api.auth-services` to enable this feature.
 
+### Legacy Ledger API / JSON API endpoints disabled by default (removal in 3.7)
+
+The Ledger API and Ledger JSON API endpoints and request fields that were deprecated in Canton 3.4 and 3.5
+remain available in Canton 3.6, but they are now **disabled by default**. Calls to them fail with the
+`DEPRECATED_API_DISABLED` error (gRPC status `FAILED_PRECONDITION`) unless the participant is started with the
+feature flag that the error message names:
+
+```
+canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true
+canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34 = true
+canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35 = true
+```
+
+There is one flag per release in which the APIs were deprecated, and within a release one for the endpoints and
+gRPC methods that were deprecated as a whole and one for the deprecated request fields of endpoints that stay,
+so that an application that only has to shed a few request fields does not have to re-enable the endpoints it
+has already migrated away from. The flags are set per participant node.
+
+HTTP requests are rejected before the request body is read; on the deprecated WebSocket endpoints the connection
+is established and the error is sent as the first (and only) message.
+
+The endpoints stay documented in the OpenAPI/AsyncAPI definitions, marked as deprecated. They will be
+removed in Canton 3.7; please migrate to their replacements.
+
+Covered by `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34`:
+- gRPC `InteractiveSubmissionService.GetPreferredPackageVersion` and the console command
+  `preferred_package_version`. Use `GetPreferredPackages` / `preferred_packages` instead, which resolve the
+  preferred packages for one or more package-name vetting requirements in a single call.
+- `GET /v2/interactive-submission/preferred-package-version`. Use `POST /v2/interactive-submission/preferred-packages` instead.
+- `(WebSocket) GET`/`POST /v2/updates/trees`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+- `(WebSocket) GET`/`POST /v2/updates/flats`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+- `GET /v2/updates/transaction-tree-by-offset/{offset}`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`.
+- `POST /v2/updates/transaction-by-offset`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+- `GET /v2/updates/transaction-tree-by-id/{update-id}`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+- `POST /v2/updates/transaction-by-id`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+- `POST /v2/commands/submit-and-wait-for-transaction-tree`. Use
+  `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+  instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
+
+Covered by `canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34`:
+- The deprecated `filter` and `verbose` fields of `(WebSocket) GET`/`POST /v2/updates` and
+  `(WebSocket) GET`/`POST /v2/state/active-contracts`. Use `updateFormat` respectively `eventFormat` instead.
+
+Covered by `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35`:
+- `GET /v2/package-vetting`. Use `POST /v2/package-vetting/list` instead.
+- `POST /v2/package-vetting`. Use `POST /v2/package-vetting/update` instead.
+- `GET /v2/state/active-contracts-page`. Use `POST /v2/state/active-contracts-page` instead.
+
 ### `external_call`
 
 The `external_call` feature is released and enabled from LF 2.4 onwards.
@@ -106,6 +171,12 @@ The feature requires the Daml package to use LF 2.4 or later and the synchronize
 protocol version 36 or later. For externally signed transactions the
 recorded results are part of the prepared transaction and covered by the signed transaction
 hash (hashing scheme version 4, available from protocol version 36).
+
+### Support for Postgres 18
+
+Canton is now supported on Postgres 18.
+
+Heads-up: Postgres 14 is becoming end-of-life by Nov 2026 and support of PG14 in future Canton versions will be removed.
 
 ### New ACS commitment pipeline
 
@@ -261,7 +332,7 @@ this was tied to the reconciliation interval of the connected synchronizer.
   - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
 - Protocol messages now use Zstandard (`zstd`) compression starting with protocol version 36, while earlier protocol versions continue to use gzip. This internal optimization is applied automatically and does not require configuration changes.
-- *BREAKING*: Removed the deprecated `GetPreferredPackageVersion` endpoint of the `InteractiveSubmissionService`. Clients should use `GetPreferredPackages` instead, which resolves the preferred packages for one or more package-name vetting requirements in a single call. This affects both the Ledger API (gRPC `InteractiveSubmissionService.GetPreferredPackageVersion`) and the Ledger JSON API (`GET /v2/interactive-submission/preferred-package-version`). The `GetPreferredPackages` endpoint (gRPC and `POST /v2/interactive-submission/preferred-packages`) is now considered stable.
+- *BREAKING*: The `GetPreferredPackages` endpoint (gRPC and `POST /v2/interactive-submission/preferred-packages`) is now considered stable. The deprecated `GetPreferredPackageVersion` endpoint is disabled by default, see "Legacy Ledger API / JSON API endpoints disabled by default" above.
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 - getLedgerEnd endpoint in StateService can now return latest observed record time for the requested synchronizers along with ledger end offset.
 - Participant health state now includes indexer as a soft dependency. Indexer health state will be present in readiness endpoint response, but it won't influece response code.
@@ -380,6 +451,7 @@ requirement. For details on TLS version deprecations, see [RFC 8996](https://www
 - The `nonempty` and `base-validation` libraries are now published to Maven Central.
 - *Console BREAKING*: `NonEmpty` has moved from `com.daml.nonempty` to `com.digitalasset.nonempty`, and its scalaz type class instances have been replaced by cats ones. Separately, scalaz has been removed from the published Daml-LF modules: for example the `Order` and `Equal` instances on `Value.ContractId` are now a standard Scala `Ordering`.
   This is relevant as these classes can be used in the console and scripts. Such usages must be updated to account for this change.
+- The docker da-base-image has been bumped to 1.0.15 to fix an issue with bash in certain kubernetes environments.
 
 #### Improved Sequencer Logging
 On the sequencer, the log line mentioning all events in a block now also can contain the outcome of the event.
@@ -396,6 +468,14 @@ metrics dropped the superfluous leading "SEQ::" string.
 - Ledger JSON API `/v2/state/active-contracts-page` is now available via POST; the GET variant that expects a request body is deprecated.
 - Mediator: Cosmetic fix for the mediator verdict sender to correctly stop retrying to send verdicts if the sequencer
   reports that the verdict has already been successfully aggregated.
+- Minor performance fix: time proofs have now a max sequencing timeout of 2 minutes and they no longer create a
+  performance regression during synchronizer catch-up. Furthermore, synchronous rejects were not properly
+  cleaned up by the sequencer client immediately after the reject was processed, but relied on the timeout logic to pick
+  up the requests.
+- Parsing of protobuf messages carrying an unknown version number is now failing.
+- Sequencer: fixed the V2 sequencer initialization endpoints (`InitializeSequencerFromGenesisStateV2`,
+  `InitializeSequencerFromLsuPredecessor`, `InitializeSequencerFromOnboardingStateV2`) failing when the uploaded state
+  exceeded 2GB, the maximum size of a single protobuf `ByteString`.
 
 ### (YY-nnn, Risk): Title
 
@@ -417,6 +497,14 @@ metrics dropped the superfluous leading "SEQ::" string.
 
 ## Deprecations
 - `StaticSynchronizerParameters.defaultsWithoutKMS` has been deprecated in favor of `StaticSynchronizerParameters.defaults`. Supported cryptographic schemes now have parity between KMS and non-KMS configurations.
+
+### Reminder: Legacy Ledger API / JSON API endpoints will be removed in version 3.7.
+
+The Ledger API and JSON API endpoints and request fields deprecated in Canton 3.4 and 3.5 (see "Legacy Ledger API /
+JSON API endpoints disabled by default" above) are disabled by default in 3.6 and can only be re-enabled temporarily
+with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34`,
+`canton.participants.<participant>.features.deprecated.enable-deprecated-parameters-34` respectively
+`canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-35`. They will be removed in Canton 3.7.
 
 ### Reminder: Support for scope-based access tokens will be removed in version 3.7.
 - "Scope-based" access tokens, i.e. JWTs without any audience specified, have been deprecated in version 3.5.

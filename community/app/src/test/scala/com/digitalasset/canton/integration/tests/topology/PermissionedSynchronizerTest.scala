@@ -17,6 +17,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
 import org.slf4j.event.Level
 
+import scala.concurrent.duration.*
+
 sealed trait PermissionedSynchronizerTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -198,15 +200,22 @@ sealed trait PermissionedSynchronizerTest
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
         participant1.synchronizers.reconnect(daName)
+
         // The ping is done here to have more time to capture the warning in case there is one.
-        participant1.health.ping(participant1)
+        // Increase retry time to exceed ping timeout
+        eventually(timeUntilSuccess = 45.seconds) {
+          participant1.health.maybe_ping(participant1) should not be empty
+        }
       },
       LogEntry.assertLogSeq(
         Nil,
         mayContain = Seq(
           _.warningMessage should include(
             s"Unable to find ParticipantSynchronizerPermission for participant ${participant1.id} on synchronizer ${daId.logical}"
-          )
+          ),
+          // a ping submitted while the participant is still replaying past the revocation is
+          // rejected until the re-granted permission becomes effective
+          _.warningMessage should include("UNKNOWN_SUBMITTERS"),
         ),
       ),
     )

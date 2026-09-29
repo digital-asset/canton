@@ -47,10 +47,12 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 }
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.toTransactionTree
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import com.google.protobuf
 import io.circe.*
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
@@ -70,6 +72,7 @@ class JsCommandService(
     protocolConverters: ProtocolConverters,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
+    deprecatedApiGate: DeprecatedApiGate,
 )(implicit
     val executionContext: ExecutionContext,
     esf: ExecutionSequencerFactory,
@@ -110,7 +113,7 @@ class JsCommandService(
     withServerLogic(
       JsCommandService.submitAndWaitForTransactionTree,
       submitAndWaitForTransactionTree,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsCommandService.submitAsyncEndpoint,
       submitAsync,
@@ -202,8 +205,17 @@ class JsCommandService(
     Either[JsCantonError, JsSubmitAndWaitForTransactionTreeResponse]
   ] = req => {
     implicit val tc: TraceContext = callerContext.traceContext()
+    submitAndWaitForTransactionTreeInternal(callerContext, req.in)
+  }
+
+  private def submitAndWaitForTransactionTreeInternal(
+      callerContext: CallerContext,
+      jsCommands: JsCommands,
+  )(implicit tc: TraceContext): Future[
+    Either[JsCantonError, JsSubmitAndWaitForTransactionTreeResponse]
+  ] =
     for {
-      commands <- protocolConverters.Commands.fromJson(req.in)
+      commands <- protocolConverters.Commands.fromJson(jsCommands)
       submitAndWaitForTransactionRequest =
         SubmitAndWaitForTransactionRequest(
           commands = Some(commands),
@@ -237,7 +249,6 @@ class JsCommandService(
         )
         .resultToRight
     } yield result
-  }
 
   private def toSubmitAndWaitTransactionTreeResponse(
       response: command_service.SubmitAndWaitForTransactionResponse
@@ -387,9 +398,10 @@ object JsCommandService extends DocumentationEndpoints {
     .in(sttp.tapir.stringToPath("submit-and-wait-for-transaction-tree"))
     .in(jsonBody[JsCommands])
     .out(jsonBody[JsSubmitAndWaitForTransactionTreeResponse])
-    .deprecated()
-    .description(
-      "Submit a batch of commands and wait for the transaction trees response. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use submit-and-wait-for-transaction instead."
+    .description("Submit a batch of commands and wait for the transaction trees response.")
+    .deprecatedSince(
+      ApiDeprecation.Canton34.Endpoints,
+      useInstead = "POST /v2/commands/submit-and-wait-for-transaction",
     )
 
   val submitAndWait = commands.post

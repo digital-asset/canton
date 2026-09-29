@@ -69,7 +69,7 @@ class BftOrderingSequencerWithTrafficControlApiTestPostgres
       BftBlockOrdererConfig(),
       PublicServerConfig(),
       BlockSequencerConfig(),
-      producePostOrderingTopologyTicks = false,
+      producePostOrderingTopologyTicks = true,
       health = None,
       storage,
       testedProtocolVersion,

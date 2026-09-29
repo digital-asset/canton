@@ -5,11 +5,17 @@ package com.digitalasset.canton.config
 
 import cats.syntax.option.*
 import com.digitalasset.canton.admin.time.v30
+import com.digitalasset.canton.config
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
-/** @param initialRetryDelay
+/** Various config values for the time proof request sender
+  *
+  * @param requestTimeout
+  *   max sequencing time on the time proof request relative to the local clock. If the local clock
+  *   and the sequencer clock differ too much, then the node will never be able to learn the
+  *   sequencers time.
+  * @param initialRetryDelay
   *   The initial retry delay if the request to send a sequenced event fails
   * @param maxRetryDelay
   *   The max retry delay if the request to send a sequenced event fails
@@ -20,12 +26,15 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 final case class TimeProofRequestConfig(
     initialRetryDelay: NonNegativeFiniteDuration = TimeProofRequestConfig.defaultInitialRetryDelay,
     maxRetryDelay: NonNegativeFiniteDuration = TimeProofRequestConfig.defaultMaxRetryDelay,
-    maxSequencingDelay: NonNegativeFiniteDuration = TimeProofRequestConfig.defaultMaxSequencingDelay,
+    maxSequencingDelay: NonNegativeFiniteDuration =
+      TimeProofRequestConfig.defaultMaxSequencingDelay,
+    requestTimeout: NonNegativeFiniteDuration = TimeProofRequestConfig.defaultRequestTimeout,
 ) extends PrettyPrinting {
   private[config] def toProtoV30: v30.TimeProofRequestConfig = v30.TimeProofRequestConfig(
-    initialRetryDelay.toProtoPrimitive.some,
-    maxRetryDelay.toProtoPrimitive.some,
-    maxSequencingDelay.toProtoPrimitive.some,
+    initialRetryDelay = initialRetryDelay.toProtoPrimitive.some,
+    maxRetryDelay = maxRetryDelay.toProtoPrimitive.some,
+    maxSequencingDelay = maxSequencingDelay.toProtoPrimitive.some,
+    requestTimeout = requestTimeout.toProtoPrimitive.some,
   )
   override protected def pretty: Pretty[TimeProofRequestConfig] = prettyOfClass(
     paramIfNotDefault(
@@ -43,11 +52,19 @@ final case class TimeProofRequestConfig(
       _.maxSequencingDelay,
       TimeProofRequestConfig.defaultMaxSequencingDelay,
     ),
+    paramIfNotDefault(
+      "requestTimeout",
+      _.requestTimeout,
+      TimeProofRequestConfig.defaultRequestTimeout,
+    ),
   )
 
 }
 
 object TimeProofRequestConfig {
+
+  private val defaultRequestTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofMinutes(2)
 
   private val defaultInitialRetryDelay: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMillis(200)
@@ -60,22 +77,26 @@ object TimeProofRequestConfig {
 
   private[config] def fromProtoV30(
       configP: v30.TimeProofRequestConfig
-  ): ParsingResult[TimeProofRequestConfig] =
+  ): ParsingResult[TimeProofRequestConfig] = {
+    def parse(
+        name: String,
+        value: Option[com.google.protobuf.duration.Duration],
+    ): ParsingResult[config.NonNegativeFiniteDuration] =
+      config.NonNegativeFiniteDuration.fromProtoPrimitiveO(name)(value)
+
     for {
-      initialRetryDelay <- ProtoConverter.parseRequired(
-        NonNegativeFiniteDuration.fromProtoPrimitive("initialRetryDelay"),
-        "initialRetryDelay",
-        configP.initialRetryDelay,
-      )
-      maxRetryDelay <- ProtoConverter.parseRequired(
-        NonNegativeFiniteDuration.fromProtoPrimitive("maxRetryDelay"),
-        "maxRetryDelay",
-        configP.maxRetryDelay,
-      )
-      maxSequencingDelay <- ProtoConverter.parseRequired(
-        NonNegativeFiniteDuration.fromProtoPrimitive("maxSequencingDelay"),
-        "maxSequencingDelay",
-        configP.maxSequencingDelay,
-      )
-    } yield TimeProofRequestConfig(initialRetryDelay, maxRetryDelay, maxSequencingDelay)
+      initialRetryDelay <- parse("initialRetryDelay", configP.initialRetryDelay)
+      maxRetryDelay <- parse("maxRetryDelay", configP.maxRetryDelay)
+      maxSequencingDelay <- parse("maxSequencingDelay", configP.maxSequencingDelay)
+      // backwards compatible parsing of parameter introduced with 3.6.1+
+      requestTimeout <- configP.requestTimeout
+        .map(config.NonNegativeFiniteDuration.fromProtoPrimitive("requestTimeout"))
+        .getOrElse(Right(defaultRequestTimeout))
+    } yield TimeProofRequestConfig(
+      initialRetryDelay = initialRetryDelay,
+      maxRetryDelay = maxRetryDelay,
+      maxSequencingDelay = maxSequencingDelay,
+      requestTimeout = requestTimeout,
+    )
+  }
 }

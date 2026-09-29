@@ -78,6 +78,7 @@ import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceInte
   HttpServiceTestFixtureData,
   dar1,
 }
+import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetAfterLedgerEnd
 import com.digitalasset.canton.logging.NamedLogging.loggerWithoutTracing
 import com.digitalasset.canton.logging.SuppressionRule
@@ -112,6 +113,10 @@ class JsonV2Tests
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
+  // The legacy (3.5-deprecated) endpoints and request fields exercised below are disabled by default
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition.addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
 
   // Configure extremely small wait time to avoid long test times and test edge cases
   override def wsConfig: Option[WebsocketConfig] = Some(

@@ -62,13 +62,14 @@ final case class LogEntry(
     *   the error code that should be checked
     * @param messageAssertion
     *   a check on the log entry's message text; this function receives the log entry's message text
-    *   only, stripped of the error code
+    *   only, stripped of the error code. Note that the only backwards compatibility guarantee that
+    *   we give is the error code itself, not the text.
     * @param contextAssertion
     *   a check on the log entry's context map; the default is to not check anything
     */
   def shouldBeCantonError(
       errorCode: ErrorCode,
-      messageAssertion: String => Assertion,
+      messageAssertion: String => Assertion = _ => succeed,
       contextAssertion: Map[String, String] => Assertion = _ => succeed,
       loggerAssertion: String => Assertion = _ => succeed,
   )(implicit pos: source.Position): Assertion = {

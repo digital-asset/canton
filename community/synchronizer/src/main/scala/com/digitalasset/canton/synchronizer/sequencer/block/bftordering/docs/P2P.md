@@ -164,8 +164,13 @@ endpoint header found"). The same advertised endpoint is *also* reused for conne
 Trigger: the out-module wants to reach a peer (initial peers on `Start`, an admin `AddEndpoint`, or
 just the first `Multicast` to a node it isn't connected to yet). It calls
 `p2pConnectionState.addNetworkRefIfMissing(addressId){ … }{ createNetworkRef }`, which (for a new
-peer) spawns a **connection-managing actor** (`PekkoP2PGrpcNetworkManager.createNetworkRef`). That
-actor immediately sends itself `Initialize` to connect **eagerly**, before any message is queued.
+peer) spawns a **connection-managing actor** (`PekkoP2PGrpcNetworkManager.createNetworkRef`). The
+actor is spawned **parked and inert**; only once the network ref has been published into the
+connection state does the out-module call `startConnection()`, which sends the actor `Initialize` to
+connect **eagerly**, before any message is queued. This **two-phase start** lets a speculative or
+superseded ref (one that lost a race to a concurrent modification for the same address) be closed
+without its parked actor ever touching the connection state, avoiding cleanup of state now owned by
+the winning ref.
 
 The flow is, end to end, *dial → channel → stream → mutual authentication → bind identity → usable*.
 Authentication (§2) is steps 5–7 here, inline:
@@ -173,7 +178,8 @@ Authentication (§2) is steps 5–7 here, inline:
 ```
 out-module          conn-mgr actor         P2PGrpcConnectionManager            remote peer (B)
    │  createNetworkRef                                                              │
-   ├───────────────► (spawn) ──Initialize──►                                        │
+   ├───────────────► (spawn, parked)                                                │
+   │  startConnection ──Initialize──►                                               │
    │                          getPeerSenderOrStartConnection(Endpoint(ep))          │
  1 │                                   │  no sender yet → connectIfNeeded(ep)        │
    │                                   │  state: ∅ → Connecting                      │

@@ -231,7 +231,7 @@ class SequencerNodeBootstrap(
     // add initialization service
     private val (initializationServiceDef, _) = adminServerRegistry.addService(
       SequencerInitializationServiceGrpc.bindService(
-        new GrpcSequencerInitializationService(this, loggerFactory)(executionContext),
+        new GrpcSequencerInitializationService(this, loggerFactory)(executionContext, actorSystem),
         executionContext,
       )
     )
