@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
@@ -47,6 +48,7 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
     emptyBlockCreationTimeout: FiniteDuration,
     consensusEnableFlushingSegment: Boolean,
     consensusFlushingMinBlocks: Int,
+    windowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt],
     viewChangeTimeoutOverride: Option[FiniteDuration],
     loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
@@ -84,6 +86,8 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
         emptyBlockCreationTimeout,
         consensusEnableFlushingSegment,
         consensusFlushingMinBlocks,
+        windowSizeForRetransmissionOfCommitCertificates =
+          windowSizeForRetransmissionOfCommitCertificates,
         viewChangeTimeoutOverride,
         metrics,
         timeouts,

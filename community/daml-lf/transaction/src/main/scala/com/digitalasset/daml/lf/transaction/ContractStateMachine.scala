@@ -79,9 +79,7 @@ object KeyMapping {
   val Empty: KeyMapping = KeyMapping(Vector.empty, exhaustive = true)
 }
 
-object NextGenContractStateMachine {
-
-  type KeyResolver = Map[GlobalKey, Vector[ContractId]]
+object ContractStateMachine {
 
   private[transaction] final case class KeyInput(
       queriedByKey: Vector[ContractId],
@@ -226,7 +224,6 @@ object NextGenContractStateMachine {
   object Journal {
 
     private[transaction] case class Impl(
-        authorizeRollback: Boolean,
         localContracts: immutable.VectorMap[ContractId, Option[GlobalKey]],
         override val inputContracts: Set[ContractId],
         internalKeyInputs: Map[GlobalKey, KeyInput],
@@ -467,13 +464,6 @@ object NextGenContractStateMachine {
         rollbackStack match {
           case Nil =>
             throw new IllegalStateException("Not inside a rollback scope")
-          case headState :: tailStack if authorizeRollback =>
-            Right(
-              this.copy(
-                activeLedgerState = headState,
-                rollbackStack = tailStack,
-              )
-            )
           case headState :: tailStack =>
             // locallyCreated and consumedBy increase monotonically, so can quickly check their size did not change since the last try block.
             if (
@@ -702,33 +692,8 @@ object NextGenContractStateMachine {
       journal.abortTry
   }
 
-  sealed abstract class Mode extends Product with Serializable
-
-  object Mode {
-
-    /** Default mode used to configure contract state machines when PV!=dev.
-      */
-    val default: Mode = NoKey
-
-    /** Default mode used to configure contract state machines when in PV=dev.
-      */
-    val devDefault: Mode = Key
-
-    // Ledger-effect rollback is rejected: a write inside a rolled-back scope fails the whole
-    // transaction. New behaviour.
-    case object Key extends Mode
-
-    // Ledger-effect rollback is allowed: writes inside a rolled-back scope are undone locally.
-    // Backward-compatible.
-    case object NoKey extends Mode
-  }
-
-  def empty(mode: Mode): Journal =
-    empty(mode == Mode.NoKey)
-
-  def empty(authorizeRollBack: Boolean = false): Journal =
+  val Empty: Journal =
     Journal.Impl(
-      authorizeRollback = authorizeRollBack,
       localContracts = immutable.VectorMap.empty,
       inputContracts = Set.empty,
       internalKeyInputs = Map.empty,

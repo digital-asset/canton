@@ -231,7 +231,7 @@ class SequencerNodeBootstrap(
     // add initialization service
     private val (initializationServiceDef, _) = adminServerRegistry.addService(
       SequencerInitializationServiceGrpc.bindService(
-        new GrpcSequencerInitializationService(this, loggerFactory)(executionContext),
+        new GrpcSequencerInitializationService(this, loggerFactory)(executionContext, actorSystem),
         executionContext,
       )
     )
@@ -271,7 +271,7 @@ class SequencerNodeBootstrap(
         config.publicApi,
         arguments.futureSupervisor,
         loggerFactory,
-      )(config.sequencer, config.parameters.producePostOrderingTopologyTicks)
+      )(config.sequencer)
       addCloseable(factory)
       factory
     }
@@ -934,8 +934,6 @@ class SequencerNodeBootstrap(
             Some(
               TopologyManagerStatus.combined(authorizedTopologyManager, synchronizerTopologyManager)
             ),
-            arguments.config.topology,
-            arguments.config.parameters.producePostOrderingTopologyTicks,
             storage,
             clock,
             Seq(sequencerId) ++ membersToRegister,

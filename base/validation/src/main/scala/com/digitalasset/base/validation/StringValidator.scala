@@ -34,6 +34,15 @@ object StringValidator {
 
   private val ok: Either[StringViolation, Unit] = Right(())
 
+  /** Checks if a character is allowed whitespace (tab, line feed, carriage return). Align with
+    * `escapeAcceptedControls`
+    */
+  private def isAllowedWhitespace(ch: Char): Boolean = ch == '\t' || ch == '\n' || ch == '\r'
+
+  /** Escape allowed control chars from a given string. Align with `isAllowedWhitespace` */
+  def escapeAcceptedControls(str: String): String =
+    str.replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+
   /** Validates a given string.
     *
     * Validation includes:
@@ -45,8 +54,6 @@ object StringValidator {
     */
   def validate(str: String): Either[StringViolation, Unit] = {
     val length = str.length
-
-    def isAllowedWhitespace(ch: Char): Boolean = ch == '\t' || ch == '\n' || ch == '\r'
 
     @scala.annotation.tailrec
     def loop(i: Int): Either[StringViolation, Unit] =

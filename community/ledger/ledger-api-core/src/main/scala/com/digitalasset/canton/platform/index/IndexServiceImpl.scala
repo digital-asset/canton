@@ -23,7 +23,7 @@ import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.{GetUpdatesPageRequest, UpdatesPageToken}
@@ -556,6 +556,15 @@ private[index] class IndexServiceImpl(
   override def isPruningInProgress: Boolean = ledgerDao.isPruningInProgress
 
   override def currentLedgerEnd(): Option[LedgerEnd] = ledgerEndCache()
+
+  override def highestOffsetBeforeOrFirstAt(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] =
+    ledgerDao.updateReader
+      .highestOffsetBeforeOrFirstAt(synchronizerId, recordTime)
 
   private def between[A](
       startExclusive: Option[Offset],

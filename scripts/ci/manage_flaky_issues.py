@@ -75,6 +75,24 @@ def _within_assignment_grace(assigned_at: Optional[datetime.datetime]) -> bool:
     return datetime.datetime.now(datetime.timezone.utc) - assigned_at < ASSIGNMENT_SLACK_GRACE
 
 
+# First column of each history row, e.g. "| 2026-04-20 12:05:05 | ...". Written by
+# create_issue_table_row via a naive datetime.now() on the CI runner, which runs in UTC.
+_ROW_DATE_RE = re.compile(r'^\| (\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2} \|', re.MULTILINE)
+
+
+def _failed_earlier_today(body: str) -> bool:
+    """True if an existing history row already recorded a failure on today's UTC date.
+
+    Once an assigned issue is past its grace window, this caps Slack alerts to once a day:
+    a test that keeps streaking every run does not re-page the assignee on every single CI
+    run, one reminder a day is enough. Reusing the history table's own Date column avoids
+    adding separate notification-tracking state that could drift from what the table
+    already records.
+    """
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    return any(date == today for date in _ROW_DATE_RE.findall(body))
+
+
 def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
     title = format_issue_title(issue)
     idx = None
@@ -138,18 +156,12 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
             if not release_line:
                 gh_assign_release_line(idx, project_item_id)
 
-        # update the description and reopen if needed
-        streak = update_issue(idx, title, body, cause)
-        # Stay quiet on Slack for the ASSIGNMENT_SLACK_GRACE period after assignment to give the assignee room to
-        # act, then resume alerting on every consecutive-failure streak so an assigned but
-        # still-breaking test is not silenced for weeks.
-        if streak is not None and has_assignee and _within_assignment_grace(assigned_at):
-            grace_hours = int(ASSIGNMENT_SLACK_GRACE.total_seconds() // 3600)
-            print(
-                f"Issue #{idx} was assigned within the last {grace_hours}h, skipping Slack notification for now."
-            )
-            return None
-        return streak
+        # update the description and reopen if needed. update_issue owns the full notify
+        # decision (grace period + once-a-day cap once assigned), since it is the only
+        # place that builds and writes the body a Slack-alert marker would be stamped into.
+        return update_issue(
+            idx, title, body, cause, has_assignee=has_assignee, assigned_at=assigned_at
+        )
 
     else:
         create_issue(title, cause)
@@ -405,7 +417,12 @@ def migrate_table_header_to_cause(body: str) -> str:
 
 
 def update_issue(
-    idx: str, title: str, body: str, cause: str = DEFAULT_CAUSE
+    idx: str,
+    title: str,
+    body: str,
+    cause: str = DEFAULT_CAUSE,
+    has_assignee: bool = False,
+    assigned_at: Optional[datetime.datetime] = None,
 ) -> Optional[tuple[str, str, str]]:
     job = get_ci_job_name()
     threshold = (
@@ -444,12 +461,26 @@ def update_issue(
             ):
                 consecutive_streak = True
 
-    new_body = f"{body}\n{create_issue_table_row(cause)}"
-    gh_issue_edit_cmd(idx, title, new_body)
-    print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
+    notify = False
     if consecutive_streak:
         if nightly:
             add_broken_nightly_label(idx)
+        if not has_assignee:
+            notify = True
+        elif _within_assignment_grace(assigned_at):
+            grace_hours = int(ASSIGNMENT_SLACK_GRACE.total_seconds() // 3600)
+            print(
+                f"Issue #{idx} was assigned within the last {grace_hours}h, skipping Slack notification for now."
+            )
+        elif _failed_earlier_today(body):
+            print(f"Issue #{idx} already failed earlier today, skipping Slack notification.")
+        else:
+            notify = True
+
+    new_body = f"{body}\n{create_issue_table_row(cause)}"
+    gh_issue_edit_cmd(idx, title, new_body)
+    print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
+    if notify:
         return (idx, title, commit_hash)
     return None
 
@@ -511,6 +542,7 @@ def self_test():
     test_update_issue_returns_consecutive_streak_info_unstable_slow()
     test_update_issue_dedupes_shard_duplicates()
     test_report_issue_assignment_grace_period()
+    test_update_issue_assigned_daily_cap()
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
@@ -590,7 +622,7 @@ def test_nightly_streak_detection():
         assert nightly_streak(_nightly_body(prior[:-1])) is False
 
     # the prior failures are non-nightly rows -> ignored -> no streak
-    nonnightly = _nightly_body(prior).replace("nightly_integration_test", "test_with_java17")
+    nonnightly = _nightly_body(prior).replace("nightly_integration_test", "sequential_test")
     with (
         patch.dict(os.environ, env, clear=False),
         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
@@ -1097,6 +1129,65 @@ def test_report_issue_assignment_grace_period():
         assert (
             run_report(env, total_count=0, assigned_at=None, assert_edit_called=False) is not None
         ), f"Expected streak result when issue has no assignee ({label})"
+
+
+def test_update_issue_assigned_daily_cap():
+    # Past the assignment grace period, an assigned issue is alerted on at most once per
+    # UTC calendar day, not on every consecutive-failure streak.
+    commits = [format(i, '040x') for i in range(CONSECUTIVE_FAILURES_THRESHOLD)]
+    current = commits[-1]
+    prior = commits[:-1]
+    header = "| Date | Job | Node | Build | Commit | Cause |\n|---|---|---|---|---|---|"
+    yesterday = (
+        datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1)
+    ).isoformat()
+
+    def make_body(row_date):
+        rows = "\n".join(
+            f"| {row_date} 12:00:00 | test | 1 | [{i}](url) | [{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) | regular |"
+            for i, c in enumerate(prior)
+        )
+        return "This issue was created automatically.\n\n" + header + ("\n" + rows if rows else "")
+
+    consecutive_pairs = set(zip(commits, commits[1:]))
+    old_assignment = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
+
+    env = {
+        'CIRCLECI': 'true',
+        'GITHUB_ACTIONS': 'false',
+        'CIRCLE_SHA1': current,
+        'CIRCLE_JOB': 'test_job',
+        'CIRCLE_NODE_INDEX': '0',
+        'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+    }
+
+    def run(body, has_assignee=True):
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(f'{__name__}.gh_issue_edit_cmd') as mock_edit,
+            patch(
+                f'{__name__}.are_consecutive_commits',
+                side_effect=lambda a, b: (a, b) in consecutive_pairs,
+            ),
+        ):
+            result = update_issue(
+                "42", "Flaky test", body, has_assignee=has_assignee, assigned_at=old_assignment
+            )
+            return result, mock_edit.call_args[0][2]
+
+    # no failure recorded yet today (history is all from yesterday): first failure of the
+    # day, alerts. The written body now carries today's own row.
+    result, todays_body = run(make_body(yesterday))
+    assert result is not None, "Expected an alert on the first failure of the day"
+
+    # same streak, later the same UTC day: today's row from the previous call already shows
+    # a failure today, so this one is suppressed.
+    result, _ = run(todays_body)
+    assert result is None, "Expected no repeat alert later the same UTC day"
+
+    # unassigned issue: never rate-limited by day, keeps alerting regardless of same-day history.
+    result, _ = run(todays_body, has_assignee=False)
+    assert result is not None, "Expected unassigned issues to keep alerting on every streak"
 
 
 # Ordered most specific first. A timeout is more telling than a regular

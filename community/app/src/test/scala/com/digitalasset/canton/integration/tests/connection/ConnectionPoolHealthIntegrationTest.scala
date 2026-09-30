@@ -140,10 +140,10 @@ sealed trait ConnectionPoolHealthIntegrationTest
 
             // Connections to sequencers 1 and 2 should be Failed, connections to sequencers 3 and 4 should be Ok
             forAll(connections) {
-              case ComponentStatus(name, ComponentHealthState.Failed(state)) =>
+              case ComponentStatus(name, ComponentHealthState.Failed(state), _) =>
                 name should (include("sequencer1") or include("sequencer2"))
                 state.description.value should startWith("Network error")
-              case ComponentStatus(name, ComponentHealthState.Ok(_)) =>
+              case ComponentStatus(name, ComponentHealthState.Ok(_), _) =>
                 name should (include("sequencer3") or include("sequencer4"))
               case other => fail(s"Unexpected component status: $other")
             }
@@ -157,8 +157,10 @@ sealed trait ConnectionPoolHealthIntegrationTest
     ): (ComponentStatus, Seq[ComponentStatus], ComponentStatus, Seq[ComponentStatus]) = {
       val components = node.health.status.trySuccess.components
 
-      val connectionPool = components.filter(_.name == "sequencer-connection-pool").loneElement
-      val connections = components.filter(_.name.startsWith("internal-sequencer-connection-"))
+      val connectionPool =
+        components.filter(_.name == "sequencer-connection-pool").loneElement
+      val connections =
+        components.filter(_.name.startsWith("internal-sequencer-connection-"))
 
       val subscriptionPool =
         components.filter(_.name == "sequencer-subscription-pool").loneElement

@@ -122,40 +122,6 @@ object SequencerError extends SequencerErrorGroup {
   }
 
   @Explanation("""
-      |This error indicates that the sequencer has detected an invalid envelope signature in the submission request.
-      |This most likely indicates that the request is bogus and has been created by a malicious sequencer.
-      |So it will not get processed.
-      |""")
-  object InvalidEnvelopeSignature extends AlarmErrorCode("INVALID_ENVELOPE_SIGNATURE") {
-    final case class Error(
-        submissionRequest: SubmissionRequest,
-        error: SignatureCheckError,
-        sequencingTimestamp: CantonTimestamp,
-        snapshotTimestamp: CantonTimestamp,
-    ) extends Alarm({
-          s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] provided a closed envelope signature " +
-            s"that failed to be verified against topology snapshot from $snapshotTimestamp. " +
-            s"Could not sequence at $sequencingTimestamp: $error"
-        })
-  }
-
-  @Explanation("""
-      |This error indicates that the participant is trying to send envelopes to multiple mediators or mediator groups in the same submission request.
-      |This most likely indicates that the request is bogus and has been created by a malicious sequencer.
-      |So it will not get processed.
-      |""")
-  object MultipleMediatorRecipients extends AlarmErrorCode("MULTIPLE_MEDIATOR_RECIPIENTS") {
-    final case class Error(
-        submissionRequest: SubmissionRequest,
-        sequencingTimestamp: CantonTimestamp,
-    ) extends Alarm({
-          s"Sender [${submissionRequest.sender}] of send request [${submissionRequest.messageId}] has submitted a request " +
-            s"to send envelopes to multiple mediators or mediator groups ${submissionRequest.batch.allMediatorRecipients}. " +
-            s"Could not sequence at $sequencingTimestamp"
-        })
-  }
-
-  @Explanation("""
       |The sequencer has detected that some event that was placed on the ledger cannot be parsed.
       |This may be due to some sequencer node acting maliciously or faulty.
       |The event is ignored and processing continues as usual.
@@ -200,6 +166,25 @@ object SequencerError extends SequencerErrorGroup {
     ) extends CantonBaseError.Impl(
           cause =
             s"The sequencer time [$ts] has exceeded by ${LoggerUtil.roundDurationForHumans(ts - maxSequencingTime)} the max-sequencing-time of the send request [$maxSequencingTime]: $message"
+        )
+  }
+
+  @Explanation("""
+                 |This error indicates that a request is rejected because the topology timestamp is non-empty.
+                 |Starting from protocol version 36, topology timestamp must be empty.
+                 |""")
+  @Resolution(
+    """Remove value of topology timestamp and re-submit the request."""
+  )
+  object NonEmptyTopologyTimestamp
+      extends ErrorCode(
+        "NON_EMPTY_TOPOLOGY_TIMESTAMP",
+        ErrorCategory.ContentionOnSharedResources,
+      ) {
+    case object Error
+        extends CantonBaseError.Impl(
+          cause =
+            s"Starting from protocol version 36, submission requests must have empty topology timestamp"
         )
   }
 

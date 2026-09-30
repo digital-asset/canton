@@ -5,7 +5,7 @@
 #
 
 ###############################################################################
-# Runs the nightly performance test to replay recorded events.
+# Runs the nightly performance test to replay the previously recorded events.
 ###############################################################################
 
 set -eu -o pipefail
@@ -82,4 +82,5 @@ terminate-subprocesses
 export KNOWN_MISSING_SEQUENCER_METRICS="true"
 export KNOWN_MISSING_MEDIATOR_METRICS="true"
 export KNOWN_MISSING_FAILED_TRADER_METRICS="true"
+
 compute-and-publish-metrics.sh 5 90

@@ -47,7 +47,18 @@ This will only succeed when there is exactly a single registered and connected s
 
 It is considered a security best practice to have a distinct key per synchronizer.
 
+### Synchronizer record time to offset conversion ledger API endpoint
+
+To make cross-participant requests easier an API endpoint that converts a pair of synchronizer id and record time into a participant offset. The new endpoint was added to state service.
+
+Please keep in mind that synthetic synchronizer events, like repair related events, will be put on the same record time
+as the last observed synchronized event at the time of creation of this synthetic event. That means that multiple
+participant offsets can exist for a single record time. The newly added endpoint returns the first record time that
+happened on a requested record time or the last offset before that record time if there are no offset on there requested
+record time.
+
 ### Minor Improvements
+- Party queries are now served from the `lapi_events_party_to_participant` table, which also acquired a new index on `party + participant_id + synchronizer_id + event_sequential_id`. This change allows faithful representation of changes to the multi-hosted parties. At the same time, the `lapi_party_entries` has now been dropped.
 - participant_id label is added onto participant metrics
 - To maintain ledger consistency when importing repair events, repair events are now rejected if the last persisted event was a topology event. If this happens, reconnect to the synchronizer to move the record time. If cannot reconnect, use the `forceRepairWhenTopologyTransactionAtLedgerEnd` flag. Using the force flag can corrupt the data in the system.
 - Deprecated configuration settings: `canton.participants.<participant>.parameters.ledger-api-server.indexer.use-weighted-batching` and `canton.participants.<participant>.parameters.ledger-api-server.indexer.submission-batch-insertion-size`. These are no longer supported.
@@ -66,6 +77,15 @@ It is considered a security best practice to have a distinct key per synchronize
    }]
   ```
 - Added the request type to the sequencer cap rejection message.
+- The participant status report now tracks the health components of all connected synchronizers instead of only the
+  last connected one. Each per-synchronizer component status carries the physical synchronizer id in a new `labels`
+  field (`synchronizer` key) of `ComponentStatus` in the health admin API, and the `Components:` section of
+  `participant.health.status` renders node-level components as before, followed by a `Synchronizers:` section with the
+  component states per connected synchronizer. The status can also be restricted to a single synchronizer via
+  `participant.health.status(synchronizerId)` (accepting a logical or physical synchronizer id), backed by a new
+  optional `synchronizer_id` field on `ParticipantStatusRequest`.
+- Removed the default `non-standard-config = true` from the docker images configuration as they are not required for the default configuration.
+- Increased the log level of Ledger API Indexer initialization and termination errors to WARN, except known transient failures that stay on INFO
 
 ### Preview Features
 - preview feature
@@ -76,6 +96,9 @@ It is considered a security best practice to have a distinct key per synchronize
   performance regression during synchronizer catch-up. Furthermore, synchronous rejects were not properly
   cleaned up by the sequencer client immediately after the reject was processed, but relied on the timeout logic to pick
   up the requests.
+- Fixed the transaction trace shown for unhandled exceptions: when the exception passed through
+  a try-catch that did not handle it, the trace started at the choice enclosing the try-catch
+  instead of the choice where the exception was thrown.
 
 ### (YY-nnn, Risk): Title
 

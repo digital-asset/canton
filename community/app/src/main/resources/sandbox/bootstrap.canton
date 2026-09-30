@@ -1,6 +1,5 @@
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Mode
 
 val protocol = ProtocolVersion.forSynchronizer
 

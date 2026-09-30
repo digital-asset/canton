@@ -14,6 +14,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, L
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.store.PartyReplicationStateManager.{
   Modification,
   OnlinePartyReplicationOperationName,
@@ -46,14 +47,12 @@ import scala.util.chaining.scalaUtilChainingOps
   *   - Other components such as the
   *     [[com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationTargetParticipantProcessor]]
   *     update individual status subcomponents set to Some(_) such as
-  *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.AcsReplicationProgress]]
+  *     [[com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationProgress]]
   *     from a simple execution queue.
   *   - Given that multiple components perform updates (but not necessarily in a racy fashion),
   *     error on the side of safety and have only the update methods use the simple execution queue
   *     to avoid lost updates in the absence of atomic update support in the underlying db store.
   */
-// TODO(#35267) Find a way to avoid querying AcsReplicationStateManager for every get or collect call
-// Maybe register a callback with AcsReplicationStateManager
 final class PartyReplicationStateManager(
     participantId: ParticipantId,
     storage: Storage,
@@ -61,7 +60,6 @@ final class PartyReplicationStateManager(
     exitOnFatalFailures: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
-    acsReplicationStateManager: AcsReplicationStateManager,
 )(implicit executionContext: ExecutionContext)
     extends AcsReplicationProgress
     with NamedLogging
@@ -194,55 +192,36 @@ final class PartyReplicationStateManager(
     * so in an idempotent way, i.e. setting new values rather than incrementing a counter.
     */
   def get(requestId: AddPartyRequestId): Option[PartyReplicationStatus] =
-    partyReplications
-      .get(requestId)
-      .map { status =>
-        acsReplicationStateManager.get(requestId) match {
-          case Some(acsReplicationStatus) =>
-            status
-              .setAcsReplicationStatus(Some(acsReplicationStatus))
-              .setAgreementStatus(acsReplicationStatus.agreementStatus)
-              .setReplication(acsReplicationStatus.replicationO)
-          // TODO(#35267) Copy error as well and make sure OnlinePartyReplicationRecoverFromDisruptionsTest passes
-          case None => status
-        }
-
-      }
-      // in case of SP, only AcsReplicator knows about replication
-      .orElse(acsReplicationStateManager.get(requestId))
-
-  /** Finds replication status by Daml sequencer channel agreement contract id.
-    *
-    * @param agreementContractId
-    *   Daml replication agreement contract id
-    * @return
-    *   party replication status if found, None otherwise
-    */
-  def findByAgreementContractId(agreementContractId: String): Option[PartyReplicationStatus] =
-    partyReplications.values.find(_.agreementStatus match {
-      case PartyReplicationStatus.AgreementStatus.Exists(contractId, _, _) =>
-        contractId.coid == agreementContractId
-      case _ => false
-    })
+    partyReplications.get(requestId)
 
   def collectFirst[T](
       f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]
   ): Option[T] =
-    partyReplications.iterator.collectFirst(f).orElse(acsReplicationStateManager.collectFirst(f))
+    partyReplications.iterator.collectFirst(f)
 
   def collect[T](f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]): Seq[T] =
     partyReplications.iterator.collect(f).toSeq
 
   override def getAcsReplicationProgress(requestId: AddPartyRequestId)(implicit
       traceContext: TraceContext
-  ): Option[PartyReplicationStatus.AcsReplicationProgress] =
+  ): Option[AcsReplicationStatus.AcsReplicationProgress] =
     get(requestId).flatMap(_.replicationO)
 
   override def updateAcsReplicationProgress(
       requestId: AddPartyRequestId,
-      progress: PartyReplicationStatus.AcsReplicationProgress,
+      progress: AcsReplicationStatus.AcsReplicationProgress,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     update_(requestId, _.modifyReplication(_ => progress))
+
+  def updateAcsReplicationStatus(
+      requestId: AddPartyRequestId,
+      acsReplicationStatus: AcsReplicationStatus,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    update_(
+      requestId,
+      _.setAcsReplicationStatus(Some(acsReplicationStatus))
+        .setReplication(acsReplicationStatus.replicationO),
+    )
 
   override protected def onClosed(): Unit =
     LifeCycle.close(executionQueue)(logger)

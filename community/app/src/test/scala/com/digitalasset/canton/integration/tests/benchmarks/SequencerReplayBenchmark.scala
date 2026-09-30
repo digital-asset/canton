@@ -8,8 +8,9 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.TempDirectory
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.{
-  LocalPostgresDumpRestore,
+  PostgresDumpRestore,
   UseBftSequencer,
   UsePostgres,
   UseReferenceBlockSequencer,
@@ -37,6 +38,7 @@ import org.scalatest.concurrent.PatienceConfiguration
 import java.nio.file.Path
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import scala.util.chaining.*
 
 /** Replays submissions to the Sequencer from the Participant and Mediator recorded by the embedded
   * [[PerformanceRunnerRecorder]] with a matching configuration, i.e., this benchmark is
@@ -58,9 +60,12 @@ import scala.concurrent.duration.*
   *
   * See the implementation for details.
   */
-trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvironment {
+trait SequencerReplayBenchmark
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with NightlyPerformanceBase {
 
-  private val SourceDirectory: File = File("replay")
+  private lazy val SourceDumpDirectory: File = nightlyReplayTestsDir
 
   /** A timeout duration for initializing the database */
   private val InitTimeout: FiniteDuration = 2.minutes
@@ -157,7 +162,11 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
   // Use local tools as the dump files are not copied into the container.
   // Otherwise, the tests would fail with "No such file or directory".
-  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin, loggerFactory)
+  // Except for Nightly Performance Benchmark run, where we have a docker that shares a volume
+  // with the host
+  private lazy val postgresDumpRestore =
+    if (isNightlyPerformanceBenchmarkRun) nightlyPostgresDumpRestore(postgresPlugin, loggerFactory)
+    else PostgresDumpRestore(postgresPlugin, forceLocal = true)
 
   private val participantNames = (1 to numberOfParticipants).map(idx => s"participant$idx")
 
@@ -191,6 +200,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
           )
         )
       )
+      .pipe(performanceBenchmarkEnrichmentIfNightly)
       .withManualStart
 
   /** Replays sends from the provided send directory. Returns a two element list with the sequencer
@@ -412,14 +422,14 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
     // The reference block sequencer uses a separate database.
     referenceBlockSequencerPlugin.foreach { plugin =>
       plugin
-        .restoreDatabases(TempDirectory(dumpDirectory(SourceDirectory)), forceLocal = true)
+        .restoreDatabases(TempDirectory(dumpDirectory(SourceDumpDirectory)), forceLocal = true)
         .futureValue
     }
 
     (mediators.local.map(_.name) ++ participantNames ++ sequencers.local.map(_.name))
       .foreach { nodeName =>
         postgresDumpRestore
-          .restoreDump(nodeName, dumpPathOfNode(nodeName, SourceDirectory))
+          .restoreDump(nodeName, dumpPathOfNode(nodeName, SourceDumpDirectory))
           .futureValue(
             PatienceConfiguration.Timeout(InitTimeout),
             PatienceConfiguration.Interval(IdleCheckInterval),
@@ -431,7 +441,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
     // we're intentionally not doing a warmup as the sequencer client metrics will capture everything regardless (not just from the test)
     // instead the initial portion of metrics should be discarded
     println("Running Sequencer Replay Test")
-    replaySends(testDirectory(SourceDirectory).path)
+    replaySends(testDirectory(SourceDumpDirectory).path)
   }
 
   "Resubscribe from beginning under load" in { implicit env =>

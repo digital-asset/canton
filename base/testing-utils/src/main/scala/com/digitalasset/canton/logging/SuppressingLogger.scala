@@ -308,10 +308,23 @@ class SuppressingLogger private[logging] (
       within,
       logs =>
         forEvery(logs)(log =>
-          assert(
-            expectedLogs.exists(msg => log.message.contains(msg)),
-            s"line $log contained unexpected log",
-          )
+          forAtLeast(1, expectedLogs) { expected =>
+            log.message should include(expected)
+          }
+        ),
+    )
+
+  /** Asserts that the sequence of logged warnings/errors meets a set of expected log messages,
+    * using regex.
+    */
+  def assertLogsSeqRegex[A](rule: SuppressionRule, expectedLogs: Seq[String])(within: => A): A =
+    assertLogsSeq(rule)(
+      within,
+      logs =>
+        forEvery(logs)(log =>
+          forAtLeast(1, expectedLogs) { expected =>
+            log.message should include regex expected
+          }
         ),
     )
 

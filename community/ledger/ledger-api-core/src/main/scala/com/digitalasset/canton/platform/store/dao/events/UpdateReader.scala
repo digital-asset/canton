@@ -14,7 +14,7 @@ import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
@@ -46,6 +46,7 @@ import com.digitalasset.canton.platform.store.dao.{
   LedgerDaoUpdateReader,
 }
 import com.digitalasset.canton.platform.{FatContract, InternalUpdateFormat, TemplatePartiesFilter}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.MonadUtil
 import io.opentelemetry.api.trace.Span
 import org.apache.pekko.stream.scaladsl.Source
@@ -190,6 +191,18 @@ private[dao] final class UpdateReader(
       )(calculateRange())
     }
   }
+  override def highestOffsetBeforeOrFirstAt(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] =
+    dispatcher.executeSql(dbMetrics.highestOffsetBeforeOrFirstAtRecordTime)(
+      eventStorageBackend.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+        synchronizerId,
+        recordTime.underlying,
+      )
+    )
 }
 
 private[dao] object UpdateReader {

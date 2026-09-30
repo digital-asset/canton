@@ -9,7 +9,7 @@ import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesPageResponse}
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
@@ -90,6 +90,16 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       metrics.services.index.getUpdate,
       delegate.getUpdateBy(lookupKey, updateFormat),
     )
+
+  override def highestOffsetBeforeOrFirstAt(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] = Timed.future(
+    metrics.services.index.highestOffsetBeforeOrFirstAt,
+    delegate.highestOffsetBeforeOrFirstAt(synchronizerId = synchronizerId, recordTime = recordTime),
+  )
 
   override def getActiveContracts(
       eventFormat: EventFormat,

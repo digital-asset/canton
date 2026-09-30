@@ -70,6 +70,7 @@ object DAMLe {
       enableLfDev: Boolean,
       enableLfBeta: Boolean,
       enableStackTraces: Boolean,
+      executionMode: interpretation.ExecutionMode = interpretation.ExecutionMode.UpdateMachine,
       profileDir: Option[Path] = None,
       snapshotDir: Option[Path] = None,
       iterationsBetweenInterruptions: Long =
@@ -94,6 +95,7 @@ object DAMLe {
         paranoid = paranoidMode,
         submissionPhaseLogging = submissionPhaseLogging,
         validationPhaseLogging = validationPhaseLogging,
+        executionMode = executionMode,
       ),
       loggerFactory,
     )

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (c) 2023-2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
 # Proprietary code. All rights reserved.
 
 import json
@@ -51,14 +51,15 @@ def generate_markdown_table(records):
     if not records:
         return "No performance test results found."
 
-    headers = ["Test Name", "TPS", "Start Time", "Duration", "Version", "Machine"]
-    alignments = ["left", "right", "left", "left", "left", "left"]
+    headers = ["Test Name", "TPS", "Start Time", "Duration", "Version", "Branch", "Machine"]
+    alignments = ["left", "right", "left", "left", "left", "left", "left"]
 
     # Raw row values before padding
     raw_rows = []
     for r in records:
         test_name = f"`{r.get('test-name', 'N/A')}`"
         version = f"`{r.get('version', 'N/A')}`"
+        branch = f"`{r.get('branch', 'N/A')}`"
         machine = str(r.get("machine", "N/A"))
         start_time = str(r.get("start-time", "N/A"))
         duration = str(r.get("duration", "N/A"))
@@ -72,7 +73,7 @@ def generate_markdown_table(records):
         else:
             tps_str = str(tps)
 
-        raw_rows.append([test_name, tps_str, start_time, duration, version, machine])
+        raw_rows.append([test_name, tps_str, start_time, duration, version, branch, machine])
 
     # Determine maximum display width for each column (content width + 2 spaces padding)
     col_widths = [len(h) for h in headers]

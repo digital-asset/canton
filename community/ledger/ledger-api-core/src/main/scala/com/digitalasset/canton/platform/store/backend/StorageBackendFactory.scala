@@ -14,11 +14,16 @@ import com.digitalasset.canton.platform.store.backend.localstore.{
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresStorageBackendFactory
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.daml.lf.data.Ref
 
 trait StorageBackendFactory {
   def createIngestionStorageBackend: IngestionStorageBackend[?]
   def createParameterStorageBackend(stringInterning: StringInterning): ParameterStorageBackend
-  def createPartyStorageBackend(ledgerEndCache: LedgerEndCache): PartyStorageBackend
+  def createPartyStorageBackend(
+      participantId: Ref.ParticipantId,
+      ledgerEndCache: LedgerEndCache,
+      stringInterning: StringInterning,
+  ): PartyStorageBackend
   def createPartyRecordStorageBackend: PartyRecordStorageBackend
   def createCompletionStorageBackend(
       stringInterning: StringInterning,
@@ -43,12 +48,14 @@ trait StorageBackendFactory {
   def createIdentityProviderConfigStorageBackend: IdentityProviderStorageBackend
 
   final def readStorageBackend(
+      participantId: Ref.ParticipantId,
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
       loggerFactory: NamedLoggerFactory,
   ): ReadStorageBackend =
     ReadStorageBackend(
-      partyStorageBackend = createPartyStorageBackend(ledgerEndCache),
+      partyStorageBackend =
+        createPartyStorageBackend(participantId, ledgerEndCache, stringInterning),
       completionStorageBackend =
         createCompletionStorageBackend(stringInterning, ledgerEndCache, loggerFactory),
       contractStorageBackend = createContractStorageBackend(stringInterning, ledgerEndCache),

@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.benchmarks
 import com.digitalasset.canton.concurrent.ExecutionContextMonitor
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseConfigTransforms,
@@ -21,11 +22,13 @@ import com.digitalasset.canton.participant.admin.ResourceLimits
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.DurationInt
+import scala.util.chaining.*
 
 sealed trait SynchronizerDisconnectAndReconnectTest
     extends CommunityIntegrationTest
     with SharedEnvironment
-    with BongTestScenarios {
+    with BongTestScenarios
+    with NightlyPerformanceBase {
 
   // This test is an adaptation of `BongBenchmark` meant to reproduce an issue that originated at a customer.
   // See https://github.com/DACH-NY/canton/issues/14150 for details.
@@ -44,6 +47,7 @@ sealed trait SynchronizerDisconnectAndReconnectTest
         _.focus(_.parameters.enableAdditionalConsistencyChecks)
           .replace(false), // because that would take way too long
       )
+      .pipe(performanceBenchmarkEnrichmentIfNightly)
       .withSetup { implicit env =>
         import env.*
 
@@ -78,9 +82,17 @@ sealed trait SynchronizerDisconnectAndReconnectTest
         )
       }
 
-  val (level, timeout) = (10, 5.minutes)
+  private def bongTimeout =
+    if (isNightlyPerformanceBenchmarkRun) 10.minutes else 5.minutes
+
+  val level = 10
   s"run the bong test at level $level" in { implicit env =>
-    setupAndRunBongTest(level, timeout)(env)
+    val nightlyMeasurements =
+      startMeasuringPartyUpdatesIfNightly(env.participants, "canton.transactions-emitted")
+
+    setupAndRunBongTest(level, bongTimeout)(env)
+
+    nightlyMeasurements.foreach(_.close())
   }
 }
 

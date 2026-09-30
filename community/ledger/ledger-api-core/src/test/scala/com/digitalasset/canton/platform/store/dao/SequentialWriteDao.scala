@@ -57,7 +57,6 @@ object SequentialWriteDao {
         parameterStorageBackend = parameterStorageBackend,
         updateToDbDtos = offset =>
           UpdateToDbDto(
-            participantId = participantId,
             translation = new LfValueTranslation(
               metrics = metrics,
               engineO = None,

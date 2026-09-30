@@ -22,6 +22,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestMalformed
 import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
@@ -78,7 +79,7 @@ import scala.util.Success
 
 import SubscriptionPool.PoolClosed
 
-class GrpcSequencerServiceTest
+final class GrpcSequencerServiceTest
     extends FixtureAsyncWordSpec
     with BaseTest
     with ProtocolVersionChecksFixtureAsyncWordSpec
@@ -322,7 +323,7 @@ class GrpcSequencerServiceTest
           submissionCost = None,
         )
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 31).toByteString
       )
 
       loggerFactory.assertLogs(
@@ -374,7 +375,7 @@ class GrpcSequencerServiceTest
         else "THISWILLFAIL".toProtoUnvalidated
       }
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 31).toByteString
       )
       loggerFactory.assertLogs(
         sendProtoAndCheckError(
@@ -426,6 +427,73 @@ class GrpcSequencerServiceTest
           _ shouldBe alarmMsg,
         ),
       )
+    }
+
+    "reject invalid aggregation rules" in { implicit env =>
+      val protoRequest = defaultRequest.toProtoV32
+      val resF = MonadUtil.foldLeftM(
+        (),
+        Seq(
+          (
+            Seq(DefaultTestIdentities.participant1, DefaultTestIdentities.participant3)
+              .map(_.toProtoPrimitive),
+            3,
+          ),
+          (Seq(DefaultTestIdentities.participant1).map(_.toProtoPrimitive), 1),
+          (
+            Seq(
+              MediatorGroupRecipient.apply(MediatorGroupIndex.zero),
+              MediatorGroupRecipient.apply(MediatorGroupIndex.zero),
+            ).map(_.toProtoPrimitive),
+            0,
+          ),
+          (
+            Seq(
+              MediatorGroupRecipient.apply(MediatorGroupIndex.zero),
+              MediatorGroupRecipient.apply(MediatorGroupIndex.one),
+            ).map(_.toProtoPrimitive),
+            0,
+          ),
+          (
+            Seq(
+              MediatorGroupRecipient.apply(MediatorGroupIndex.zero),
+              SequencersOfSynchronizer,
+            ).map(_.toProtoPrimitive),
+            0,
+          ),
+          (
+            Seq(
+              AllMembersOfSynchronizer
+            ).map(_.toProtoPrimitive),
+            0,
+          ),
+        ),
+      ) { case (_, (eligible, threshold)) =>
+        val withFakeAggregationRule = protoRequest.withAggregationRule(
+          com.digitalasset.canton.protocol.v30.AggregationRule(
+            eligibleMembers = com.digitalasset.canton.validation.ProtoUnvalidatedSeq(
+              eligible.map(com.digitalasset.canton.validation.ProtoUnvalidatedString(_))
+            ),
+            threshold = threshold,
+          )
+        )
+        val content =
+          signedContent(
+            VersionedMessage[SubmissionRequest](
+              withFakeAggregationRule.toByteString,
+              32,
+            ).toByteString
+          )
+        loggerFactory.assertLogs(
+          sendProto(content.toByteString).failed.map { ex =>
+            logger.debug(s"TRACEME $ex")
+            ex.getMessage should include(SubmissionRequestMalformed.id)
+            ()
+          },
+          _.warningMessage should include("Invalid aggregation rule"),
+        )
+      }
+      resF.map(_ => succeed)
     }
 
     "reject unauthorized authenticated participant" in { implicit env =>
@@ -575,53 +643,6 @@ class GrpcSequencerServiceTest
       ),
     )
 
-    "reject unachievable threshold in aggregation rule" in { implicit env =>
-      val request = defaultRequest
-        .focus(_.topologyTimestamp)
-        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-        .focus(_.aggregationRule)
-        .replace(
-          Some(
-            AggregationRule.testing(
-              eligibleSenders = NonEmpty(Seq, participant, participant),
-              threshold = PositiveInt.tryCreate(2),
-              testedProtocolVersion,
-            )
-          )
-        )
-      loggerFactory.assertLogs(
-        sendAndCheckError(request) { case ex: StatusRuntimeException =>
-          ex.getMessage should include("Threshold 2 cannot be reached")
-        },
-        _.warningMessage should include("Threshold 2 cannot be reached"),
-      )
-    }
-
-    "reject uneligible sender in aggregation rule" in { implicit env =>
-      val request = defaultRequest
-        .focus(_.topologyTimestamp)
-        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
-        .focus(_.aggregationRule)
-        .replace(
-          Some(
-            AggregationRule.testing(
-              eligibleSenders = NonEmpty(Seq, DefaultTestIdentities.participant2),
-              threshold = PositiveInt.tryCreate(1),
-              testedProtocolVersion,
-            )
-          )
-        )
-      loggerFactory.assertLogs(
-        sendAndCheckError(request) { case ex: StatusRuntimeException =>
-          ex.getMessage should include(
-            s"Sender [$participant] is not eligible according to the aggregation rule"
-          )
-        },
-        _.warningMessage should include(
-          s"Sender [$participant] is not eligible according to the aggregation rule"
-        ),
-      )
-    }
   }
 
   "subscribe" should {
@@ -832,7 +853,7 @@ class GrpcSequencerServiceTest
 
   def signedAcknowledgeReq(requestP: v30.AcknowledgeRequest): v30.AcknowledgeSignedRequest =
     v30.AcknowledgeSignedRequest(
-      signedContent(VersionedMessage(requestP.toByteString, 0).toByteString).toByteString
+      signedContent(VersionedMessage(requestP.toByteString, 30).toByteString).toByteString
     )
 
   "acknowledgeSigned" should {

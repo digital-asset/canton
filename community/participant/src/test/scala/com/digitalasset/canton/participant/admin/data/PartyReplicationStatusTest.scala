@@ -33,12 +33,13 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
     InternalStatus(
       params = dummyParams,
       pv = testedProtocolVersion,
-      agreementStatus = InternalStatus.AgreementStatus.NotProposed,
       authorizationO = None,
       replicationO = None,
+      acsReplicationO = None,
       indexingO = None,
       hasCompleted = hasCompleted,
       errorO = errorO.map(InternalStatus.PartyReplicationFailed.apply),
+      replicationMode = InternalStatus.ReplicationMode.SequencerChannel,
     )
 
   "PartyReplicationStatus mapping to LAPI Proto" should {

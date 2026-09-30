@@ -681,6 +681,16 @@ class MediatorNodeBootstrap(
         synchronizerLoggerFactory,
       )
 
+      sequencerClientRef =
+        GrpcSequencerConnectionService
+          .setup(
+            adminServerRegistry,
+            synchronizerConfigurationStore,
+            connectionPoolFactory,
+            parameters.tracing,
+            loggerFactory,
+          )
+
       // we wait here until the sequencer becomes active. this allows to reconfigure the
       // sequencer client address
       connectionPoolAndSequencerConnections <-
@@ -708,17 +718,6 @@ class MediatorNodeBootstrap(
           connectionPool,
         )
         .leftMap(error => s"Failed to create sequencer client: $error")
-
-      sequencerClientRef =
-        GrpcSequencerConnectionService
-          .setup(
-            adminServerRegistry,
-            synchronizerConfigurationStore,
-            connectionPoolFactory,
-            sequencerClient,
-            parameters.tracing,
-            loggerFactory,
-          )
 
       _ = sequencerClientRef.set(sequencerClient)
       _ = deferredSequencerClientHealth.set(sequencerClient.healthComponent)

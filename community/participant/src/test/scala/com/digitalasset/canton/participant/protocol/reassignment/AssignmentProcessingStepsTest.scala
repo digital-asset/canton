@@ -39,10 +39,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentVal
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   NotHostedOnParticipant,
+  PackageIdUnknownOrUnvetted,
   StakeholdersMismatch,
   SubmitterMustBeStakeholder,
 }
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   InFlightSubmissionSynchronizerTracker,
@@ -67,6 +69,7 @@ import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{pureCrypto, submitter}
+import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -84,12 +87,12 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag, ResourceUtil}
+import com.digitalasset.canton.util.{ContractValidator, ResourceUtil}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
-import org.scalatest
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -138,6 +141,15 @@ final class AssignmentProcessingStepsTest
   private lazy val targetValidationPackageId =
     Target(LfPackageId.assertFromString("target-validation-package-id"))
 
+  private lazy val unvettedPackageId =
+    LfPackageId.assertFromString("unvetted-package-id")
+
+  private lazy val invalidPackageId =
+    LfPackageId.assertFromString("invalid-package-id")
+
+  private lazy val vettedPackageId =
+    LfPackageId.assertFromString("vetted-package-id")
+
   private lazy val initialReassignmentCounter: ReassignmentCounter = ReassignmentCounter.One
 
   private def submitterInfo(submitter: LfPartyId): ReassignmentSubmitterMetadata =
@@ -166,6 +178,9 @@ final class AssignmentProcessingStepsTest
         )
       )
     )
+    .withPackages(
+      Map(participant -> Seq(contract.templateId.packageId, vettedPackageId, invalidPackageId))
+    )
     .withSimpleParticipants(participant) // required such that `participant` gets a signing key
     .enableMultiSynchronizer(participant)
     .build(crypto, loggerFactory)
@@ -175,7 +190,12 @@ final class AssignmentProcessingStepsTest
 
   private lazy val cryptoSnapshot = cryptoClient.currentSnapshotApproximation.futureValueUS
 
-  private lazy val assignmentProcessingSteps = testInstance(targetPsid, cryptoClient, None)
+  private lazy val testContractAuthenticator = new TestValidator(
+    Map((contract.contractId, invalidPackageId) -> "invalid package")
+  )
+
+  private lazy val assignmentProcessingSteps =
+    testInstance(targetPsid, cryptoClient, None, testContractAuthenticator)
 
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
   private lazy val ledgerApiStore = mock[LedgerApiStore]
@@ -607,14 +627,18 @@ final class AssignmentProcessingStepsTest
 
   "construct pending data and response" should {
     // Model conformance errors emits alarms.
-    val modelConformanceError = LogEntry.assertLogSeq(
-      Seq(
-        (
-          _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.ModelConformance),
-          "model conformance error",
+    def modelConformanceError(expectedWarning: String): Iterable[LogEntry] => Assertion =
+      LogEntry.assertLogSeq(
+        Seq(
+          (
+            le => {
+              le.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.ModelConformance)
+              le.warningMessage should include regex expectedWarning
+            },
+            "model conformance error",
+          )
         )
       )
-    ) _
     "succeed without errors" in {
       for {
         deps <- statefulDependencies
@@ -742,85 +766,69 @@ final class AssignmentProcessingStepsTest
       }
     }
 
-    def shouldFailWithInvalidPackage(
-        invalidRpId: ReassignmentTag[LfPackageId]
-    ): scalatest.Assertion = {
-      val testContract = ExampleContractFactory.build()
-
-      val expected = "bad-contract"
-
-      val contractValidator =
-        new TestValidator(Map((testContract.contractId, invalidRpId.unwrap) -> expected))
-
-      val assignmentProcessingSteps =
-        testInstance(targetPsid, cryptoClient, None, contractValidator)
-
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        (for {
-          deps <- statefulDependencies
-          (persistentState, ephemeralState) = deps
-
-          _ <- valueOrFail(persistentState.reassignmentStore.addUnassignmentData(unassignmentData))(
-            "add reassignment data failed"
-          ).failOnShutdown
-
-          fullAssignmentTree = makeFullAssignmentTree(
-            party1,
-            testContract,
-            invalidRpId match {
-              case source: Source[?] => source
-              case _ => Source(testContract.templateId.packageId)
-            },
-            invalidRpId match {
-              case target: Target[?] => target
-              case _ => Target(testContract.templateId.packageId)
-            },
-            targetPsid,
-            targetMediator,
-            reassigningParticipants = Set(participant),
-          )
-
-          result <-
-            assignmentProcessingSteps
-              .constructPendingDataAndResponse(
-                mkParsedRequest(fullAssignmentTree),
-                ephemeralState.reassignmentCache,
-                FutureUnlessShutdown.pure(mkActivenessResult()),
-                engineController =
-                  EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
-                DummyTickRequest,
-                PublishUpdateViaRecordOrderPublisher.noop,
-              )
-              .failOnShutdown
-          confirmationResponse <- result.confirmationResponsesF.failOnShutdown
-
-        } yield {
-          confirmationResponse.valueOrFail("no response")._1.responses should matchPattern {
-            case Seq(ConfirmationResponse(_, _: LocalReject, _)) =>
-          }
-          val assignmentValidationResult = result.pendingData.assignmentValidationResult
-          val modelConformanceError =
-            assignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.futureValueUS
-
-          modelConformanceError.left.value match {
-            case ContractValidationError(ref, contractId, rpId, reason) =>
-              ref shouldBe fullAssignmentTree.reassignmentRef
-              contractId shouldBe testContract.contractId
-              reason should include(expected)
-            case other => fail(s"Did not expect $other")
-          }
-
-          assignmentValidationResult.reassigningParticipantValidationResult.errors should contain(
-            UnassignmentDataNotFound(fullAssignmentTree.reassignmentId)
-          )
-        }).futureValue,
-        modelConformanceError,
+    "fail when target package id is unvetted" in {
+      val result = loggerFactory.assertLogs(
+        shouldReject(
+          targetValidationPackageId = Target(unvettedPackageId)
+        ),
+        _.shouldBeCantonErrorCode(ModelConformance),
+      )
+      result.commonValidationResult.packageVettingResult shouldBe Some(
+        PackageIdUnknownOrUnvetted(
+          Set(contract.contractId),
+          List(PackageUnknownTo(unvettedPackageId, participant)),
+          targetPsid.unwrap,
+        )
       )
     }
 
-    "fail when an invalid target validation package is given" in {
-      val invalidRepresentativePackageId = LfPackageId.assertFromString("invalid-upgrade-package")
-      shouldFailWithInvalidPackage(Target(invalidRepresentativePackageId))
+    "fail when target package id is invalid" in {
+      val result = loggerFactory.assertLogs(
+        shouldReject(
+          targetValidationPackageId = Target(invalidPackageId)
+        ),
+        _.shouldBeCantonErrorCode(ModelConformance),
+      )
+      inside(result.commonValidationResult.contractAuthenticationResultF.futureValueUS.swap.value) {
+        case ContractValidationError(ref, contractId, rpId, reason) =>
+          ref shouldBe ReassignmentRef(result.reassignmentId)
+          contractId shouldBe contract.contractId
+          rpId shouldBe invalidPackageId
+          reason should include("invalid package")
+      }
+    }
+
+    def shouldReject(
+        targetValidationPackageId: Target[LfPackageId]
+    ): AssignmentValidationResult = {
+      val result = (for {
+        ephemeralState <- statefulDependencies.map(_._2)
+
+        fullAssignmentTree = makeFullAssignmentTree(
+          targetValidationPackageId = targetValidationPackageId,
+          reassigningParticipants = Set(participant),
+        )
+
+        result <- valueOrFail(
+          assignmentProcessingSteps
+            .constructPendingDataAndResponse(
+              mkParsedRequest(fullAssignmentTree),
+              ephemeralState.reassignmentCache,
+              FutureUnlessShutdown.pure(mkActivenessResult()),
+              engineController =
+                EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
+              DummyTickRequest,
+              PublishUpdateViaRecordOrderPublisher.noop,
+            )
+        )("construction of pending data and response failed").failOnShutdown
+      } yield result).futureValue
+
+      result.confirmationResponsesF.futureValueUS.value
+        .valueOrFail("no response")
+        ._1
+        .responses should matchPattern { case Seq(ConfirmationResponse(_, LocalReject(_, _), _)) =>
+      }
+      result.pendingData.assignmentValidationResult
     }
 
     "fail when inconsistent stakeholders are given" in {
@@ -886,7 +894,7 @@ final class AssignmentProcessingStepsTest
             case Seq(ConfirmationResponse(_, LocalReject(_, true), _)) =>
           }
         }).futureValue,
-        modelConformanceError,
+        modelConformanceError("stakeholders mismatch"),
       )
     }
   }
@@ -919,6 +927,7 @@ final class AssignmentProcessingStepsTest
           activenessResult = mkActivenessResult(),
           participantSignatureVerificationResult = None,
           contractAuthenticationResultF = EitherT.rightT(()),
+          packageVettingResult = None,
           submitterCheckResult = None,
           reassignmentIdResult = None,
           multiSynchronizerFeatureFlagCheckResult = None,

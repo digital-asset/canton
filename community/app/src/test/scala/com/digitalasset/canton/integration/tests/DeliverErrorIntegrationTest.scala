@@ -4,6 +4,8 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BigDecimalImplicits.*
+import com.digitalasset.canton.admin.api.client.data.SubmissionRequestAmplification
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.{
@@ -18,12 +20,8 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.sequencing.protocol.AggregationRule
-import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.MaxSequencingTimeTooFar
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
-import com.digitalasset.canton.topology.DefaultTestIdentities
-import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
 import scala.jdk.CollectionConverters.*
@@ -54,6 +52,17 @@ trait DeliverErrorIntegrationTest
 
     List(participant1, participant2).foreach { p =>
       p.synchronizers.connect_local(sequencer1, daName)
+      p.synchronizers.modify(
+        daName,
+        _.withSubmissionRequestAmplification(
+          SubmissionRequestAmplification(
+            factor = PositiveInt.two,
+            patience = com.digitalasset.canton.config.NonNegativeFiniteDuration.ofSeconds(1),
+          )
+        ),
+      )
+      p.synchronizers.disconnect_all()
+      p.synchronizers.reconnect_all()
       p.dars.upload(CantonExamplesPath)
     }
 
@@ -71,15 +80,12 @@ trait DeliverErrorIntegrationTest
       submissionRequest.sender match {
         case `participant1Id` if submissionRequest.isConfirmationRequest =>
           val modifiedSubmission = submissionRequest
-            .focus(_.aggregationRule)
+            .focus(_.maxSequencingTime)
             .replace(
-              Some(
-                AggregationRule.testing(
-                  NonEmpty.mk(Seq, participant1Id, DefaultTestIdentities.participant2),
-                  threshold = 1,
-                  protocolVersion = testedProtocolVersion,
-                )
-              )
+              // default is max 6 minutes, so setting to 10 minutes will mean that the sequencer will reject it
+              // however, as we disabled the "submission side" checks, this will bounce on the post ordering side
+              // with a reject
+              env.environment.clock.now.plusSeconds(600)
             )
           // We now must recreate a correct signature of the sender
           val signedModifiedRequest =
@@ -100,14 +106,14 @@ trait DeliverErrorIntegrationTest
       new Amount(1.toBigDecimal, "snack"),
       List.empty.asJava,
     ).create.commands.asScala.toSeq
-    val expectedErrorCode = SubmissionRequestRefused.id
+    val expectedErrorCode = MaxSequencingTimeTooFar.id
 
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       participant1.ledger_api.javaapi.commands.submit(Seq(alice), iouCommand),
       _.warningMessage should include("Submission was rejected by the sequencer at"),
       _.errorMessage should (include("Request failed for participant1") and include(
-        show"Aggregation rule contains unregistered eligible members"
-      ) and include(expectedErrorCode)),
+        expectedErrorCode
+      )),
     )
 
     logger.info("received a deliver error for the submission")

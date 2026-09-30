@@ -15,7 +15,12 @@ import com.digitalasset.canton.health.admin.data.NodeStatus.{
 import com.digitalasset.canton.health.admin.data.{NodeStatus, TopologyQueueStatus}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  ParticipantId,
+  PhysicalSynchronizerId,
+  Synchronizer,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 
 import java.time.Duration
@@ -53,10 +58,31 @@ final case class ParticipantStatus(
         s"Connected synchronizers: ${multiline(connectedHealthySynchronizers.map(_.toString))}",
         s"Unhealthy synchronizers: ${multiline(connectedUnhealthySynchronizers.map(_.toString))}",
         s"Active: $active",
-        s"Components: ${multiline(components.map(_.toString))}",
+        s"Components: ${multiline(ComponentStatus.renderGrouped(components))}",
         s"Version: ${version.fullVersion}",
       ) ++ protocolVersionsString(supportedProtocolVersions)).mkString(System.lineSeparator())
     )
+
+  /** Restricts the status to the given synchronizer: node-level components (without a synchronizer
+    * label) are kept, while connected synchronizers and synchronizer-labeled components are kept
+    * only if they match `synchronizer`. A physical synchronizer id matches exactly; a logical
+    * synchronizer id matches all its physical instances.
+    */
+  def filterBySynchronizer(synchronizer: Synchronizer): ParticipantStatus = {
+    val matchingSynchronizers = connectedSynchronizers.filter { case (psid, _) =>
+      synchronizer.isCompatibleWith(psid)
+    }
+
+    // component labels carry the full psid
+    val matchingLabels = matchingSynchronizers.keySet.map(_.toProtoPrimitive)
+
+    copy(
+      connectedSynchronizers = matchingSynchronizers,
+      components = components.filter(
+        _.labels.get(ComponentStatus.SynchronizerLabelKey).forall(matchingLabels)
+      ),
+    )
+  }
 
   def toParticipantStatusProto
       : participantV30.ParticipantStatusResponse.ParticipantStatusResponseStatus = {

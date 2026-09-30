@@ -7,6 +7,7 @@ import better.files.File
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.console.LocalInstanceReference
+import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.{
   PostgresDumpRestore,
   UseBftSequencer,
@@ -42,15 +43,17 @@ import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
+import scala.util.chaining.*
 
 /** Replay participant events recorded with [[PerformanceRunnerRecorder]].
   */
 class MediatorReplayBenchmark
     extends CommunityIntegrationTest
+    with NightlyPerformanceBase
     with SharedEnvironment
     with HasExecutionContext {
 
-  private val SourceDirectory: File = File("replay")
+  private lazy val SourceDumpDirectory: File = nightlyReplayTestsDir
 
   /** Overall timeout for a replay */
   private val InitTimeout: FiniteDuration = 2.minutes
@@ -76,7 +79,9 @@ class MediatorReplayBenchmark
 
   // Use local tools by default as the dump files are not copied into the container.
   // Otherwise, the tests would fail with "No such file or directory".
-  private lazy val postgresDumpRestore = PostgresDumpRestore(postgresPlugin, forceLocal = true)
+  private lazy val postgresDumpRestore =
+    if (isNightlyPerformanceBenchmarkRun) nightlyPostgresDumpRestore(postgresPlugin, loggerFactory)
+    else PostgresDumpRestore(postgresPlugin, forceLocal = true)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P0S1M1_Manual
@@ -89,6 +94,7 @@ class MediatorReplayBenchmark
           NonNegativeFiniteDuration.tryFromDuration(30.minutes)
         )
       )
+      .pipe(performanceBenchmarkEnrichmentIfNightly)
 
   override def afterAll(): Unit = {
     // ensure that we don't leave the replay config on the mediator class that could be erroneously picked up by other tests
@@ -159,7 +165,7 @@ class MediatorReplayBenchmark
 
     Seq[LocalInstanceReference](sequencer1, mediator1).foreach { node =>
       postgresDumpRestore
-        .restoreDump(node, dumpPathOfNode(node.name, SourceDirectory))
+        .restoreDump(node, dumpPathOfNode(node.name, SourceDumpDirectory))
         .futureValue(
           PatienceConfiguration.Timeout(InitTimeout),
           PatienceConfiguration.Interval(IdleCheckInterval),
@@ -168,11 +174,11 @@ class MediatorReplayBenchmark
   }
 
   "Warmup" in { implicit env =>
-    replayEvents(warmupDirectory(SourceDirectory).path)
+    replayEvents(warmupDirectory(SourceDumpDirectory).path)
   }
 
   "Test" in { implicit env =>
     println("Running Mediator Replay Test")
-    replayEvents(testDirectory(SourceDirectory).path)
+    replayEvents(testDirectory(SourceDumpDirectory).path)
   }
 }

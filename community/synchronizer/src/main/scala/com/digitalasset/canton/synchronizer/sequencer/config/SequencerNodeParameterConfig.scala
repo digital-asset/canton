@@ -61,10 +61,6 @@ final case class AsyncWriterConfig(
   *   If true, disable checks on the write path of the sequencer in order to allow testing the same
   *   checks on the post-processing path (malicious sequencer node tests). Only to be used for
   *   testing purposes.
-  * @param disableAggregationRuleSizeCheckForTesting
-  *   Whether to disable the aggregation rule size check for testing purposes. This should only be
-  *   used in tests and should eventually be removed as the tests are based on a feature that is not
-  *   intended to be used in production.
   * @param disableReleaseVersionHandshakeCheck
   *   If true, then we won't check whether the client binaries are really supported during
   *   handshake. This is normally only useful for unstable protocol versions to avoid accidental
@@ -88,14 +84,11 @@ final case class SequencerNodeParameterConfig(
     unsafeSequencerChannelSupport: Boolean = false,
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),
     timeAdvancingTopology: TimeAdvancingTopologyConfig = TimeAdvancingTopologyConfig(),
-    // TODO(#30769) remove this flag once the feature is complete
-    producePostOrderingTopologyTicks: Boolean = true,
     lsuRepair: LsuRepair = LsuRepair(),
     lsu: SequencerLsuConfig = SequencerLsuConfig(),
     delayRequestsBeforeLsuTrafficInit: Boolean = false,
     enableRejectDeliveredAggregationsOnPv35: Seq[String] = Seq("MED"),
     disableSubmissionChecksForTesting: Boolean = false,
-    disableAggregationRuleSizeCheckForTesting: Boolean = false,
     disableReleaseVersionHandshakeCheck: Boolean = false,
     enablePrevalidation: Boolean = true,
     enableAsyncSequencerLogging: Boolean = true,

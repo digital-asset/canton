@@ -29,7 +29,15 @@ slack-exit-status() {
     else
       # If the build failed, the logs directory does not yet exist; point to the CRON output file instead.
       LOGS_LOCATION=$( [ -d "$LOGS_DIR" ] && echo "$LOGS_DIR" || echo "${CRON_OUTPUT_FILE:-unknown}" )
-      send-slack-message.sh "<!here> :bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. The person on the CI rota should investigate."
+      # Ping the CI rota (scripts/ci/select_rota.py) instead of the whole channel;
+      # it degrades to a deterministic fallback pick if the rota sheet is unreachable.
+      MENTION=""
+      for id in $(python3 "$REPOSITORY_ROOT/scripts/ci/select_rota.py" --rotation ci 2>/dev/null); do
+        if [[ "$id" =~ ^U[A-Z0-9]+$ ]]; then
+          MENTION="$MENTION<@$id> "
+        fi
+      done
+      send-slack-message.sh ":bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. You are on rota, so please take a look. ${MENTION}"
     fi
   fi
 

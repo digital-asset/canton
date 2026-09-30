@@ -51,7 +51,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
 }
 import com.digitalasset.canton.participant.protocol.validation.ExternalCallValidator
-import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
+import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.{
   ParticipantPruningScheduler,
@@ -77,7 +77,7 @@ import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.{Cron, CronWindowSchedule, Schedulers, SchedulersImpl}
-import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
+import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.tea.TrafficEnforcementApp
@@ -392,7 +392,13 @@ class ParticipantNodeBootstrap(
           recordSequencerInteractions,
           replaySequencerConfig,
           loggerFactory,
-          healthService.dependencies.map(_.toComponentStatus),
+          healthData =
+            // Node-level components are reported as-is; the raw per-synchronizer components are
+            // replaced by synchronizer-labeled statuses (see componentStatusesWith). The health
+            // service itself keeps the raw components.
+            connectedSynchronizersHealthRef.get.fold(
+              healthService.dependencies.map(_.toComponentStatus)
+            )(_.componentStatusesWith(healthService.dependencies)),
         )
         addCloseable(node)
         setInitialized(participantServices)
@@ -910,15 +916,7 @@ class ParticipantNodeBootstrap(
           sync.setLsuStatusMetrics()
         }
 
-        _ = {
-          connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)
-          connectedSynchronizerEphemeralHealth.set(sync.ephemeralHealth)
-          connectedSynchronizerSequencerClientHealth.set(sync.sequencerClientHealth)
-          connectedSynchronizerSequencerConnectionPoolHealthRef.set(
-            sync.sequencerConnectionPoolHealth
-          )
-          connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
-        }
+        _ = connectedSynchronizersHealthRef.set(Some(sync.connectedSynchronizersHealth))
 
         ledgerApiIndexServiceContainer = new LifeCycleContainer[LedgerApiIndexService](
           stateName = "ledger-api-index-service",
@@ -1282,10 +1280,6 @@ class ParticipantNodeBootstrap(
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
         // Health components owned by the bootstrap, not closed by the health service.
-        addCloseable(connectedSynchronizerHealth)
-        addCloseable(connectedSynchronizerEphemeralHealth)
-        addCloseable(connectedSynchronizerSequencerClientHealth)
-        addCloseable(connectedSynchronizerAcsCommitmentProcessorHealth)
         addCloseable(acsCommitmentProcessorPipelineHealth)
         trafficEnforcementComponentContainersO.foreach {
           case (trafficEnforcementAppContainer, trafficEnforcementBackendContainer) =>
@@ -1320,10 +1314,6 @@ class ParticipantNodeBootstrap(
       storage: Storage
   ): (DependenciesHealthService, LivenessHealthService) = {
     val constantSoftDependencies = Seq(
-      connectedSynchronizerHealth,
-      connectedSynchronizerEphemeralHealth,
-      connectedSynchronizerSequencerClientHealth,
-      connectedSynchronizerAcsCommitmentProcessorHealth,
       acsCommitmentProcessorPipelineHealth,
       ledgerApiIndexerHealth,
     )
@@ -1337,7 +1327,7 @@ class ParticipantNodeBootstrap(
       // reaching the node
       softDependencies = Eval.always(
         constantSoftDependencies ++
-          connectedSynchronizerSequencerConnectionPoolHealthRef.get.apply()
+          connectedSynchronizersHealthRef.get.toList.flatMap(_.allHealthComponents)
       ),
     )
     val liveness = LivenessHealthService.alwaysAlive(logger, timeouts)
@@ -1361,35 +1351,15 @@ class ParticipantNodeBootstrap(
     None
   )
 
-  lazy val connectedSynchronizerHealth: MutableHealthComponent = MutableHealthComponent(
-    loggerFactory,
-    ConnectedSynchronizer.healthName,
-    timeouts,
-  )
-  private lazy val connectedSynchronizerEphemeralHealth: MutableHealthComponent =
-    MutableHealthComponent(
-      loggerFactory,
-      SyncEphemeralState.healthName,
-      timeouts,
-    )
-  private lazy val connectedSynchronizerSequencerClientHealth: MutableHealthComponent =
-    MutableHealthComponent(
-      loggerFactory,
-      SequencerClient.healthName,
-      timeouts,
-    )
+  /** Health of all connected synchronizers, set once the sync service has been created. Used to
+    * report the health components of every connected synchronizer as soft dependencies of the
+    * node's health service.
+    */
+  private val connectedSynchronizersHealthRef =
+    new AtomicReference[Option[ConnectedSynchronizersHealth]](None)
+
   private lazy val ledgerApiIndexerHealth: MutableHealthComponent =
     MutableHealthComponent(loggerFactory, LedgerApiIndexer.healthComponentName, timeouts)
-
-  private val connectedSynchronizerSequencerConnectionPoolHealthRef =
-    new AtomicReference[() => Seq[HealthQuasiComponent]](() => Seq.empty)
-
-  private lazy val connectedSynchronizerAcsCommitmentProcessorHealth: MutableHealthComponent =
-    MutableHealthComponent(
-      loggerFactory,
-      AcsCommitmentProcessor.healthName,
-      timeouts,
-    )
 
   private lazy val acsCommitmentProcessorPipelineHealth =
     new MutableHealthQuasiComponent[HealthComponent](

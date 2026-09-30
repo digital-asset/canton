@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.participant.scheduler
 
+import cats.Eval
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, SynchronizerPredecessor}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   Checkpoint,
   CheckpointType,
@@ -120,6 +123,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
         schedule = Some(schedule),
         purgeableStoresComputation = purgeableStoresComputation,
         chunkSize = PositiveInt.tryCreate(2),
+        recomputePurgeableStoresAfter = PositiveInt.one,
         BatchingConfig(),
         timeouts,
         loggerFactory,
@@ -158,6 +162,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
 
       val oldPsid = DefaultTestIdentities.physicalSynchronizerId
       val newPsid = oldPsid.incrementSerial.value
+      val lsid = oldPsid.logical
       val upgradeTime = CantonTimestamp.Epoch.plusSeconds(30)
 
       val configStore = {
@@ -202,16 +207,29 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       val schedule = new SteppingSchedule()
       val scheduler = {
         val stateManager = mock[SyncPersistentStateManager]
+        val ledgerApiStore = mock[LedgerApiStore]
+
         val oldPersistentState = mock[SyncPersistentState]
         val oldAcsDigestStore = mock[AcsDigestStore]
+
         val newPersistentState = mock[SyncPersistentState]
         val newConnectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
         newConnectivityStatusStore.setTopologyInitialized().futureValueUS
 
+        when(stateManager.ledgerApiStore).thenReturn(Eval.now(ledgerApiStore))
+
         when(oldPersistentState.purgeableStores).thenReturn(Seq(oldStore))
         when(oldPersistentState.acsDigestStore).thenReturn(oldAcsDigestStore)
+
         when(newPersistentState.purgeableStores).thenReturn(Seq(newStore))
         when(newPersistentState.connectivityStatusStore).thenReturn(newConnectivityStatusStore)
+
+        when(ledgerApiStore.cleanSynchronizerIndex(lsid))
+          .thenReturn(
+            None,
+            Some(SynchronizerIndex.forSequencedUpdate(upgradeTime.immediatePredecessor)),
+            Some(SynchronizerIndex.forSequencedUpdate(upgradeTime)),
+          )
 
         when(
           oldAcsDigestStore.latestCheckpointUpTo(eqTo(Offset.MaxValue), eqTo(allCheckpointsFilter))(
@@ -255,6 +273,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
             loggerFactory,
           ),
           chunkSize = PositiveInt.two,
+          recomputePurgeableStoresAfter = PositiveInt.one,
           batchingConfig = BatchingConfig(),
           timeouts = timeouts,
           loggerFactory = loggerFactory,
@@ -313,14 +332,14 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       // (old = LsuSource, new = Active): Now we can purge the old store. New store unaffected.
       if (acsDigestProcessorEnabled) {
         schedule.step { result =>
-          // Mocked call #1: ACS Digest is at checkpoint None
+          // Mocked latestCheckpointUpTo call #1: ACS Digest is at checkpoint None
           result shouldBe Done
           oldStore.size shouldBe 1
           newStore.size shouldBe 1
         }
 
         schedule.step { result =>
-          // Mocked call #2: ACS Digest is at checkpoint before upgradeTime
+          // Mocked latestCheckpointUpTo call #2: ACS Digest is at checkpoint before upgradeTime
           result shouldBe Done
           oldStore.size shouldBe 1
           newStore.size shouldBe 1
@@ -328,7 +347,25 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       }
 
       schedule.step { result =>
-        // Mocked call #3: ACS Digest is at checkpoint before upgradeTime
+        // Mocked latestCheckpointUpTo call #3: ACS Digest is at checkpoint after upgradeTime
+        // Mocked cleanSynchronizerIndex call #1: None
+        result shouldBe Done
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
+      }
+
+      schedule.step { result =>
+        // Mocked latestCheckpointUpTo call #4: ACS Digest is at checkpoint after upgradeTime
+        // Mocked cleanSynchronizerIndex call #2: Before upgrade time
+        result shouldBe Done
+        oldStore.size shouldBe 1
+        newStore.size shouldBe 1
+      }
+
+      schedule.step { result =>
+        // Mocked latestCheckpointUpTo call #5: ACS Digest is at checkpoint after upgradeTime
+        // Mocked cleanSynchronizerIndex call #3: After upgrade time
+        // Pruning is done
         result shouldBe MoreWorkToPerform
         oldStore.size shouldBe 0
         newStore.size shouldBe 1

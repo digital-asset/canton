@@ -8,13 +8,13 @@ import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature, SigningKeyUsage}
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.EphemeralSequencerChannelProgress
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.EphemeralSequencerChannelProgress
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
 import com.digitalasset.canton.participant.protocol.party.*

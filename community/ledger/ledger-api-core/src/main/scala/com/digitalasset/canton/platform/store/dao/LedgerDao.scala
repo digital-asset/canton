@@ -8,7 +8,7 @@ import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.config.CantonRequireTypes.String185
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsRead
 import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
@@ -53,6 +54,13 @@ private[platform] trait LedgerDaoUpdateReader {
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]
+
+  def highestOffsetBeforeOrFirstAt(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]]
 }
 
 object LedgerDaoUpdateReader {

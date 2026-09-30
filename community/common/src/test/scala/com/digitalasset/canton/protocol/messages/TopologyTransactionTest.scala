@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.SigningKeyUsage
+import com.digitalasset.canton.crypto.{Signature, SigningKeyUsage}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.{TestSynchronizerParameters, v30}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
@@ -16,13 +17,20 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignSpecificMappings,
 }
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
-import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPackageId}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.{
+  BaseTest,
+  FailOnShutdown,
+  HasExecutionContext,
+  LfPackageId,
+  ProtoDeserializationError,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 
-class TopologyTransactionTest
+final class TopologyTransactionTest
     extends AnyWordSpec
     with BaseTest
     with HasCryptographicEvidenceTest
@@ -187,6 +195,91 @@ class TopologyTransactionTest
         restrictedFromScala.toProtoNamespaceDelegationV30.valueOrFail(
           "serializing transaction"
         ) shouldBe restrictedDelegationProto
+      }
+    }
+
+    "unknown proto versions" should {
+      val tx = mk(NamespaceDelegation.tryCreate(uid.namespace, publicKey, CanSignAllMappings))
+      val txP = tx.toProtoV30.valueOrFail("serializing transaction")
+
+      def untypedVersionedMessage(data: ByteString, protoVersion: Int): ByteString =
+        UntypedVersionedMessage(
+          UntypedVersionedMessage.Wrapper.Data(data),
+          protoVersion,
+        ).toByteString
+
+      def noDeserializerError(protoVersion: Int, name: String): ProtoDeserializationError =
+        OtherError(
+          s"Unable to find deserializer for version ${ProtoVersion(protoVersion)} and message $name"
+        )
+
+      // There is a topology transaction with proto version 29 on MainNet
+      s"accept proto version 29 and known versions" in {
+        val knownVersions = TopologyTransaction.versioningTable.converters.map {
+          case (protoVersion, converter) => (protoVersion.v, converter.fromInclusive.representative)
+        }.toList
+        val testedVersions = (29, ProtocolVersion.stable.min1) +: knownVersions
+
+        testedVersions.foreach { case (protoVersion, protocolVersion) =>
+          clue(s"proto version $protoVersion") {
+            val bytes = untypedVersionedMessage(txP.toByteString, protoVersion)
+            val deserialized = TopologyTransaction
+              .fromByteString(ProtocolVersionValidation(protocolVersion), bytes)
+              .value
+
+            deserialized shouldBe tx
+
+            val expectedProtoVersion = if (protoVersion == 29) 30 else protoVersion
+
+            // Legacy proto versions are read with the lowest supported proto version
+            deserialized.representativeProtocolVersion shouldBe
+              TopologyTransaction
+                .protocolVersionRepresentativeFor(ProtoVersion(expectedProtoVersion))
+                .value
+
+            // The original proto version is kept
+            deserialized.getCryptographicEvidence shouldBe bytes
+          }
+        }
+      }
+
+      // TODO(i32231): once proto version 31 is enabled, move 31 to the accepted versions (with
+      //  v31 payload bytes) and adapt the expected representative protocol versions
+      s"reject proto with unknown versions" in {
+        val lastKnown = TopologyTransaction.versioningTable.converters.keys.max.v
+
+        Seq(lastKnown + 1, 999).foreach { protoVersion =>
+          clue(s"proto version $protoVersion") {
+            TopologyTransaction
+              .fromByteString(
+                ProtocolVersionValidation(testedProtocolVersion),
+                untypedVersionedMessage(txP.toByteString, protoVersion),
+              )
+              .left
+              .value shouldBe noDeserializerError(protoVersion, TopologyTransaction.name)
+          }
+        }
+      }
+
+      "reject proto version 29 for other messages" in {
+        val signedTx = SignedTopologyTransaction.withSignatures(
+          tx,
+          NonEmpty.mk(Seq, Signature.noSignature),
+          isProposal = false,
+          testedProtocolVersion,
+        )
+        val signedTxP = signedTx.toProtoV30.toByteString
+
+        clue("sanity check: proto version 30 is accepted") {
+          SignedTopologyTransaction
+            .fromTrustedByteString(untypedVersionedMessage(signedTxP, 30))
+            .value shouldBe signedTx
+        }
+
+        SignedTopologyTransaction
+          .fromTrustedByteString(untypedVersionedMessage(signedTxP, 29))
+          .left
+          .value shouldBe noDeserializerError(29, SignedTopologyTransaction.name)
       }
     }
 

@@ -564,8 +564,6 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
           sequencerNodeConfig.parameters.enableRejectDeliveredAggregationsOnPv35,
         disableSubmissionChecksForTesting =
           sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
-        disableAggregationRuleSizeCheckForTesting =
-          sequencerNodeConfig.parameters.disableAggregationRuleSizeCheckForTesting,
         lsuConfig = sequencerNodeConfig.parameters.lsu,
         disableReleaseVersionHandshakeCheck =
           sequencerNodeConfig.parameters.disableReleaseVersionHandshakeCheck,

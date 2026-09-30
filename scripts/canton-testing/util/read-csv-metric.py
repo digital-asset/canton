@@ -9,6 +9,7 @@
 
 import csv
 import sys
+import re
 
 from datetime import datetime, UTC
 
@@ -21,9 +22,12 @@ late_event_percentile = int(sys.argv[4])
 with open(filename, 'r') as file:
     rows = list(csv.DictReader(file))
 
-# this is the filtering logic
+# This is the filtering logic
+# Note: 'pattern' is evaluated as a Python regular expression (re.search).
+# If filtering with literal special regex characters like '.', '?', or '*', keep in mind they are evaluated as regex patterns.
 if len(sys.argv) >= 6 and sys.argv[5]:
-    rows = [x for x in rows if sys.argv[5] in x["attributes"]]
+    pattern = sys.argv[5]
+    rows = [x for x in rows if re.search(pattern, str(x["attributes"]))]
 
 if not rows:
     sys.exit("No metrics reported!")

@@ -370,7 +370,7 @@ private[lf] object SBuiltinFun {
         case Some(value) =>
           Control.Value(value)
         case None =>
-          machine.handleException(Speedy.SArithmeticError(name, args))
+          machine.throwException(Speedy.SArithmeticError(name, args))
       }
   }
 
@@ -2342,7 +2342,7 @@ private[lf] object SBuiltinFun {
         machine: Machine[Q],
     ): Control[Q] = {
       val excep = getSAny(args, 0)
-      machine.handleException(excep)
+      machine.throwException(excep)
     }
   }
 
@@ -2357,8 +2357,9 @@ private[lf] object SBuiltinFun {
       checkToken(args, 2)
       opt match {
         case None =>
-          machine.handleException(excep) // re-throw
+          machine.lookForNextHandler(excep) // re-throw
         case Some(handler) =>
+          machine.exceptionCaught()
           handler match {
             case handler: SPAP => machine.enterApplication(handler, ArraySeq(SEValue(SToken)))
             case _ => crash(s"Expected SPAP, got $handler")

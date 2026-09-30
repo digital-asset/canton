@@ -46,10 +46,9 @@ class BaseDigestProcessorTest
     with HasExecutionContext {
 
   "BaseDigestProcessor" should {
-    def checkHealth(proc: BaseDigestProcessor, expected: AcsCommitmentHealthState) = {
+    def checkHealth(proc: BaseDigestProcessor, expected: AcsCommitmentHealthState) = eventually() {
       proc.health.getState shouldBe expected.componentHealthState
       proc.metrics.digestProcessorHealth.getValue shouldBe expected.metricValue
-
     }
     "report health during successful startup" in {
       val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
@@ -210,7 +209,7 @@ class BaseDigestProcessorTest
 
       val runningFailure = new RuntimeException("failure-while-running")
 
-      // signal a successful startup
+      // signal an error while running
       logger.info(s"completing pipeline with $runningFailure")
       pipelineCompletion.failure(runningFailure)
 
@@ -245,7 +244,7 @@ class BaseDigestProcessorTest
 
       val completionFutureAfterStop = proc.completionFuture
 
-      // signal a successful startup
+      // signal an error while running
       val stoppingException = new RuntimeException("failure-while-stopping")
       logger.info(s"completing pipeline with $stoppingException")
       pipelineCompletion.failure(stoppingException)

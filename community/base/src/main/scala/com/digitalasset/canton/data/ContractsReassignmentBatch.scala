@@ -16,7 +16,6 @@ final case class ContractReassignment(
     targetValidationPackageId: Target[LfPackageId],
     counter: ReassignmentCounter,
 ) {
-  // TODO(#26468): Use source/target validation package ids for vetting checks in phase 3
   def templateId: TypeConId = contract.inst.templateId
   def packageName: PackageName = contract.inst.packageName
 }
@@ -30,9 +29,6 @@ final case class ContractsReassignmentBatch private (
     item => (item.contract.contractId, item.counter)
   }
 
-  // TODO(#29199): Use source/target validation package ids for vetting checks
-  def packageIds: Set[LfPackageId] = contracts.view.map(_.templateId.packageId).toSet
-
   def sourcePackageIds: Source[Set[LfPackageId]] = Source(
     contracts.view.map(_.sourceValidationPackageId.unwrap).toSet
   )
@@ -40,6 +36,7 @@ final case class ContractsReassignmentBatch private (
     contracts.view.map(_.targetValidationPackageId.unwrap).toSet
   )
 
+  // This can be done because all contracts in a batch have the same stakeholders.
   def stakeholders: Stakeholders = Stakeholders(contracts.head1.contract.metadata)
 }
 

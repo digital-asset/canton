@@ -42,21 +42,24 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     ByteString.copyFromUtf8("dynamic-synchronizer-parameters-payload-1")
   private val payload2 =
     ByteString.copyFromUtf8("dynamic-synchronizer-parameters-payload-2")
-  val dtos = Vector(
-    // 1: party allocation
-    dtoPartyEntry(offset(1), someParty)
-  )
+
+  def partyDtos(party: Ref.Party, ptpOffset: Long, ptpEventId: Long): Vector[DbDto] =
+    Vector(
+      dtoPartyToParticipant(offset(ptpOffset), ptpEventId, party)
+    )
+
   it should "delete overspill entries - parties" in {
     fixture(
-      dtos1 = dtos,
+      // 1: party allocation
+      dtos1 = partyDtos(someParty, 1L, 1L),
       lastOffset1 = 2L,
-      lastEventSeqId1 = 0L,
-      dtos2 = Vector(
-        // 3: party allocation
-        dtoPartyEntry(offset(3), someParty2)
-      ),
+      lastEventSeqId1 = 1L,
+      lastInterningId1 = 1,
+      // 3: party allocation
+      dtos2 = partyDtos(someParty2, 3L, 3L),
       lastOffset2 = 3L,
       lastEventSeqId2 = 0L,
+      lastInterningId2 = 2,
       checkContentsBefore = () => {
         val parties = executeSql(backend.party.knownParties(None, None, 10))
         parties should have length 1
@@ -70,7 +73,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
 
   it should "delete overspill entries written before first ledger end update - parties" in {
     fixtureOverspillEntriesPriorToFirstLedgerEndUpdate(
-      dtos = dtos,
+      dtos = partyDtos(someParty, 1L, 1L),
       lastOffset = 3,
       lastEventSeqId = 0L,
       checkContentsAfter = () => {
@@ -80,7 +83,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     )
   }
 
-  val dtos1 = Vector(
+  private val dtos1 = Vector(
     // 1: transaction with a create node
     dtosCreate(
       1L,
@@ -241,9 +244,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       dtos1 = dtos1,
       lastOffset1 = 5L,
       lastEventSeqId1 = 9L,
+      lastInterningId1 = 0,
       dtos2 = dtos2,
       lastOffset2 = 12L,
       lastEventSeqId2 = 18L,
+      lastInterningId2 = 0,
       checkContentsBefore = () => {
         val activateEventSeqIds =
           executeSql(
@@ -549,9 +554,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       dtos1: Vector[DbDto],
       lastOffset1: Long,
       lastEventSeqId1: Long,
+      lastInterningId1: Int,
       dtos2: Vector[DbDto],
       lastOffset2: Long,
       lastEventSeqId2: Long,
+      lastInterningId2: Int,
       checkContentsBefore: () => Assertion,
       checkContentsAfter: () => Assertion,
   ): Assertion = {
@@ -563,7 +570,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     executeSql(backend.ingestion.deletePartiallyIngestedData(end1))
     // Fully insert first batch of updates
     executeSql(ingest(dtos1, _))
-    executeSql(updateLedgerEnd(ledgerEnd(lastOffset1, lastEventSeqId1)))
+    executeSql(updateLedgerEnd(ledgerEnd(lastOffset1, lastEventSeqId1, lastInterningId1)))
     // Partially insert second batch of updates (indexer crashes before updating ledger end)
     executeSql(ingest(dtos2, _))
     // Check the contents
@@ -572,7 +579,9 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     val end2 = executeSql(backend.parameter.ledgerEnd)
     executeSql(backend.ingestion.deletePartiallyIngestedData(end2))
     // Move the ledger end so that any non-deleted data would become visible
-    executeSql(updateLedgerEnd(ledgerEnd(lastOffset2 + 1, lastEventSeqId2 + 1)))
+    executeSql(
+      updateLedgerEnd(ledgerEnd(lastOffset2 + 1, lastEventSeqId2 + 1, lastInterningId2))
+    )
     // Check the contents
     checkContentsAfter()
   }

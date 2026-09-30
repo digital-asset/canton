@@ -112,6 +112,14 @@ jobs:
           chmod 777 /tmp/canton/data-continuity-dumps
         shell: bash
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Run Data Continuity Tests
         uses: ./.github/actions/test/run_tests
         with:

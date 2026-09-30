@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.Generators
 import com.digitalasset.canton.config.CantonRequireTypes.String73
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -27,6 +27,7 @@ import com.digitalasset.canton.serialization.{
   BytestringWithCryptographicEvidence,
   HasCryptographicEvidence,
 }
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{GeneratorsTopology, Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -98,9 +99,12 @@ final class GeneratorsProtocol(
   implicit val aggregationRuleArb: Arbitrary[AggregationRule] =
     Arbitrary(
       for {
-        threshold <- Arbitrary.arbitrary[PositiveInt]
-        eligibleMembers <- Generators.nonEmptyListGen[Member]
-      } yield AggregationRule.testing(eligibleMembers, threshold, protocolVersion)
+        index <- Gen.choose(-2, 3)
+      } yield {
+        if (index == -2) AggregationRule.senderDedup(protocolVersion)
+        else if (index == -1) AggregationRule.activeSequencers(protocolVersion)
+        else AggregationRule.activeMediators(MediatorGroupIndex.tryCreate(index), protocolVersion)
+      }
     )
 
   implicit val closedUncompressedEnvelopeArb: Arbitrary[ClosedUncompressedEnvelope] = Arbitrary(

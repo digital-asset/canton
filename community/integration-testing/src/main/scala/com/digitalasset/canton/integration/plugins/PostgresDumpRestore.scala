@@ -43,6 +43,9 @@ sealed trait PostgresDumpRestore extends DbDumpRestore with NamedLogging {
     _ <- runDumpCommand(plugin.generateDbName(nodeName), tempFile.path)
   } yield ()
 
+  def saveDump(node: InstanceReference, dumpFileName: Path): Future[Unit] =
+    runDumpCommand(plugin.generateDbName(node.name), dumpFileName)
+
   def restoreDump(node: InstanceReference, dumpFileName: Path)(implicit
       env: TestConsoleEnvironment,
       traceContext: TraceContext,
@@ -119,9 +122,6 @@ final case class LocalPostgresDumpRestore(
 
   // In the non-docker case, this is a noop
   def copyToLocal(source: TempDirectory, target: File): Unit = ()
-
-  def saveDump(node: InstanceReference, dumpFileName: Path): Future[Unit] =
-    runDumpCommand(plugin.generateDbName(node.name), dumpFileName)
 
   protected def runDumpOrRestoreCommand(
       command: String,

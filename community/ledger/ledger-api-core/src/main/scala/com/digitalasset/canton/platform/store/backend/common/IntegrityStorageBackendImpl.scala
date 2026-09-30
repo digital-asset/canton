@@ -626,7 +626,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
               SELECT DISTINCT event_offset
               FROM lapi_events_acs_commitments
               WHERE synchronizer_id = $internedSynchronizerId
-            )
+            ) distinct_acs_commitments
           """.asSingle(int("count"))(connection)
         allUpdateMetas - allDistinctReceivedAcsCommitments
       }
@@ -648,7 +648,6 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
     // initialization based on offsets, some rubbish can remains (which can cause problems for example for integrity
     // checking which motivated this change)
     SQL"DELETE FROM lapi_command_completions".executeUpdate()(connection).discard
-    SQL"DELETE FROM lapi_party_entries".executeUpdate()(connection).discard
     SQL"DELETE FROM lapi_update_meta".executeUpdate()(connection).discard
   }
 

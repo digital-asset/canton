@@ -33,7 +33,6 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpenerError.EnvelopeOpenerDeserializationError
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriber.TimeAdvanceBroadcastMessageIdPrefix
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   SendDecision,
@@ -49,13 +48,12 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Replace}
 import com.digitalasset.canton.topology.{Member, PartyId}
-import com.digitalasset.canton.util.{ErrorUtil, MaliciousParticipantNode, SingleUseCell}
+import com.digitalasset.canton.util.{MaliciousParticipantNode, SingleUseCell}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
 import scala.collection.mutable
 
@@ -482,29 +480,11 @@ class InvalidTopologyBroadcastIntegrationTest
   "A node" should {
     "detect a timeout when broadcasting topology transactions" in { implicit env =>
       import env.*
-
-      // Arbitrary number of time advancements we want to drop.
-      // This thereby tests that the sequencer retries sending its time advancement broadcast.
-      val timeAdvancementsToDrop = 3
-
       val s1 = getProgrammableSequencer(sequencer1.name)
       val droppedBatch = new SingleUseCell[Batch[ClosedEnvelope]]
-      val droppedTimeAdvancement = new AtomicReference[Option[(CantonTimestamp, Int)]](None)
       s1.setPolicy("drop topology broadcasts")(
-        SendPolicy.processTimeProofs(implicit traceContext =>
+        SendPolicy.processTimeProofs(_ =>
           {
-            case r if r.messageId.unwrap.startsWith(TimeAdvanceBroadcastMessageIdPrefix) =>
-              val Some((_, retryCount)) = droppedTimeAdvancement.updateAndGet {
-                case None => Some(r.maxSequencingTime -> 0)
-                case Some((previousTime, count)) =>
-                  ErrorUtil.requireState(
-                    previousTime == r.maxSequencingTime.immediatePredecessor,
-                    "dropped time advancement is not the same as retried time advancement",
-                  )
-                  Some(r.maxSequencingTime -> (count + 1))
-              }: @unchecked
-              if (retryCount > timeAdvancementsToDrop) SendDecision.Process
-              else SendDecision.Drop
             case r if r.batch.allRecipients.contains(AllMembersOfSynchronizer) =>
               droppedBatch.putIfAbsent(r.batch) match {
                 case None =>

@@ -45,7 +45,7 @@ import org.apache.pekko.stream.Attributes
 import org.apache.pekko.stream.scaladsl.Source
 
 import java.sql.Connection
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.*
 
 class TopologyTransactionsStreamReader(
@@ -64,7 +64,8 @@ class TopologyTransactionsStreamReader(
   private val dbMetrics = metrics.index.db
 
   def streamTopologyTransactions(
-      topologyTransactionsStreamQueryParams: TopologyTransactionsStreamQueryParams
+      topologyTransactionsStreamQueryParams: TopologyTransactionsStreamQueryParams,
+      deserializationQueriesRateLimiter: ConcurrencyLimiter,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, TopologyTransactionResponse), NotUsed] = {
@@ -208,37 +209,43 @@ class TopologyTransactionsStreamReader(
 
     UpdateReader
       .groupContiguous(filtered)(by = _.updateId)
-      .mapConcat(group => toTopologyTransactionResponse(group).toList)
+      .mapAsync(topologyTransactionsStreamQueryParams.maxParallelPayloadQueries)(group =>
+        deserializationQueriesRateLimiter.execute {
+          toTopologyTransactionResponse(group)
+        }
+      )
+      .mapConcat(identity)
   }
 
   private def toTopologyTransactionResponse(
       payloads: Vector[RawTopologyEvent]
-  ): Option[(Offset, TopologyTransactionResponse)] =
-    payloads.headOption.map { first =>
-      val events = payloads.collect { case raw: RawParticipantAuthorization =>
-        TransactionConversions.toTopologyEvent(
-          partyId = raw.partyId,
-          participantId = raw.participantId,
-          authorizationEvent = raw.authorizationEvent,
+  ): Future[Option[(Offset, TopologyTransactionResponse)]] =
+    Future {
+      payloads.headOption.map { first =>
+        val events = payloads.collect { case raw: RawParticipantAuthorization =>
+          TransactionConversions.toTopologyEvent(
+            partyId = raw.partyId,
+            participantId = raw.participantId,
+            authorizationEvent = raw.authorizationEvent,
+          )
+        }
+        val synchronizerParametersState = payloads.reverseIterator.collectFirst {
+          case raw: RawDynamicSynchronizerParameters =>
+            SynchronizerParametersState(ByteString.copyFrom(raw.payload))
+        }
+        first.offset -> TopologyTransactionResponse(
+          commonTopologyTransactionProperties = CommonTopologyTransactionProperties(
+            updateId = first.updateId,
+            offset = first.offset.unwrap,
+            synchronizerId = first.synchronizerId,
+            recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
+            traceContext = Conversions.protoTraceContextFrom(noTracingLogger)(first.traceContext),
+          ),
+          events = events,
+          synchronizerParametersState = synchronizerParametersState,
         )
       }
-      val synchronizerParametersState = payloads.reverseIterator.collectFirst {
-        case raw: RawDynamicSynchronizerParameters =>
-          SynchronizerParametersState(ByteString.copyFrom(raw.payload))
-      }
-      first.offset -> TopologyTransactionResponse(
-        commonTopologyTransactionProperties = CommonTopologyTransactionProperties(
-          updateId = first.updateId,
-          offset = first.offset.unwrap,
-          synchronizerId = first.synchronizerId,
-          recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
-          traceContext = Conversions.protoTraceContextFrom(noTracingLogger)(first.traceContext),
-        ),
-        events = events,
-        synchronizerParametersState = synchronizerParametersState,
-      )
     }
-
 }
 
 object TopologyTransactionsStreamReader {

@@ -491,8 +491,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                     (
                       (entry: LogEntry) =>
                         entry.warningMessage should include(
-                          "Decryption " +
-                            "error: InvalidSubviewReferenceError"
+                          "Decryption error: InvalidSubviewReferenceError(\"Invalid subview reference in view"
                         ),
                       "p1 decryption error",
                     ),
@@ -500,11 +499,12 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                       (entry: LogEntry) =>
                         entry.shouldBeCantonError(
                           LocalRejectError.MalformedRejects.Payloads,
-                          msg =>
-                            msg should include regex raw"Parent view ViewHash\(\S+\) is invalid because a subview " +
-                              raw"failed to decrypt",
+                          msg => {
+                            msg should include regex raw"Invalid subview reference in view ViewHash\(\S+\): " +
+                              raw"ciphertext ID \S+ not found"
+                          },
                         ),
-                      "p1 parent view gets rejected because one of its subviews failed to decrypt or is missing",
+                      "p1 parent view gets rejected because one of its subviews is missing",
                     ),
                   )
                 }
@@ -806,23 +806,27 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             )
           eventually() {
             val logEntries = loggerFactory.fetchRecordedLogEntries
-            logEntries.size shouldBe >=(3)
-            val logMessages = logEntries.map(_.message)
-            logMessages.exists(_.contains("Failed to process request")) shouldBe true
-            logMessages.exists(
-              _.contains(
-                "Asynchronous event processing failed for event batch with sequencing timestamps"
-              )
-            ) shouldBe true
-            logMessages should contain("An internal error has occurred.")
-            assert(
-              logEntries
-                .map(_.throwable.value.getMessage)
-                .exists(_.contains("has multiple encryption keys associated with it"))
+            val expectedMessages = Seq(
+              "Failed to process request",
+              "Asynchronous event processing failed for event batch with sequencing timestamps",
+              "An internal error has occurred.",
             )
+
+            forAll(Seq("participant1", "participant2")) { participant =>
+              val participantEntries = logEntries.filter(_.loggerName.contains(participant))
+
+              forAll(expectedMessages) { expectedMessage =>
+                participantEntries.exists(_.message.contains(expectedMessage)) shouldBe true
+              }
+
+              participantEntries.exists(
+                _.throwable.exists(
+                  _.getMessage.contains("has multiple encryption keys associated with it")
+                )
+              ) shouldBe true
+            }
           }
         }
-
       }
     }
 

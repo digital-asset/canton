@@ -11,7 +11,7 @@ import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.participant.admin.data.RepairContract
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
-import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{Party, SynchronizerId}
 import com.digitalasset.canton.{BaseTest, LfPackageId, ReassignmentCounter}
 import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, CreationTime}
 import org.scalatest.Assertion
@@ -31,8 +31,8 @@ trait RepairTestUtil {
 
   protected def createContract(
       participant: ParticipantReference,
-      payer: PartyId,
-      owner: PartyId,
+      payer: Party,
+      owner: Party,
       currency: String = "USD",
       synchronizerId: Option[SynchronizerId] = None,
   ): iou.Iou.ContractId = {
@@ -102,8 +102,8 @@ trait RepairTestUtil {
   protected def createContractInstance(
       participant: LocalParticipantReference,
       synchronizerId: SynchronizerId,
-      payer: PartyId,
-      owner: PartyId,
+      payer: Party,
+      owner: Party,
       currency: String = "USD",
   ): RepairContract =
     readContractInstance(
@@ -115,8 +115,8 @@ trait RepairTestUtil {
   protected def createArchivedContractInstance(
       participant: LocalParticipantReference,
       synchronizerId: SynchronizerId,
-      payer: PartyId,
-      owner: PartyId,
+      payer: Party,
+      owner: Party,
       currency: String = "USD",
   ): RepairContract = {
     val archivedContractId = createContract(participant, payer, owner, currency)
@@ -128,7 +128,7 @@ trait RepairTestUtil {
 
   protected def exerciseContract(
       participant: LocalParticipantReference,
-      owner: PartyId,
+      owner: Party,
       cid: iou.Iou.ContractId,
   ): Assertion = {
     val exerciseCmd = cid.exerciseCall().commands.asScala.toSeq
@@ -146,8 +146,8 @@ trait RepairTestUtil {
 
   protected def createArchivedContract(
       participant: LocalParticipantReference,
-      payer: PartyId,
-      owner: PartyId,
+      payer: Party,
+      owner: Party,
       currency: String = "USD",
   ): iou.Iou.ContractId = {
     val cid = createContract(participant, payer, owner, currency)
@@ -156,13 +156,13 @@ trait RepairTestUtil {
   }
 
   protected def assertAcsCounts(
-      expectedCounts: (ParticipantReference, Map[PartyId, Int])*
+      expectedCounts: (ParticipantReference, Map[Party, Int])*
   ): Unit =
     assertAcsCountsWithFilter(_ => true, expectedCounts*)
 
   protected def assertAcsCountsWithFilter(
       filter: WrappedContractEntry => Boolean,
-      expectedCounts: (ParticipantReference, Map[PartyId, Int])*
+      expectedCounts: (ParticipantReference, Map[Party, Int])*
   ): Unit =
     eventually() {
       expectedCounts.foreach { case (p, partyInfo) =>

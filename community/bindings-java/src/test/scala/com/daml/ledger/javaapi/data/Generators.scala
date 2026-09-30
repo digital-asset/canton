@@ -1346,6 +1346,29 @@ object Generators {
       .build()
   }
 
+  def convertRecordTimeToOffsetRequestGen
+      : Gen[v2.StateServiceOuterClass.ConvertRecordTimeToOffsetRequest] = {
+    import v2.StateServiceOuterClass.ConvertRecordTimeToOffsetRequest as Request
+    for {
+      recordTime <- protoTimestampGen
+      synchronizerId <- identifierGen
+    } yield {
+      Request
+        .newBuilder()
+        .setRecordTime(recordTime)
+        .setSynchronizerId(synchronizerId.toString)
+        .build()
+    }
+  }
+
+  def convertRecordTimeToOffsetResponseGen
+      : Gen[v2.StateServiceOuterClass.ConvertRecordTimeToOffsetResponse] = {
+    import v2.StateServiceOuterClass.ConvertRecordTimeToOffsetResponse as Response
+    for {
+      offset <- Gen.posNum[Long]
+    } yield Response.newBuilder().setOffset(offset).build()
+  }
+
   val prefetchContractKeyGen: Gen[CommandsOuterClass.PrefetchContractKey] =
     for {
       templateId <- identifierGen

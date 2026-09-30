@@ -3,7 +3,7 @@ description: Cleanup Test job
 
 inputs:
   collect_postgres_query_stats:
-    default: "false"
+    default: "false" # TODO(i29772): Enable by default to collect query stats
     required: false
     description: Collect postgres query stats
   report_to_datadog:
@@ -23,6 +23,13 @@ inputs:
   test_job_success:
     required: true
     description: Whether the test job succeeded, used for reporting stability to Datadog
+  job_name:
+    default: ""
+    required: false
+    description: >-
+      Distinct name of the calling leg (top-level workflow job), used to keep shard bundle
+      artifacts from colliding when several legs share the same github.job (the reusable
+      workflow's own job id is constant across legs). Defaults to github.job.
 
 runs:
   using: composite
@@ -63,7 +70,6 @@ runs:
             --shard-index "${{ inputs.shard_index }}" \
             --total-shards "${{ inputs.num_test_buckets }}" \
             --junit-glob ".ci-test-results/merged/TEST-*.xml" \
-            --summary-path "test-summary.md" \
             --json-output "test-summary.json" \
             --rerun-metadata-json ".ci-test-results/merged/merge-metadata.json"
 
@@ -149,9 +155,13 @@ runs:
       id: artifact_name_gen
       if: always()
       shell: bash
+      env:
+        JOB_NAME: ${{ inputs.job_name }}
       run: |
-        # if you change this pattern, don't forget to update the pattern in the aggregate_shard_outputs job in _test.yml
-        NAME="${{ github.job }}-bundle-run-${{ github.run_id }}"
+        # if you change this pattern, don't forget to update the download pattern in
+        # _aggregate_test_shard_outputs.yml's "Download shard bundle artifacts" step
+        LEG_NAME="${JOB_NAME:-${{ github.job }}}"
+        NAME="${LEG_NAME}-bundle-run-${{ github.run_id }}"
         NAME="${NAME}-pv-${{ env.CANTON_PROTOCOL_VERSION || 'default' }}"
         NAME="${NAME}-shard-${{ inputs.shard_index }}"
         NAME="${NAME}-attempt-${{ github.run_attempt }}"

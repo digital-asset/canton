@@ -305,14 +305,6 @@ private[backend] object AppendOnlySchema {
     val idFilterVariousWitness: Table[DbDto.IdFilterVariousWitness] =
       idFilter("lapi_filter_various_witness")
 
-    val partyEntries: Table[DbDto.PartyEntry] =
-      fieldStrategy.insert("lapi_party_entries")(
-        "ledger_offset" -> fieldStrategy.bigint(_ => _.ledger_offset),
-        "party" -> fieldStrategy.stringOptional(_ => _.party),
-        "is_local" -> fieldStrategy.booleanOptional(_ => _.is_local),
-        "party_id" -> fieldStrategy.partyOptional(_.party),
-      )
-
     val partyToParticipant: Table[DbDto.EventPartyToParticipant] =
       fieldStrategy.insert("lapi_events_party_to_participant")(
         "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
@@ -422,7 +414,6 @@ private[backend] object AppendOnlySchema {
       idFilterDeactivateWitness.executeUpdate,
       eventVariousWitnessed.executeUpdate,
       idFilterVariousWitness.executeUpdate,
-      partyEntries.executeUpdate,
       partyToParticipant.executeUpdate,
       genericTopologyEvent.executeUpdate,
       commandCompletions.executeUpdate,
@@ -452,7 +443,6 @@ private[backend] object AppendOnlySchema {
             .prepareData(collect[IdFilterDeactivateWitness], stringInterning),
           eventVariousWitnessed.prepareData(collect[EventVariousWitnessed], stringInterning),
           idFilterVariousWitness.prepareData(collect[IdFilterVariousWitness], stringInterning),
-          partyEntries.prepareData(collect[PartyEntry], stringInterning),
           partyToParticipant.prepareData(collect[EventPartyToParticipant], stringInterning),
           genericTopologyEvent
             .prepareData(collect[GenericTopologyEvent], stringInterning),

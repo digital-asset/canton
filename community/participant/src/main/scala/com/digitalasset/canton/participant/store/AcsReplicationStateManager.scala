@@ -12,8 +12,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
-import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.store.AcsReplicationStateManager.{
   AcsReplicationOperationName,
   Modification,
@@ -35,13 +35,13 @@ import scala.util.chaining.scalaUtilChainingOps
   * Note: Non-sealed for testing.
   */
 private[canton] trait AcsReplicationProgress {
-  def getAcsReplicationProgress(requestId: AddPartyRequestId)(implicit
+  def getAcsReplicationProgress(requestId: AcsReplicationRequestId)(implicit
       traceContext: TraceContext
-  ): Option[PartyReplicationStatus.AcsReplicationProgress]
+  ): Option[AcsReplicationStatus.AcsReplicationProgress]
 
   def updateAcsReplicationProgress(
-      requestId: AddPartyRequestId,
-      progress: PartyReplicationStatus.AcsReplicationProgress,
+      requestId: AcsReplicationRequestId,
+      progress: AcsReplicationStatus.AcsReplicationProgress,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
 }
 
@@ -56,22 +56,21 @@ private[canton] trait AcsReplicationProgress {
   *     is eagerly loaded from the store at startup and kept in sync with the db.
   *   - The [[com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator]] owns
   *     adding and removing
-  *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus]] entries as well
-  *     as updates that add (set to Some(_)) or remove (set to None) optional status subcomponents
-  *     such as
-  *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.replicationO]] and
+  *     [[com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus]]
+  *     entries as well as updates that add (set to Some(_)) or remove (set to None) optional status
+  *     subcomponents such as `replicationO` of
+  *     [[com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus]] and
   *     does so from a simple execution queue.
   *   - Other components such as the
   *     [[com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationTargetParticipantProcessor]]
   *     update individual status subcomponents set to Some(_) such as
-  *     [[com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.AcsReplicationProgress]]
+  *     [[com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationProgress]]
   *     from a simple execution queue.
   *   - Given that multiple components perform updates (but not necessarily in a racy fashion),
   *     error on the side of safety and have only the update methods use the simple execution queue
   *     to avoid lost updates in the absence of atomic update support in the underlying db store.
   */
-// TODO(#35267) Use AcsReplicationStatus instead of PartyReplicationStatus
-// TODO(#35267) Remove the persistent storage for now?
+// TODO(#35267) Persist only party replication related ACS replication state
 final class AcsReplicationStateManager(
     participantId: ParticipantId,
     storage: Storage,
@@ -84,14 +83,14 @@ final class AcsReplicationStateManager(
     with NamedLogging
     with FlagCloseable {
 
-  private val acsReplications = new TrieMap[AddPartyRequestId, PartyReplicationStatus]()
+  private val acsReplications = new TrieMap[AcsReplicationRequestId, AcsReplicationStatus]()
 
   private val targetParticipantStore =
-    PendingOperationStore.apply[PartyReplicationStatus, SynchronizerId](
+    PendingOperationStore.apply[AcsReplicationStatus, SynchronizerId](
       storage,
       timeouts,
       loggerFactory,
-      PartyReplicationStatus,
+      AcsReplicationStatus,
       SynchronizerId.fromString,
     )
 
@@ -134,7 +133,7 @@ final class AcsReplicationStateManager(
     *   an "already exists" error if a status with the same request id already exists
     */
   // TODO(#35267) Check if calling this method could collide with initialization before it's finished
-  def add(status: PartyReplicationStatus)(implicit
+  def add(status: AcsReplicationStatus)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
@@ -170,9 +169,9 @@ final class AcsReplicationStateManager(
     * @return
     *   the updated status
     */
-  def update(requestId: AddPartyRequestId, modify: Modification)(implicit
+  def update(requestId: AcsReplicationRequestId, modify: Modification)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, PartyReplicationStatus] = executionQueue.executeEUS(
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = executionQueue.executeEUS(
     for {
       prevStatus <- EitherT.fromEither[FutureUnlessShutdown](
         acsReplications
@@ -203,7 +202,7 @@ final class AcsReplicationStateManager(
     s"update $requestId",
   )
 
-  def update_(requestId: AddPartyRequestId, modify: Modification)(implicit
+  def update_(requestId: AcsReplicationRequestId, modify: Modification)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = update(requestId, modify).map(_ => ())
 
@@ -211,7 +210,7 @@ final class AcsReplicationStateManager(
     * is important that the update only modifies the portion of the status that is changing and does
     * so in an idempotent way, i.e. setting new values rather than incrementing a counter.
     */
-  def get(requestId: AddPartyRequestId): Option[PartyReplicationStatus] =
+  def get(requestId: AcsReplicationRequestId): Option[AcsReplicationStatus] =
     acsReplications.get(requestId)
 
   /** Finds replication status by Daml sequencer channel agreement contract id.
@@ -221,28 +220,28 @@ final class AcsReplicationStateManager(
     * @return
     *   party replication status if found, None otherwise
     */
-  def findByAgreementContractId(agreementContractId: LfContractId): Option[PartyReplicationStatus] =
+  def findByAgreementContractId(agreementContractId: LfContractId): Option[AcsReplicationStatus] =
     acsReplications.values.find(_.agreementStatus match {
-      case PartyReplicationStatus.AgreementStatus.Exists(contractId, _, _) =>
+      case AcsReplicationStatus.AgreementStatus.Exists(contractId, _, _) =>
         contractId.coid == agreementContractId.coid
       case _ => false
     })
 
   def collectFirst[T](
-      f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]
+      f: PartialFunction[(AcsReplicationRequestId, AcsReplicationStatus), T]
   ): Option[T] = acsReplications.iterator.collectFirst(f)
 
-  def collect[T](f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]): Seq[T] =
+  def collect[T](f: PartialFunction[(AcsReplicationRequestId, AcsReplicationStatus), T]): Seq[T] =
     acsReplications.iterator.collect(f).toSeq
 
-  override def getAcsReplicationProgress(requestId: AddPartyRequestId)(implicit
+  override def getAcsReplicationProgress(requestId: AcsReplicationRequestId)(implicit
       traceContext: TraceContext
-  ): Option[PartyReplicationStatus.AcsReplicationProgress] =
+  ): Option[AcsReplicationStatus.AcsReplicationProgress] =
     get(requestId).flatMap(_.replicationO)
 
   override def updateAcsReplicationProgress(
-      requestId: AddPartyRequestId,
-      progress: PartyReplicationStatus.AcsReplicationProgress,
+      requestId: AcsReplicationRequestId,
+      progress: AcsReplicationStatus.AcsReplicationProgress,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     update_(requestId, _.modifyReplication(_ => progress))
 
@@ -251,15 +250,15 @@ final class AcsReplicationStateManager(
 }
 
 object AcsReplicationStateManager {
-  type Modification = PartyReplicationStatus => PartyReplicationStatus
+  type Modification = AcsReplicationStatus => AcsReplicationStatus
 
   private[AcsReplicationStateManager] lazy val AcsReplicationOperationName =
     NonEmptyString.tryCreate("acs_replication")
 
   private[AcsReplicationStateManager] def pendingDbOperationFromStatus(
-      status: PartyReplicationStatus
-  ): PendingOperation[PartyReplicationStatus, SynchronizerId] =
-    PendingOperation[PartyReplicationStatus, SynchronizerId](
+      status: AcsReplicationStatus
+  ): PendingOperation[AcsReplicationStatus, SynchronizerId] =
+    PendingOperation[AcsReplicationStatus, SynchronizerId](
       AcsReplicationOperationName,
       status.params.requestId.toHexString,
       status,

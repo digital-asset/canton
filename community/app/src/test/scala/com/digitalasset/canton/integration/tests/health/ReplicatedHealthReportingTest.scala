@@ -296,18 +296,6 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
 
         checkContainsState[ComponentHealthState.Failed](passiveParticipant, DbStorage.healthName)
         checkContainsState[ComponentHealthState.Ok](activeParticipant, DbStorage.healthName)
-        checkContainsState[ComponentHealthState.Failed](
-          activeParticipant,
-          ConnectedSynchronizer.healthName,
-        )
-        checkContainsState[ComponentHealthState.Failed](
-          activeParticipant,
-          SyncEphemeralState.healthName,
-        )
-        checkContainsState[ComponentHealthState.Failed](
-          activeParticipant,
-          SequencerClient.healthName,
-        )
         checkServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkNotServing(
           ledgerActive,

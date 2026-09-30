@@ -29,10 +29,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
+  PackageIdUnknownOrUnvetted,
   ReassigningParticipantsMismatch,
   SubmitterMustBeStakeholder,
 }
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.participant.store.ReassignmentStore.UnknownReassignmentId
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{
@@ -99,6 +101,8 @@ final class AssignmentValidationTest
       workflowId = None,
     )
 
+  private val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
+
   private def mkTestingTopology(multiSyncFor: ParticipantId*) = TestingTopology()
     .withSynchronizers(sourceSynchronizer.unwrap)
     .withReversedTopology(
@@ -107,6 +111,20 @@ final class AssignmentValidationTest
         observingParticipant -> Map(observer -> ParticipantPermission.Observation),
         aliceParticipant -> Map(alice -> ParticipantPermission.Submission),
         bobParticipant -> Map(bob -> ParticipantPermission.Submission),
+      )
+    )
+    .withPackages(
+      Map(
+        submittingParticipant -> Seq(
+          ExampleTransactionFactory.packageId,
+          invalidPackageId,
+        ),
+        observingParticipant -> Seq(
+          ExampleTransactionFactory.packageId,
+          invalidPackageId,
+        ),
+        aliceParticipant -> Seq(ExampleTransactionFactory.packageId),
+        bobParticipant -> Seq(ExampleTransactionFactory.packageId),
       )
     )
     // required such that `participant` gets a signing key
@@ -420,7 +438,6 @@ final class AssignmentValidationTest
 
     "create a common validation failure if the contract fails to validate against the target package" in {
 
-      val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
       val invalidContractReason = "invalid-contract"
       val failingContractValidator =
         new TestValidator(Map((contract.contractId, invalidPackageId) -> invalidContractReason))
@@ -448,7 +465,35 @@ final class AssignmentValidationTest
         reason should include(invalidContractReason)
       }
       result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
+    }
 
+    "create a common validation failure if the target package is unvetted in the target topology" in {
+
+      val unvettedPackageId = LfPackageId.assertFromString("unvetted-package-id")
+
+      val invalidAssignmentRequest = makeFullAssignmentTree(
+        unassignmentData.reassignmentId,
+        contract,
+        targetValidationPackageId = Some(unvettedPackageId),
+      )
+
+      val result = assignmentValidation(submittingParticipant)
+        .perform(
+          unassignmentDataE = Right(unassignmentData),
+          activenessF = activenessF,
+        )(mkParsedRequest(invalidAssignmentRequest))
+        .futureValueUS
+        .value
+
+      val expected = PackageIdUnknownOrUnvetted(
+        Set(contract.contractId),
+        List(observingParticipant, submittingParticipant).map(
+          PackageUnknownTo(unvettedPackageId, _)
+        ),
+        targetSynchronizer.unwrap,
+      )
+
+      result.commonValidationResult.packageVettingResult.value shouldBe expected
     }
 
     "multi-synchronizer feature flg" should {
@@ -538,10 +583,10 @@ final class AssignmentValidationTest
       contractValidator: ContractValidator = ContractValidator.AllowAll,
   ): AssignmentValidation =
     new AssignmentValidation(
-      synchronizerId,
-      Target(defaultStaticSynchronizerParameters),
-      participantId,
-      TestReassignmentCoordination.apply(
+      targetPsid = synchronizerId,
+      staticSynchronizerParameters = Target(defaultStaticSynchronizerParameters),
+      participantId = participantId,
+      reassignmentCoordination = TestReassignmentCoordination.apply(
         Set(),
         CantonTimestamp.Epoch,
         Some(snapshotOverride),

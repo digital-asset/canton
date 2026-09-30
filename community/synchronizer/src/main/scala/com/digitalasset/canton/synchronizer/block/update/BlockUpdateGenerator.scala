@@ -155,7 +155,6 @@ class BlockUpdateGeneratorImpl(
     rateLimitManager: SequencerRateLimitManager,
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
     getAnnouncedLsu: => Option[AnnouncedLsu],
-    producePostOrderingTopologyTicks: Boolean,
     consistencyChecks: Boolean,
     parameters: BlockProcessingParameters,
     metrics: SequencerMetrics,
@@ -444,11 +443,9 @@ class BlockUpdateGeneratorImpl(
               if upgrade.upgradeTime <= baseBlockSequencingTime =>
             FutureUnlessShutdown.pure((state, ChunkUpdate.noop))
           case _ =>
-            // Starting with protocol version 35, topology ticks can be deterministically injected post-ordering
-            // by sequencers, making time proofs unnecessary for observing topology transactions becoming effective.
-            if (
-              protocolVersion >= ProtocolVersion.v35 && producePostOrderingTopologyTicks && createTick
-            ) {
+            // topology ticks can be deterministically injected post-ordering by sequencers,
+            // making time proofs unnecessary for observing topology transactions becoming effective.
+            if (createTick) {
               blockChunkProcessor.emitTick(
                 state.copy(
                   // important to do this update from here instead of from inside emitTick,

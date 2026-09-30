@@ -55,8 +55,8 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
     participant2.dars.upload(cantonTestsPath, synchronizerId = daId)
     eventually()(assert(participant1.synchronizers.is_connected(daId)))
     eventually()(assert(participant2.synchronizers.is_connected(daId)))
-    val alice = participant1.parties.testing.enable("alice")
-    val bob = participant2.parties.testing.enable("bob")
+    val alice = participant1.parties.testing.enable(aliceS)
+    val bob = participant1.parties.testing.enable(bobS)
     // ensure all participants have observed a point after the topology changes before disconnecting them
     participants.local.foreach(_.testing.fetch_synchronizer_times())
     participant1.synchronizers.disconnect(daName)

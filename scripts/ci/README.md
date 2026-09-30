@@ -4,7 +4,7 @@
 
 - **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
-    - a **flaky streak** pings the **Flaky Canton** rotation (two people),
+    - a **flaky streak** pings the **Flaky Canton** rotation (three people),
     - a **broken nightly** pings the **CI rota**.
   - **Red-main alert** (`slack_red_main_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
@@ -52,8 +52,12 @@ flowchart TD
 
     H1 --> J{"issue has an assignee?"}
     I -->|yes| J
-    J -->|yes| J1["suppressed, not written to streaks.json"]
     J -->|no| K["streaks.json"]
+    J -->|yes| J2{"within 24h of assignment?"}
+    J2 -->|yes| J1["suppressed, grace period"]
+    J2 -->|no| J3{"already failed today?"}
+    J3 -->|yes| J4["suppressed, daily cap"]
+    J3 -->|no| K
 
     K --> L["alert_slack.py<br/>post to #team-canton-notifications"]
     L --> M{"nightly job?"}
@@ -94,7 +98,7 @@ The goals of the system are:
   The threshold avoids noise from one-off failures or manual retries while ensuring that a genuinely broken test gets human attention quickly.
   The message @-mentions whoever is on the relevant rota shift that week, read from the [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) via `select_rota.py` (falling back to the roster pool in `roster_people.json` if the sheet is unreadable).
   If the same alert keeps appearing, it means the test is still broken and has not been fixed yet, not that the notification system is misbehaving.
-  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned.
+  For the first 24 hours after an issue is assigned the alert is suppressed, to give whoever picked it up room to work without Slack noise. Past that window an assigned but still-failing test resumes alerting, capped to once per UTC calendar day rather than on every consecutive-failure streak, so a genuine breakage cannot stay silent for weeks just because someone is assigned, but a test that keeps streaking on every run does not re-page the assignee dozens of times a day either. The cap reuses the Date column already recorded in the issue's own history table, if a row from today is already there, the day's alert has already gone out. Unassigned issues are not rate-limited, they keep alerting on every streak until someone picks them up.
 
 ### Nightly tests
 
@@ -121,7 +125,7 @@ First failure on main/main-2.x
 Subsequent failures
   → gh issue reopen  (if closed, unless the failing commit predates the close)
   → gh issue edit    (new row appended to the table)
-  → if 3 consecutive commits all fail AND (issue is unassigned OR was assigned more than 24h ago): Slack alert sent
+  → if 3 consecutive commits all fail AND (issue is unassigned OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
 
 OSS (digital-asset/canton) or other branches
   → Datadog metric only, no GitHub issue

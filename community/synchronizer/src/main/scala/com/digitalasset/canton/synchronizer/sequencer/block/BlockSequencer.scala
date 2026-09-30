@@ -82,6 +82,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   LsuSequencerError,
   LsuTrafficAlreadyInitialized,
   MissingSynchronizerPredecessor,
+  NonEmptyTopologyTimestamp,
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.{
@@ -144,7 +145,6 @@ class BlockSequencer(
     store: SequencerBlockStore,
     dbSequencerStore: SequencerStore,
     blockSequencerConfig: BlockSequencerConfig,
-    producePostOrderingTopologyTicks: Boolean,
     trafficPurchasedStore: TrafficPurchasedStore,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
@@ -317,7 +317,6 @@ class BlockSequencer(
       blockRateLimitManager,
       drSequencingTimeUpperBound = parameters.drSequencingTimeUpperBound,
       getAnnouncedLsu = announcedLsu.get(),
-      producePostOrderingTopologyTicks = producePostOrderingTopologyTicks,
       consistencyChecks = parameters.enableAdditionalConsistencyChecks,
       parameters = blockProcessingParameters,
       metrics = metrics,
@@ -386,6 +385,15 @@ class BlockSequencer(
       else
         noTracingLogger.error("Sequencer flow has failed", ex)
   }
+
+  private def validateTopologyTimestamp(
+      submission: SubmissionRequest
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+    EitherT.cond[FutureUnlessShutdown](
+      submission.topologyTimestamp.isEmpty || !submission.shouldHaveEmptyTopologyTimestamp,
+      (),
+      NonEmptyTopologyTimestamp.Error,
+    )
 
   private def validateMaxSequencingTime(
       submission: SubmissionRequest
@@ -628,10 +636,9 @@ class BlockSequencer(
             else EitherTUtil.unitUS
           _ <- enforceThroughputCap(submission)
           _ <- rejectSubmissionsIfOverloaded(submission)
-          _ <- validateAggregationRuleRecipients(submission)
           _ <- validateMaxSequencingTime(submission)
+          _ <- validateTopologyTimestamp(submission)
           _ <- validateAggregationAlreadyDelivered(submission)
-          // TODO(#19476): Why we don't check group recipients here?
           approximateSnapshot <- EitherT.liftF(
             cryptoApi.currentSnapshotApproximation
           )
@@ -667,22 +674,6 @@ class BlockSequencer(
     }
 
   }
-
-  private def validateAggregationRuleRecipients(
-      submission: SubmissionRequest
-  ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] = if (
-    protocolVersion > ProtocolVersion.v34 && !parameters.disableAggregationRuleSizeCheckForTesting
-  ) {
-    EitherTUtil.condUnitET[FutureUnlessShutdown](
-      submission.aggregationRule.map(_.input).forall {
-        case _: AggregationRuleInput.Resolved => false
-        case _ => true
-      },
-      SequencerErrors.AggregateSubmissionInvalidRule.invalid(
-        "Resolved recipients are not allowed in aggregation rules beyond pv34"
-      ),
-    )
-  } else EitherTUtil.unitUS
 
   private def checkBeforeUpgradeTime(
       snapshot: SynchronizerSnapshotSyncCryptoApi

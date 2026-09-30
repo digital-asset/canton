@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import cats.syntax.traverse.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
@@ -40,12 +41,25 @@ trait DigestProcessorFactory {
       synchronizerId: SynchronizerId,
   )(implicit traceContext: TraceContext): ReinitializingDigestProcessor
 
-  /** Returns whether the running digest store of the given synchronizer contains any checkpoint.
-    * Returns `false` if there is no running digest store for the given synchronizer.
+  /** Checks whether the running digest store needs to be fully initialized, which is when:
+    *   1. there are no checkpoints in the acs digest store, AND
+    *   1. the participant has previously received events from the synchronizer
+    *
+    * The second condition is important in the following scenario:
+    *   1. a participant registers a synchronizer
+    *   1. the participant is restarted before it has received an event from the synchronizer,
+    *      because it crashed e.g. during the topology import during the initial handshake, or
+    *      because the synchronizer was registered with manual-connect=true and the participant
+    *      hasn't connected yet to the synchronizer.
+    *
+    * Without the second condition, the ReinitializingDigestProcessor would crash because it doesn't
+    * find a timestamp for the synchronizer at ledger end.
+    *
+    * Returns `None` if there is no running digest store for the given synchronizer.
     */
   def needsReinitialization(
       synchronizerId: SynchronizerId
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Boolean]]
 
   def createConsistencyCheckProcessor(
       synchronizerAlias: SynchronizerAlias,
@@ -154,7 +168,7 @@ class DigestProcessorFactoryImpl(
       createDigestAccumulator(acsDigestStore, metrics, loggerFactoryWithSynchronizer)
 
     val reinitializingTimepoint =
-      DigestProcessorFactoryImpl.reinitializationTimepoint(ledgerApiStore, synchronizerId)
+      DigestProcessorFactoryImpl.tryReinitializationTimepoint(ledgerApiStore, synchronizerId)
 
     new ReinitializingDigestProcessorImpl(
       participantId,
@@ -176,11 +190,15 @@ class DigestProcessorFactoryImpl(
       synchronizerId: SynchronizerId
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    acsDigestStoreLookup(synchronizerId) match {
-      case None => FutureUnlessShutdown.pure(false)
-      case Some(store) =>
-        store.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).map(_.isEmpty)
+  ): FutureUnlessShutdown[Option[Boolean]] =
+    acsDigestStoreLookup(synchronizerId).traverse { store =>
+      for {
+        latestCheckpointO <- store.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
+        ledgerEndForSynchronizer = DigestProcessorFactoryImpl.reinitializationTimepoint(
+          ledgerApiStore,
+          synchronizerId,
+        )
+      } yield latestCheckpointO.isEmpty && ledgerEndForSynchronizer.nonEmpty
     }
 
   override def createConsistencyCheckProcessor(
@@ -236,19 +254,25 @@ class DigestProcessorFactoryImpl(
 
 object DigestProcessorFactoryImpl {
   @VisibleForTesting
-  private[commitment] def reinitializationTimepoint(
+  private[commitment] def tryReinitializationTimepoint(
       ledgerApiStore: LedgerApiStore,
       synchronizerId: SynchronizerId,
   )(implicit errorLoggingContext: ErrorLoggingContext): Timepoint = {
-    // TODO(#33422) - Once the Github issue 27992 is solved, switch to new method
-    val timepointO = for {
-      end <- ledgerApiStore.ledgerEnd
-      index <- end.synchronizerIndices.get(synchronizerId)
-    } yield Timepoint(end.lastOffset)(index.recordTime)
+    val timepointO = reinitializationTimepoint(ledgerApiStore, synchronizerId)
     timepointO.getOrElse(
       ErrorUtil.invalidState(
         s"There is no suitable last offset for synchronizer $synchronizerId in the Ledger"
       )
     )
   }
+
+  private[commitment] def reinitializationTimepoint(
+      ledgerApiStore: LedgerApiStore,
+      synchronizerId: SynchronizerId,
+  ): Option[Timepoint] =
+    // TODO(#33422) - Once the Github issue 27992 is solved, switch to new method
+    for {
+      end <- ledgerApiStore.ledgerEnd
+      index <- end.synchronizerIndices.get(synchronizerId)
+    } yield Timepoint(end.lastOffset)(index.recordTime)
 }

@@ -101,8 +101,8 @@ jobs:
       reset_classes_if_requested: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test:
-    name: Test
+  test_36:
+    name: Test 36
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_test.yml
@@ -110,13 +110,13 @@ jobs:
     with:
       include_only_requires_external_kms_tests: false
       override_java_version_for_tests: ""
-      protocol_version: ""
+      protocol_version: '36'
       job_name: test
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_requires_external_kms:
+  test_36_requires_external_kms:
     name: Test (RequiresExternalKms)
-    needs: [pick_runner, test]
+    needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
@@ -126,7 +126,7 @@ jobs:
     with:
       include_only_requires_external_kms_tests: true
       override_java_version_for_tests: ""
-      protocol_version: ""
+      protocol_version: '36'
       job_name: test_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
@@ -173,18 +173,19 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  crash_recovery_test:
-    name: Crash Recovery Test
+  crash_recovery_test_36:
+    name: Crash Recovery Test 36
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  crash_recovery_test_requires_external_kms:
-    name: Crash Recovery Test (RequiresExternalKms)
-    needs: [pick_runner, crash_recovery_test]
+  crash_recovery_test_36_requires_external_kms:
+    name: Crash Recovery Test 36 (RequiresExternalKms)
+    needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
@@ -193,9 +194,11 @@ jobs:
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: true
+      job_name: crash_recovery_test_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  ledger_api_compatibility_tests:
+  ledger_api_compatibility_tests_36:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
     if: github.event_name == 'push'
@@ -203,6 +206,7 @@ jobs:
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   package_community:
     name: Package Community
@@ -217,7 +221,7 @@ jobs:
 
   protobuf_continuity:
     name: Protobuf Continuity
-    needs: [pick_runner, test]
+    needs: [pick_runner, compile]
     # Intentional: keep this job branch-only.
     # Protobuf continuity is a static source-level check (`sbt protobufContinuityCheck`), so
     # running it again on a release tag would be redundant with the branch/release-line commit
@@ -250,14 +254,15 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  sequential_test:
+  sequential_test_36:
     name: Sequential Test
     if: github.event_name == 'push'
-    needs: [pick_runner, test, compile]
+    needs: [pick_runner, compile]
     uses: ./.github/workflows/_sequential_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   smoke_test:
     name: Smoke Test
@@ -295,7 +300,7 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_35:
+  test_35:
     name: Test Protocol Version 35
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group' && github.ref_type != 'tag'
@@ -303,12 +308,12 @@ jobs:
     secrets: inherit
     with:
       protocol_version: '35'
-      job_name: test_protocol_version_35
+      job_name: test_35
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_35_requires_external_kms:
-    name: Test Protocol Version 36 (RequiresExternalKms)
-    needs: [pick_runner, test]
+  test_35_requires_external_kms:
+    name: Test Protocol Version 35 (RequiresExternalKms)
+    needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group' &&
       github.ref_type != 'tag'  &&
@@ -322,29 +327,30 @@ jobs:
       job_name: test_protocol_version_35_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_dev:
+  test_dev:
     name: Test Protocol Version Dev
-    needs: [pick_runner, test]
+    needs: [pick_runner, compile]
     if: github.event_name == 'push'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       protocol_version: 'DEV'
-      job_name: test_protocol_version_dev
+      job_name: test_dev
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  toxiproxy_test_fast:
-    name: Toxiproxy Test Fast
+  toxiproxy_test_fast_36:
+    name: Toxiproxy Test Fast 36
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_toxiproxy_test_fast.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  toxiproxy_test_fast_requires_external_kms:
-    name: Toxiproxy Test Fast (RequiresExternalKms)
-    needs: [pick_runner, toxiproxy_test_fast]
+  toxiproxy_test_fast_36_requires_external_kms:
+    name: Toxiproxy Test Fast 36 (RequiresExternalKms)
+    needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group'  &&
       (github.event_name != 'pull_request' ||
@@ -353,28 +359,32 @@ jobs:
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: true
+      job_name: toxiproxy_test_fast_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  unstable_test:
-    name: Unstable Test
+  unstable_test_36:
+    name: Unstable Test 36
     needs: [pick_runner, package_community]
     if: github.event_name == 'push'
     uses: ./.github/workflows/_unstable_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  variations_test:
-    name: Variations Test
-    needs: [pick_runner, test]
+  variations_test_36:
+    name: Variations Test 36
+    needs: [pick_runner, compile]
     if: github.event_name == 'push'
     uses: ./.github/workflows/_variations_test.yml
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
-  variations_test_selected_users:
-    name: Variations Test (Selected Users)
+  variations_test_36_selected_users:
+    name: Variations Test 36 (Selected Users)
     needs: [pick_runner, compile]
     if: github.event_name == 'pull_request'
     uses: ./.github/workflows/_variations_test.yml
@@ -382,6 +392,7 @@ jobs:
     with:
       only_for_selected_users: true
       runner: ${{ needs.pick_runner.outputs.runner }}
+      protocol_version: '36'
 
   notify:
     name: Notify on Failure
@@ -390,30 +401,30 @@ jobs:
       - setup_and_validation
       - static_tests
       - compile
-      - test
-      - test_requires_external_kms
+      - test_36
+      - test_36_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
-      - crash_recovery_test
-      - crash_recovery_test_requires_external_kms
-      - ledger_api_compatibility_tests
+      - crash_recovery_test_36
+      - crash_recovery_test_36_requires_external_kms
+      - ledger_api_compatibility_tests_36
       - package_community
       - protobuf_continuity
       - protocol_continuity_test_latest
       - scalafix
-      - sequential_test
+      - sequential_test_36
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_protocol_version_35
-      - test_protocol_version_35_requires_external_kms
-      - test_protocol_version_dev
-      - toxiproxy_test_fast
-      - toxiproxy_test_fast_requires_external_kms
-      - unstable_test
-      - variations_test
-      - variations_test_selected_users
+      - test_35
+      - test_35_requires_external_kms
+      - test_dev
+      - toxiproxy_test_fast_36
+      - toxiproxy_test_fast_36_requires_external_kms
+      - unstable_test_36
+      - variations_test_36
+      - variations_test_36_selected_users
     if: |
       always() &&
       github.event_name == 'push' &&
@@ -444,30 +455,30 @@ jobs:
       - setup_and_validation
       - static_tests
       - compile
-      - test
-      - test_requires_external_kms
+      - test_36
+      - test_36_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
-      - crash_recovery_test
-      - crash_recovery_test_requires_external_kms
-      - ledger_api_compatibility_tests
+      - crash_recovery_test_36
+      - crash_recovery_test_36_requires_external_kms
+      - ledger_api_compatibility_tests_36
       - package_community
       - protobuf_continuity
       - protocol_continuity_test_latest
       - scalafix
-      - sequential_test
+      - sequential_test_36
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_protocol_version_35
-      - test_protocol_version_35_requires_external_kms
-      - test_protocol_version_dev
-      - toxiproxy_test_fast
-      - toxiproxy_test_fast_requires_external_kms
-      - unstable_test
-      - variations_test
-      - variations_test_selected_users
+      - test_35
+      - test_35_requires_external_kms
+      - test_dev
+      - toxiproxy_test_fast_36
+      - toxiproxy_test_fast_36_requires_external_kms
+      - unstable_test_36
+      - variations_test_36
+      - variations_test_36_selected_users
     if: ${{ always() }}
     # Keep required-gate runner selection independent from pick_runner output to avoid
     # stalling merge queue if pick_runner fails before emitting outputs.

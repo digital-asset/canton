@@ -20,7 +20,9 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
+import org.slf4j.event.Level
 
 import scala.concurrent.duration.DurationInt
 
@@ -52,17 +54,29 @@ class LedgerApiIndexerToxiproxyIntegrationTest
       }
 
       val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(proxyConf.name).value
-      proxy.underlying.disable()
 
-      BaseTest.eventuallyForever(timeUntilSuccess = 60.seconds, durationOfSuccess = 60.seconds) {
-        // Wait until indexer gives up restarts and closes itself.
-        participant1.health.status.trySuccess.components
-          .find(_.name == LedgerApiIndexer.healthComponentName)
-          .value
-          .state shouldBe (ComponentHealthState.Failed(
-          ComponentHealthState.UnhealthyState(Some("Component is closed"))()
-        ))
+      loggerFactory.assertLogsSeqRegex(
+        SuppressionRule.Level(Level.WARN),
+        Seq(
+          "Failed to check database lock status for \\d+, assuming lost",
+          "Lock \\d+ was lost",
+          "Locked connection was lost, trying to rebuild",
+        ),
+      ) {
+        proxy.underlying.disable()
+
+        BaseTest
+          .eventuallyForever(timeUntilSuccess = 60.seconds, durationOfSuccess = 60.seconds) {
+            // Wait until indexer gives up restarts and closes itself.
+            participant1.health.status.trySuccess.components
+              .find(_.name == LedgerApiIndexer.healthComponentName)
+              .value
+              .state shouldBe (ComponentHealthState.Failed(
+              ComponentHealthState.UnhealthyState(Some("Component is closed"))()
+            ))
+          }
       }
+
       proxy.underlying.enable()
 
       eventually() {
