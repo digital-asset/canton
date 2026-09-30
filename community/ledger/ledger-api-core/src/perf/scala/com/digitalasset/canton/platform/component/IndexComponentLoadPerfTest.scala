@@ -118,6 +118,22 @@ class InsertWithIncreasedArchivalRatePerfTest extends PerfTestBase {
   }
 }
 
+class InsertPrepareTest extends PerfTestBase {
+  override val filenameSuffix =
+    "lapi_prepare_perf_test_" + timestamp
+
+  override implicit val traceContext: TraceContext = TraceContext.createNew("lapi-prepare-perf-test")
+
+  it should "20% CN NFR insert without metrics" in {
+    cnNFRIngestionFixture(
+      passes = 864,
+      activeTxsPerPass = 23,
+      yesIReallyWantToRunIt = true,
+      actionName = "preload 20% CN NFR",
+    )
+  }
+}
+
 class InsertPerfTest extends PerfTestBase {
   override val filenameSuffix =
     "lapi_insert_perf_test_" + timestamp
@@ -126,16 +142,15 @@ class InsertPerfTest extends PerfTestBase {
 
   // contracts created total = 864 * 2023 * 5
   // archives = 864 * 1823 * 5
-  // active contracts = 864 * 200 * 5
+  // active contracts = 864 * 23 * 5
   it should "20% CN NFR insert" in {
     measure {
-    cnNFRIngestionFixture(
-      passes = 864,
-      activeTxsPerPass = 23, // default
-      yesIReallyWantToRunIt = true,
-      actionName = "ingesting 20% CN NFR",
-    )
+      cnNFRIngestionFixture(
+        passes = 864,
+        activeTxsPerPass = 23,
+        yesIReallyWantToRunIt = true,
+        actionName = "ingesting 20% CN NFR",
+      )
+    }
   }
-  }
-
 }

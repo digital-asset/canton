@@ -25,6 +25,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestMalformed
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.update.BlockChunkProcessor
@@ -33,8 +34,9 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionE
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.ExceededMaxSequencingTime
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, PekkoUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -59,6 +61,10 @@ abstract class SequencerApiTest
 
   import RecipientsTest.*
 
+  private lazy val m1 = MediatorId(UniqueIdentifier.tryCreate("mediator1", "abc"))
+  private lazy val m2 = MediatorId(UniqueIdentifier.tryCreate("mediator2", "abc"))
+  private lazy val m3 = MediatorId(UniqueIdentifier.tryCreate("mediator3", "abc"))
+
   protected class Env extends AutoCloseable {
 
     implicit lazy val actorSystem: ActorSystem =
@@ -73,7 +79,17 @@ abstract class SequencerApiTest
     }
 
     val topologyFactory: TestingIdentityFactory =
-      TestingTopology(synchronizerParameters = List.empty)
+      TestingTopology(
+        synchronizerParameters = List.empty,
+        mediatorGroups = Set(
+          MediatorGroup(
+            index = MediatorGroupIndex.zero,
+            active = NonEmpty.mk(Seq, m1, m2, m3),
+            passive = Seq.empty,
+            threshold = PositiveInt.two,
+          )
+        ),
+      )
         .withSimpleParticipants(
           p1,
           p2,
@@ -154,7 +170,7 @@ abstract class SequencerApiTest
     }
 
   protected def psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId
-  protected def mediatorId: MediatorId = DefaultTestIdentities.mediatorId
+  protected def mediatorId: MediatorId = m1
   protected def sequencerId: SequencerId = DefaultTestIdentities.sequencerId
 
   protected def createSequencer(crypto: SynchronizerCryptoClient)(implicit
@@ -176,6 +192,57 @@ abstract class SequencerApiTest
       case Some(orderer) =>
         orderer.send(request).mapK(FutureUnlessShutdown.outcomeK).leftWiden[CantonBaseError]
     }
+
+  private def createMediatorRequest(
+      members: Seq[(Member, MessageId)],
+      envelopeContent: Seq[(String, Seq[Member])],
+      maxSequencingTime: CantonTimestamp,
+  )(implicit env: Env) = {
+    import env.*
+    val aggregationRule =
+      AggregationRule.activeMediators(
+        MediatorGroupIndex.zero,
+        testedProtocolVersion,
+      )
+
+    val envelopes = envelopeContent.map {
+      case (content, first +: rest) =>
+        ClosedUncompressedEnvelope.create(
+          ByteString.copyFromUtf8(content),
+          Recipients.cc(first, rest*),
+          Seq.empty,
+          testedProtocolVersion,
+        )
+      case _ => fail("need at least one recipient for each envelope")
+    }
+
+    def mkRequest(
+        sender: Member,
+        messageId: MessageId,
+        envelopes: List[ClosedUncompressedEnvelope],
+    ): SubmissionRequest =
+      SubmissionRequest.tryCreate(
+        sender,
+        messageId,
+        Batch(envelopes, testedProtocolVersion),
+        maxSequencingTime,
+        topologyTimestamp = None,
+        Some(aggregationRule),
+        Option.empty[SequencingSubmissionCost],
+        testedProtocolVersion,
+      )
+
+    (
+      aggregationRule,
+      MonadUtil.sequentialTraverse(members) { case (member, messageId) =>
+        val client = topologyFactory.forOwnerAndSynchronizer(member, psid)
+        for {
+          signedEnvelopes <- envelopes.parTraverse(signEnvelope(client, _))
+        } yield (sign(mkRequest(member, messageId, signedEnvelopes.toList)), signedEnvelopes)
+      },
+    )
+
+  }
 
   protected def runSequencerApiTests(): Unit = {
     "The sequencers" should {
@@ -335,48 +402,43 @@ abstract class SequencerApiTest
         }
       }
 
-      def testAggregation: Boolean = supportAggregation
-      def testAggregationPV35: Boolean =
-        supportAggregation && testedProtocolVersion > ProtocolVersion.v34
+      def testAggregation: Boolean =
+        supportAggregation && testedProtocolVersion > ProtocolVersion.v34 // 3.7 is no longer supporting pv34, so tests won't run on it
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*
 
         val messageContent = "aggregatable-message"
-        // TODO(i10412): See above
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p6, p9),
-            PositiveInt.tryCreate(2),
-            testedProtocolVersion,
-          )
-        val request1 = createSendRequest(
-          p6,
-          messageContent,
-          Recipients.cc(p10),
+        val messageId1 = MessageId.tryCreate(messageContent + "-m1")
+        val messageId2 = MessageId.tryCreate(messageContent + "-m2")
+
+        val (_, requestsF) = createMediatorRequest(
+          Seq(
+            (m1, messageId1),
+            (m2, messageId2),
+          ),
+          // TODO(i10412): See above
+          Seq((messageContent, Seq(p10))),
           maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          aggregationRule = Some(aggregationRule),
-        )
-        val request2 = request1.copy(sender = p9, messageId = MessageId.fromUuid(new UUID(1, 2)))
+        )(env)
 
         for {
-          _ <- sequencer
-            .sendAsyncSigned(sign(request1))
-            .valueOrFail("Sent async for participant1")
-          reads1 <- readForMembers(Seq(p6), sequencer)
-          _ <- sequencer
-            .sendAsyncSigned(sign(request2))
-            .valueOrFail("Sent async for participant2")
-          reads2 <- readForMembers(Seq(p9), sequencer)
+          requests <- requestsF
+          (request1, envelopes1) = requests.headOption.value
+          (request2, envelopes2) = requests(1)
+          _ <- sequencer.sendAsyncSigned(request1).valueOrFail("Sent async for mediator1")
+          reads1 <- readForMembers(Seq(m1), sequencer)
+          _ <- sequencer.sendAsyncSigned(request2).valueOrFail("Sent async for mediator2")
+          reads2 <- readForMembers(Seq(m2), sequencer)
           reads3 <- readForMembers(Seq(p10), sequencer)
         } yield {
-          // p6 gets the receipt immediately
+          // m1 gets the receipt immediately
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p6,
-                messageId = Some(request1.messageId),
+                to = m1,
+                messageId = Some(messageId1),
                 defaultExpectedTrafficReceipt,
               )
             ),
@@ -387,8 +449,8 @@ abstract class SequencerApiTest
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p9,
-                messageId = Some(request2.messageId),
+                to = m2,
+                messageId = Some(messageId2),
                 defaultExpectedTrafficReceipt,
               )
             ),
@@ -402,7 +464,11 @@ abstract class SequencerApiTest
                 to = p10,
                 messageId = None,
                 trafficReceipt = None,
-                EnvelopeDetails(messageContent, Recipients.cc(p10)),
+                EnvelopeDetails(
+                  messageContent,
+                  Recipients.cc(p10),
+                  signatures = envelopes1.flatMap(_.signatures) ++ envelopes2.flatMap(_.signatures),
+                ),
               )
             ),
             reads3,
@@ -410,27 +476,25 @@ abstract class SequencerApiTest
         }
       }
 
-      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregationPV35 in {
+      "bounce on write path aggregate submissions with maxSequencingTime exceeding bound" onlyRunWhen testAggregation in {
         env =>
           import env.*
 
           val messageContent = "bounce-write-path-message"
-          // TODO(i10412): See above
           val aggregationRule =
-            AggregationRule.testing(
-              NonEmpty(Seq, p6, p9),
-              PositiveInt.tryCreate(2),
+            AggregationRule.activeMediators(
+              MediatorGroupIndex.zero,
               testedProtocolVersion,
             )
           val request1 = createSendRequest(
-            p6,
+            m1,
             messageContent,
             Recipients.cc(p10),
             maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofMinutes(10)),
             aggregationRule = Some(aggregationRule),
           )
           val request2 = request1.copy(
-            sender = p9,
+            sender = m2,
             messageId = MessageId.fromUuid(new UUID(1, 2)),
             maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofMinutes(-10)),
           )
@@ -463,7 +527,7 @@ abstract class SequencerApiTest
           }
       }
 
-      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregationPV35 in { env =>
+      "bounce on write path aggregate submissions dedup" onlyRunWhen testAggregation in { env =>
         import env.*
 
         val messageContent = "bounce-sender-dedup-message"
@@ -502,11 +566,9 @@ abstract class SequencerApiTest
           sequencer.discard // This is necessary to init the lazy val in the Env before manipulating the clocks
 
           val messageContent = "bounce-read-path-message"
-          // TODO(i10412): See above
           val aggregationRule =
-            AggregationRule.testing(
-              NonEmpty(Seq, p6, p9),
-              PositiveInt.tryCreate(2),
+            AggregationRule.activeMediators(
+              MediatorGroupIndex.zero,
               testedProtocolVersion,
             )
 
@@ -541,139 +603,109 @@ abstract class SequencerApiTest
       "aggregate signatures" onlyRunWhen testAggregation in { env =>
         import env.*
 
-        // TODO(i10412): See above
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p11, p12, p13),
-            PositiveInt.tryCreate(2),
-            testedProtocolVersion,
-          )
-
-        val content1 = "message1-to-sign"
-        val content2 = "message2-to-sign"
-        val recipients1 = Recipients.cc(p11, p13)
-        val envelope1 = ClosedUncompressedEnvelope.create(
-          ByteString.copyFromUtf8(content1),
-          recipients1,
-          Seq.empty,
-          testedProtocolVersion,
-        )
-        val recipients2 = Recipients.cc(p12, p13)
-        val envelope2 = ClosedUncompressedEnvelope.create(
-          ByteString.copyFromUtf8(content2),
-          recipients2,
-          Seq.empty,
-          testedProtocolVersion,
-        )
-        val envelopes = List(envelope1, envelope2)
         val messageId1 = MessageId.tryCreate(s"request1")
         val messageId2 = MessageId.tryCreate(s"request2")
         val messageId3 = MessageId.tryCreate(s"request3")
-        val p11Crypto = topologyFactory.forOwnerAndSynchronizer(p11, psid)
-        val p12Crypto = topologyFactory.forOwnerAndSynchronizer(p12, psid)
-        val p13Crypto = topologyFactory.forOwnerAndSynchronizer(p13, psid)
-
-        def mkRequest(
-            sender: Member,
-            messageId: MessageId,
-            envelopes: List[ClosedUncompressedEnvelope],
-        ): SubmissionRequest =
-          SubmissionRequest.tryCreate(
-            sender,
-            messageId,
-            Batch(envelopes, testedProtocolVersion),
-            CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-            topologyTimestamp = None,
-            Some(aggregationRule),
-            Option.empty[SequencingSubmissionCost],
-            testedProtocolVersion,
-          )
+        val content1 = "envelope1-to-sign"
+        val recipients1 = Seq(p1, p3)
+        val recipients1CC = Recipients.cc(p1, p3)
+        val recipients2 = Seq(p2, p3)
+        val recipients2CC = Recipients.cc(p2, p3)
+        val content2 = "envelope2-to-sign"
+        val (_, requestsF) = createMediatorRequest(
+          Seq((m1, messageId1), (m2, messageId2), (m3, messageId3)),
+          Seq((content1, recipients1), (content2, recipients2)),
+          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
+        )(env)
 
         val lockP = Promise[Unit]()
 
         for {
-          envs1 <- envelopes.parTraverse(signEnvelope(p11Crypto, _))
-          request1 = mkRequest(p11, messageId1, envs1)
-          envs2 <- envelopes.parTraverse(signEnvelope(p12Crypto, _))
-          request2 = mkRequest(p12, messageId2, envs2)
-          envs3 <- envelopes.parTraverse(signEnvelope(p13Crypto, _))
-          request3 = mkRequest(p13, messageId3, envs3)
+          requests <- requestsF
+          (request1, envs1) = requests.headOption.value
+          (request2, envs2) = requests(1)
+          (request3, envs3) = requests(2)
           _ <- sequencer
-            .sendAsyncSigned(sign(request1))
-            .valueOrFail("Sent async for participant11")
-          reads11 <- readForMembers(Seq(p11), sequencer)
+            .sendAsyncSigned(request1)
+            .valueOrFail("Sent async for m1")
+          read1 <- readForMembers(Seq(m1), sequencer)
           _ = sequencer.applyPostProcessingLockForTesting(lockP.future)
           _ <- sequencer
-            .sendAsyncSigned(sign(request2))
-            .valueOrFail("Sent async for participant13")
+            .sendAsyncSigned(request2)
+            .valueOrFail("Sent async for m2")
           _ <- sequencer
-            .sendAsyncSigned(sign(request3))
-            .valueOrFail("Sent async for participant13")
+            .sendAsyncSigned(request3)
+            .valueOrFail("Sent async for m3")
           _ = lockP.success(())
-          reads12 <- readForMembers(Seq(p12, p13), sequencer)
-          reads12a <- readForMembers(
-            Seq(p11),
-            sequencer,
-            startTimestamp = firstEventTimestamp(p11)(reads11).map(_.immediateSuccessor),
-          )
-          reads13 <- readForMembers(
-            Seq(p13),
-            sequencer,
-            startTimestamp = firstEventTimestamp(p13)(reads12).map(_.immediateSuccessor),
-          )
-          // if participant13 sends after processing, he'll see the already sent error
+          readP <- readForMembers(Seq(p1, p2, p3), sequencer)
+          read2 <- readForMembers(Seq(m2), sequencer)
+          read3 <- readForMembers(Seq(m3), sequencer)
+
+          // if m3 sends again after processing, he'll see the already sent error
           _ <-
-            if (testAggregationPV35)
+            if (testAggregation)
               sequencer
-                .sendAsyncSigned(sign(request3))
+                .sendAsyncSigned(request3)
                 .leftOrFail("Send async should fail with already sent")
             else FutureUnlessShutdown.unit
         } yield {
+          // expect receipt for m1 and m2
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p11,
-                messageId = Some(request1.messageId),
+                to = m1,
+                messageId = Some(messageId1),
                 trafficReceipt = defaultExpectedTrafficReceipt,
               )
             ),
-            reads11,
+            read1,
           )
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p12,
-                messageId = Some(request2.messageId),
+                to = m2,
+                messageId = Some(messageId2),
                 trafficReceipt = defaultExpectedTrafficReceipt,
-                EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
-              ),
-              EventDetails(
-                previousTimestamp = None,
-                to = p13,
-                messageId = None,
-                trafficReceipt = None,
-                EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
-                EnvelopeDetails(content2, recipients2, envs1(1).signatures ++ envs2(1).signatures),
-              ),
+              )
             ),
-            reads12,
+            read2,
           )
+          // expect envelopes for p1, p2, p3
           checkMessages(
             Seq(
               EventDetails(
-                previousTimestamp = reads11.headOption.map(_._2.timestamp),
-                to = p11,
+                previousTimestamp = None,
+                to = p1,
                 messageId = None,
                 trafficReceipt = None,
-                EnvelopeDetails(content1, recipients1, envs1(0).signatures ++ envs2(0).signatures),
-              )
+                EnvelopeDetails(content1, recipients1CC, envs1(0).signatures ++ envs2(0).signatures),
+              ),
+              EventDetails(
+                previousTimestamp = None,
+                to = p2,
+                messageId = None,
+                trafficReceipt = defaultExpectedTrafficReceipt,
+                EnvelopeDetails(content2, recipients2CC, envs1(1).signatures ++ envs2(1).signatures),
+              ),
+              EventDetails(
+                previousTimestamp = None,
+                to = p3,
+                messageId = None,
+                trafficReceipt = None,
+                EnvelopeDetails(
+                  content1,
+                  recipients1CC,
+                  envs1(0).signatures ++ envs2(0).signatures,
+                ),
+                EnvelopeDetails(content2, recipients2CC, envs1(1).signatures ++ envs2(1).signatures),
+              ),
             ),
-            reads12a,
+            readP,
           )
 
-          checkRejection(reads13, p13, messageId3, defaultExpectedTrafficReceipt) {
+          checkRejection(read3, m3, messageId3, defaultExpectedTrafficReceipt) {
             case SequencerErrors.AggregateSubmissionAlreadySent(reason) =>
               reason should (
                 include(s"The aggregatable request with aggregation ID") and
@@ -691,353 +723,222 @@ abstract class SequencerApiTest
       "prevent aggregation stuffing" onlyRunWhen testAggregation in { env =>
         import env.*
 
-        val messageContent = "aggregatable-message-stuffing"
-        // TODO(i10412): See above
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p14, p15),
-            PositiveInt.tryCreate(2),
-            testedProtocolVersion,
-          )
-        val recipients = Recipients.cc(p14, p15)
-        val envelope = ClosedUncompressedEnvelope.create(
-          ByteString.copyFromUtf8(messageContent),
-          recipients,
-          Seq.empty,
-          testedProtocolVersion,
-        )
         val messageId1 = MessageId.tryCreate(s"request1")
         val messageId2 = MessageId.tryCreate(s"request2")
         val messageId3 = MessageId.tryCreate(s"request3")
-        val p14Crypto = topologyFactory.forOwnerAndSynchronizer(p14, psid)
-        val p15Crypto = topologyFactory.forOwnerAndSynchronizer(p15, psid)
-
-        def mkRequest(
-            sender: Member,
-            messageId: MessageId,
-            envelope: ClosedUncompressedEnvelope,
-        ): SubmissionRequest =
-          SubmissionRequest.tryCreate(
-            sender,
-            messageId,
-            Batch(List(envelope), testedProtocolVersion),
-            CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-            topologyTimestamp = None,
-            Some(aggregationRule),
-            Option.empty[SequencingSubmissionCost],
-            testedProtocolVersion,
-          )
+        val messageContent = "aggregatable-message-stuffing"
+        val recipients = Seq(p1)
+        val (_, requestsF) = createMediatorRequest(
+          Seq((m1, messageId1), (m1, messageId2), (m2, messageId3)),
+          Seq((messageContent, recipients)),
+          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
+        )(env)
 
         for {
-          env1 <- signEnvelope(p14Crypto, envelope)
-          request1 = mkRequest(p14, messageId1, env1)
-          env2 <- signEnvelope(p14Crypto, envelope)
-          request2 = mkRequest(p14, messageId2, env2)
-          env3 <- signEnvelope(p15Crypto, envelope)
-          request3 = mkRequest(p15, messageId3, env3)
-          _ <- sequencer
-            .sendAsyncSigned(sign(request1))
-            .valueOrFail("Sent async for participant14")
-          reads14 <- readForMembers(Seq(p14), sequencer)
-          _ <- sequencer
-            .sendAsyncSigned(sign(request2))
-            .valueOrFail("Sent async stuffing for participant14")
-          reads14a <- readForMembers(
-            Seq(p14),
+          requests <- requestsF
+          (request1, envelopes1) = requests.headOption.value
+          (request2, _) = requests(1)
+          (request3, envelopes3) = requests(2)
+          _ <- sequencer.sendAsyncSigned(request1).valueOrFail("Sent async for mediator1")
+          reads1 <- readForMembers(Seq(m1), sequencer)
+          _ <- sequencer.sendAsyncSigned(request2).valueOrFail("Sent async stuffing for mediator1")
+          reads1a <- readForMembers(
+            Seq(m1),
             sequencer,
-            startTimestamp = firstEventTimestamp(p14)(reads14).map(_.immediateSuccessor),
+            startTimestamp = firstEventTimestamp(m1)(reads1).map(_.immediateSuccessor),
           )
-          // p15 can still continue and finish the aggregation
+          // m2 can still continue and finish the aggregation
           _ <- sequencer
-            .sendAsyncSigned(sign(request3))
-            .valueOrFail("Sent async for participant15")
-          reads14b <- readForMembers(
-            Seq(p14),
-            sequencer,
-            startTimestamp = firstEventTimestamp(p14)(reads14a).map(_.immediateSuccessor),
-          )
-          reads15 <- readForMembers(Seq(p15), sequencer)
+            .sendAsyncSigned(request3)
+            .valueOrFail("Sent async for mediator2")
+          reads2 <- readForMembers(Seq(m2), sequencer)
+          readsp1 <- readForMembers(Seq(p1), sequencer)
         } yield {
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p14,
-                messageId = Some(request1.messageId),
+                to = m1,
+                messageId = Some(messageId1),
                 trafficReceipt = defaultExpectedTrafficReceipt,
               )
             ),
-            reads14,
+            reads1,
           )
-          checkRejection(reads14a, p14, messageId2, defaultExpectedTrafficReceipt) {
+          checkRejection(reads1a, m1, messageId2, defaultExpectedTrafficReceipt) {
             case SequencerErrors.AggregateSubmissionStuffing(reason) =>
               reason should include(
-                s"The sender $p14 previously contributed to the aggregatable submission with ID"
+                s"The sender $m1 previously contributed to the aggregatable submission with ID"
               )
           }
-          val deliveredEnvelopeDetails = EnvelopeDetails(
-            messageContent,
-            recipients,
-            // Only the first signature from p1 is included
-            env1.signatures ++ env3.signatures,
-          )
-
           checkMessages(
             Seq(
               EventDetails(
-                previousTimestamp = reads14.headOption.map(_._2.timestamp),
-                to = p14,
-                messageId = None,
-                trafficReceipt = None,
-                deliveredEnvelopeDetails,
+                previousTimestamp = None,
+                to = m2,
+                messageId = Some(messageId3),
+                trafficReceipt = defaultExpectedTrafficReceipt,
               )
             ),
-            reads14b,
+            reads2,
+          )
+          val deliveredEnvelopeDetails = EnvelopeDetails(
+            messageContent,
+            Recipients.ofSet(recipients.toSet).value,
+            // Only the first signature from m1 is included
+            envelopes1.flatMap(_.signatures) ++ envelopes3.flatMap(_.signatures),
           )
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p15,
-                messageId = Some(messageId3),
+                to = p1,
+                messageId = None,
                 trafficReceipt = defaultExpectedTrafficReceipt,
                 deliveredEnvelopeDetails,
               )
             ),
-            reads15,
+            readsp1,
           )
         }
       }
 
-      "require eligible senders be registered" onlyRunWhen testAggregation in { env =>
+      "require the sender to be registered" onlyRunWhen testAggregation in { env =>
         import env.*
 
-        // We expect synchronous rejections and can therefore reuse participant1.
-        // But we need a fresh unregistered participant16
-        // TODO(i10412): remove this comment
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p1, p16),
-            PositiveInt.tryCreate(1),
-            testedProtocolVersion,
+        val aggregationRule = AggregationRule.senderDedup(testedProtocolVersion)
+
+        val request = sign(
+          createSendRequest(
+            p1,
+            "unregistered-sender",
+            Recipients.cc(p16),
+            aggregationRule = Some(aggregationRule),
+            maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
           )
-
-        val request = createSendRequest(
-          p1,
-          "unregistered-eligible-sender",
-          Recipients.cc(p1),
-          aggregationRule = Some(aggregationRule),
-          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
         )
-
+        val spoofed = request.copy(content = request.content.copy(sender = p16))
         for {
-          error <- sequencer.sendAsyncSigned(sign(request)).leftOrFailShutdown("Sent async")
+          error <- sequencer.sendAsyncSigned(spoofed).leftOrFailShutdown("Sent async")
         } yield {
-          error.code.id shouldBe SequencerErrors.SenderUnknown.id
+          error.code.id shouldBe SequencerErrors.SubmissionRequestRefused.id
           error.cause should (
-            include("(Eligible) Senders are unknown") and
+            include("There are no valid keys for") and
               include(p16.toString)
           )
-        }
-      }
-
-      "require the threshold to be reachable" onlyRunWhen testAggregation in { env =>
-        import env.*
-
-        // TODO(i10412): See above
-        val faultyThreshold = PositiveInt.tryCreate(2)
-        val aggregationRule =
-          AggregationRule.testing(NonEmpty(Seq, p17, p17), faultyThreshold, testedProtocolVersion)
-
-        val messageId = MessageId.tryCreate("unreachable-threshold")
-        val request = SubmissionRequest.tryCreate(
-          p17,
-          messageId,
-          Batch.empty(testedProtocolVersion),
-          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          topologyTimestamp = None,
-          aggregationRule = Some(aggregationRule),
-          Option.empty[SequencingSubmissionCost],
-          testedProtocolVersion,
-        )
-
-        for {
-          reads <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            for {
-              _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Sent async")
-              reads <- readForMembers(Seq(p17), sequencer, timeout = 5.seconds)
-            } yield reads,
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    SequencerErrors.SubmissionRequestMalformed,
-                    _ shouldBe s"Send request [$messageId] from sender [$p17] is malformed. " +
-                      s"Discarding request. Threshold $faultyThreshold cannot be reached",
-                  ),
-                  "p17's submission generates an alarm",
-                )
-              )
-            ),
-          )
-        } yield {
-          // p17 gets nothing
-          checkMessages(Seq(), reads)
-        }
-      }
-
-      "require the sender to be eligible" onlyRunWhen testAggregation in { env =>
-        import env.*
-
-        // TODO(i10412): See above
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p17),
-            PositiveInt.tryCreate(1),
-            testedProtocolVersion,
-          )
-
-        val messageId = MessageId.tryCreate("first-sender-not-eligible")
-        val request = SubmissionRequest.tryCreate(
-          p18,
-          messageId,
-          Batch.empty(testedProtocolVersion),
-          maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          topologyTimestamp = None,
-          aggregationRule = Some(aggregationRule),
-          Option.empty[SequencingSubmissionCost],
-          testedProtocolVersion,
-        )
-
-        for {
-          reads <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            for {
-              _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Sent async")
-              reads <- readForMembers(Seq(p18), sequencer, timeout = 5.seconds)
-            } yield reads,
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    SequencerErrors.SubmissionRequestMalformed,
-                    _ shouldBe s"Send request [$messageId] from sender [$p18] is malformed. " +
-                      s"Discarding request. Sender [$p18] is not eligible according to the aggregation rule",
-                  ),
-                  "p18's submission generates an alarm",
-                )
-              )
-            ),
-          )
-        } yield {
-          // p18 gets nothing
-          checkMessages(Seq(), reads)
         }
       }
 
       "prevent non-eligible senders from contributing" onlyRunWhen testAggregation in { env =>
         import env.*
 
+        val messageId1 = MessageId.tryCreate(s"request1")
+        val messageId2 = MessageId.tryCreate(s"request2")
+        val messageId3 = MessageId.tryCreate(s"request3")
         val messageContent = "aggregatable-message"
-        val aggregationRule =
-          AggregationRule.testing(
-            NonEmpty(Seq, p1, p2),
-            PositiveInt.tryCreate(2),
-            testedProtocolVersion,
-          )
-
-        val requestFromP1 = createSendRequest(
-          sender = p1,
-          messageContent,
-          Recipients.cc(p3),
+        val recipients = Seq(p2)
+        val (_, requestsF) = createMediatorRequest(
+          Seq((m1, messageId1), (p1, messageId2), (m2, messageId3)),
+          Seq((messageContent, recipients)),
           maxSequencingTime = CantonTimestamp.Epoch.add(Duration.ofSeconds(60)),
-          aggregationRule = Some(aggregationRule),
-        )
-
-        // Request with non-eligible sender
-        val messageId = MessageId.tryCreate("further-sender-not-eligible")
-        val requestFromP4 = requestFromP1.copy(sender = p4, messageId = messageId)
-
-        val requestFromP2 =
-          requestFromP1.copy(sender = p2, messageId = MessageId.fromUuid(new UUID(1, 2)))
+        )(env)
 
         for {
+          requests <- requestsF
+          (requestFromM1, envelopes1) = requests.headOption.value
+          (requestFromP1, _) = requests(1)
+          (requestFromM2, envelopes3) = requests(2)
           _ <- sequencer
-            .sendAsyncSigned(sign(requestFromP1))
-            .valueOrFail("Sent async for participant1")
-
-          readsForP1 <- readForMembers(Seq(p1), sequencer)
-
-          readsForP4 <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+            .sendAsyncSigned(requestFromM1)
+            .valueOrFail("Sent async for mediator1")
+          readsForM1 <- readForMembers(Seq(m1), sequencer)
+          readsForP1 <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
             for {
               _ <- sequencer
-                .sendAsyncSigned(sign(requestFromP4))
+                .sendAsyncSigned(requestFromP1)
                 .valueOrFail("Sent async for non-eligible participant4")
-              reads <- readForMembers(Seq(p4), sequencer, timeout = 5.seconds)
+              reads <- readForMembers(Seq(p1), sequencer, timeout = 5.seconds)
             } yield reads,
             LogEntry.assertLogSeq(
               Seq(
                 (
-                  _.shouldBeCantonError(
-                    SequencerErrors.SubmissionRequestMalformed,
-                    _ shouldBe s"Send request [$messageId] from sender [$p4] is malformed. " +
-                      s"Discarding request. Sender [$p4] is not eligible according to the aggregation rule",
+                  // just emitted as a warning message with details, while the rejection
+                  // omits details
+                  _.warningMessage should include(
+                    if (testedProtocolVersion > ProtocolVersion.v36)
+                      SequencerErrors.SubmissionRequestMalformedAndRejected.id
+                    else SubmissionRequestMalformed.id
                   ),
-                  "p4's submission generates an alarm",
+                  "p1's submission generates an alarm and a rejection",
                 )
               )
             ),
           )
 
           _ <- sequencer
-            .sendAsyncSigned(sign(requestFromP2))
-            .valueOrFail("Sent async for participant2")
-
+            .sendAsyncSigned(requestFromM2)
+            .valueOrFail("Sent async for mediator2")
+          readsForM2 <- readForMembers(Seq(m2), sequencer)
           readsForP2 <- readForMembers(Seq(p2), sequencer)
-          readsForP3 <- readForMembers(Seq(p3), sequencer)
         } yield {
-          // p1 gets the receipt immediately
+          // m1 gets the receipt immediately
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
-                to = p1,
-                messageId = Some(requestFromP1.messageId),
+                to = m1,
+                messageId = Some(messageId1),
                 trafficReceipt = defaultExpectedTrafficReceipt,
               )
             ),
-            readsForP1,
+            readsForM1,
           )
 
-          // p2 gets the receipt only
+          // m2 gets the receipt only
+          checkMessages(
+            Seq(
+              EventDetails(
+                previousTimestamp = None,
+                to = m2,
+                messageId = Some(messageId3),
+                trafficReceipt = defaultExpectedTrafficReceipt,
+              )
+            ),
+            readsForM2,
+          )
+
+          // p2 gets the message
           checkMessages(
             Seq(
               EventDetails(
                 previousTimestamp = None,
                 to = p2,
-                messageId = Some(requestFromP2.messageId),
-                trafficReceipt = defaultExpectedTrafficReceipt,
+                messageId = None,
+                trafficReceipt = None,
+                EnvelopeDetails(
+                  messageContent,
+                  Recipients.cc(p2),
+                  envelopes1.flatMap(_.signatures) ++ envelopes3.flatMap(_.signatures),
+                ),
               )
             ),
             readsForP2,
           )
 
-          // p3 gets the message
-          checkMessages(
-            Seq(
-              EventDetails(
-                previousTimestamp = None,
-                to = p3,
-                messageId = None,
-                trafficReceipt = None,
-                EnvelopeDetails(messageContent, Recipients.cc(p3)),
-              )
-            ),
-            readsForP3,
-          )
+          // p1 gets a rejection
+          if (testedProtocolVersion > ProtocolVersion.v36)
+            checkRejection(readsForP1, p1, messageId2, defaultExpectedTrafficReceipt) {
+              case SequencerErrors.SubmissionRequestMalformedAndRejected(reason)
+                  if testedProtocolVersion > ProtocolVersion.v36 =>
+                reason should include(s"Validation of aggregation rule")
+            }
+          else {
+            // p1 gets nothing (message is discarded before pv37)
+            checkMessages(Seq(), readsForP1)
+          }
 
-          // p4 gets nothing
-          checkMessages(Seq(), readsForP4)
         }
+
       }
 
       "require the member to be enabled to send/read" in { env =>

@@ -11,6 +11,25 @@
 
 set -eu -o pipefail
 
+# -----------------------------------------------------------------------------
+# Pre-processing: Partition COMMON_LOG_FILE if provided
+# -----------------------------------------------------------------------------
+if [[ -n ${COMMON_LOG_FILE:-} ]]; then
+	echo "COMMON_LOG_FILE detected. Splitting into component log files..."
+
+	PARTICIPANTS_LOG_FILE="$LOGS_DIR/participants.split.${CURRENT_JOB_NAME}.log"
+	SYNCHRONIZERS_LOG_FILE="$LOGS_DIR/synchronizers.split.${CURRENT_JOB_NAME}.log"
+
+	# 1. Synchronizers: Match logger context containing sequencer/mediator/domain, excluding participant
+	grep -E '\] .*(synchronizer|domain|sequencer|mediator)' "$COMMON_LOG_FILE" | \
+		grep -Eiv 'participant' > "$SYNCHRONIZERS_LOG_FILE" || true
+
+	# 2. Participants: Match logger context containing participant
+	grep -E '\] .*participant' "$COMMON_LOG_FILE" > "$PARTICIPANTS_LOG_FILE" || true
+	
+	echo "Split complete."
+fi
+
 echo
 echo "***** Extracting log metrics from $SYNCHRONIZERS_LOG_FILE and $PARTICIPANTS_LOG_FILE..."
 
@@ -34,7 +53,7 @@ EOI
 
 cat >> "$SLACK_METRICS_FILE" <<EOI
 *Logs*
-• Warnings/errors: *$participants_num_warnings_or_errors* (participants), *$synchronizers_num_warnings_or_errors* (synchronizers)
-• Size (uncompressed): $(print-bytes "$participants_log_size") (participants), $(print-bytes "$synchronizers_log_size") (synchronizers)
+• Warnings/errors: *$participants_num_warnings_or_errors* (participants related), *$synchronizers_num_warnings_or_errors* (synchronizers related)
+• Size (uncompressed): $(print-bytes "$participants_log_size") (participants related), $(print-bytes "$synchronizers_log_size") (synchronizers related)
 
 EOI

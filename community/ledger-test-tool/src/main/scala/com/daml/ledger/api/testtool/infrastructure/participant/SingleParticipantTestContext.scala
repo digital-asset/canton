@@ -90,13 +90,15 @@ import com.daml.ledger.javaapi.data.{Command, ExerciseByKeyCommand, Identifier, 
 import com.daml.logging.LoggingContext
 import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects, toProto}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{PartyId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{DelayUtil, MonadUtil, OptionUtil}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.grpc.StatusRuntimeException
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse}
 import io.grpc.protobuf.StatusProto
@@ -1874,6 +1876,18 @@ final class SingleParticipantTestContext private[participant] (
 
   def getJwks(request: GetJwksRequest): Future[GetJwksResponse] =
     services.jose.getJwks(request)
+
+  override def convertRecordTimeToOffset(
+      synchronizerId: SynchronizerId,
+      recordTime: Timestamp,
+  ): Future[Offset] =
+    services.state
+      .convertRecordTimeToOffset(
+        ConvertRecordTimeToOffsetRequest.defaultInstance
+          .withRecordTime(recordTime)
+          .withSynchronizerId(synchronizerId.toProtoPrimitive)
+      )
+      .map(o => Offset.tryFromLong(o.offset))
 }
 
 object SingleParticipantTestContext {

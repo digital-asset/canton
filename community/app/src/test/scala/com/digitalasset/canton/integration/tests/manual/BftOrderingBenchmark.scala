@@ -46,6 +46,7 @@ import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
   DefaultMaxBatchCreationInterval,
@@ -69,7 +70,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultPbftViewChangeTimeout,
+  DefaultPbftViewChangeTimeoutStep,
+  DefaultPbftViewChangeTimeoutUpperBound,
   DefaultSegmentLength,
+  DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   SegmentLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
@@ -291,16 +295,23 @@ class BftOrderingBenchmark
       useStandaloneConfig = Some(
         UseStandaloneConfig(
           pbftViewChangeTimeout = bftOrderingBenchmarkConfig.pbftViewChangeTimeout,
+          pbftViewChangeTimeoutStep = bftOrderingBenchmarkConfig.pbftViewChangeTimeoutStep,
+          pbftViewChangeTimeoutUpperBound =
+            bftOrderingBenchmarkConfig.pbftViewChangeTimeoutUpperBound,
           segmentLength = bftOrderingBenchmarkConfig.segmentLength.value,
           blacklistLeaderSelectionPolicyConfig =
             bftOrderingBenchmarkConfig.blacklistLeaderSelectionPolicyConfig,
           maxRequestsInBatch = bftOrderingBenchmarkConfig.maxRequestsInBatch,
           maxBatchesPerBlockProposal = bftOrderingBenchmarkConfig.maxBatchesPerBlockProposal,
+          stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+            bftOrderingBenchmarkConfig.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
           testSlowdown = bftOrderingBenchmarkConfig.testSlowdown,
         )
       ),
       consensusEmptyBlockCreationTimeout =
         bftOrderingBenchmarkConfig.consensusEmptyBlockCreationTimeout.underlying,
+      consensusWindowSizeForRetransmissionOfCommitCertificates =
+        bftOrderingBenchmarkConfig.consensusWindowSizeForRetransmissionOfCommitCertificates,
       sequencingParameters = Some(
         SequencingParameters.create(
           pbftViewChangeTimeout = bftOrderingBenchmarkConfig.pbftViewChangeTimeout.toInternal,
@@ -613,11 +624,19 @@ private object BftOrderingBenchmark {
       segmentLength: PositiveLong = DefaultSegmentLength.length,
       consensusEmptyBlockCreationTimeout: PositiveFiniteDuration =
         PositiveFiniteDuration.tryFromDuration(DefaultConsensusEmptyBlockCreationTimeout),
+      consensusWindowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] =
+        DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
       pbftViewChangeTimeout: PositiveFiniteDuration = DefaultPbftViewChangeTimeout.toConfig,
+      pbftViewChangeTimeoutStep: config.NonNegativeFiniteDuration =
+        DefaultPbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound: config.NonNegativeFiniteDuration =
+        DefaultPbftViewChangeTimeoutUpperBound,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
         DefaultLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
       minRequestsInBatch: Short = DefaultMinRequestsInBatch,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
       maxBatchCreationInterval: PositiveFiniteDuration =
         PositiveFiniteDuration.tryFromDuration(DefaultMaxBatchCreationInterval),
       maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,

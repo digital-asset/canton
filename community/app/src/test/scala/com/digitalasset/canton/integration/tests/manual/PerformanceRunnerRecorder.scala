@@ -28,8 +28,10 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
+import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.{
   LocalPostgresDumpRestore,
+  PostgresDumpRestore,
   UseBftSequencer,
   UsePostgres,
   UseReferenceBlockSequencer,
@@ -141,9 +143,12 @@ import scala.concurrent.duration.*
   * Recordings can be made in rounds by grouping participants. It's especially useful for large
   * numbers of participants that would be difficult to run all at once.
   */
-trait PerformanceRunnerRecorder extends CommunityIntegrationTest with SharedEnvironment {
+trait PerformanceRunnerRecorder
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with NightlyPerformanceBase {
 
-  private val TargetDirectory: File = File("replay")
+  private lazy val TargetDirectory: File = nightlyReplayTestsDir
 
   /** Whether to enable recording. Switch off if you want to measure performance without the
     * recording overhead.
@@ -231,7 +236,9 @@ trait PerformanceRunnerRecorder extends CommunityIntegrationTest with SharedEnvi
   protected val referenceBlockSequencerPlugin: Option[UseReferenceBlockSequencer[?]] =
     None
 
-  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin, loggerFactory)
+  private lazy val postgresDumpRestore: PostgresDumpRestore =
+    if (isNightlyPerformanceBenchmarkRun) nightlyPostgresDumpRestore(postgresPlugin, loggerFactory)
+    else LocalPostgresDumpRestore(postgresPlugin, loggerFactory)
 
   override def environmentDefinition: EnvironmentDefinition = {
     val baseEnvDefinition = EnvironmentDefinition
@@ -474,7 +481,10 @@ trait PerformanceRunnerRecorder extends CommunityIntegrationTest with SharedEnvi
       // The reference block sequencer uses a separate database.
       referenceBlockSequencerPlugin.foreach { plugin =>
         plugin
-          .dumpDatabases(TempDirectory(dumpDirectory(TargetDirectory)), forceLocal = true)
+          .dumpDatabases(
+            TempDirectory(dumpDirectory(TargetDirectory)),
+            forceLocal = !isNightlyPerformanceBenchmarkRun,
+          )
           .futureValue(timeout = PatienceConfiguration.Timeout(DumpTimeout))
       }
 

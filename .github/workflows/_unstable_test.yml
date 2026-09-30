@@ -6,6 +6,9 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+      protocol_version:
+        required: true
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: true
@@ -75,6 +78,14 @@ jobs:
           shard-index: 0
           network-mode: host
 
+      - name: Set Canton Protocol Version
+        env:
+          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+        run: |
+          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Download test file
         uses: actions/download-artifact@v7
         with:
@@ -118,4 +129,4 @@ jobs:
     with:
       caller_job: unstable_test
       runner: ${{ inputs.runner }}
-      protocol_version: ""
+      protocol_version: ${{ inputs.protocol_version }}

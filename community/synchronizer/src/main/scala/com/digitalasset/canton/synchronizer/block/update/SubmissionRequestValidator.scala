@@ -20,7 +20,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -115,9 +115,6 @@ private[update] final class SubmissionRequestValidator(
     * despite returning a left, should be charged to the submitting sender.
     *
     * We can do this after we validated the submission signature.
-    *
-    * @param skipFreshInFlightValidationCheck
-    *   small optimization to skip the member check if the aggregation id is already known
     */
   def performIndependentValidations(
       sequencingTimestamp: CantonTimestamp,
@@ -125,7 +122,6 @@ private[update] final class SubmissionRequestValidator(
       snapshotToValidateSubmissionRequest: SyncCryptoApi,
       topologySnapshotFromRequestO: Option[SyncCryptoApi],
       topologyTimestampError: Option[SequencerDeliverError],
-      skipFreshInFlightValidationCheck: AggregationId => Boolean,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -173,25 +169,27 @@ private[update] final class SubmissionRequestValidator(
         // a delay can come from different nodes and we should only log this as a warning in a way where we can
         // attribute the delay to a specific node.
         {
-          SequencerError.ExceededMaxSequencingTime
+          com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.ExceededMaxSequencingTime
             .Error(
               sequencingTimestamp,
               submissionRequest.maxSequencingTime,
               submissionRequest.messageId.unwrap,
             )
             .discard
-          SubmissionOutcome.Discard
+          SubmissionOutcome.Discard // we have to drop this one as the client will not expect a receipt AFTER max sequencing time
         },
       )
       _ <- EitherT
         .cond[FutureUnlessShutdown](
           SubmissionRequestValidations.checkToAtMostOneMediator(submissionRequest),
-          (), {
-            SequencerError.MultipleMediatorRecipients
-              .Error(submissionRequest, sequencingTimestamp)
-              .report()
-            SubmissionOutcome.Discard: SubmissionOutcome
-          },
+          (),
+          SubmissionRequestValidator.discardOrBetterRejectInvalidRequest(
+            submissionRequest,
+            sequencingTimestamp,
+            "checkToAtMostOneMediator",
+            "Submission request has more than one mediator recipient",
+            protocolVersion,
+          ),
         )
         .mapK(validationFUSK)
       _ <- checkRecipientsAreKnown(
@@ -236,7 +234,6 @@ private[update] final class SubmissionRequestValidator(
           snapshotToValidateSubmissionRequest,
           topologyOrSequencingSnapshot,
           submissionRequest,
-          skipFreshInFlightValidationCheck,
         )
         .mapK(validationFUSK)
     } yield PrevalidationOutcome(recipients, aggregationInfo)
@@ -410,17 +407,14 @@ private[update] final class SubmissionRequestValidator(
             }
       }
       .leftMap { error =>
-        if (reportError) {
-          SequencerError.InvalidEnvelopeSignature
-            .Error(
-              submissionRequest.value,
-              error,
-              sequencingTimestamp,
-              topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
-            )
-            .report()
-        }
-        SubmissionOutcome.Discard
+        SubmissionRequestValidator.discardOrBetterRejectInvalidRequest(
+          submissionRequest.value,
+          sequencingTimestamp,
+          "checkClosedEnvelopesSignatures",
+          error.show,
+          protocolVersion,
+          reportError = reportError,
+        )
       }
 
   private def checkRecipientsAreKnown(
@@ -464,32 +458,32 @@ private[update] final class SubmissionRequestValidator(
   ): EitherT[FutureUnlessShutdown, SubmissionOutcome, Unit] = {
 
     val alarm = for {
-      _ <- (if (signedSubmissionRequest.prevalidated)
-              signedSubmissionRequest.value.verifyKeyUsage(
-                topologyOrSequencingSnapshot,
-                signedSubmissionRequest.value.content.sender,
-              )
-            else
-              signedSubmissionRequest.value
-                .verifySignature(
-                  topologyOrSequencingSnapshot,
-                  signedSubmissionRequest.value.content.sender,
-                  HashPurpose.SubmissionRequestSignature,
-                ))
-        .leftMap[BaseAlarm](error =>
-          SequencerError.InvalidSubmissionRequestSignature.Error(
-            signedSubmissionRequest.value,
-            error,
-            topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
-            signedSubmissionRequest.value.timestampOfSigningKey,
+      _ <-
+        (if (signedSubmissionRequest.prevalidated)
+           signedSubmissionRequest.value.verifyKeyUsage(
+             topologyOrSequencingSnapshot,
+             signedSubmissionRequest.value.content.sender,
+           )
+         else
+           signedSubmissionRequest.value
+             .verifySignature(
+               topologyOrSequencingSnapshot,
+               signedSubmissionRequest.value.content.sender,
+               HashPurpose.SubmissionRequestSignature,
+             ))
+          .leftMap[BaseAlarm](error =>
+            SequencerError.InvalidSubmissionRequestSignature.Error(
+              signedSubmissionRequest.value,
+              error,
+              topologyOrSequencingSnapshot.ipsSnapshot.timestamp,
+              signedSubmissionRequest.value.timestampOfSigningKey,
+            )
           )
-        )
     } yield ()
-
     alarm.leftMap { a =>
       if (reportError)
         a.report()
-      SubmissionOutcome.Discard
+      SubmissionOutcome.Discard // must discard as the sender is not verified so cannot be charged for traffic
     }
   }
 
@@ -523,6 +517,47 @@ private[update] object SubmissionRequestValidator {
     WriterT.liftK[FutureUnlessShutdown, TrafficConsumption]
   def validationK(implicit executionContext: ExecutionContext) =
     FutureUnlessShutdown.outcomeK.andThen(validationFUSK)
+
+  /** Report invalid requests
+    *
+    * @param stepTextIncludedInRejection
+    *   which check failed (be careful when changing to avoid ledger forks)
+    */
+  def discardOrBetterRejectInvalidRequest(
+      submissionRequest: SubmissionRequest,
+      sequencingTimestamp: CantonTimestamp,
+      stepTextIncludedInRejection: String,
+      error: String,
+      protocolVersion: ProtocolVersion,
+      reportError: Boolean = true,
+  )(implicit errorLoggingContext: ErrorLoggingContext): SubmissionOutcome =
+    // We reject the request so the sender cannot just use traffic for free
+    if (protocolVersion > ProtocolVersion.v36) {
+      val rejection =
+        SequencerErrors.SubmissionRequestMalformedAndRejected(stepTextIncludedInRejection)
+      val ret = SubmissionOutcome.Reject.logAndCreate(
+        submissionRequest,
+        sequencingTimestamp,
+        rejection,
+        Some(error),
+        reportError = reportError,
+      )
+      ret
+    } else {
+      // don't include the detailed error message in the rejection to avoid ledger forks due to changed strings
+      if (reportError) {
+        errorLoggingContext.info(
+          s"Error occurred when processing request $sequencingTimestamp: $stepTextIncludedInRejection => $error"
+        )
+        val rejection =
+          SequencerErrors.SubmissionRequestMalformed.Error(
+            submissionRequest,
+            stepTextIncludedInRejection + " failed.",
+          )
+        rejection.report()
+      }
+      SubmissionOutcome.Discard
+    }
 
   object TrafficConsumption {
     implicit val accumulatedTrafficCostMonoid: Monoid[TrafficConsumption] =

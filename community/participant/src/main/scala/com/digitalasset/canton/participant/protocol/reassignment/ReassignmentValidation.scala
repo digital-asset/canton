@@ -9,7 +9,14 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId, Stakeholders}
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.PackageIdUnknownOrUnvetted
+import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  LfContractId,
+  ReassignmentId,
+  Stakeholders,
+}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
@@ -216,4 +223,23 @@ object ReassignmentValidation {
       Either
         .cond(isActive, (), ReassignmentValidationError.MediatorInactive(reassignmentId, mediator))
     })
+
+  def checkPackagesVetted(
+      stakeholders: Stakeholders,
+      contractIds: Set[LfContractId],
+      packageIds: Set[LfPackageId],
+      topologySnapshot: TopologySnapshot,
+      synchronizerId: PhysicalSynchronizerId,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    UsableSynchronizers
+      .checkPackagesVetted(
+        synchronizerId,
+        topologySnapshot,
+        stakeholders.all.map(_ -> packageIds).toMap,
+        topologySnapshot.timestamp,
+      )
+      .leftMap(u => PackageIdUnknownOrUnvetted(contractIds, u.unknownTo, synchronizerId))
 }

@@ -22,12 +22,14 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.TopologyManagerError.TopologyStoreUnknown
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Confirmation, Submission}
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   ParticipantPermission,
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasTempDirectory, TempFile}
 import org.scalatest.Assertion
 
@@ -63,6 +65,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   override protected def configTransforms: List[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
+    // TODO(#35499): OffPR with Squencer Channels - Switch dev / alpha to 37
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
@@ -454,6 +457,188 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       clue(
         s"Perform another LSU (transitioning from PV ${fixture.newPV} to PV ${fixture2.newPV})"
       )(performLsu(participants.all, fixture2, upgradeTime2))
+    }
+  }
+}
+
+/* Test: Recovering a party-to-participant mapping stuck due to different topology proto versions.
+ *
+ * - Scenario: Target proposes (v30) -> LSU -> Source proposes (v31).
+ * - Issue: Signature hash mismatch. PTP proposal to authorize the new hosting is stuck for serial N.
+ * - Recover: Fully authorize a different PTP for serial N (e.g. change participant permission).
+ * - Restart OffPR proposing a new PTP on serial N+1.
+ *
+ * Contracts are archived and recreated throughout to demonstrate that regular business operation is
+ * unaffected, and it exercises the ACS import, which aborts if the snapshot would re-activate a
+ * contract the target has already seen archived.
+ */
+// TODO(#36184): Document in public OffPR documentation
+final class LsuOffPRInterleavedLsuWithProtoVersionChange
+    extends LsuOfflinePartyReplicationIntegrationTest {
+
+  "Logical synchronizer upgrade" should {
+    // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
+    "allow to recover a stuck party-to-participant proposal" onlyRunLessThan ProtocolVersion.dev in {
+      implicit env =>
+        import env.*
+
+        val fixture = Fixture(
+          currentPsid = env.daId,
+          upgradeTime = upgradeTime1,
+          oldSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer1), Seq(env.mediator1)),
+          newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
+          newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
+          oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
+          // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
+          newPV = ProtocolVersion.dev, // results in a topology proto version change (v30 -> v31)
+          newSerial = env.daId.serial.increment.value.toNonNegative,
+        )
+        val lsid = fixture.currentPsid.logical
+
+        val iou1 = IouSyntax.createIou(participant1)(alice, bob)
+
+        clue("Target proposes to host alice and disconnects") {
+          participant2.topology.party_to_participant_mappings.propose_delta(
+            party = alice,
+            adds = Seq(participant2.id -> Submission),
+            store = lsid,
+            requiresPartyToBeOnboarded = true,
+          )
+
+          participant2.synchronizers.disconnect_all()
+        }
+
+        clue(s"Perform LSU (transitioning to PV ${fixture.newPV})") {
+          performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
+        }
+
+        clue(
+          "Alice agrees to the new hosting, but the signatures are not merged across the two proto versions"
+        ) {
+          participant1.topology.party_to_participant_mappings.propose_delta(
+            party = alice,
+            adds = Seq(participant2.id -> Submission),
+            store = lsid,
+            requiresPartyToBeOnboarded = true,
+          )
+
+          // An operator would find something is wrong by seeing that the party ACS export aborts due to a timeout
+          // since the mapping never becomes effective. We simply assert on the PTP absence as a simulation.
+          always(durationOfSuccess = 1.seconds) {
+            participant1.topology.party_to_participant_mappings
+              .list(lsid, filterParty = alice.filterString)
+              .flatMap(_.item.participants.map(_.participantId)) should not contain participant2.id
+          }
+        }
+
+        IouSyntax.archive(participant1)(iou1, alice)
+        val iou2 = IouSyntax.createIou(participant1)(alice, bob)
+
+        // ----- Recovery starts
+
+        // Whether the target reconnects here or later is irrelevant
+        clue("Target reconnects and catches up to the new effective state") {
+          participant2.synchronizers.reconnect(daName)
+          eventually() {
+            participant2.synchronizers.is_connected(fixture.newPsid) shouldBe true
+          }
+        }
+
+        // Here, we change the ParticipantPermission; but we could change the confirmation threshold.
+        // The key point is to "consume" the current serial which has been used for the onboarding mapping.
+        clue("A different mapping change takes the current serial and voids the stuck proposal") {
+          Seq(Confirmation, Submission).foreach { permission =>
+            participant1.topology.party_to_participant_mappings.propose_delta(
+              party = alice,
+              adds = Seq(participant1.id -> permission),
+              store = lsid,
+            )
+
+            eventually() {
+              participant1.topology.party_to_participant_mappings
+                .list(lsid, filterParty = alice.filterString)
+                .flatMap(_.item.participants)
+                .find(_.participantId == participant1.id)
+                .map(_.permission) shouldBe Some(permission)
+            }
+          }
+        }
+
+        IouSyntax.archive(participant1)(iou2, alice)
+        val iou3 = IouSyntax.createIou(participant1)(alice, bob)
+
+        clue("Topology state is cleaned up on both sides, OffPR can restart") {
+          eventually() {
+            participant2.topology.party_to_participant_mappings
+              .list(lsid, filterParty = alice.filterString)
+              .flatMap(_.item.participants)
+              .find(_.participantId == participant1.id)
+              .map(_.permission) shouldBe Some(Submission)
+          }
+        }
+
+        clue("Target proposes to host alice again (v31 schema) and disconnects") {
+          participant2.topology.party_to_participant_mappings.propose_delta(
+            party = alice,
+            adds = Seq(participant2.id -> Submission),
+            store = lsid,
+            requiresPartyToBeOnboarded = true,
+          )
+
+          participant2.synchronizers.disconnect_all()
+        }
+
+        IouSyntax.archive(participant1)(iou3, alice)
+        val iou4 = IouSyntax.createIou(participant1)(alice, bob)
+
+        // Captured before the mapping becomes effective, for the flag clearance below.
+        val targetOffsetBeforeTopologyEffective = participant2.ledger_api.state.end()
+
+        val offsetBeforeRecovery = clue("Alice agrees again; the two proposals now merge") {
+          val offset = participant1.ledger_api.state.end()
+
+          participant1.topology.party_to_participant_mappings.propose_delta(
+            party = alice,
+            adds = Seq(participant2.id -> Submission),
+            store = lsid,
+            requiresPartyToBeOnboarded = true,
+          )
+
+          eventually() {
+            participant1.topology.party_to_participant_mappings
+              .list(lsid, filterParty = alice.filterString)
+              .flatMap(_.item.participants.map(_.participantId)) should contain(participant2.id)
+          }
+
+          offset
+        }
+
+        clue("ACS export, import and onboarding flag clearance") {
+          participant1.parties.export_party_acs(
+            party = alice,
+            synchronizerId = lsid,
+            targetParticipantId = participant2.id,
+            beginOffsetExclusive = offsetBeforeRecovery,
+            exportFilePath = acsSnapshotFile.path.toString,
+          )
+          repair.acs.read_from_file(acsSnapshotFile.path.toString) should have size 1
+
+          participant2.parties.import_party_acs(lsid, Some(alice), acsSnapshotFile.path.toString)
+          participant2.synchronizers.reconnect(daName)
+
+          eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = true)
+          participant1.health.ping(participant2)
+
+          awaitClearOnboardingFlag(alice, participant2, lsid, targetOffsetBeforeTopologyEffective)(
+            env
+          )
+          eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = false)
+
+          // Only the contract that is active at export time is replicated.
+          participant2.ledger_api.javaapi.state.acs
+            .await(IouSyntax.modelCompanion)(alice)
+            .id shouldBe iou4.id
+        }
     }
   }
 }

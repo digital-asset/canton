@@ -267,6 +267,7 @@ abstract class BaseSynchronizerRestartTest
         ComponentStatus(
           "sequencer-client",
           ComponentHealthState.Ok(),
+          labels = Map.empty,
         )
       )
     }

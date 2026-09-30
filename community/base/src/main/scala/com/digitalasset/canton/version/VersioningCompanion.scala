@@ -133,8 +133,8 @@ trait BaseVersioningCompanionF[
   )(bytes: OriginalByteString): ParsingResult[DeserializedValueClass] = for {
     proto <- ProtoConverter.protoParser(v1.UntypedVersionedMessage.parseFrom)(bytes)
     data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-    valueClass <- versioningTable
-      .deserializerFor(ProtoVersion(proto.version))(protocolVersionValidation, context, bytes, data)
+    deserializer <- versioningTable.deserializerFor(ProtoVersion(proto.version))
+    valueClass <- deserializer(protocolVersionValidation, context, bytes, data)
   } yield valueClass
 
   def fromByteString(expectedProtocolVersion: ProtocolVersion, context: Context)(
@@ -199,13 +199,13 @@ trait BaseVersioningCompanionF[
     for {
       proto <- ProtoConverter.protoParserArray(v1.UntypedVersionedMessage.parseFrom)(bytes)
       data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-      valueClass <- versioningTable
-        .deserializerFor(ProtoVersion(proto.version))(
-          ProtocolVersionValidation.NoValidation,
-          context,
-          ByteString.copyFrom(bytes),
-          data,
-        )
+      deserializer <- versioningTable.deserializerFor(ProtoVersion(proto.version))
+      valueClass <- deserializer(
+        ProtocolVersionValidation.NoValidation,
+        context,
+        ByteString.copyFrom(bytes),
+        data,
+      )
     } yield valueClass
 
   def fromTrustedByteArray(bytes: Array[Byte])(implicit
@@ -272,15 +272,16 @@ trait BaseVersioningCompanionF[
     def fromTrustedProtoVersioned(
         proto: VersionedMessage[DeserializedValueClass]
     ): ParsingResult[DeserializedValueClass] =
-      proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data")).flatMap {
-        bytes =>
-          versioningTable.deserializerFor(ProtoVersion(proto.version))(
-            ProtocolVersionValidation.NoValidation,
-            context,
-            bytes,
-            bytes,
-          )
-      }
+      for {
+        bytes <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+        deserializer <- versioningTable.deserializerFor(ProtoVersion(proto.version))
+        instance <- deserializer(
+          ProtocolVersionValidation.NoValidation,
+          context,
+          bytes,
+          bytes,
+        )
+      } yield instance
 
     try {
       v1.UntypedVersionedMessage

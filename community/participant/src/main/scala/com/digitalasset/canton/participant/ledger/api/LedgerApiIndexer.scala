@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import cats.data.EitherT
 import com.daml.ledger.resources.ResourceOwner
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -24,17 +25,11 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.indexer.ha.HaConfig
+import com.digitalasset.canton.platform.indexer.*
+import com.digitalasset.canton.platform.indexer.ha.{HaConfig, PollingCheckException}
 import com.digitalasset.canton.platform.indexer.parallel.{
   PostPublishData,
   ReassignmentOffsetPersistence,
-}
-import com.digitalasset.canton.platform.indexer.{
-  IndexerConfig,
-  IndexerParams,
-  IndexerQueueProxy,
-  IndexerState,
-  JdbcIndexer,
 }
 import com.digitalasset.canton.platform.store.cache.OnlyForTestingTransactionInMemoryStore
 import com.digitalasset.canton.platform.store.{DbSupport, LedgerApiContractStore}
@@ -56,6 +51,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   ShutdownInProgress,
 }
 import com.digitalasset.canton.util.{Mutex, PekkoUtil, StateChangedCallback}
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
@@ -136,6 +132,14 @@ object LedgerApiIndexer {
   }
 
   val healthComponentName: String = "ledger api indexer"
+
+  private val defaultLogLevelIsInfo: Throwable => Boolean = {
+    case s: StatusRuntimeException =>
+      DecodedCantonError.fromStatusRuntimeException(s).exists(_.isRetryable)
+    // PollingChecker errors will be rethrown on initialization, so there is no urgency to log them on WARN
+    case _: PollingCheckException => true
+    case _ => false
+  }
 
   def initialize(
       metrics: LedgerApiServerMetrics,
@@ -245,6 +249,7 @@ object LedgerApiIndexer {
           consumerFactory = normalIndexerCreateFunction,
           consumerName = "indexer",
           healthStateChanged = healthStatusHandler,
+          defaultLogLevelIsInfo = defaultLogLevelIsInfo,
         )
       }
       _ = initializationLogger.debug("Waiting for the indexer to initialize the database.")

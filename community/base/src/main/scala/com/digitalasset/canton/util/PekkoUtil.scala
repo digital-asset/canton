@@ -78,7 +78,7 @@ import org.apache.pekko.stream.{
 }
 import org.apache.pekko.{Done, NotUsed}
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import java.util.{Timer, TimerTask}
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
@@ -1488,6 +1488,7 @@ object PekkoUtil extends HasLoggerName {
       consumerFactory: Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[T]]],
       consumerName: String,
       healthStateChanged: StateChangedCallback,
+      defaultLogLevelIsInfo: Throwable => Boolean,
   ) extends RecoveringFutureQueue[T] {
 
     assert(maxBlockedOffer > 0)
@@ -1512,6 +1513,7 @@ object PekkoUtil extends HasLoggerName {
     private val timer: Timer = new Timer()
     private val shuttingDown: AtomicBoolean = new AtomicBoolean(false)
     private var shuttingDownTimerCancelled: Boolean = false
+    private val consecutiveFailuresWithoutProgress: AtomicInteger = new AtomicInteger(0)
     private val donePromise: Promise[Done] = Promise()
     private val firstSuccessfulConsumerInitializationPromise: Promise[Unit] = Promise()
     donePromise.future.onComplete(_ =>
@@ -1601,6 +1603,7 @@ object PekkoUtil extends HasLoggerName {
 
     private def commitProxy(consumerHealthStatus: AtomicReference[HealthStatus]): Commit = commit =>
       {
+        consecutiveFailuresWithoutProgress.set(0)
         val oldStatus = consumerHealthStatus.getAndSet(HealthStatus.healthy)
         if (oldStatus != HealthStatus.healthy) {
           healthStateChanged()
@@ -1648,7 +1651,9 @@ object PekkoUtil extends HasLoggerName {
               "Consumer initialized, but since shutdown already in progress, consumer shutdown initiated"
             )
             queueConsumer.futureQueue.shutdown()
-            queueConsumer.futureQueue.done.onComplete(consumerTerminated)(directEC)
+            queueConsumer.futureQueue.done.onComplete(consumerTerminated(_, consumerHealthStatus))(
+              directEC
+            )
           } else {
             logger.info("Consumer initialized")
             if (!haveUncommittedElements) { // If there are no outstanding uncommitted elements, we assume healthy, so idle indexer is healthy
@@ -1665,7 +1670,7 @@ object PekkoUtil extends HasLoggerName {
             )
             healthStateChanged()
             consumer.ifInitialized(
-              _.done.onComplete(consumerTerminated)(directEC)
+              _.done.onComplete(consumerTerminated(_, consumerHealthStatus))(directEC)
             )
           }
 
@@ -1682,8 +1687,10 @@ object PekkoUtil extends HasLoggerName {
             val logMessage =
               s"Consumer initialization failed (attempt #$attempt), retrying after $waitMillis millis"
             if (attempt > retryAttemptErrorThreshold) logger.error(logMessage, failure)
-            else if (attempt > retryAttemptWarnThreshold) logger.warn(logMessage, failure)
-            else logger.info(logMessage, failure)
+            else if (attempt <= retryAttemptWarnThreshold && defaultLogLevelIsInfo(failure))
+              logger.info(logMessage, failure)
+            else
+              logger.warn(logMessage, failure)
             consumer = Consumer.WaitingForRetry
             healthStateChanged()
             if (!shuttingDownTimerCancelled) {
@@ -1698,12 +1705,18 @@ object PekkoUtil extends HasLoggerName {
       }
     }
 
-    private def consumerTerminated(result: Try[Done]): Unit = blockingSynchronized {
+    private def consumerTerminated(
+        result: Try[Done],
+        healthStatus: AtomicReference[HealthStatus],
+    ): Unit = blockingSynchronized {
       result match {
         case Success(_) =>
           logger.info("Consumer successfully terminated")
-        case Failure(failure) =>
+        case Failure(failure)
+            if healthStatus.get() == HealthStatus.healthy && defaultLogLevelIsInfo(failure) =>
           logger.info("Consumer terminated with a failure", failure)
+        case Failure(failure) =>
+          logger.warn("Consumer terminated with a failure", failure)
       }
       if (shuttingDown.get()) {
         logger.info("Terminated (consumer terminated), shutdown complete")

@@ -13,6 +13,7 @@ import com.digitalasset.base.error.{
   Explanation,
   Resolution,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.{
   EarliestOffsetMetadataKey,
   LatestOffsetMetadataKey,
@@ -93,6 +94,30 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
       ) extends DamlErrorWithDefiniteAnswer(cause = "Update not found, or not visible.") {
         override def resources: Seq[(ErrorResource, String)] = Seq(
           (ErrorResource.TransactionHash, hash)
+        )
+      }
+    }
+
+    @Explanation(
+      "Record time is either before synchronizer connection was esablished or it was pruned already."
+    )
+    @Resolution(
+      "Make sure that record time was not pruned yet and that the connection from this participand node to this synchronizer was esablished before this record time."
+    )
+    object RecordTime
+        extends ErrorCode(
+          id = "RECORD_TIME_NOT_FOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+      final case class Reject(synchronizerId: SynchronizerId, recordTime: CantonTimestamp)(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause =
+              "Record time is either before synchronizer connection was esablished or it was pruned already"
+          ) {
+        override def resources: Seq[(ErrorResource, String)] = Seq(
+          (ErrorResource.SynchronizerId, synchronizerId.toProtoPrimitive),
+          (ErrorResource.RecordTime, recordTime.toString()),
         )
       }
     }
@@ -648,6 +673,34 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           cause =
             s"No record time found for synchronizer ids: ${synchronizerIds.view.map(_.toProtoPrimitive).mkString(", ")}"
         )
+  }
+
+  @Explanation(
+    "This rejection is given when a read request tries to access record time that was not observed yet for a particular synchronizer."
+  )
+  @Resolution(
+    "Either wait for participant to catch up with the requested synchronizer of request an earlier record time."
+  )
+  object RecordTimeNotObservedYet
+      extends ErrorCode(
+        id = "RECORD_TIME_NOT_OBSERVED_YET",
+        ErrorCategory.InvalidGivenCurrentSystemStateSeekAfterEnd,
+      ) {
+    final case class Reject(
+        synchronizerId: SynchronizerId,
+        recordTime: CantonTimestamp,
+        lastObservedTimeForSynchronizer: CantonTimestamp,
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The requested record time ($recordTime) is after the most recent observed update for this synchronizer ($lastObservedTimeForSynchronizer)"
+        ) {
+      override def resources: Seq[(ErrorResource, String)] = Seq(
+        ErrorResource.SynchronizerId -> synchronizerId.toProtoPrimitive,
+        ErrorResource.RecordTime -> recordTime.toString(),
+      )
+    }
   }
 
 }

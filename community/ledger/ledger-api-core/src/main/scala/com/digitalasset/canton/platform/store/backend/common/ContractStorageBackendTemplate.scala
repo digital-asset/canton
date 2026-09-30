@@ -8,7 +8,6 @@ import anorm.~
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.{ContractStorageBackend, PersistentEventType}
-import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 
@@ -17,7 +16,6 @@ import java.sql.Connection
 class ContractStorageBackendTemplate(
     queryStrategy: QueryStrategy,
     stringInterning: StringInterning,
-    ledgerEndCache: LedgerEndCache,
 ) extends ContractStorageBackend {
 
   override def activeContracts(internalContractIds: Seq[Long], beforeEventSeqId: Long)(
@@ -49,19 +47,20 @@ class ContractStorageBackendTemplate(
         .toMap
     }
 
-  override def lastActivations(synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+  override def lastActivations(
+      synchronizerContracts: Iterable[(SynchronizerId, Long)],
+      beforeOrAtEventSeqId: Long,
+  )(
       connection: Connection
   ): Map[(SynchronizerId, Long), Long] =
-    ledgerEndCache()
-      .map { ledgerEnd =>
-        synchronizerContracts.iterator.flatMap { case (synchronizerId, internalContractId) =>
-          val internedSynchronizerId = stringInterning.synchronizerId.internalize(synchronizerId)
-          SQL"""
+    synchronizerContracts.iterator.flatMap { case (synchronizerId, internalContractId) =>
+      val internedSynchronizerId = stringInterning.synchronizerId.internalize(synchronizerId)
+      SQL"""
           SELECT event_sequential_id
           FROM lapi_events_activate_contract as activate
           WHERE
             internal_contract_id = $internalContractId AND
-            event_sequential_id <= ${ledgerEnd.lastEventSeqId} AND
+            event_sequential_id <= $beforeOrAtEventSeqId AND
             EXISTS ( -- subquery for triggering (event_sequential_id) INCLUDE (synchronizer_id) index usage
               SELECT 1
               FROM lapi_events_activate_contract as activate2
@@ -71,11 +70,9 @@ class ContractStorageBackendTemplate(
             )
           ORDER BY event_sequential_id DESC
           LIMIT 1"""
-            .as(long("event_sequential_id").singleOpt)(connection)
-            .map((synchronizerId, internalContractId) -> _)
-        }.toMap
-      }
-      .getOrElse(Map.empty)
+        .as(long("event_sequential_id").singleOpt)(connection)
+        .map((synchronizerId, internalContractId) -> _)
+    }.toMap
 
   override def supportsBatchKeyStateLookups: Boolean = false
 

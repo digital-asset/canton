@@ -31,7 +31,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ListSet
 
-class TransactionViewTest
+final class TransactionViewTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext

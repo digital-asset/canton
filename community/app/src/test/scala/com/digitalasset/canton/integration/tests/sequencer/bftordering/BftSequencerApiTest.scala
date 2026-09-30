@@ -59,7 +59,6 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
       enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
-      disableAggregationRuleSizeCheckForTesting = true, // remove after PV34 is gone
       lsuConfig = SequencerLsuConfig(),
       enablePrevalidation = true,
     )
@@ -76,7 +75,6 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         BftBlockOrdererConfig(),
         PublicServerConfig(),
         BlockSequencerConfig(),
-        producePostOrderingTopologyTicks = false,
         health = None,
         storage,
         testedProtocolVersion,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright (c) 2023 Digital Asset (Switzerland) GmbH and/or its affiliates.
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
 # Proprietary code. All rights reserved.
 #
 
@@ -30,9 +30,25 @@ test-with-recording.sh "$@"
 # This relies on the result of `test-with-recording.sh`
 test-participant-replay.sh "$@"
 
+test-sequencer-catchup.sh "$@"
+
+test-mediator-replay.sh "$@"
+
+test-sequencer-replay.sh "$@"
+
+test-bong-benchmark.sh "$@"
+
+test-sync-disconnect-reconnect.sh "$@"
+
 echo
 echo "***** Deleting recordings..."
 rm -rf "$RECORDINGS_DIR"
 
+
+if [[ -f "${METRICS_BASE_DIR:-}/summary.json" ]]; then
+    echo
+    echo "***** Summary of Nightly performance tests"
+    render-metrics-table.py "${METRICS_BASE_DIR:-}/summary.json"
+fi
 
 

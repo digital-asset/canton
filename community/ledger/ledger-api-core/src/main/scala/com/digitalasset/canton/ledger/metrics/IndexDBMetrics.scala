@@ -572,6 +572,10 @@ class MainIndexDBMetrics(
     "last_record_time_before_or_at_synchronizer_offset"
   )
 
+  val highestOffsetBeforeOrFirstAtRecordTime: DatabaseMetrics = createDbMetrics(
+    "highest-offset-before-or-first-at-record-time"
+  )
+
   object translation {
     val getLfPackage: Timer = openTelemetryMetricsFactory.timer(inventory.getLfPackage.info)
   }

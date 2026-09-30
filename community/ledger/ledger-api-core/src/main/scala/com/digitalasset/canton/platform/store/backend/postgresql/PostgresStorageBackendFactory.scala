@@ -8,6 +8,7 @@ import com.digitalasset.canton.platform.store.backend.*
 import com.digitalasset.canton.platform.store.backend.common.*
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.daml.lf.data.Ref
 
 final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory)
     extends StorageBackendFactory
@@ -21,8 +22,12 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
   ): ParameterStorageBackend =
     new ParameterStorageBackendImpl(PostgresQueryStrategy, stringInterning)
 
-  override def createPartyStorageBackend(ledgerEndCache: LedgerEndCache): PartyStorageBackend =
-    new PartyStorageBackendTemplate(ledgerEndCache)
+  override def createPartyStorageBackend(
+      participantId: Ref.ParticipantId,
+      ledgerEndCache: LedgerEndCache,
+      stringInterning: StringInterning,
+  ): PartyStorageBackend =
+    new PartyStorageBackendTemplate(participantId, ledgerEndCache, stringInterning)
 
   override def createCompletionStorageBackend(
       stringInterning: StringInterning,
@@ -35,7 +40,7 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
       stringInterning: StringInterning,
       ledgerEndCache: LedgerEndCache,
   ): ContractStorageBackend =
-    new PostgresContractStorageBackend(stringInterning, ledgerEndCache)
+    new PostgresContractStorageBackend(stringInterning)
 
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,

@@ -22,6 +22,7 @@ import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp
 import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.grpc.stub.StreamObserver
@@ -77,6 +78,10 @@ class JsStateService(
       JsStateService.getLastPrunedOffsetsEndpoint,
       getLatestPrunedOffsets,
     ),
+    withServerLogic(
+      JsStateService.convertRecordTimeToOffset,
+      convertRecordTimeToOffset,
+    ),
   )
 
   private def getConnectedSynchronizers(
@@ -122,6 +127,24 @@ class JsStateService(
     _ =>
       stateServiceClient(callerContext.token())
         .getLatestPrunedOffsets(state_service.GetLatestPrunedOffsetsRequest())
+        .resultToRight
+  }
+
+  private def convertRecordTimeToOffset(
+      callerContext: CallerContext
+  ): TracedInput[(Timestamp, Option[String])] => Future[
+    Either[JsCantonError, state_service.ConvertRecordTimeToOffsetResponse]
+  ] = {
+    implicit val traceContext: TraceContext = callerContext.traceContext()
+
+    req =>
+      stateServiceClient(callerContext.token())
+        .convertRecordTimeToOffset(
+          state_service.ConvertRecordTimeToOffsetRequest(
+            Some(req.in._1),
+            req.in._2.getOrElse(""),
+          )
+        )
         .resultToRight
   }
 
@@ -232,6 +255,13 @@ object JsStateService extends DocumentationEndpoints {
     .out(jsonBody[state_service.GetLatestPrunedOffsetsResponse])
     .protoRef(state_service.StateServiceGrpc.METHOD_GET_LATEST_PRUNED_OFFSETS)
 
+  val convertRecordTimeToOffset = state.get
+    .in(sttp.tapir.stringToPath("convert-record-time-to-offset"))
+    .in(query[Timestamp]("record-time"))
+    .in(query[Option[String]]("synchronizer-id"))
+    .out(jsonBody[state_service.ConvertRecordTimeToOffsetResponse])
+    .protoRef(state_service.StateServiceGrpc.METHOD_CONVERT_RECORD_TIME_TO_OFFSET)
+
   override def documentation: Seq[AnyEndpoint] = Seq(
     activeContractsEndpoint,
     activeContractsListEndpoint,
@@ -240,6 +270,7 @@ object JsStateService extends DocumentationEndpoints {
     getConnectedSynchronizersEndpoint,
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,
+    convertRecordTimeToOffset,
   )
 }
 
@@ -324,7 +355,9 @@ object JsStateServiceCodecs {
   implicit val getLatestPrunedOffsetsResponseRW
       : Codec[state_service.GetLatestPrunedOffsetsResponse] =
     deriveRelaxedCodec
-
+  implicit val convertRecordTimeToOffsetResponseRW
+      : Codec[state_service.ConvertRecordTimeToOffsetResponse] =
+    deriveRelaxedCodec
   // Schema mappings are added to align generated tapir docs with a circe mapping of ADTs
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))

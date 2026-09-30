@@ -475,7 +475,7 @@ object TestSubmissionService {
     // enabled, `Engine.checkAllowedDeps` reads the allowed versions from the interpretation
     // config, not the engine config, so a stable-only config would reject a dev package.
     val effectiveInterpretationConfig = interpretationConfig.getOrElse(
-      if (enableLfDev) InterpretationConfig.Dev else InterpretationConfig.Default
+      if (enableLfDev) InterpretationConfig.Dev else InterpretationConfig.Stable
     )
 
     def participantNode: ParticipantNode = participant.underlying.value

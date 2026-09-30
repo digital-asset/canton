@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.nightly.sequencer
 import cats.syntax.option.*
 import com.daml.metrics.HistogramDefinition
 import com.daml.metrics.api.MetricQualification
-import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.testing.InMemoryMetricsFactory.InMemoryMeter
 import com.daml.metrics.api.testing.MetricValues
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
 import com.digitalasset.canton.concurrent.Threading
@@ -29,6 +29,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
+import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.ToxiproxyConfig
 import com.digitalasset.canton.integration.plugins.toxiproxy.{SequencerToPostgres, UseToxiproxy}
 import com.digitalasset.canton.integration.plugins.{
@@ -62,6 +63,7 @@ import org.scalatest.Assertion
 
 import java.time.Instant
 import scala.concurrent.duration.*
+import scala.util.chaining.*
 
 /** Usage:
   *
@@ -126,9 +128,17 @@ import scala.concurrent.duration.*
   *   - Wait for the sequencer to restart (you can see a new java process)
   *   - Attach a profiler to the new java process. Make sure you stop profiling before the process
   *     stops.
+  *
+  * Note: scripts/canton-testing/test-sequencer-catchup.sh - which is part of the nightly
+  * performance test runner - uses the following environment variables:
+  * {{{
+  * export NIGHTLY_PERF_RUN=1
+  * export CI=1
+  * }}}
   */
 class SequencerCatchUpPerformanceIntegrationTest
     extends BasePerformanceIntegrationTest
+    with NightlyPerformanceBase
     with SharedEnvironment
     with MetricValues
     with TrafficBalanceSupport {
@@ -260,6 +270,7 @@ class SequencerCatchUpPerformanceIntegrationTest
         numSequencers = 4,
         numMediators = 5,
       )
+      .pipe(performanceBenchmarkEnrichmentIfNightly)
       .withManualStart
       .withTeardown { _ =>
         toxiproxyPluginOpt.foreach { toxiproxyPlugin =>
@@ -333,6 +344,9 @@ class SequencerCatchUpPerformanceIntegrationTest
           )
       }
       .addConfigTransform(
+        _.focus(_.monitoring.metrics.cardinality).replace(PositiveInt.tryCreate(20_000))
+      )
+      .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.engine.enableAdditionalConsistencyChecks)
             .replace(false)
@@ -357,9 +371,20 @@ class SequencerCatchUpPerformanceIntegrationTest
   )
 
   def blockEventCount(sequencer: LocalSequencerReference): Long =
-    sequencer.underlying.value.sequencer.metrics.block.blockEvents.valuesWithContext.toList
-      .map(_._2)
-      .sum
+    sequencer.underlying.value.sequencer.metrics.block.blockEvents match {
+      // When using NoOpMetricsFactory in the PerformanceRunner, we get an InMemoryMeter here that can always sum the block event metrics.
+      // However, for other Meters such as OpenTelemetryMeter, we don't have such solution, so we fall back to zero.
+      // When NIGHTLY_PERF_RUN is set, we rely on CSV metric reporting, making a fallback to zero appropriate for this case.
+      // Although sequencer4 statistics are not collected directly, the nightly performance test doesn't deal with
+      // this specific metric and instead reports other metrics.
+      case meter: InMemoryMeter =>
+        meter.valuesWithContext.toList
+          .map(_._2)
+          .sum
+      case _ =>
+        // There is no block event count for non in memory meters so we fall back to 0!
+        0L
+    }
 
   "Test the speed of the sequencer catch-up" in { implicit env =>
     import env.*
@@ -377,13 +402,13 @@ class SequencerCatchUpPerformanceIntegrationTest
     val runnerP1 =
       new PerformanceRunner(
         p1Config,
-        _ => NoOpMetricsFactory,
+        testMetricsFactoryIfNightly(environment),
         loggerFactory.append("participant", "participant1"),
       )
     val runnerP2 =
       new PerformanceRunner(
         p2Config,
-        _ => NoOpMetricsFactory,
+        testMetricsFactoryIfNightly(environment),
         loggerFactory.append("participant", "participant2"),
       )
 
@@ -427,6 +452,17 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     runners.foreach(env.environment.addUserCloseable(_))
 
+    // the pre-allocated parties are used
+    val measurements =
+      startMeasuringPartyUpdatesIfNightly(
+        participants,
+        metricName = "canton.transactions-emitted",
+        preAllocatePartyMap = Map(
+          participant1 -> p1Config.localRoles.map(_.name),
+          participant2 -> p2Config.localRoles.map(_.name),
+        ),
+      )
+
     // Time of the test is controlled in the private vals of the class
     runners.foreach(_.startup().discard)
 
@@ -434,6 +470,7 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     if (!produceLoadAfterRestart) {
       runners.foreach(_.close())
+      measurements.foreach(_.close())
     }
 
     if (stopOtherNodesDuringCatchUp) {
@@ -512,6 +549,9 @@ class SequencerCatchUpPerformanceIntegrationTest
         // Circuit-breaker-related warn logs are allowed
         mayContain = Seq(
           _.warningMessage should include(
+            "Instrument daml.sequencer.block.events has exceeded the maximum allowed cardinality"
+          ),
+          _.warningMessage should include(
             "Sequencer is unhealthy, so disconnecting all members. Overloaded. Can't receive requests at the moment"
           ),
           _.warningMessage should include(
@@ -524,6 +564,7 @@ class SequencerCatchUpPerformanceIntegrationTest
 
     if (produceLoadAfterRestart) {
       runners.foreach(_.close())
+      measurements.foreach(_.close())
     }
   }
 

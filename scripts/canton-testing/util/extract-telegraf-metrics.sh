@@ -26,7 +26,12 @@ export TOP_PID=$$
 ### Helpers for accessing metrics JSON files
 
 # A metric report for a given TS will be the latest report between TS - TS_WINDOW and TS.
-TS_WINDOW=90
+IF_DURATION="${UPDATES_DURATION_IN_SECS:-90}"
+if [ "$IF_DURATION" -lt 90 ]; then
+  TS_WINDOW="$IF_DURATION"
+else
+  TS_WINDOW=90
+fi
 
 # Prefetch relevant metrics data so that we have to read the big metrics files only once.
 # shellcheck disable=SC2086
@@ -39,11 +44,22 @@ FILTERED_METRICS_DATA="$(jq --slurp "
   " $TELEGRAF_METRICS_FILES)"
 
 query-metrics() {
+  # If FILTERED_METRICS_DATA is empty array or null, default directly to 0
+  if [[ -z "$FILTERED_METRICS_DATA" || "$FILTERED_METRICS_DATA" == "[]" || "$FILTERED_METRICS_DATA" == "null" ]] \
+       && [[ "${KNOWN_MISSING_TELEGRAF_METRICS:-false}" == "true" ]]; then
+    echo "0"
+    return 0
+  fi
+
   RESULT="$(jq "$1" <<<"$FILTERED_METRICS_DATA")"
 
   if [[ $RESULT == "null" ]] || [[ -z $RESULT ]]; then
-    echo "Missing telegraf data. Query: $1" >&2
-    kill -s TERM "$TOP_PID"
+    if [[ "${KNOWN_MISSING_TELEGRAF_METRICS:-false}" == "true" ]]; then
+      echo "0"
+    else
+      echo "Missing telegraf data. Query: $1" >&2
+      kill -s TERM "$TOP_PID"
+    fi
   else
     echo "$RESULT"
   fi
@@ -54,9 +70,11 @@ resource-usage-at() {
   local LOWER_TS="$((UPPER_TS - TS_WINDOW))"
 
   query-metrics "
-    map(select($LOWER_TS <= .timestamp and .timestamp <= $UPPER_TS and $2 and .fields.$3 != null)) |
-    max_by(.timestamp) |
-    .fields.$3"
+    map(select($LOWER_TS <= .timestamp and .timestamp <= $UPPER_TS and $2 and (.fields.${3}_mean != null or .fields.$3 != null))) |
+    if length == 0 then null else
+      max_by(.timestamp) |
+      (.fields.${3}_mean // .fields.$3)
+    end"
 }
 
 summed-resource-usage-at() {
@@ -65,10 +83,12 @@ summed-resource-usage-at() {
 
   query-metrics "
     map(select($LOWER_TS <= .timestamp and .timestamp <= $UPPER_TS and $2 and .fields.$3 != null)) |
-    group_by(.timestamp) |
-    max_by(.[0].timestamp) |
-    map(.fields.$3) |
-    add"
+    if length == 0 then null else
+      group_by(.timestamp) |
+      max_by(.[0].timestamp) |
+      map(.fields.$3) |
+      add
+    end"
 }
 
 ### Disk usage per transaction
@@ -161,7 +181,7 @@ EOI
 ### CPU
 
 cpu-usage-at() {
-  resource-usage-at "$1" '.name == "cpu" and .tags.cpu == "cpu-total"' usage_user_mean
+  resource-usage-at "$1" '.name == "cpu" and .tags.cpu == "cpu-total"' usage_user
 }
 
 CPU_USAGE="$(cpu-usage-at "$LATE_TS")"

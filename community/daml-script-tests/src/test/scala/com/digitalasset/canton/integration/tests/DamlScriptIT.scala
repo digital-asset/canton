@@ -28,8 +28,10 @@ import org.scalatest.{Args, Assertion, BeforeAndAfterAll, Status}
 import java.nio.file.*
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
-abstract class DamlScriptIT(langVersion: LanguageVersion)
-    extends CommunityIntegrationTest
+abstract class DamlScriptIT(
+    langVersion: LanguageVersion,
+    enableExperimentalExecutionConductor: Boolean = false,
+) extends CommunityIntegrationTest
     with SharedEnvironment
     with BeforeAndAfterAll {
   self: CantonEnvironmentSetup =>
@@ -247,9 +249,14 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
     ConfigTransforms.updateAllParticipantConfigs_(ConfigTransforms.useTestingTimeService)
 
   private lazy val maybeEnableLfDev: Seq[ConfigTransform] =
-    if (enableLfDev)
-      ConfigTransforms.enableDevVersionSupport
-    else Nil
+    if (enableLfDev) ConfigTransforms.enableDevVersionSupport
+    else Seq.empty
+
+  private lazy val SetExecutionMode: Seq[ConfigTransform] =
+    if (enableExperimentalExecutionConductor)
+      ConfigTransforms.enableExperimentalExecutionConductor
+    else
+      Seq.empty
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -257,6 +264,7 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
       .addConfigTransforms(useTestingTimeService)
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransforms(maybeEnableLfDev*)
+      .addConfigTransforms(SetExecutionMode*)
       .withSetup { env =>
         import env.*
 
@@ -649,7 +657,14 @@ class DamlScriptPV35LF23IT extends DamlScriptPV35LF23ITBase {
   doRunTests(scriptIdsToTest)
 }
 
-class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
+class DamlScriptUpdPVDevLFDevIT
+    extends DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor = false)
+class DamlScriptCmdPVDevLFDevIT
+    extends DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor = true)
+
+abstract class DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor: Boolean)
+    extends DamlScriptIT(LanguageVersion.v2_dev, enableExperimentalExecutionConductor) {
+
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 

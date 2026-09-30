@@ -9,6 +9,12 @@ on:
       include_only_requires_external_kms_tests:
         default: false
         type: boolean
+      job_name:
+        default: crash_recovery_test
+        type: string
+      protocol_version:
+        required: true
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: false
@@ -57,7 +63,7 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/utils/resolve_previous_artifact_run
         with:
-          artifact-name: crash_recovery_test-timings-latest
+          artifact-name: ${{ inputs.job_name }}-timings-latest
 
   crash_recovery_test:
     name: Crash Recovery Test (shard ${{ matrix.shard }})
@@ -97,10 +103,18 @@ jobs:
         with:
           shard-index: ${{ matrix.shard }}
 
+      - name: Set Canton Protocol Version
+        env:
+          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+        run: |
+          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-artifact-name: ${{ inputs.job_name }}-timings-latest
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
           previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
@@ -120,6 +134,7 @@ jobs:
           succeed_on_error: 'false'
           test_file: test-full-class-names.log
           timings_file: ${{ github.job }}/.timings/timings.json
+          job_name: ${{ inputs.job_name }}
 
       - name: Stop Postgres container
         if: always()
@@ -134,6 +149,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: crash_recovery_test
+      job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
-      protocol_version: ""
+      protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

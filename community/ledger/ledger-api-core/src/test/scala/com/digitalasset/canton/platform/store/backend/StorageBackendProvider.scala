@@ -17,6 +17,7 @@ import com.digitalasset.canton.platform.store.backend.postgresql.PostgresStorage
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.platform.store.testing.postgresql.PostgresAroundAll
+import com.digitalasset.daml.lf.data.Ref
 import org.mockito.MockitoSugar.mock
 import org.scalatest.Suite
 
@@ -69,6 +70,8 @@ trait StorageBackendProvider {
     updateLedgerEndCache(connection)
   }
 
+  protected val participantId: Ref.ParticipantId = Ref.ParticipantId.assertFromString("participant")
+
   protected final def updateLedgerEndCache(
       connection: Connection
   ): Unit =
@@ -84,6 +87,7 @@ trait StorageBackendProviderPostgres
   this: Suite =>
   override protected def jdbcUrl: String = postgresDatabase.url
   override protected val backend: TestBackend = TestBackend(
+    participantId,
     PostgresStorageBackendFactory(loggerFactory),
     loggerFactory,
   )
@@ -93,7 +97,8 @@ trait StorageBackendProviderH2 extends StorageBackendProvider with BaseTest { th
   override protected def jdbcUrl: String = "jdbc:h2:mem:storage_backend_provider;db_close_delay=-1"
   override protected def lockIdSeed: Int =
     throw new UnsupportedOperationException //  DB Locking is not supported for H2
-  override protected val backend: TestBackend = TestBackend(H2StorageBackendFactory, loggerFactory)
+  override protected val backend: TestBackend =
+    TestBackend(participantId, H2StorageBackendFactory, loggerFactory)
 }
 
 final case class TestBackend(
@@ -119,6 +124,7 @@ final case class TestBackend(
 
 object TestBackend {
   def apply(
+      participantId: Ref.ParticipantId,
       storageBackendFactory: StorageBackendFactory,
       loggerFactory: NamedLoggerFactory,
   ): TestBackend = {
@@ -129,7 +135,11 @@ object TestBackend {
       ingestion = storageBackendFactory.createIngestionStorageBackend,
       parameter = storageBackendFactory.createParameterStorageBackend(stringInterning),
       pruningOffsetService = mock[PruningOffsetService],
-      party = storageBackendFactory.createPartyStorageBackend(ledgerEndCache),
+      party = storageBackendFactory.createPartyStorageBackend(
+        participantId,
+        ledgerEndCache,
+        stringInterning,
+      ),
       completion = storageBackendFactory
         .createCompletionStorageBackend(stringInterning, ledgerEndCache, loggerFactory),
       contract =

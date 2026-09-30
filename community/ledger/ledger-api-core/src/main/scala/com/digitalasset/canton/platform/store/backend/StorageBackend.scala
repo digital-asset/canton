@@ -304,7 +304,10 @@ trait ContractStorageBackend {
       connection: Connection
   ): Map[Long, Boolean]
 
-  def lastActivations(synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+  def lastActivations(
+      synchronizerContracts: Iterable[(SynchronizerId, Long)],
+      beforeOrAtEventSeqId: Long,
+  )(
       connection: Connection
   ): Map[(SynchronizerId, Long), Long]
 
@@ -482,6 +485,11 @@ trait EventStorageBackend {
       beforeOrAtRecordTimeInclusive: Timestamp,
       beforeOrAtLedgerEndOffsetInclusive: Offset,
   )(connection: Connection)(implicit traceContext: TraceContext): Option[SynchronizerOffset]
+
+  def lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+      synchronizerId: SynchronizerId,
+      beforeOrAtRecordTime: Timestamp,
+  )(connection: Connection): Option[Offset]
 
   def lastRecordTimeBeforeOrAtSynchronizerOffset(
       synchronizerId: SynchronizerId,

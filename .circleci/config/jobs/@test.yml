@@ -2,7 +2,6 @@ test:
   parameters:
     protocol_version:
       type: string
-      default: ""
     override_java_version_for_tests:
       type: string
       default: ""
@@ -14,13 +13,11 @@ test:
     - run_ordinary_tests:
         exclude_unstable_tests: true
         override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-        collect_postgres_query_stats: true
 
 external_parties_test:
   parameters:
     protocol_version:
       type: string
-      default: ""
     override_java_version_for_tests:
       type: string
       default: ""
@@ -45,7 +42,6 @@ variations_test:
       default: ""
       type: string
     protocol_version:
-      default: ""
       type: string
   steps:
     - checkout:
@@ -69,6 +65,7 @@ postgres_conformance_test:
   executor: canton-xlarge-docker-with-postgres<<parameters.postgres_version>>
   parallelism: 12
   steps:
+    - allow_automatic_protocol_version
     - run_db_tests:
         db_name: Postgres
         exclude_unstable_tests: true
@@ -80,7 +77,6 @@ stability_test:
       default: true
     protocol_version:
       type: string
-      default: ""
   executor: canton-xlarge-docker-with-postgres
   parallelism: 72 # The number of test runs. Increase to make the test more "aggressive".
   # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
@@ -122,7 +118,6 @@ crash_recovery_test:
   parameters:
     protocol_version:
       type: string
-      default: ""
   steps:
     - run_crash_recovery_tests:
         exclude_unstable_tests: true
@@ -144,6 +139,8 @@ stability_crash_recovery_test:
     succeed_on_error:
       type: boolean
       default: true
+    protocol_version:
+      type: string
   executor: canton-xlarge-docker-with-postgres
   parallelism: 16 # The number of test runs. Increase to make the test more "aggressive".
   # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
@@ -153,6 +150,7 @@ stability_crash_recovery_test:
         filter: *crash_recovery_filter
         num_test_buckets: "4"
         succeed_on_error: << parameters.succeed_on_error >>
+        protocol_version: << parameters.protocol_version >>
 
 stability_crash_recovery_test_alerting:
   executor: canton-small-docker
@@ -171,6 +169,7 @@ benchmark:
         name: Set Canton log level to WARN
         command: |
           echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
+    - allow_automatic_protocol_version
     - run_tests:
         command: &default_test_command
           "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
@@ -199,6 +198,7 @@ release_test:
         location: "community/mock-kms-driver/target/scala-2.13"
     - restore_packaged_release:
         location: "community/app/target/release"
+    - allow_automatic_protocol_version
     - run_tests:
         command: "\"testOnly com.digitalasset.canton.integration.tests.release* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: ""
@@ -231,6 +231,7 @@ protocol_continuity_test_all:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 12 # Should be the same as num_test_buckets below, as we want to run every test once.
   steps:
+    - allow_automatic_protocol_version
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity |
@@ -239,10 +240,15 @@ protocol_continuity_test_all:
         num_parallel_tasks: "1"
         timeout: "40m"
 
-ledger_api_compatibility_tests:
+ledger_api_compatibility_test:
   executor: canton-xlarge-docker-with-postgres
+  parameters:
+    protocol_version:
+      type: string
   parallelism: 5 # Should be the same as num_test_buckets below, as we want to run every test once.
   steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity\\.api"
@@ -254,6 +260,7 @@ protocol_continuity_test_latest:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 2 # Should be the same as num_test_buckets below, as we want to run every test once.
   steps:
+    - allow_automatic_protocol_version
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity.\\latest"
@@ -263,7 +270,12 @@ protocol_continuity_test_latest:
 
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
@@ -274,8 +286,13 @@ nightly_integration_test:
 
 nightly_integration_test_with_session_keys:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - enable_session_signing_keys
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly |
@@ -306,11 +323,16 @@ nightly_integration_test_sequencer_only:
 
 nightly_integration_test_bftordering_only:
   executor: canton-xlarge-docker
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - run:
         name: Set Canton log level to WARN
         command: |
           echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
@@ -323,6 +345,7 @@ nightly_integration_test_bftordering_only:
 nightly_test_upgrades_matrix_and_check:
   executor: canton-xlarge-docker-with-postgres
   steps:
+    - allow_automatic_protocol_version
     - run_tests:
         command: "\"daml-lf-upgrade-check-test / Test / test\""
         timeout: "10m"
@@ -340,8 +363,13 @@ nightly_test_upgrades_matrix_and_check:
 
 model_based_external_parties_test:
   executor: canton-xlarge-docker-with-postgres
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - set_external_parties
+    - set_canton_protocol_version:
+      protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: "cat" # cat acts as identity filter
@@ -354,7 +382,12 @@ model_based_external_parties_test:
 
 model_based_test:
   executor: canton-xlarge-docker-with-postgres
+  parameters:
+    protocol_version:
+      type: string
   steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: "cat" # cat acts as identity filter
@@ -497,6 +530,9 @@ benchmark_transaction_snapshot:
 
 toxiproxy_test_fast:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - run_tests:
         command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\""
@@ -506,6 +542,9 @@ toxiproxy_test_fast:
 
 toxiproxy_test_slow:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - run_tests:
         command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\""
@@ -518,6 +557,9 @@ toxiproxy_test_slow:
 
 unstable_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
     - run_tests:
         command: "dumpClassPath \
@@ -533,7 +575,12 @@ unstable_test:
 
 unstable_test_slow:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parameters:
+    protocol_version:
+      type: string
   steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: "dumpClassPath \"testOnly * -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest\""
         filter: "cat" # cat acts as identity filter
@@ -563,6 +610,7 @@ test_performance_runner:
     - checkout_and_restore_caches
     - attach_workspace:
         at: /tmp/workspace
+    - allow_automatic_protocol_version
     - run:
         name: Run performance runner
         command: |
@@ -699,7 +747,6 @@ test_flake_fix_many_times:
       type: string
     protocol_version:
       type: string
-      default: ""
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   parallelism: << parameters.parallel_runners >>
   steps:
@@ -723,7 +770,6 @@ topology_chaos_test:
       type: integer
     protocol_version:
       type: string
-      default: ""
   executor: canton-xlarge-docker-with-postgres
   parallelism: << parameters.test_repetitions >>
   steps:
@@ -738,6 +784,7 @@ test_ping_windows:
   steps:
     - attach_workspace:
         at: workspace
+    - allow_automatic_protocol_version
     - run:
         name: Run ping
         command: |
@@ -753,6 +800,7 @@ test_ping_arm:
     - checkout
     - attach_workspace:
         at: workspace
+    - allow_automatic_protocol_version
     - run:
         name: Run ping
         command: |

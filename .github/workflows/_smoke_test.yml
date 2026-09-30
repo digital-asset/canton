@@ -45,6 +45,14 @@ jobs:
         with:
           shard-index: 0
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Run smoke tests
         uses: ./.github/actions/test/run_tests
         with:

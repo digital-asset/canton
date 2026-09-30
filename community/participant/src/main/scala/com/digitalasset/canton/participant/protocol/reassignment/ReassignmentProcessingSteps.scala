@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
-import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
@@ -495,9 +494,12 @@ private[reassignment] trait ReassignmentProcessingSteps[
             LocalRejectError.MalformedRejects.MalformedRequest
               .Reject(err.message)
           )
+
           val modelConformanceRejection: Seq[ModelConformance.Reject] =
-            Seq(commonContractAuthenticationResult, reassignmentContractAuthenticationResult)
-              .flatMap(_.swap.toOption)
+            Seq(
+              commonContractAuthenticationResult.swap.toOption,
+              validationResult.commonValidationResult.packageVettingResult,
+            ).flatten
               .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
 
           val submitterCheckRejection = validationResult.commonValidationResult.submitterCheckResult
@@ -508,12 +510,14 @@ private[reassignment] trait ReassignmentProcessingSteps[
               LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
             )
 
-          val reassigningParticipantResult = validationResult.reassigningParticipantValidationResult
+          val reassigningErrors =
+            validationResult.reassigningParticipantValidationResult.errors ++ reassignmentContractAuthenticationResult.swap.toOption
 
           val (abstainErrors, rejectingReassignmentErrors) =
-            if (reassigningParticipantResult.isAbstain)
-              (reassigningParticipantResult.errors, Seq.empty)
-            else (Seq.empty, reassigningParticipantResult.errors)
+            if (validationResult.reassigningParticipantValidationResult.isAbstain)
+              (reassigningErrors, Seq.empty)
+            else
+              (Seq.empty, reassigningErrors)
 
           val failedValidationRejection =
             rejectingReassignmentErrors
@@ -597,6 +601,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
   /** During phase 7, the validations that should be checked are the validations that can be done on
     * all participants, whether reassigning or non-reassigning participants. These checks include:
     *   - Contract authentication check.
+    *   - Target package vetting check.
     *   - Validation of the signature of the submitting participant.
     *   - Checks related to the submitter party:
     *     - Is the submitter a stakeholder?
@@ -613,13 +618,9 @@ private[reassignment] trait ReassignmentProcessingSteps[
       commonValidationResult: ReassignmentValidationResult.CommonValidationResult
   ): FutureUnlessShutdown[Option[LocalRejectError]] =
     commonValidationResult.contractAuthenticationResultF.value.map { contractAuthenticationResult =>
-      val modelConformanceRejection =
-        contractAuthenticationResult
-          .leftMap(error =>
-            LocalRejectError.MalformedRejects.ModelConformance.Reject(error.toString)
-          )
-          .swap
-          .toOption
+      val modelConformanceRejection = contractAuthenticationResult.swap.toOption
+        .orElse(commonValidationResult.packageVettingResult)
+        .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
 
       val authenticationRejection =
         commonValidationResult.participantSignatureVerificationResult

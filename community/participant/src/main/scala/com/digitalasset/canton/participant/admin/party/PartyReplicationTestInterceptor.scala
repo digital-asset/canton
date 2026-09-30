@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor.*
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.protocol.party.SourceParticipantStore
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -26,7 +27,7 @@ trait PartyReplicationTestInterceptor {
     * @return
     *   Proceed to execute as normal or Wait to do nothing.
     */
-  def onTargetParticipantProgress(progress: PartyReplicationStatus.AcsReplicationProgress)(implicit
+  def onTargetParticipantProgress(progress: AcsReplicationStatus.AcsReplicationProgress)(implicit
       traceContext: TraceContext
   ): ProceedOrWait = Proceed
 }

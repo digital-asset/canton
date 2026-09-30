@@ -246,15 +246,6 @@ object DbDto {
       builder.addSynchronizerId(synchronizer_id)
   }
 
-  final case class PartyEntry(
-      ledger_offset: Long,
-      party: Option[Party],
-      is_local: Option[Boolean],
-  ) extends DbDto {
-    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
-      party.foreach(builder.addParty)
-  }
-
   final case class CommandCompletion(
       completion_offset: Long,
       record_time: Long,

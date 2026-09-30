@@ -35,7 +35,24 @@ NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
 NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
 # Nightly jobs that keep a historical name instead of the `nightly_` prefix. Matched
 # on the job name (CIRCLE_JOB / GITHUB_JOB), so keep in sync across a GHA migration.
-NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset({"toxiproxy_test_slow"})
+NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset(
+    {
+        "toxiproxy_test_slow",
+        "external_parties_test",
+        "test_with_java17",
+        "test_protocol_version_37",
+        "protocol_continuity_test_all",
+        "crash_recovery_test_35",
+        "crash_recovery_test_37",
+        "postgres_conformance_test_14",
+        "postgres_conformance_test_15",
+        "postgres_conformance_test_16",
+        "postgres_conformance_test_18",
+        "benchmark",
+        "topology_chaos_test",
+        "stability_crash_recovery_test",
+    }
+)
 
 milestone = "Flaky Tests"  # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN"  # https://github.com/orgs/DACH-NY/projects/38/
@@ -633,7 +650,19 @@ def test_is_nightly_job():
     assert is_nightly_job("nightly_integration_test")
     assert is_nightly_job("nightly_test_upgrades_matrix")
     assert is_nightly_job("toxiproxy_test_slow")  # nightly, keeps its historical name
-    assert not is_nightly_job("test_with_java17")
+    assert is_nightly_job("external_parties_test")  # nightly, keeps its historical name
+    assert is_nightly_job("test_with_java17")  # nightly, keeps its historical name
+    assert is_nightly_job("test_protocol_version_37")  # nightly, keeps its historical name
+    assert is_nightly_job("protocol_continuity_test_all")  # nightly, keeps its historical name
+    assert is_nightly_job("crash_recovery_test_35")  # nightly, keeps its historical name
+    assert is_nightly_job("crash_recovery_test_37")  # nightly, keeps its historical name
+    assert is_nightly_job("postgres_conformance_test_14")  # nightly, keeps its historical name
+    assert is_nightly_job("postgres_conformance_test_15")  # nightly, keeps its historical name
+    assert is_nightly_job("postgres_conformance_test_16")  # nightly, keeps its historical name
+    assert is_nightly_job("postgres_conformance_test_18")  # nightly, keeps its historical name
+    assert is_nightly_job("benchmark")  # nightly, keeps its historical name
+    assert is_nightly_job("topology_chaos_test")  # nightly, keeps its historical name
+    assert is_nightly_job("stability_crash_recovery_test")  # nightly, keeps its historical name
     assert not is_nightly_job("toxiproxy_test_fast")  # runs per-commit, not nightly
     assert not is_nightly_job("unstable_test")  # intentionally unstable, excluded
     assert not is_nightly_job("unstable_test_slow")  # intentionally unstable, excluded

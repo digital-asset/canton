@@ -30,6 +30,9 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
   private lazy val cantonShouldStartFlags =
     s"--verbose --no-tty --config $cacheTurnOff --bootstrap $resourceDir/scripts/bootstrap.canton"
 
+  private lazy val deadlockRegexFilter =
+    "WARN  c\\.d\\.c\\.s\\.SequencerAggregatorPekko:(.*) is now in state Failed\\(Sequencer subscriptions have diverged and cannot reach the threshold (.*) for synchronizer (.*) any more\\.\\)\\. (.*)"
+
   "Calling Canton" should {
 
     "print out the help message when using the --help flag" in { processLogger =>
@@ -74,7 +77,12 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
 
     "successfully start canton sandbox" in { processLogger =>
       s"$cantonBin sandbox --exit-after-bootstrap" ! processLogger
-      checkOutput(processLogger, shouldContain = Seq("Canton sandbox is ready"))
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("Canton sandbox is ready"),
+        // --exit-after-bootstrap shuts down immediately after running the scripts, which can cause deadlocks
+        additionalRegexFilters = Seq(deadlockRegexFilter),
+      )
     }
 
     "successfully start canton sandbox on bespoke ports" in { processLogger =>
@@ -94,7 +102,12 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
       val sandboxLogName = "log/new-sandbox.log"
       Process(s"rm -f $sandboxLogName", Some(new java.io.File(cantonDir))) !;
       s"$cantonBin sandbox --exit-after-bootstrap $portsArgString --log-file-name $sandboxLogName" ! processLogger
-      checkOutput(processLogger, Seq("Canton sandbox is ready"))
+      checkOutput(
+        processLogger,
+        Seq("Canton sandbox is ready"),
+        // --exit-after-bootstrap shuts down immediately after running the scripts, which can cause deadlocks
+        additionalRegexFilters = Seq(deadlockRegexFilter),
+      )
       val logFile = File(sandboxLogName)
       assert(logFile.exists)
       val contents = logFile.contentAsString

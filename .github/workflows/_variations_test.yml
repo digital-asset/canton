@@ -18,7 +18,7 @@ on:
         default: ""
         type: string
       protocol_version:
-        default: ""
+        required: true
         type: string
       runner:
         description: GitHub Actions runner label
@@ -145,7 +145,6 @@ jobs:
           shard-index: ${{ matrix.shard }}
 
       - name: Set Canton Protocol Version
-        if: ${{ inputs.protocol_version != '' }}
         env:
           CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
         run: |

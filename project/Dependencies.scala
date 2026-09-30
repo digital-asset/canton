@@ -41,7 +41,7 @@ object Dependencies {
   lazy val ammonite_version = "3.0.9"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.54.14"
+  lazy val aws_version = "2.55.2"
   lazy val better_files_version = "3.9.2"
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
@@ -67,7 +67,7 @@ object Dependencies {
   lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "3.0.0"
   lazy val magnolia_version = "1.1.10"
-  lazy val magnolifyScalacheck_version = "0.6.2"
+  lazy val magnolifyScalacheck_version = "0.9.8"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.3.0"
@@ -81,10 +81,10 @@ object Dependencies {
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
-  lazy val scaffeine_version = "5.2.1"
+  lazy val scaffeine_version = "5.3.0"
   lazy val scala_collections_contrib_version = "0.2.2"
   lazy val scala_csv_version = "2.0.0"
-  lazy val scala_logging_version = "3.9.5"
+  lazy val scala_logging_version = "3.9.6"
   lazy val scalacheck_version = "1.15.4"
   lazy val scalafx_version = "17.0.1-R26"
   lazy val scalafx_all_version = "17-ea+8"
@@ -356,7 +356,9 @@ object Dependencies {
   lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
 
   lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
-  lazy val protoc_gen_grpc_java = "io.grpc" % "protoc-gen-grpc-java" % "1.60.2"
+  // The codegen plugin generates stubs against io.grpc classes, so it tracks the grpc runtime
+  // rather than carrying a pin of its own.
+  lazy val protoc_gen_grpc_java = "io.grpc" % "protoc-gen-grpc-java" % grpc_api.revision
 
   // We prevent library conflicts that new tapir creates / some tests fail
   val tapirExclusions = Seq(

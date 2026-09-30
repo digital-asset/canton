@@ -5,13 +5,13 @@ package com.digitalasset.canton.participant.scheduler
 
 import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.functorFilter.*
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{Offset, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
-import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.LsuSource
+import com.digitalasset.canton.participant.store.{AcsDigestStore, SynchronizerConnectionConfigStore}
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.store.ChunkPurgeable
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -68,43 +68,83 @@ class PostLsuPurgeableStoresComputation(
       predecessorState <- persistentStates.get(psid).toList
     } yield predecessorState -> synchronizerPredecessor
 
-    // For each predecessor synchronizer, we check if the latest ACS digest checkpoint is after the upgrade time
     MonadUtil
       .sequentialTraverse(filteredCandidates) { case (predecessorState, synchronizerPredecessor) =>
-        if (acsDigestProcessorEnabled) {
-          logger.debug(
-            s"Checking if ACS digest processor has caught up for predecessor synchronizer ${predecessorState.psid}"
+        for {
+          acsCommitmentsPastUpgradeTime <- acsCommitmentsChecks(
+            predecessorState.acsDigestStore,
+            synchronizerPredecessor,
           )
-          val acsDigestCheckpoint = predecessorState.acsDigestStore.latestCheckpointUpTo(
-            Offset.MaxValue,
-            allCheckpointsFilter,
-          )
-
-          acsDigestCheckpoint.map { checkpointO =>
-            logger.debug(
-              s"ACS digest processor latest checkpoint: $acsDigestCheckpoint"
+        } yield {
+          if (
+            acsCommitmentsPastUpgradeTime && isCleanSynchronizerIndexAfterUpgradeTime(
+              synchronizerPredecessor
             )
-            checkpointO.fold(Seq.empty[ChunkPurgeable]) { checkpoint =>
-              if (checkpoint.timepoint.recordTime > synchronizerPredecessor.upgradeTime) {
-                logger.debug(
-                  s"ACS digest processor has progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}, stores are safe to be purged"
-                )
-                predecessorState.purgeableStores
-              } else {
-                logger.debug(
-                  s"ACS digest processor has not yet progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}"
-                )
-                Seq.empty[ChunkPurgeable]
-              }
-            }
-          }
-        } else {
-          logger.debug(
-            s"Not considering ACS digest processor for store pruging as it is disabled"
           )
-          FutureUnlessShutdown.pure(predecessorState.purgeableStores)
+            predecessorState.purgeableStores
+          else
+            Seq.empty
         }
       }
       .map(_.flatten)
   }
+
+  /** Returns true if the stores of the predecessor can be pruned from the point of view of crash
+    * recovery/clean synchronizer index.
+    *
+    * Note that this currently ensures that processing of the offboarding events by the reassignment
+    * store is completed before we purge the related topology.
+    */
+  // TODO(#23636) Consider removing this
+  private def isCleanSynchronizerIndexAfterUpgradeTime(
+      synchronizerPredecessor: SynchronizerPredecessor
+  ): Boolean = {
+    val cleanSynchronizerIndex = syncPersistentStateManager.ledgerApiStore.value
+      .cleanSynchronizerIndex(synchronizerPredecessor.psid.logical)
+
+    cleanSynchronizerIndex.map(_.recordTime).fold(false)(_ >= synchronizerPredecessor.upgradeTime)
+  }
+
+  /** Returns true if the stores of the predecessor can be pruned from the point of view of ACS
+    * commitments processing.
+    */
+  private def acsCommitmentsChecks(
+      acsDigestStore: AcsDigestStore,
+      synchronizerPredecessor: SynchronizerPredecessor,
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[Boolean] =
+    // Check if the latest ACS digest checkpoint is after the upgrade time
+    if (acsDigestProcessorEnabled) {
+      logger.debug(
+        s"Checking if ACS digest processor has caught up for predecessor synchronizer ${synchronizerPredecessor.psid}"
+      )
+      val acsDigestCheckpoint = acsDigestStore.latestCheckpointUpTo(
+        Offset.MaxValue,
+        allCheckpointsFilter,
+      )
+
+      acsDigestCheckpoint.map { checkpointO =>
+        logger.debug(
+          s"ACS digest processor latest checkpoint: $acsDigestCheckpoint"
+        )
+        checkpointO.fold(false) { checkpoint =>
+          if (checkpoint.timepoint.recordTime > synchronizerPredecessor.upgradeTime) {
+            logger.debug(
+              s"ACS digest processor has progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}, stores are safe to be purged"
+            )
+            true
+          } else {
+            logger.debug(
+              s"ACS digest processor has not yet progressed beyond upgrade time ${synchronizerPredecessor.upgradeTime}) for predecessor ${synchronizerPredecessor.psid}"
+            )
+            false
+          }
+        }
+      }
+    } else {
+      logger.debug(s"Not considering ACS digest processor for store purging as it is disabled")
+      FutureUnlessShutdown.pure(true)
+    }
 }

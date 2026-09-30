@@ -9,6 +9,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
   PaginationInput,
 }
+import com.digitalasset.canton.platform.store.interning.StringInterningView
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,45 +43,49 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
   it should "reset everything when using resetAll" in {
     val dtos: Vector[DbDto] = Vector(
-      // 1: party allocation
-      Seq(dtoPartyEntry(offset(1))),
-      // 2: transaction with create node
+      // 1: transaction with create node
       dtosCreate(
-        event_offset = 2L,
+        event_offset = 1L,
         event_sequential_id = 1L,
         notPersistedContractId = hashCid("#3"),
       )(),
       Seq(dtoCompletion(offset(2))),
-      // 3: transaction with exercise node and retroactive divulgence
+      // 2: transaction with exercise node and retroactive divulgence
       dtosConsumingExercise(
-        event_offset = 3L,
+        event_offset = 2L,
         event_sequential_id = 2L,
       ),
       Seq(dtoCompletion(offset(3))),
-      // 4: assign event
+      // 3: assign event
       dtosAssign(
-        event_offset = 4L,
+        event_offset = 3L,
         event_sequential_id = 3L,
         notPersistedContractId = hashCid("#4"),
       )(),
-      // 5: unassign event
+      // 4: unassign event
       dtosUnassign(
-        event_offset = 5L,
+        event_offset = 4L,
         event_sequential_id = 4L,
       ),
-      // 6: topology transaction
-      Seq(dtoPartyToParticipant(offset = offset(6), eventSequentialId = 5L)),
-      // 7: witnessed create
-      dtosWitnessedCreate(event_offset = 7L, event_sequential_id = 6L)(),
-      // 8: witnessed consuming exercise
-      dtosWitnessedExercised(event_offset = 8L, event_sequential_id = 7L),
-      // 9: witnessed non-consuming exercise
-      dtosWitnessedExercised(event_offset = 9L, event_sequential_id = 8L, consuming = false),
-      // 10: acs commitment
-      Seq(dtoAcsCommitment(offset = offset(10), eventSequentialId = 9L)),
-      // 11: dynamic synchronizer parameters
-      Seq(dtoGenericTopologyEvent(offset = offset(11), eventSequentialId = 10L)),
-      // String interning
+      // 5: topology transaction
+      Seq(
+        dtoPartyToParticipant(offset = offset(5), eventSequentialId = 5L),
+        dtoInterning(
+          backend.stringInterningSupport.party.internalize(someParty),
+          StringInterningView.PartyPrefix + someParty,
+        ),
+      ),
+      // 6: witnessed create
+      dtosWitnessedCreate(event_offset = 6L, event_sequential_id = 6L)(),
+      // 7: witnessed consuming exercise
+      dtosWitnessedExercised(event_offset = 7L, event_sequential_id = 7L),
+      // 8: witnessed non-consuming exercise
+      dtosWitnessedExercised(event_offset = 8L, event_sequential_id = 8L, consuming = false),
+      // 9: acs commitment
+      Seq(dtoAcsCommitment(offset = offset(9), eventSequentialId = 9L)),
+      // 10: dynamic synchronizer parameters
+      Seq(dtoGenericTopologyEvent(offset = offset(10), eventSequentialId = 10L)),
+      // 11: String interning
       Seq(DbDto.StringInterningDto(internalId = 10, externalString = "d|x:abc")),
     ).flatten
 

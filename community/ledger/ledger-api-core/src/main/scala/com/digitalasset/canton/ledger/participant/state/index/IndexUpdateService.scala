@@ -41,10 +41,6 @@ trait IndexUpdateService extends LedgerEndService {
       updateFormat: UpdateFormat,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]]
 
-  def latestPrunedOffset()(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[Offset]]
-
   def updatesPage(
       getUpdatesPageRequest: GetUpdatesPageRequest
   )(implicit

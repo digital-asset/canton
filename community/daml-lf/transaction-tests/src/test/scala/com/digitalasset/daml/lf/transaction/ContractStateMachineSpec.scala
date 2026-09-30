@@ -8,7 +8,7 @@ import cats.syntax.foldable.*
 import cats.syntax.option.*
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.{
+import com.digitalasset.daml.lf.transaction.ContractStateMachine.{
   Journal,
   StateMachineResult,
   Visitor,
@@ -34,13 +34,13 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.language.implicitConversions
 
-class NextGenContractStateMachineSpec
+class ContractStateMachineSpec
     extends AnyFreeSpec
     with Inside
     with Matchers
     with TableDrivenPropertyChecks {
 
-  import NextGenContractStateMachineSpec.*
+  import ContractStateMachineSpec.*
 
   type OptStateMachineResult = ErrOr[StateMachineResult]
   lazy val alice: Ref.Party = "Alice"
@@ -235,7 +235,7 @@ class NextGenContractStateMachineSpec
         crypto.Hash.hashPrivateKey(s"key-$keyId"),
       )
 
-    val start = Right(NextGenContractStateMachine.empty(authorizeRollBack = false))
+    val start = Right(ContractStateMachine.Empty)
     val cid1 = toContractId(1)
     // val cid2 = toContractId(2)
     val key1 = toGlobalKey(1)
@@ -372,11 +372,7 @@ class NextGenContractStateMachineSpec
     s.abortTry.left.map(_ => EffectfulRollback(Set.empty))
 
   def ignoreUnitTest(unitTest: UnitTest): Unit =
-    unitTest.description - {
-      unitTest.expected.foreach { case (mode, _) =>
-        s"mode $mode" ignore {}
-      }
-    }
+    unitTest.description ignore {}
 
   def runUnitTestWithoutAndWithKey(
       key: String,
@@ -396,32 +392,25 @@ class NextGenContractStateMachineSpec
       s"UnitTest '${unitTest.description}' must have at least one of interaction or transaction defined",
     )
     unitTest.description - {
-      unitTest.expected.foreach { case (mode, expectedResult) =>
-        s"mode $mode" - {
-          unitTest.interaction.foreach { interaction =>
-            "LL" in {
-              val fresh = NextGenContractStateMachine.empty(mode)
-              val result = interaction.apply(fresh).map(_.toStateMachineResult)
-              compareResult(result, expectedResult)
-            }
-          }
-          unitTest.transaction.foreach { tx =>
-            "HH" in {
-              val hhResult = walkTransactionOnVisitor(tx, mode).map(_.toStateMachineResult)
-              compareResult(hhResult, expectedResult)
-            }
-          }
+      unitTest.interaction.foreach { interaction =>
+        "LL" in {
+          val fresh = ContractStateMachine.Empty
+          val result = interaction.apply(fresh).map(_.toStateMachineResult)
+          compareResult(result, unitTest.expected)
+        }
+      }
+      unitTest.transaction.foreach { tx =>
+        "HH" in {
+          val hhResult = walkTransactionOnVisitor(tx).map(_.toStateMachineResult)
+          compareResult(hhResult, unitTest.expected)
         }
       }
     }
   }
 
-  def walkTransactionOnVisitor[Tx](
-      tx: HasTxNodes[Tx],
-      mode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.Key,
-  ): ErrOr[Journal] =
+  def walkTransactionOnVisitor[Tx](tx: HasTxNodes[Tx]): ErrOr[Journal] =
     tx.foldInExecutionOrder[ErrOr[Journal]](
-      Right(NextGenContractStateMachine.empty(mode))
+      Right(ContractStateMachine.Empty)
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
@@ -690,10 +679,7 @@ class NextGenContractStateMachineSpec
             s <- rollbackTryForTesting(s)
           } yield s,
         transaction = mkRollbackTx(mkCreate(id)),
-        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-          NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
-        ),
+        expected = Left(EffectfulRollback(Set.empty)),
       )
     )
   }
@@ -718,14 +704,7 @@ class NextGenContractStateMachineSpec
           mkRollbackTx(mkCreate(id1, key.some)),
           mkCreate(id2, key.some),
         ),
-        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-          NextGenContractStateMachine.Mode.NoKey -> Right(
-            StateMachineResult.emptyWith(
-              localKeys = Map(key.gkey -> Vector(id2))
-            )
-          ),
-        ),
+        expected = Left(EffectfulRollback(Set.empty)),
       )
     )
   }
@@ -892,17 +871,7 @@ class NextGenContractStateMachineSpec
               mkExercise(id, consuming = true, optkey, byKey = false)
             ),
           ),
-          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-            NextGenContractStateMachine.Mode.NoKey -> Right(
-              StateMachineResult.emptyWith(
-                localKeys =
-                  if (optkey.isEmpty) Map.empty
-                  else
-                    Map(key.gkey -> Vector(id))
-              )
-            ),
-          ),
+          expected = Left(EffectfulRollback(Set.empty)),
         )
       },
     )
@@ -966,10 +935,7 @@ class NextGenContractStateMachineSpec
             ),
             mkCreate(id, optkey),
           ),
-          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-            NextGenContractStateMachine.Mode.NoKey -> Left(DuplicateContractId(id)),
-          ),
+          expected = Left(EffectfulRollback(Set.empty)),
         )
       },
     )
@@ -1032,10 +998,7 @@ class NextGenContractStateMachineSpec
               mkExercise(id, consuming = true, optkey, byKey = false),
             )
           ),
-          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-            NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
-          ),
+          expected = Left(EffectfulRollback(Set.empty)),
         )
       },
     )
@@ -1064,14 +1027,7 @@ class NextGenContractStateMachineSpec
           ),
           mkExercise(id, consuming = true, key = None, byKey = false),
         ),
-        expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-          NextGenContractStateMachine.Mode.NoKey -> Right(
-            StateMachineResult.emptyWith(
-              consumed = Set[V.ContractId](id)
-            )
-          ),
-        ),
+        expected = Left(EffectfulRollback(Set.empty)),
       )
     )
   }
@@ -1458,17 +1414,7 @@ class NextGenContractStateMachineSpec
             ),
             mkFetch(id, optkey, byKey = false),
           ),
-          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-            NextGenContractStateMachine.Mode.NoKey -> Right(
-              StateMachineResult.emptyWith(
-                localKeys =
-                  if (optkey.isEmpty) Map.empty
-                  else
-                    Map(key.gkey -> Vector(id))
-              )
-            ),
-          ),
+          expected = Left(EffectfulRollback(Set.empty)),
         )
       },
     )
@@ -1503,10 +1449,7 @@ class NextGenContractStateMachineSpec
             ),
             mkFetch(id, optkey, byKey = false),
           ),
-          expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
-            NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
-          ),
+          expected = Left(EffectfulRollback(Set.empty)),
         )
       },
     )
@@ -2690,8 +2633,8 @@ class NextGenContractStateMachineSpec
   case class UnitTest(
       description: String,
       interaction: Option[Journal => ErrOr[Journal]],
-      expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
-      // when both an interaction and transaction are supplied, evaluating the set transactino should lead to the same
+      expected: OptStateMachineResult,
+      // when both an interaction and transaction are supplied, evaluating the set transaction should lead to the same
       // expected result. Note that there is no 1-to-1 mapping between interactions and transactions.
       transaction: Option[HasTxNodes[?]] = None,
   )
@@ -2703,47 +2646,26 @@ class NextGenContractStateMachineSpec
         expected: OptStateMachineResult,
         transaction: HasTxNodes[?],
     ): UnitTest =
-      UnitTest(description, Some(interaction), allModesMap(expected), Some(transaction))
+      UnitTest(description, Some(interaction), expected, Some(transaction))
 
     def apply(
         description: String,
         interaction: Journal => Either[TransactionError, Journal],
         expected: OptStateMachineResult,
-    ): UnitTest =
-      UnitTest(description, Some(interaction), allModesMap(expected))
-
-    def apply(
-        description: String,
-        interaction: Journal => Either[TransactionError, Journal],
-        expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
     ): UnitTest =
       UnitTest(description, Some(interaction), expected)
 
     def apply(
         description: String,
-        interaction: Journal => Either[TransactionError, Journal],
-        expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
-        transaction: HasTxNodes[?],
-    ): UnitTest =
-      UnitTest(description, Some(interaction), expected, Some(transaction))
-
-    def apply(
-        description: String,
         expected: OptStateMachineResult,
         transaction: HasTxNodes[?],
     ): UnitTest =
-      UnitTest(description, None, allModesMap(expected), Some(transaction))
-
-    def allModesMap(expected: OptStateMachineResult) =
-      Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-        NextGenContractStateMachine.Mode.Key -> expected,
-        NextGenContractStateMachine.Mode.NoKey -> expected,
-      )
+      UnitTest(description, None, expected, Some(transaction))
   }
 
 }
 
-object NextGenContractStateMachineSpec {
+object ContractStateMachineSpec {
 
   private case object TestToken extends NeedKeyProgression.Token
 

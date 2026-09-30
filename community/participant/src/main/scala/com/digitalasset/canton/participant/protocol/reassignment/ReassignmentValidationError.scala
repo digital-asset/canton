@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
   ReassignmentProcessorError,
   SubmissionValidationError,
 }
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, Stakeholders}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
@@ -147,6 +148,15 @@ object ReassignmentValidationError extends PrettyPrintingCompanion[ReassignmentV
   ) extends ReassignmentValidationError {
     override def message: String =
       s"For `$reassignmentRef`: declared participants ${declared.diff(reassigningParticipants)} are not reassigning participants at target timestamp ${targetTimestamp.unwrap} (reassigning participants: $reassigningParticipants)"
+  }
+
+  final case class PackageIdUnknownOrUnvetted(
+      contractIds: Set[LfContractId],
+      unknownTo: List[PackageUnknownTo],
+      synchronizerId: PhysicalSynchronizerId,
+  ) extends ReassignmentValidationError {
+    override def message: String =
+      s"Cannot unassign contracts `$contractIds` on synchronizer `$synchronizerId`: ${unknownTo.mkString(", ")}"
   }
 
   final case class AbortedDueToShutdownOut(contractId: LfContractId)

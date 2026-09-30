@@ -706,8 +706,9 @@ trait MembersTopologySnapshotClient {
 
 trait SynchronizerUpgradeClient {
 
-  /** In case the synchronizer owners have announced an LSU, returns the physical synchronizer id of
-    * the successor of this synchronizer and the upgrade time. Otherwise, returns None.
+  /** In case the synchronizer owners have announced an LSU, returns the successor of this
+    * synchronizer (including the physical synchronizer id and the upgrade time) and the effective
+    * time of the announcement. Otherwise, returns None.
     */
   def announcedLsu()(implicit
       traceContext: TraceContext

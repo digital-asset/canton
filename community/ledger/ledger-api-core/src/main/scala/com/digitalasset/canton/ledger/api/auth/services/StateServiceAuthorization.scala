@@ -65,6 +65,13 @@ final class StateServiceAuthorization(
 
   override def bindService(): ServerServiceDefinition =
     StateServiceGrpc.bindService(this, executionContext)
+
+  /** Translate syncrhonizer record time to an offset
+    */
+  override def convertRecordTimeToOffset(
+      request: ConvertRecordTimeToOffsetRequest
+  ): Future[ConvertRecordTimeToOffsetResponse] =
+    authorizer.rpc(service.convertRecordTimeToOffset)(RequiredClaim.Public())(request)
 }
 
 object StateServiceAuthorization {

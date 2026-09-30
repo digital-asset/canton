@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.signalling.{EventSignaller, LocalEventSignaller}
+import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.Done
 import org.apache.pekko.stream.{KillSwitch, Materializer}
 
@@ -65,7 +66,8 @@ class AcsCommitmentProcessorManager(
 
   def health: HealthComponent = healthComponent
 
-  private val synchronizers =
+  @VisibleForTesting
+  private[canton] val synchronizers =
     mutable.Map[SynchronizerId, SynchronizerCommitmentState]()
 
   private val lock = new Mutex()

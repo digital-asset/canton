@@ -99,8 +99,6 @@ class ConnectionValidationLimiter(
     newState match {
       case ValidationState.Validating(tc, promise) =>
         implicit val traceContext: TraceContext = tc
-
-        logger.debug("Starting validation")
         val validationF =
           validate(traceContext).thereafter { result =>
             logger.debug(s"Validation completed with $result")

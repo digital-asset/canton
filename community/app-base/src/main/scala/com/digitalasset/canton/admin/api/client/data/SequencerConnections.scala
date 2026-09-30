@@ -210,9 +210,11 @@ object SequencerConnections {
       connections: Seq[SequencerConnection],
       sequencerTrustThreshold: PositiveInt,
       sequencerLivenessMargin: NonNegativeInt,
-      submissionRequestAmplification: SubmissionRequestAmplification,
-      sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
-      subscriptionLivenessLimits: SubscriptionLivenessLimits,
+      submissionRequestAmplification: SubmissionRequestAmplification =
+        SubmissionRequestAmplification.NoAmplification,
+      sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
+        SequencerConnectionPoolDelays.default,
+      subscriptionLivenessLimits: SubscriptionLivenessLimits = SubscriptionLivenessLimits.default,
   )(implicit consoleEnvironment: ConsoleEnvironment): SequencerConnections =
     many(
       connections,

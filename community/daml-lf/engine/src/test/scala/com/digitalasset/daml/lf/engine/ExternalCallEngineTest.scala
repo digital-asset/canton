@@ -9,7 +9,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
-import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
+import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig, Error as IE}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -19,7 +19,15 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with SuppressingLogging {
+class ExternalCallEngineTestUpdateMachine
+    extends ExternalCallEngineTest(ExecutionMode.UpdateMachine)
+class ExternalCallEngineTestConductor extends ExternalCallEngineTest(ExecutionMode.Conductor)
+
+abstract class ExternalCallEngineTest(executionMode: ExecutionMode)
+    extends AnyWordSpec
+    with Matchers
+    with Inside
+    with SuppressingLogging {
 
   implicit private val parserParameters: ParserParameters[this.type] =
     ParserParameters(
@@ -50,7 +58,9 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
     }
   """
 
-  def newEngine(config: EngineConfig = Engine.DevConfig): Engine = {
+  def newEngine(
+      config: EngineConfig = Engine.DevConfig.copy(executionMode = executionMode)
+  ): Engine = {
     val engine = new Engine(config, loggerFactory)
     engine.preloadPackage(pkgId, pkg).consume(lookupHandler()) shouldBe Right(())
     engine

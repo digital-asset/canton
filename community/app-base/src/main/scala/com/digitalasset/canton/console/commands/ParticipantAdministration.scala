@@ -35,7 +35,7 @@ import com.digitalasset.canton.config.{
   NonNegativeDuration,
   SynchronizerTimeTrackerConfig,
 }
-import com.digitalasset.canton.console.CommandErrors.GenericCommandError
+import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
@@ -3055,6 +3055,26 @@ class ParticipantHealthAdministration(
     with ParticipantHealthAdministrationCommon {
   override protected def nodeStatusCommand: GrpcAdminCommand[?, ?, NodeStatus[ParticipantStatus]] =
     ParticipantAdminCommands.Health.ParticipantStatusCommand()
+
+  @Help.Summary("Get status information for a single synchronizer")
+  @Help.Description(
+    """Returns the same information as `status`, but restricted to one synchronizer:
+      |node-level components are kept, while per-synchronizer entries (connected
+      |synchronizers and their health components) are kept only if they match the given
+      |`synchronizerId`. Accepts a logical or a physical synchronizer id; a logical id
+      |matches all physical instances of that synchronizer."""
+  )
+  def status(synchronizerId: Synchronizer): NodeStatus[ParticipantStatus] =
+    consoleEnvironment.run {
+      CommandSuccessful(
+        runner.adminCommand(
+          ParticipantAdminCommands.Health.ParticipantStatusCommand(Some(synchronizerId))
+        ) match {
+          case CommandSuccessful(success) => success
+          case err: CommandError => NodeStatus.Failure(err.cause)
+        }
+      )
+    }
 
   @Help.Summary("Counts pending command submissions and transactions on a synchronizer")
   @Help.Description(

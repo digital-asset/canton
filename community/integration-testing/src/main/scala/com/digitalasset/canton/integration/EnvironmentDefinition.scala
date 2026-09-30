@@ -267,6 +267,18 @@ object EnvironmentDefinition extends LazyLogging {
     )
   }
 
+  def S1M2(implicit env: TestConsoleEnvironment): NetworkTopologyDescription = {
+    import env.*
+    NetworkTopologyDescription(
+      daName,
+      synchronizerOwners = Seq[InstanceReference](sequencer1, mediator1),
+      synchronizerThreshold = PositiveInt.one,
+      sequencers = Seq(sequencer1),
+      mediators = Seq(mediator1, mediator2),
+      mediatorThreshold = PositiveInt.two,
+    )
+  }
+
   def S2M1(
       synchronizerOwnersOverride: Option[Seq[InstanceReference]] = None
   )(implicit env: TestConsoleEnvironment): NetworkTopologyDescription = {

@@ -17,7 +17,7 @@ import com.google.protobuf.ByteString
 import org.scalatest.prop.TableFor4
 import org.scalatest.wordspec.AnyWordSpec
 
-class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersionChecksAnyWordSpec {
+final class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersionChecksAnyWordSpec {
 
   import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 

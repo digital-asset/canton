@@ -95,11 +95,15 @@ class StandaloneOrderingTopologyProvider(
       SequencingParameters.Default.update(
         pbftViewChangeTimeout =
           PositiveFiniteDuration.tryFromDuration(standaloneConfig.pbftViewChangeTimeout).toInternal,
+        pbftViewChangeTimeoutStep = standaloneConfig.pbftViewChangeTimeoutStep,
+        pbftViewChangeTimeoutUpperBound = standaloneConfig.pbftViewChangeTimeoutUpperBound,
         segmentLength = segmentLength,
         blacklistLeaderSelectionPolicyConfig =
           standaloneConfig.blacklistLeaderSelectionPolicyConfig,
         maxRequestsInBatch = standaloneConfig.maxRequestsInBatch,
         maxBatchesPerBlockProposal = standaloneConfig.maxBatchesPerBlockProposal,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+          standaloneConfig.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
       ),
       DynamicSynchronizerParameters.defaultMaxRequestSize.value,
       ConventionalBootstrapTopologyActivationTime,

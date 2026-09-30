@@ -167,6 +167,7 @@ object AssignmentValidationResult {
         ReassignmentValidationError,
         Unit,
       ],
+      packageVettingResult: Option[ReassignmentValidationError],
       submitterCheckResult: Option[ReassignmentValidationError],
       reassignmentIdResult: Option[ReassignmentValidationError],
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],

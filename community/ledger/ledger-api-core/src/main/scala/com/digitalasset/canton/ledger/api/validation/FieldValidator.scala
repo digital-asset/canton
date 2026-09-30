@@ -6,6 +6,8 @@ package com.digitalasset.canton.ledger.api.validation
 import cats.implicits.toBifunctorOps
 import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.value.Identifier
+import com.digitalasset.canton.LfTimestamp
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator.{
   AnnotationsSizeExceededError,
   EmptyAnnotationsValueError,
@@ -337,5 +339,17 @@ object FieldValidator {
         message = errorMessage,
       )
     )
+
+  def validateLfTime(protoTimestamp: com.google.protobuf.timestamp.Timestamp)(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, LfTimestamp] =
+    LfTimestamp
+      .fromInstant(TimestampConversion.toInstant(protoTimestamp))
+      .left
+      .map(_ =>
+        invalidArgument(
+          s"Can not represent ledger time $protoTimestamp as a Daml timestamp"
+        )
+      )
 
 }

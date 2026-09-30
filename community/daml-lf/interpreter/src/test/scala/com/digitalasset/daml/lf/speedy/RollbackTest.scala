@@ -7,7 +7,7 @@ package speedy
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
 import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.speedy.TestPkg.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -33,9 +33,6 @@ abstract class RollbackTestBase
     with SuppressingLogging {
 
   import RollbackTest.*
-
-  private[this] val interpretationConfig: interpretation.InterpretationConfig =
-    interpretation.InterpretationConfig.Default
 
   // The only scenarios with an effect inside a rollback: uncatchable under Default.
   private[this] val effectfulRollbackChoices =
@@ -271,7 +268,7 @@ abstract class RollbackTestBase
           } yield tx,
         parties = Set(alice),
         packageResolution = Map.empty,
-        interpretationConfig = interpretationConfig,
+        interpretationConfig = InterpretationConfig.Default,
       )
       if (effectfulRollbackChoices(choiceName)) {
         result match {

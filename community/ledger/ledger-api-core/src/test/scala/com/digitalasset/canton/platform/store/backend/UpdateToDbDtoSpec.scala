@@ -3041,7 +3041,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
   private def updateToDtos(update: Update) =
     UpdateToDbDto(
-      someParticipantId,
       valueSerialization,
       compressionStrategy,
       LedgerApiServerMetrics.ForTesting,

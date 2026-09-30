@@ -70,6 +70,12 @@ _postgres17_docker_executor:
 _toxiproxy_docker_executor:
     image: ghcr.io/shopify/toxiproxy:2.1.5
 commands:
+    allow_automatic_protocol_version:
+        steps:
+            - run:
+                command: |
+                    echo "export CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> $BASH_ENV
+                name: Set CANTON_AUTOMATIC_PROTOCOL_VERSION=1
     authorize_git:
         steps:
             - run:
@@ -646,7 +652,6 @@ commands:
                 default: $CIRCLE_NODE_TOTAL
                 type: string
             protocol_version:
-                default: ""
                 type: string
             succeed_on_error:
                 default: false
@@ -667,8 +672,7 @@ commands:
                 command: find log -name "external-*" | xargs --no-run-if-empty tar cvf log/all-external-jobs.tar
                 name: Pack external log files into single file
                 when: always
-            - cleanup_test_job:
-                collect_postgres_query_stats: true
+            - cleanup_test_job
             - when:
                 condition: << parameters.succeed_on_error >>
                 steps:
@@ -768,7 +772,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-98176b11a35b \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1a016224f389 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1022,7 +1026,6 @@ commands:
     set_canton_protocol_version:
         parameters:
             protocol_version:
-                default: ""
                 type: string
         steps:
             - run:
@@ -1735,6 +1738,7 @@ jobs:
                 command: |
                     echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
                 name: Set Canton log level to WARN
+            - allow_automatic_protocol_version
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.benchmarks
@@ -1890,6 +1894,7 @@ jobs:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 6
         steps:
+            - allow_automatic_protocol_version
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.docs\.snippet
@@ -1961,7 +1966,6 @@ jobs:
         parallelism: 6
         parameters:
             protocol_version:
-                default: ""
                 type: string
         steps:
             - run_crash_recovery_tests:
@@ -1993,7 +1997,6 @@ jobs:
                 default: ""
                 type: string
             protocol_version:
-                default: ""
                 type: string
         steps:
             - set_canton_protocol_version:
@@ -2115,10 +2118,15 @@ jobs:
                     gcloud storage cp --recursive "$SNAPSHOT_DIR" "gs://daml-lf-snapshot-data"
             - slack_red_main_with_volunteer:
                 fixed_volunteer: U03K3A3UAGY
-    ledger_api_compatibility_tests:
+    ledger_api_compatibility_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 5
+        parameters:
+            protocol_version:
+                type: string
         steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity\.api
@@ -2127,8 +2135,13 @@ jobs:
                 timeout: 40m
     model_based_external_parties_test:
         executor: canton-xlarge-docker-with-postgres
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - set_external_parties
+            - protocol_version: << parameters.protocol_version >>
+              set_canton_protocol_version: null
             - run_tests:
                 command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: cat
@@ -2140,7 +2153,12 @@ jobs:
                 fixed_volunteer: U03NCGBFCDP
     model_based_test:
         executor: canton-xlarge-docker-with-postgres
+        parameters:
+            protocol_version:
+                type: string
         steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: cat
@@ -2162,7 +2180,12 @@ jobs:
                 timeout: 120m
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
@@ -2170,11 +2193,16 @@ jobs:
                 num_test_buckets: "2"
     nightly_integration_test_bftordering_only:
         executor: canton-xlarge-docker
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - run:
                 command: |
                     echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
                 name: Set Canton log level to WARN
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
@@ -2193,8 +2221,13 @@ jobs:
                 num_test_buckets: "2"
     nightly_integration_test_with_session_keys:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - enable_session_signing_keys
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.topology
@@ -2210,6 +2243,7 @@ jobs:
     nightly_test_upgrades_matrix_and_check:
         executor: canton-xlarge-docker-with-postgres
         steps:
+            - allow_automatic_protocol_version
             - run_tests:
                 command: '"daml-lf-upgrade-check-test / Test / test"'
                 filter: cat
@@ -2327,6 +2361,7 @@ jobs:
             postgres_version:
                 type: integer
         steps:
+            - allow_automatic_protocol_version
             - run_db_tests:
                 db_name: Postgres
                 exclude_unstable_tests: true
@@ -2358,6 +2393,7 @@ jobs:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 12
         steps:
+            - allow_automatic_protocol_version
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.continuity\.latest
@@ -2368,6 +2404,7 @@ jobs:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 2
         steps:
+            - allow_automatic_protocol_version
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity.\latest
@@ -2481,6 +2518,7 @@ jobs:
                 location: community/mock-kms-driver/target/scala-2.13
             - restore_packaged_release:
                 location: community/app/target/release
+            - allow_automatic_protocol_version
             - run_tests:
                 command: '"testOnly com.digitalasset.canton.integration.tests.release* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors'
                 do_checkout: false
@@ -2540,6 +2578,8 @@ jobs:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 16
         parameters:
+            protocol_version:
+                type: string
             succeed_on_error:
                 default: true
                 type: boolean
@@ -2548,6 +2588,7 @@ jobs:
                 exclude_unstable_tests: false
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery
                 num_test_buckets: "4"
+                protocol_version: << parameters.protocol_version >>
                 succeed_on_error: << parameters.succeed_on_error >>
     stability_crash_recovery_test_alerting:
         executor: canton-small-docker
@@ -2575,7 +2616,6 @@ jobs:
         parallelism: 72
         parameters:
             protocol_version:
-                default: ""
                 type: string
             succeed_on_error:
                 default: true
@@ -2648,13 +2688,11 @@ jobs:
                 default: ""
                 type: string
             protocol_version:
-                default: ""
                 type: string
         steps:
             - set_canton_protocol_version:
                 protocol_version: << parameters.protocol_version >>
             - run_ordinary_tests:
-                collect_postgres_query_stats: true
                 exclude_unstable_tests: true
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
     test_data_continuity_dumps:
@@ -2699,7 +2737,6 @@ jobs:
             parallel_runners:
                 type: integer
             protocol_version:
-                default: ""
                 type: string
             test_repetitions_per_runner:
                 type: integer
@@ -2719,6 +2756,7 @@ jobs:
             - checkout_and_restore_caches
             - attach_workspace:
                 at: /tmp/workspace
+            - allow_automatic_protocol_version
             - run:
                 command: |
                     export TERM=dumb
@@ -2754,6 +2792,7 @@ jobs:
             - checkout
             - attach_workspace:
                 at: workspace
+            - allow_automatic_protocol_version
             - run:
                 command: |
                     workspace/community/app/target/release/canton/bin/canton run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
@@ -2768,6 +2807,7 @@ jobs:
         steps:
             - attach_workspace:
                 at: workspace
+            - allow_automatic_protocol_version
             - run:
                 command: |
                     workspace/community/app/target/release/canton/bin/canton.bat run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
@@ -2791,7 +2831,6 @@ jobs:
                 default: $CIRCLE_NODE_TOTAL
                 type: string
             protocol_version:
-                default: ""
                 type: string
             run_all_ops_test:
                 default: false
@@ -2806,6 +2845,9 @@ jobs:
                 run_all_ops_test: << parameters.run_all_ops_test >>
     toxiproxy_test_fast:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
@@ -2814,6 +2856,9 @@ jobs:
                 num_parallel_tasks: "1"
     toxiproxy_test_slow:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
@@ -2830,6 +2875,9 @@ jobs:
                 num_test_buckets: ""
     unstable_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
             - run_tests:
                 command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.* -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest"
@@ -2842,7 +2890,12 @@ jobs:
                 timeout: 60m
     unstable_test_slow:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parameters:
+            protocol_version:
+                type: string
         steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
             - run_tests:
                 command: dumpClassPath "testOnly * -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest"
                 fail_on_error_in_output: false
@@ -2920,7 +2973,6 @@ jobs:
                 default: ""
                 type: string
             protocol_version:
-                default: ""
                 type: string
         steps:
             - checkout:
@@ -3258,7 +3310,7 @@ workflows:
             equal:
                 - generate-transaction-snapshot
                 - << pipeline.parameters.manual_job >>
-    manual_ledger_api_compatibility_tests:
+    manual_ledger_api_compatibility_test_36:
         jobs:
             - compile:
                 context:
@@ -3267,13 +3319,15 @@ workflows:
                     - azure-self-cache
                     - maven-mirror
                     - da-images
-            - ledger_api_compatibility_tests:
+            - ledger_api_compatibility_test:
                 context:
                     - datadog
                     - artifactory
                     - azure-self-cache
                     - maven-mirror
                     - da-images
+                name: ledger_api_compatibility_test_36
+                protocol_version: "36"
                 requires:
                     - compile
         when:
@@ -3359,6 +3413,8 @@ workflows:
                     - da-images
                     - aws_kms_testing
                     - gcp_kms_testing
+                name: nightly_integration_test_36
+                protocol_version: "36"
                 requires:
                     - compile
         when:
@@ -3381,6 +3437,8 @@ workflows:
                     - azure-self-cache
                     - maven-mirror
                     - da-images
+                name: nightly_integration_test_36_bftordering_only
+                protocol_version: "36"
                 requires:
                     - print_tests
         when:
@@ -4045,7 +4103,7 @@ workflows:
             equal:
                 - test-ping
                 - << pipeline.parameters.manual_job >>
-    manual_test_protocol_version_36:
+    manual_test_pv_36:
         jobs:
             - compile:
                 context:
@@ -4066,15 +4124,15 @@ workflows:
                 filters:
                     tags:
                         only: /^v.*/
-                name: test_protocol_version_36
+                name: test_36
                 protocol_version: "36"
                 requires:
                     - compile
         when:
             equal:
-                - test-protocol-version-36
+                - test-36
                 - << pipeline.parameters.manual_job >>
-    manual_test_protocol_version_37:
+    manual_test_pv_37:
         jobs:
             - compile:
                 context:
@@ -4095,15 +4153,15 @@ workflows:
                 filters:
                     tags:
                         only: /^v.*/
-                name: test_protocol_version_37
+                name: test_37
                 protocol_version: "37"
                 requires:
                     - compile
         when:
             equal:
-                - test-protocol-version-37
+                - test-37
                 - << pipeline.parameters.manual_job >>
-    manual_test_protocol_version_dev:
+    manual_test_pv_dev:
         jobs:
             - compile:
                 context:
@@ -4124,13 +4182,13 @@ workflows:
                 filters:
                     tags:
                         only: /^v.*/
-                name: test_protocol_version_dev
+                name: test_dev
                 protocol_version: dev
                 requires:
                     - compile
         when:
             equal:
-                - test-protocol-version-dev
+                - test-dev
                 - << pipeline.parameters.manual_job >>
     manual_test_scala3:
         jobs:
@@ -4220,6 +4278,8 @@ workflows:
                     - azure-self-cache
                     - maven-mirror
                     - da-images
+                name: unstable_test_slow_36
+                protocol_version: "36"
                 requires:
                     - compile
         when:

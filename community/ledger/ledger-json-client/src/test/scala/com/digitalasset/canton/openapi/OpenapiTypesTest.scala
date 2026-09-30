@@ -130,10 +130,21 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
       // `Identifier` is included in openapi but never used and definition is actually wrong
       val validSchemas = nonEmptySchemas.removed("Identifier")
       val allOpenApiSchemaNames = validSchemas.keys.toSeq.sorted
-      val allTestedModelClasses = allMappingExamples.map(_.openapiClass().getSimpleName).sorted
+      val allTestedModelClasses = allMappingExamples.map(_.openapiClass().getSimpleName).toSet
+      // The generator emits a single model class for schemas that are structurally identical, so a
+      // schema is covered as soon as one of its duplicates is. Checking the name alone fails for
+      // the copies openapi.yaml declares (for example `DeduplicationDuration1`).
+      val schemaNamesByDefinition = validSchemas.groupMap { case (_, schema) => schema } {
+        case (name, _) => name
+      }
 
       forAll(allOpenApiSchemaNames) { definedSchema =>
-        assert(allTestedModelClasses.contains(definedSchema))
+        val duplicates = schemaNamesByDefinition
+          .getOrElse(validSchemas(definedSchema), Iterable(definedSchema))
+        assert(
+          duplicates.exists(allTestedModelClasses.contains),
+          s"no mapping covers schema $definedSchema (generated as one of ${duplicates.mkString(", ")})",
+        )
       }
     }
   }
@@ -382,15 +393,15 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ),
         Mapping[
           v2.completion.Completion.DeduplicationPeriod.DeduplicationDuration,
-          openapi.DeduplicationDuration1,
+          openapi.DeduplicationDuration,
         ](
-          openapi.DeduplicationDuration1.fromJson
+          openapi.DeduplicationDuration.fromJson
         ),
         Mapping[
           v2.commands.Commands.DeduplicationPeriod.DeduplicationDuration,
-          openapi.DeduplicationDuration2,
+          openapi.DeduplicationDuration,
         ](
-          openapi.DeduplicationDuration2.fromJson
+          openapi.DeduplicationDuration.fromJson
         ),
         Mapping[
           v2.interactive.interactive_submission_service.ExecuteSubmissionRequest.DeduplicationPeriod.DeduplicationDuration,
@@ -400,15 +411,15 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ),
         Mapping[
           v2.completion.Completion.DeduplicationPeriod.DeduplicationOffset,
-          openapi.DeduplicationOffset1,
+          openapi.DeduplicationOffset,
         ](
-          openapi.DeduplicationOffset1.fromJson
+          openapi.DeduplicationOffset.fromJson
         ),
         Mapping[
           v2.commands.Commands.DeduplicationPeriod.DeduplicationOffset,
-          openapi.DeduplicationOffset2,
+          openapi.DeduplicationOffset,
         ](
-          openapi.DeduplicationOffset2.fromJson
+          openapi.DeduplicationOffset.fromJson
         ),
         Mapping[
           v2.interactive.interactive_submission_service.ExecuteSubmissionRequest.DeduplicationPeriod.DeduplicationOffset,
@@ -644,8 +655,8 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.offset_checkpoint.OffsetCheckpoint, openapi.OffsetCheckpoint1](
           openapi.OffsetCheckpoint1.fromJson
         ),
-        Mapping[json.JsUpdate.OffsetCheckpoint, openapi.OffsetCheckpoint2](
-          openapi.OffsetCheckpoint2.fromJson
+        Mapping[json.JsUpdate.OffsetCheckpoint, openapi.OffsetCheckpoint](
+          openapi.OffsetCheckpoint.fromJson
         ),
         Mapping[v2.version_service.OffsetCheckpointFeature, openapi.OffsetCheckpointFeature](
           openapi.OffsetCheckpointFeature.fromJson
@@ -1102,6 +1113,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.PruneEventsResponse,
         ](
           openapi.PruneEventsResponse.fromJson
+        ),
+        Mapping[
+          v2.state_service.ConvertRecordTimeToOffsetResponse,
+          openapi.ConvertRecordTimeToOffsetResponse,
+        ](
+          openapi.ConvertRecordTimeToOffsetResponse.fromJson
         ),
       )
     }

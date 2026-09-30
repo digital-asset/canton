@@ -11,22 +11,26 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.AgreementStatus.{
-  Exists,
-  NotNeeded,
-  NotProposed,
-  Proposed,
-}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   AcsIndexingProgress,
-  AcsReplicationProgress,
-  AgreementStatus,
   Disconnected,
   PartyReplicationAuthorization,
   PartyReplicationError,
   PartyReplicationFailed,
-  PersistentProgress,
   ReplicationParams,
+}
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AgreementStatus.{
+  Exists,
+  NotProposed,
+  Proposed,
+}
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
+  AcsReplicationError,
+  AcsReplicationParameters,
+  AcsReplicationProgress,
+  AgreementStatus,
+  PersistentProgress,
 }
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
@@ -197,7 +201,6 @@ final class GeneratorsParticipant(
       Gen.oneOf[AgreementStatus](
         Gen.const(NotProposed),
         Gen.const(Proposed),
-        Gen.const(NotNeeded),
         existingSequencerChannelAgreementArb.arbitrary,
       )
     )
@@ -253,22 +256,50 @@ final class GeneratorsParticipant(
       } yield error
     )
 
+  implicit val acsReplicationStatusArb: Arbitrary[AcsReplicationStatus] =
+    Arbitrary(
+      for {
+        params <- Arbitrary.arbitrary[AcsReplicationParameters]
+        agreement <- Arbitrary.arbitrary[AgreementStatus]
+        authorizationO <- Gen.option(
+          Arbitrary.arbitrary[AcsReplicationStatus.PartyReplicationAuthorization]
+        )
+        replicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationProgress])
+        hasCompleted <- Arbitrary.arbitrary[Boolean]
+        errorO <- Gen.option(Arbitrary.arbitrary[AcsReplicationError])
+      } yield AcsReplicationStatus.apply(
+        params,
+        version,
+        agreement,
+        authorizationO,
+        replicationO,
+        hasCompleted,
+        errorO,
+      )
+    )
+
+  implicit val replicationModeArb: Arbitrary[PartyReplicationStatus.ReplicationMode] =
+    Arbitrary(
+      Gen.oneOf[PartyReplicationStatus.ReplicationMode](
+        PartyReplicationStatus.ReplicationMode.File,
+        PartyReplicationStatus.ReplicationMode.SequencerChannel,
+      )
+    )
+
   implicit val partyReplicationStatusArb: Arbitrary[PartyReplicationStatus] =
     Arbitrary(
       for {
         params <- Arbitrary.arbitrary[ReplicationParams]
         authorizationO <- Gen.option(Arbitrary.arbitrary[PartyReplicationAuthorization])
-        agreementO <- Arbitrary.arbitrary[AgreementStatus]
         replicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationProgress])
-        // TODO (#35267): change this once AcsReplicationStatus is a separate class
-        acsReplicationO <- Gen.const(None)
+        acsReplicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationStatus])
         indexingO <- Gen.option(Arbitrary.arbitrary[AcsIndexingProgress])
         hasCompleted <- Arbitrary.arbitrary[Boolean]
         errorO <- Gen.option(Arbitrary.arbitrary[PartyReplicationError])
+        replicationMode <- Arbitrary.arbitrary[PartyReplicationStatus.ReplicationMode]
       } yield PartyReplicationStatus.apply(
         params,
         version,
-        authorizationO.map(_ => agreementO).getOrElse(AgreementStatus.NotProposed),
         authorizationO,
         authorizationO.flatMap(_ => replicationO),
         acsReplicationO,
@@ -276,6 +307,7 @@ final class GeneratorsParticipant(
         authorizationO.flatMap(_ => replicationO).flatMap(_ => indexingO),
         hasCompleted,
         errorO,
+        replicationMode,
       )
     )
 

@@ -10,6 +10,9 @@ on:
         description: Whether to succeed the job even if some tests fail.
         default: true
         type: boolean
+      protocol_version:
+        required: true
+        type: string
     secrets:
       DATADOG_API_KEY:
         required: false
@@ -106,6 +109,14 @@ jobs:
         with:
           shard-index: ${{ steps.shard.outputs.physical }}
 
+      - name: Set Canton Protocol Version
+        env:
+          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+        run: |
+          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+        shell: bash
+
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
@@ -143,5 +154,5 @@ jobs:
     with:
       caller_job: stability_crash_recovery_test
       runner: ${{ inputs.runner }}
-      protocol_version: ""
+      protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

@@ -184,6 +184,43 @@ class InMemoryStateUpdaterSpec
     )
   }
 
+  "prepare" should "preserve the same contract instances" in new Scope {
+    private val updateWithContract = {
+      val builder = TxBuilder()
+      val contract = genContract
+      val createNode = contract.inst.toCreateNode
+      builder.add(createNode)
+      val tx = builder.buildCommitted()
+
+      offset(11L) -> transactionAccepted(
+        t = 0L,
+        transaction = tx,
+        synchronizerId = synchronizerId1,
+        contracts = Seq(contract),
+        contractActivenessChanged = false,
+      )
+    }
+    private val instance =
+      updateWithContract._2.contractInfos.map(_._2.persistedContractInstance.inst).head
+
+    val result: PrepareResult = InMemoryStateUpdater.prepare(
+      makeBatch(
+        Vector(updateWithContract),
+        someLedgerEnd.copy(synchronizerIndices =
+          Map(synchronizerIdWithoutNum -> updateWithContract._2.synchronizerIndex)
+        ),
+        traceContext,
+      )
+    )
+
+    inside(result.updates.loneElement) { case transactionAccepted: TransactionAccepted =>
+      inside(transactionAccepted.events.loneElement) {
+        case createdEvent: TransactionLogUpdate.CreatedEvent =>
+          createdEvent.createdContractInstance shouldBe theSameInstanceAs(instance)
+      }
+    }
+  }
+
   "prepare" should "throw exception for an empty vector" in new Scope {
     an[NoSuchElementException] should be thrownBy {
       InMemoryStateUpdater.prepare(
@@ -918,14 +955,15 @@ object InMemoryStateUpdaterSpec {
           reassignmentId = ReassignmentId.tryCreate("00155555"),
           isReassigningParticipant = true,
         ),
-        reassignment = Reassignment.Batch(
-          Reassignment.Assign(
+        reassignment = Seq(
+          TransactionLogUpdate.Assign(
             reassignmentCounter = 15L,
             nodeId = 0,
-            persistedContractInstance = PersistedContractInstance(
-              internalContractId = 1,
-              inst = someContract.inst,
-            ),
+            contractId = someContract.inst.contractId,
+            templateId = someContract.inst.templateId,
+            packageName = someContract.inst.packageName,
+            stakeholders = someContract.inst.stakeholders,
+            createdContractInstance = someContract.inst,
           )
         ),
         synchronizerId = synchronizerId2.toProtoPrimitive,
@@ -946,8 +984,8 @@ object InMemoryStateUpdaterSpec {
           reassignmentId = ReassignmentId.tryCreate("0001555551"),
           isReassigningParticipant = true,
         ),
-        reassignment = Reassignment.Batch(
-          Reassignment.Unassign(
+        reassignment = Seq(
+          TransactionLogUpdate.Unassign(
             contractId = someContract.contractId,
             templateId = templateId2,
             packageName = packageName,
@@ -1294,12 +1332,9 @@ object InMemoryStateUpdaterSpec {
       treeEventWitnesses = Set.empty,
       flatEventWitnesses = createdNode.stakeholders,
       submitters = Set.empty,
-      createArgument = com.digitalasset.daml.lf.transaction
-        .Versioned(createdNode.version, createdNode.arg),
-      createSignatories = createdNode.signatories,
-      createObservers = createdNode.stakeholders.diff(createdNode.signatories),
       authenticationData = someContractMetadataBytes,
       representativePackageId = representativePackageId,
+      createdContractInstance = someContract.inst,
     )
 
   implicit val defaultValueProviderCreatedEvent
@@ -1342,6 +1377,7 @@ object InMemoryStateUpdaterSpec {
   )
 
   private val update1 = offset(11L) -> transactionAccepted(t = 1L, synchronizerId = synchronizerId1)
+
   private def rawMetadataChangedUpdate(offset: Offset, recordTime: Timestamp) =
     offset ->
       Update.SequencerIndexMoved(

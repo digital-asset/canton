@@ -3,7 +3,7 @@
 
 Reads the current week's row from the rota Google Sheet and prints the Slack user ID(s)
 of whoever is on the requested rotation, space-separated, on one line. Most rotations
-resolve to one person; ``flaky-canton`` spans two columns and prints two IDs.
+resolve to one person; ``flaky-canton`` spans three columns and prints three IDs.
 
 If the sheet cannot be read for any reason (missing/invalid credentials, network error,
 tab/row not found, unresolved name), it falls back to a deterministic pick from the
@@ -61,10 +61,10 @@ ROTATION_HEADERS: dict[str, list[str]] = {
 }
 
 # rotation cli name -> number of sheet columns (people) it should resolve to. Most
-# rotations are one person; flaky-canton is a two-person pair. A sheet that yields a
+# rotations are one person; flaky-canton is a three-person group. A sheet that yields a
 # different count (typo'd/duplicated/missing header) is treated as a lookup failure so
 # it degrades to the fallback pool rather than silently pinging the wrong set.
-ROTATION_COLUMNS: dict[str, int] = {"flaky-canton": 2}
+ROTATION_COLUMNS: dict[str, int] = {"flaky-canton": 3}
 DEFAULT_ROTATION_COLUMNS = 1
 
 # CircleCI job name -> rotation to ping when that job fails on main (the red-main ping).

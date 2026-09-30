@@ -281,7 +281,8 @@ class UpdatesStreamReader(
                 maxPagesPerIdPagesBuffer = maxPayloadsPerPayloadsPage,
                 maxPayloadsPerPayloadsPage = maxParallelPayloadTopologyEventsQueries,
                 maxParallelPayloadQueries = transactionsProcessingParallelism,
-              )
+              ),
+              deserializationQueriesLimiter,
             )
             .map((RawTopologyTransaction.apply _).tupled)
         case None => Source.empty

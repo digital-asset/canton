@@ -48,10 +48,10 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
+  PackageIdUnknownOrUnvetted,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.PendingUnassignment
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessorError.*
-import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationError.PackageIdUnknownOrUnvetted
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationResult.{
   CommonValidationResult,
   ReassigningParticipantValidationResult,
@@ -1160,6 +1160,7 @@ final class UnassignmentProcessingStepsTest
         ),
         participantSignatureVerificationResult = None,
         contractAuthenticationResultF = EitherT.rightT(()),
+        packageVettingResult = None,
         submitterCheckResult = None,
         multiSynchronizerFeatureFlagCheckResult = None,
       ),

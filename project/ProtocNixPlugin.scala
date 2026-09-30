@@ -12,6 +12,10 @@ import sbt.Keys.*
   * every build even when no proto changed, and the scripts pile up in `/tmp` for the life of the
   * sbt server. Writing the launcher ourselves under a digest-named path keeps the key stable, and
   * the `.sh` suffix stops sbt-protoc from wrapping it again.
+  *
+  * The launcher also names the library search path. Invoking the loader explicitly drops the
+  * binary's own defaults, so a plugin that links anything beyond libc (grpc-java links libstdc++
+  * dynamically) would otherwise die with "error while loading shared libraries", status 127.
   */
 object ProtocNixPlugin extends AutoPlugin {
   override def trigger: PluginTrigger = allRequirements
@@ -32,17 +36,32 @@ object ProtocNixPlugin extends AutoPlugin {
 
   private val launcherLock = new Object
 
+  /** The `-L` directories the nix compiler wrapper links against, libstdc++ among them. */
+  private lazy val nixCcLibraryDirs: Seq[String] = {
+    val ldflags = sys.env.get("NIX_CC").map(file(_) / "nix-support" / "cc-ldflags")
+    ldflags.filter(_.isFile).toSeq.flatMap { flags =>
+      IO.read(flags)
+        .split("\\s+")
+        .collect { case flag if flag.startsWith("-L") && flag.length > 2 => flag.drop(2) }
+        .toSeq
+    }
+  }
+
   private def launcherFor(name: String, binary: File, linker: String): File = {
+    // The loader sits in glibc's lib directory, which is where libc itself lives.
+    val libraryPath = (file(linker).getParentFile.getAbsolutePath +: nixCcLibraryDirs).distinct
     val script =
       s"""#!/bin/sh
-         |exec $linker ${binary.getAbsolutePath} "$$@"
+         |exec $linker --library-path ${libraryPath.mkString(":")} ${binary.getAbsolutePath} "$$@"
          |""".stripMargin
     // Digest in the name, so a new linker or binary is a new path and thus a new cache key.
     val launcher = launcherDir / s"$name-${Hash.toHex(Hash(script)).take(12)}.sh"
     // Two projects can share a plugin, so they race on one path; IO.write truncates.
     launcherLock.synchronized {
-      // Recreate if a tmp sweeper removed it. The path stays the same, so the cache still holds.
-      if (!launcher.isFile) {
+      // Rewrite if a tmp sweeper removed it or left it damaged: the digest only names the path, so
+      // a truncated script still matches it and fails the plugin with a shell error that does not
+      // name this file. The path stays the same, so the cache still holds.
+      if (!launcher.isFile || IO.read(launcher) != script) {
         IO.createDirectory(launcherDir)
         IO.write(launcher, script)
       }

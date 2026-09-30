@@ -54,8 +54,8 @@ private[store] object StorageBackendTestValues extends OptionValues {
 
   /** Produces offsets that are ordered the same as the input value */
   def offset(x: Long): Offset = Offset.tryFromLong(x)
-  def ledgerEnd(o: Long, e: Long): LedgerEnd =
-    LedgerEnd(offset(o), e, 0, CantonTimestamp.now(), Map())
+  def ledgerEnd(o: Long, e: Long, lastStringInterningId: Int = 0): LedgerEnd =
+    LedgerEnd(offset(o), e, lastStringInterningId, CantonTimestamp.now(), Map())
   def updateIdFromOffset(x: Offset): UpdateId = TestUpdateId(x.toDecimalString)
   def updateIdArrayFromOffset(x: Offset): Array[Byte] = updateIdFromOffset(
     x
@@ -117,17 +117,6 @@ private[store] object StorageBackendTestValues extends OptionValues {
     someExternalTransactionHashBinaryByteString.toByteArray
   val reassignmentId: Array[Byte] =
     ReassignmentId.create("0012345678").toOption.get.toBytes.toByteArray
-
-  def dtoPartyEntry(
-      offset: Offset,
-      party: Party = someParty,
-      isLocal: Boolean = true,
-  ): DbDto.PartyEntry =
-    DbDto.PartyEntry(
-      ledger_offset = offset.unwrap,
-      party = Some(party),
-      is_local = Some(isLocal),
-    )
 
   def dtosCreate(
       // update related columns

@@ -84,4 +84,4 @@ jobs:
     with:
       caller_job: protocol_continuity_test_all
       runner: ${{ inputs.runner }}
-      protocol_version: ''
+      protocol_version: ""

@@ -3,23 +3,21 @@
 
 package com.digitalasset.canton.participant.admin.party.acsreplication
 
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
-import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
+  AcsReplicationError,
+  AcsReplicationFailed,
+  AcsReplicationParameters,
   AcsReplicationProgress,
-  PartyReplicationError,
-  PartyReplicationFailed,
-  ReplicationParams,
 }
 
-/** The ACS replication stage describes the same information as the [[PartyReplicationStatus]], but
-  * in a form that describes the "next action" to be taken to advance the ACS replication request on
+/** The ACS replication stage describes the same information as the [[AcsReplicationStatus]], but in
+  * a form that describes the "next action" to be taken to advance the ACS replication request on
   * the source and target participants (SP and TP).
   *
   * Stages with a verb in the same mean that ACS replication needs to or is performing an action
   * (e.g. NeedToObtain... or Replicating...) to advance party replication whereas others indicate
   * that ACS replication is waiting for something to happen (NeedSequencerChannelAgreement).
   */
-// TODO(#35267) Stop using PartyReplicationStatus and replace it with AcsReplicationStatus
 sealed trait AcsReplicationStage extends Product with Serializable
 
 object AcsReplicationStage {
@@ -29,7 +27,7 @@ object AcsReplicationStage {
     * From that, the topology serial and effective time is obtained. Serial is used for further
     * verifications while the effective time is used for the ACS transfer.
     */
-  final case class VerifyingOnboardingTopologyAuthorization(params: ReplicationParams)
+  final case class VerifyingOnboardingTopologyAuthorization(params: AcsReplicationParameters)
       extends AcsReplicationStage
 
   /** No sequencer channel agreement has been proposed yet.
@@ -39,13 +37,13 @@ object AcsReplicationStage {
     *     (beginning of the party replication)
     */
   final case class NeedsToProposeAcsReplicationSequencerChannel(
-      params: ReplicationParams,
+      params: AcsReplicationParameters,
       errorMessage: Option[String],
   ) extends AcsReplicationStage
 
   /** The sequencer channel agreement has been proposed, but the agreement hasn't been reached yet.
     */
-  final case class AcsReplicationSequencerChannelAgreementProposed(params: ReplicationParams)
+  final case class AcsReplicationSequencerChannelAgreementProposed(params: AcsReplicationParameters)
       extends AcsReplicationStage
 
   /** The sequencer-channel agreement exists and the TP has been authorized to receive the ACS, but
@@ -68,7 +66,7 @@ object AcsReplicationStage {
     *   importer)
     */
   final case class ReplicatingPartyAcs(
-      params: ReplicationParams,
+      params: AcsReplicationParameters,
       progress: AcsReplicationProgress,
   ) extends AcsReplicationStage
 
@@ -77,7 +75,7 @@ object AcsReplicationStage {
     * @param error
     *   cause of the invalid state
     */
-  final case class IsInInvalidState(error: PartyReplicationError) extends AcsReplicationStage
+  final case class IsInInvalidState(error: AcsReplicationError) extends AcsReplicationStage
 
   /** Helper that determines what ACS replication needs to do next or what it is waiting for to
     * advance ACS replication.
@@ -87,34 +85,34 @@ object AcsReplicationStage {
     *   If ACS replication is still in progress and can be advanced, returns the ACS replication
     *   stage.
     */
-  def fromPartyReplicationStatus(status: PartyReplicationStatus): Option[AcsReplicationStage] =
+  def fromAcsReplicationStatus(status: AcsReplicationStatus): Option[AcsReplicationStage] =
     (status match {
-      case status @ PartyReplicationStatus(p, agreement, authorizationO, reO, _, _, _, errO) =>
+      case status @ AcsReplicationStatus(p, agreement, authorizationO, reO, _, errO) =>
         errO match {
           case None =>
             Option.when(status.isProgressExpected)((p, agreement, authorizationO, reO, None))
-          case Some(d: PartyReplicationStatus.Disconnected) =>
+          case Some(d: AcsReplicationStatus.Disconnected) =>
             Option.when(status.isProgressExpected)((p, agreement, authorizationO, reO, Some(d)))
-          case Some(PartyReplicationFailed(_)) => None
+          case Some(AcsReplicationFailed(_)) => None
         }
     }).flatMap {
       case (params, _, None, _, _) =>
         Some(AcsReplicationStage.VerifyingOnboardingTopologyAuthorization(params))
       case (
             _,
-            _: PartyReplicationStatus.AgreementStatus.Exists,
+            _: AcsReplicationStatus.AgreementStatus.Exists,
             Some(_),
             Some(_),
-            Some(PartyReplicationStatus.Disconnected(message)),
+            Some(AcsReplicationStatus.Disconnected(message)),
           ) =>
         Some(AcsReplicationStage.NeedToReconnectToDisconnectedSequencerChannel(message))
-      case (params, PartyReplicationStatus.AgreementStatus.NotProposed, Some(_), None, None) =>
+      case (params, AcsReplicationStatus.AgreementStatus.NotProposed, Some(_), None, None) =>
         Some(AcsReplicationStage.NeedsToProposeAcsReplicationSequencerChannel(params, None))
-      case (params, PartyReplicationStatus.AgreementStatus.Proposed, Some(_), None, None) =>
+      case (params, AcsReplicationStatus.AgreementStatus.Proposed, Some(_), None, None) =>
         Some(AcsReplicationStage.AcsReplicationSequencerChannelAgreementProposed(params))
       case (
             _,
-            _: PartyReplicationStatus.AgreementStatus.Exists,
+            _: AcsReplicationStatus.AgreementStatus.Exists,
             Some(_),
             None,
             None,
@@ -122,8 +120,8 @@ object AcsReplicationStage {
         Some(AcsReplicationStage.NeedToConnectToSequencerChannel)
       case (
             params,
-            _: PartyReplicationStatus.AgreementStatus.Exists |
-            PartyReplicationStatus.AgreementStatus.Archived,
+            _: AcsReplicationStatus.AgreementStatus.Exists |
+            AcsReplicationStatus.AgreementStatus.Archived,
             Some(_),
             Some(replicationProgress),
             None,
@@ -132,7 +130,7 @@ object AcsReplicationStage {
       case _ =>
         Some(
           AcsReplicationStage.IsInInvalidState(
-            PartyReplicationFailed(s"Acs replication is in invalid state: $status")
+            AcsReplicationFailed(s"ACS replication is in invalid state: $status")
           )
         )
 
