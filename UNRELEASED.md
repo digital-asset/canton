@@ -57,6 +57,16 @@ participant offsets can exist for a single record time. The newly added endpoint
 happened on a requested record time or the last offset before that record time if there are no offset on there requested
 record time.
 
+Daml choices can now make external calls: deterministic calls to extension services that the
+participant operator configures under `canton.participants.<participant>.parameters.engine.extensions`
+(see `ExtensionServiceConfig`). The submitting participant executes each call and records the
+result in the transaction; confirming participants re-validate the recorded results against
+their own extension service before approving, and disagreements are rejected and alarmed.
+The feature is early access: it requires the Daml package to use LF 2.4 or later and the
+synchronizer to run protocol version 36 or later. For externally signed transactions the
+recorded results are part of the prepared transaction and covered by the signed transaction
+hash (hashing scheme version 4, available from protocol version 36).
+
 ### Minor Improvements
 - Party queries are now served from the `lapi_events_party_to_participant` table, which also acquired a new index on `party + participant_id + synchronizer_id + event_sequential_id`. This change allows faithful representation of changes to the multi-hosted parties. At the same time, the `lapi_party_entries` has now been dropped.
 - participant_id label is added onto participant metrics
