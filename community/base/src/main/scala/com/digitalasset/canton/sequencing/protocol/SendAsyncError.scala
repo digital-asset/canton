@@ -11,7 +11,10 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.Exce
 /** Synchronous error returned by a sequencer. */
 sealed trait SendAsyncError extends PrettyPrinting {
 
-  val message: String
+  protected val message: String
+
+  /** One line summary based on decoded error code if it exists */
+  def shortMessage: String
 
   override protected def pretty: Pretty[SendAsyncError] = prettyOfClass(
     unnamedParam(_.message.unquoted)
@@ -32,6 +35,11 @@ object SendAsyncError {
   /** Implementation of [[SendAsyncError]]s for gRPC transports */
   final case class SendAsyncErrorGrpc(error: GrpcError) extends SendAsyncError {
     override val message: String = error.toString
+
+    override def shortMessage: String =
+      error.decodedCantonError
+        .map(c => c.code.toMsg(c.cause, c.correlationId, limit = None))
+        .getOrElse(message)
 
     override def isOverload: Boolean = error match {
       case _: GrpcRequestRefusedByServer =>
@@ -62,6 +70,9 @@ object SendAsyncError {
 
   /** Implementation of [[SendAsyncError]]s for direct transports */
   final case class SendAsyncErrorDirect(override val message: String) extends SendAsyncError {
+
+    override def shortMessage: String = message
+
     override def isOverload: Boolean = false
 
     override def hasMaxSequencingTimeElapsed: Boolean =

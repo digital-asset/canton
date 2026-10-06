@@ -41,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultConsensusNewEpochTopologyWarnTimeout,
   DefaultConsensusQueueMaxSize,
   DefaultConsensusQueuePerNodeQuota,
+  DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
@@ -150,6 +151,8 @@ import scala.util.Random
   *   will be able to decide to flush the segment and complete all slots in parallel if it detects
   *   that a strong quorum of segments are completed while the one it leads is in progress. If fewer
   *   blocks than this are missing, the node will complete them normally one at a time.
+  * @param consensusWindowSizeForRetransmissionOfCommitCertificates
+  *   The maximum number of commit certificates that will be sent in a single retransmission message
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
@@ -271,6 +274,8 @@ final case class BftBlockOrdererConfig(
     consensusEnableLogEndOfEpochProgress: Boolean = false,
     consensusEnableFlushingSegment: Boolean = true,
     consensusFlushingMinBlocks: Int = DefaultConsensusFlushingMinBlocks,
+    consensusWindowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] =
+      DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferFutureEpochQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
     epochStateTransferFutureEpochQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
@@ -327,6 +332,9 @@ object BftBlockOrdererConfig {
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 500.milliseconds
   val DefaultConsensusFlushingMinBlocks = 2
+  val DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] = Some(
+    PositiveInt.tryCreate(10)
+  )
   val DefaultDelayedInitQueueMaxSize: Int = 1_024
   val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
   val DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
@@ -551,6 +559,10 @@ object BftBlockOrdererConfig {
     *   The number of blocks per segment.
     * @param pbftViewChangeTimeout
     *   The base duration to use for view change timeouts for ISS segments.
+    * @param pbftViewChangeTimeoutStep
+    *   The step duration to use for view change timeouts for ISS segments.
+    * @param pbftViewChangeTimeoutUpperBound
+    *   The upper bound duration to use for view change timeouts for ISS segments.
     * @param blacklistLeaderSelectionPolicyConfig
     *   The leader selection policy to enforce in the presence of View Changes of segments.
     * @param maxRequestsInBatch
@@ -568,9 +580,12 @@ object BftBlockOrdererConfig {
       signingPublicKeyProtoFile: File,
       segmentLength: Long,
       pbftViewChangeTimeout: FiniteDuration,
+      pbftViewChangeTimeoutStep: config.NonNegativeFiniteDuration,
+      pbftViewChangeTimeoutUpperBound: config.NonNegativeFiniteDuration,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short,
       maxBatchesPerBlockProposal: Short,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
       peers: Seq[BftBlockOrderingStandalonePeerConfig],
       testSlowdown: Option[BftBlockOrderingStandaloneTestSlowdownConfig] = None,
   )

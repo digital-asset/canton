@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SignatureCheckError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressionRule
@@ -313,7 +314,10 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
           new ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]]()
 
         val previousEpochsRetransmissionsTracker = mock[PreviousEpochsRetransmissionsTracker]
-        val manager = createManager(networkOut, Some(previousEpochsRetransmissionsTracker))
+        val manager = createManager(
+          networkOut,
+          previousEpochsRetransmissionsTrackerO = Some(previousEpochsRetransmissionsTracker),
+        )
 
         val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
 
@@ -585,6 +589,95 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       )
     }
 
+    "split retransmission response into multiple messages if it exceeds window size" in {
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext()
+
+      val epochState = mock[EpochState[ProgrammableUnitTestEnv]]
+      when(epochState.epoch).thenReturn(epoch)
+
+      val cryptoProvider = spy(ProgrammableUnitTestEnv.noSignatureCryptoProvider)
+      val networkOut = mock[ModuleRef[P2PNetworkOut.Message]]
+      val manager = createManager(
+        networkOut,
+        windowSizeForRetransmissionOfCommitCertificates = Some(PositiveInt.tryCreate(2)),
+      )
+
+      def createCommitCertificate(blockNumber: Int): CommitCertificate =
+        CommitCertificate(
+          PrePrepare
+            .create(
+              BlockMetadata.mk(EpochNumber.First, BlockNumber(blockNumber.toLong)),
+              ViewNumber.First,
+              OrderingBlock(Seq()),
+              CanonicalCommitSet.empty,
+              from = self,
+            )
+            .fakeSign,
+          Seq.empty,
+        )
+
+      val cc0 = createCommitCertificate(0)
+      val cc1 = createCommitCertificate(1)
+      val cc2 = createCommitCertificate(2)
+
+      manager.startEpoch(epochState)
+      manager.epochEnded(Seq(cc0, cc1, cc2))
+
+      val epochStatus =
+        ConsensusStatus.EpochStatus.create(
+          other1,
+          EpochNumber.First,
+          NonEmpty.mk(
+            Seq,
+            ConsensusStatus.SegmentStatus.InProgress(
+              ViewNumber.First,
+              Seq(ConsensusStatus.BlockStatus.InProgress(prePrepared = false, Seq.empty, Seq.empty)),
+            ),
+            ConsensusStatus.SegmentStatus.InProgress(
+              ViewNumber.First,
+              Seq(ConsensusStatus.BlockStatus.InProgress(prePrepared = false, Seq.empty, Seq.empty)),
+            ),
+            ConsensusStatus.SegmentStatus.InProgress(
+              ViewNumber.First,
+              Seq(ConsensusStatus.BlockStatus.InProgress(prePrepared = false, Seq.empty, Seq.empty)),
+            ),
+          ),
+        )
+      manager.handleMessage(
+        orderingTopologyInfo(cryptoProvider),
+        Consensus.RetransmissionsMessage.VerifiedNetworkMessage(
+          Consensus.RetransmissionsMessage.RetransmissionRequest(epochStatus.fakeSign)
+        ),
+      )
+
+      context.runPipedMessages() shouldBe empty
+
+      verify(networkOut, times(1)).asyncSend(
+        P2PNetworkOut.Multicast(
+          P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+            Consensus.RetransmissionsMessage.RetransmissionResponse(
+              self,
+              Seq(cc0, cc1),
+            )
+          ),
+          Set(other1),
+        )
+      )
+      verify(networkOut, times(1)).asyncSend(
+        P2PNetworkOut.Multicast(
+          P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+            Consensus.RetransmissionsMessage.RetransmissionResponse(
+              self,
+              Seq(cc2),
+            )
+          ),
+          Set(other1),
+        )
+      )
+    }
+
     "refill the rate limiter from an independent monotonic time source so that requests resume while protocol time is static" in {
       val networkOut = mock[ModuleRef[P2PNetworkOut.Message]]
       implicit val context
@@ -650,6 +743,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
   private def createManager(
       networkOut: ModuleRef[P2PNetworkOut.Message],
+      windowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] = None,
       previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
       // Static by default (like a non-advancing sim clock), so tests exercise the burst deterministically.
       rateLimiterNanoTime: () => Long = () => 0L,
@@ -663,6 +757,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       metrics,
       loggerFactory,
       logEndOfEpochProgress = true,
+      windowSizeForRetransmissionOfCommitCertificates,
       previousEpochsRetransmissionsTrackerO,
       rateLimiterNanoTime,
     )

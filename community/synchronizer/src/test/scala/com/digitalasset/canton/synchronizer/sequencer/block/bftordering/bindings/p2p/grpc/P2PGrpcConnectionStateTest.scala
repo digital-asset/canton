@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkRef,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
+import com.digitalasset.canton.tracing.TraceContext
 import org.mockito.MockitoSugar.mock
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -218,9 +219,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // Outgoing connection authenticates and associates with the same node ID as the incoming connection
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
-        verifyZeroInteractions(ref1)
+        verifyOnlyStarted(ref1)
 
-        verifyZeroInteractions(ref3)
+        verifyOnlyStarted(ref3)
 
         state.connections should contain theSameElementsAs Seq(
           Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
@@ -257,9 +258,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // Outgoing connection authenticates and associates with the same node ID as the incoming connection
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
-        verifyZeroInteractions(ref1)
+        verifyOnlyStarted(ref1)
 
-        verifyZeroInteractions(ref3)
+        verifyOnlyStarted(ref3)
 
         state.connections should contain theSameElementsAs Seq(
           Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
@@ -300,10 +301,10 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // Outgoing connection authenticates and associates with the same node ID as the incoming connection
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
-        verifyZeroInteractions(ref1)
+        verifyOnlyStarted(ref1)
         verify(ref2, times(1)).close()
 
-        verifyZeroInteractions(ref3)
+        verifyOnlyStarted(ref3)
 
         state.connections should contain theSameElementsAs Seq(
           Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
@@ -344,10 +345,10 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // Outgoing connection authenticates and associates with the same node ID as the incoming connection
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
 
-        verifyZeroInteractions(ref2)
+        verifyOnlyStarted(ref2)
         verify(ref1, times(1)).close()
 
-        verifyZeroInteractions(ref3)
+        verifyOnlyStarted(ref3)
 
         state.connections should contain theSameElementsAs Seq(
           Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId),
@@ -476,7 +477,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
             if (closeNetworkRefs)
               verify(ref, times(1)).close()
             else
-              verifyZeroInteractions(ref)
+              verifyOnlyStarted(ref)
         }
       }
     }
@@ -841,6 +842,13 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       // The existing (incoming) ref is preserved
       state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
     }
+  }
+
+  // A network ref that has been successfully installed is started exactly once (two-phase start),
+  //  after publication, and nothing else interacts with it (in particular it is not closed).
+  private def verifyOnlyStarted(ref: P2PNetworkRef[BftOrderingMessage]): Unit = {
+    verify(ref).startConnection()(any[TraceContext])
+    verifyNoMoreInteractions(ref)
   }
 }
 

@@ -6,7 +6,7 @@ package com.digitalasset.canton.logging.pretty
 import cats.Show.ContravariantShow
 import com.digitalasset.canton.util.ShowUtil
 
-sealed trait CanPrettyPrint
+sealed trait CanPrettyPrint extends Any
 
 /** Extend this trait to directly enable pretty printing via supertype.
   */
@@ -32,7 +32,7 @@ trait PrettyPrinting extends ShowUtil with PrettyUtil with CanPrettyPrint {
 
 /** Extend this trait to directly enable pretty printing via companion object.
   */
-trait PrettyPrintingFromCompanion extends CanPrettyPrint {
+trait PrettyPrintingFromCompanion extends Any with CanPrettyPrint {
   def prettyCompanion: PrettyPrintingCompanion[this.type]
 
   final def show: String = prettyCompanion.contravariantShow.show(this)

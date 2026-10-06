@@ -137,6 +137,11 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
     val aggregatedLedgerEndForRepair: AtomicReference[Option[LedgerEnd]] =
       // the LedgerEnd necessarily will be updated as successful repair has at least a CommitRepair Update, which carries the LedgerEnd forward
       new AtomicReference(None)
+    val persistedLedgerEndCache = ParallelIndexerSubscription.persistedLedgerEndCache(
+      repairMode = repairMode,
+      aggregatedLedgerEndForRepair = aggregatedLedgerEndForRepair,
+      ledgerEndCache = inMemoryState.ledgerEndCache,
+    )
     val storeLedgerEndF = storeLedgerEndUpdate(
       parameterStorageBackend.updateLedgerEnd,
       dbDispatcher,
@@ -215,12 +220,13 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
             metrics = metrics,
             clock = clock,
             logger = logger,
-            ledgerEndCache = inMemoryState.ledgerEndCache,
+            ledgerEndCache = persistedLedgerEndCache,
             activeContracts = mutable.LinkedHashMap.empty,
           ),
           dbPrepareParallelism = dbPrepareParallelism,
           dbPrepare = dbPrepare(
             lastActivations = contractStorageBackend.lastActivations,
+            ledgerEndCache = persistedLedgerEndCache,
             dbDispatcher = dbDispatcher,
             resolveInternalContractIds = resolveInternalContractIdsF,
             logger = logger,
@@ -463,6 +469,17 @@ object ParallelIndexerSubscription {
       CantonTimestamp.MinValue, // this is a property of interest in the zero element: sets the lower bound for publication time, we start at MinValue
     synchronizerIndices = Map(),
   )
+
+  /** The Ledger End up to which all events are persisted. In repair mode, we use
+    * aggregatedLedgerEndForRepair.
+    */
+  def persistedLedgerEndCache(
+      repairMode: Boolean,
+      aggregatedLedgerEndForRepair: AtomicReference[Option[LedgerEnd]],
+      ledgerEndCache: LedgerEndCache,
+  ): LedgerEndCache =
+    if (repairMode) () => aggregatedLedgerEndForRepair.get().orElse(ledgerEndCache())
+    else ledgerEndCache
 
   def monotonicityValidator(
       initialLedgerEnd: Option[LedgerEnd]
@@ -911,10 +928,11 @@ object ParallelIndexerSubscription {
     ) {}
 
   def dbPrepare(
-      lastActivations: Iterable[(SynchronizerId, Long)] => Connection => Map[
+      lastActivations: (Iterable[(SynchronizerId, Long)], Long) => Connection => Map[
         (SynchronizerId, Long),
         Long,
       ],
+      ledgerEndCache: LedgerEndCache,
       dbDispatcher: DbDispatcher,
       resolveInternalContractIds: TraceContext => Iterable[ContractId] => Future[
         Map[ContractId, Long]
@@ -948,12 +966,13 @@ object ParallelIndexerSubscription {
             )
             .toVector
         lastActivationsWithInternalContractIds <-
-          if (missingActivationsWithInternalContractIds.isEmpty) {
-            Future.successful(Map.empty[(SynchronizerId, Long), Long])
-          } else {
-            dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
-              lastActivations(missingActivationsWithInternalContractIds)
-            )
+          (ledgerEndCache(), missingActivationsWithInternalContractIds) match {
+            case (Some(ledgerEnd), missing) if missing.nonEmpty =>
+              dbDispatcher.executeSql(metrics.index.db.lookupLastActivationsDbMetrics)(
+                lastActivations(missing, ledgerEnd.lastEventSeqId)
+              )
+            case _ =>
+              Future.successful(Map.empty[(SynchronizerId, Long), Long])
           }
         updatedMissingDeactivatedActivations =
           missingActivations.view

@@ -152,7 +152,7 @@ object TimeProofRequestSubmitter {
   )(implicit executionContext: ExecutionContext): TimeProofRequestSubmitter =
     new TimeProofRequestSubmitterImpl(
       config,
-      TimeProof.sendRequest(sequencerClient)(_),
+      TimeProof.sendRequest(sequencerClient, config.requestTimeout.toInternal)(_),
       clock,
       timeouts,
       loggerFactory,

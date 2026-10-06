@@ -947,6 +947,9 @@ private[lf] object Speedy {
               case Control.Expression(exp) =>
                 control = exp.execute(this)
                 loop()
+              case Control.Suspend(thunk) =>
+                control = thunk()
+                loop()
               case Control.Question(res) =>
                 SResultQuestion(res)
               case Control.Complete(value: SValue) =>
@@ -1274,13 +1277,14 @@ private[lf] object Speedy {
   object Control {
     final case class Value(v: SValue) extends Control[Nothing]
     final case class Expression(e: SExpr) extends Control[Nothing]
+    final case class Suspend[Q](thunk: () => Control[Q]) extends Control[Q]
     final case class Question[Q](res: Q) extends Control[Q]
     final case class Complete(res: SValue) extends Control[Nothing]
     final case class Error(err: interpretation.Error) extends Control[Nothing]
     final case object WeAreUnset extends Control[Nothing]
 
     implicit object `Defer Control` extends cats.Defer[Control] {
-      override def defer[A](x: => Control[A]): Control[A] = x
+      override def defer[A](x: => Control[A]): Control[A] = Suspend(() => x)
     }
   }
 

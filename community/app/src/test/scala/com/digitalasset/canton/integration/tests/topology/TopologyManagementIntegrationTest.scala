@@ -546,7 +546,7 @@ trait TopologyManagementIntegrationTest
 
       val wrapped = UntypedVersionedMessage(
         UntypedVersionedMessage.Wrapper.Data(transaction.toByteString),
-        version = testedProtocolVersion.v,
+        version = TopologyTransaction.protoVersionFor(testedProtocolVersion).v,
       )
 
       val originalByteString = wrapped.toByteString
@@ -603,7 +603,7 @@ trait TopologyManagementIntegrationTest
 
       val wrapped = UntypedVersionedMessage(
         UntypedVersionedMessage.Wrapper.Data(transaction.toByteString),
-        version = testedProtocolVersion.v,
+        version = TopologyTransaction.protoVersionFor(testedProtocolVersion).v,
       )
 
       val originalByteString = wrapped.toByteString
@@ -2007,7 +2007,7 @@ trait TopologyManagementIntegrationTest
 
 }
 
-class TopologyManagementBftOrderingIntegrationTestPostgres
+final class TopologyManagementBftOrderingIntegrationTestPostgres
     extends TopologyManagementIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

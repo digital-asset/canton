@@ -905,15 +905,17 @@ private[backend] trait StorageBackendTestsContracts
           )
         )
     )
+    val lastActivationsInput = List(
+      someSynchronizerId -> internalContractId,
+      someSynchronizerId -> internalContractId3,
+      someSynchronizerId2 -> internalContractId2,
+      someSynchronizerId2 -> internalContractId3,
+    )
     val lastActivations = executeSql(
-      backend.contract.lastActivations(
-        List(
-          someSynchronizerId -> internalContractId,
-          someSynchronizerId -> internalContractId3,
-          someSynchronizerId2 -> internalContractId2,
-          someSynchronizerId2 -> internalContractId3,
-        )
-      )
+      backend.contract.lastActivations(lastActivationsInput, 3L)
+    )
+    val lastActivationsUpTo2 = executeSql(
+      backend.contract.lastActivations(lastActivationsInput, 2L)
     )
 
     activeContracts2 shouldBe Map(
@@ -930,6 +932,10 @@ private[backend] trait StorageBackendTestsContracts
       (someSynchronizerId, internalContractId) -> 1L,
       (someSynchronizerId2, internalContractId2) -> 2L,
       (someSynchronizerId2, internalContractId3) -> 3L,
+    )
+    lastActivationsUpTo2 shouldBe Map(
+      (someSynchronizerId, internalContractId) -> 1L,
+      (someSynchronizerId2, internalContractId2) -> 2L,
     )
   }
 
@@ -1038,7 +1044,8 @@ private[backend] trait StorageBackendTestsContracts
         List(
           someSynchronizerId -> internalContractId,
           someSynchronizerId2 -> internalContractId2,
-        )
+        ),
+        4L,
       )
     )
 
@@ -1062,7 +1069,7 @@ private[backend] trait StorageBackendTestsContracts
   it should "be able to query with empty input" in {
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     val activeContracts = executeSql(
-      backend.contract.lastActivations(Nil)
+      backend.contract.lastActivations(Nil, 0L)
     )
     activeContracts shouldBe empty
   }

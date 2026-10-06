@@ -18,6 +18,7 @@ import com.google.common.annotations.VisibleForTesting
 
 final case class ParticipantNodeParameters(
     general: CantonNodeParameters.General,
+    deprecatedApis: DeprecatedApiConfig,
     activationFrequencyForWarnAboutConsistencyChecks: Long,
     adminWorkflow: AdminWorkflowConfig,
     maxUnzippedDarSize: Int,
@@ -85,6 +86,7 @@ object ParticipantNodeParameters {
         TopologyConfig(dispatchQueueBackpressureLimit = NonNegativeInt.tryCreate(10)),
       sanitizePublicErrorMessages = false,
     ),
+    deprecatedApis = DeprecatedApiConfig(),
     activationFrequencyForWarnAboutConsistencyChecks = 1000L,
     adminWorkflow = AdminWorkflowConfig(
       bongTestMaxLevel = NonNegativeInt.tryCreate(10)

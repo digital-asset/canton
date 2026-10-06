@@ -157,6 +157,27 @@ trait ModuleRef[-AcceptedMessageT] {
 /** An abstraction of the network for deterministic simulation testing purposes.
   */
 trait P2PNetworkRef[-P2PMessageT] extends FlagCloseable {
+
+  /** Starts the connection backing this ref.
+    *
+    * Creating a ref may spawn a connection-managing actor that is initially parked and inert: it
+    * neither initializes nor tears down any shared connection state until this method is called.
+    * This lets the owner publish the ref into shared connection state first and only then activate
+    * exactly the winning ref, so speculative or superseded refs can be closed without touching the
+    * state associated with their address.
+    *
+    * Should be called once, after the ref has been published, by the same single writer that owns
+    * connection-state mutation (the P2P network output module actor). It activates the connection
+    * at most once, so repeated calls are safely ignored.
+    *
+    * Safe to race with [[com.digitalasset.canton.lifecycle.FlagCloseable.close]]: if the ref has
+    * already been closed (e.g. because a concurrent shutdown superseded it or removed its entry) by
+    * the time this runs, it is a no-op and the parked actor is left inert rather than being
+    * activated. Refs whose backing connection is already active on creation (e.g. simulation refs)
+    * default to a no-op.
+    */
+  def startConnection()(implicit traceContext: TraceContext): Unit = ()
+
   def asyncP2PSend(recipientBftNodeId: BftNodeId, createMessage: Option[Instant] => P2PMessageT)(
       implicit
       traceContext: TraceContext,

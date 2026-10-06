@@ -23,8 +23,10 @@ class JsDamlDefinitionsService(
     damlDefinitionsView: DamlDefinitionsView,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
-)(implicit val authInterceptor: AuthInterceptor, val executionContext: ExecutionContext)
-    extends Endpoints {
+)(implicit
+    val authInterceptor: AuthInterceptor,
+    val executionContext: ExecutionContext,
+) extends Endpoints {
   import JsDamlDefinitionsService.*
   private val packageSignatureSelectorPath = "package-signature"
   private val templateSelectorPath = "template-id"

@@ -304,7 +304,10 @@ trait ContractStorageBackend {
       connection: Connection
   ): Map[Long, Boolean]
 
-  def lastActivations(synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+  def lastActivations(
+      synchronizerContracts: Iterable[(SynchronizerId, Long)],
+      beforeOrAtEventSeqId: Long,
+  )(
       connection: Connection
   ): Map[(SynchronizerId, Long), Long]
 

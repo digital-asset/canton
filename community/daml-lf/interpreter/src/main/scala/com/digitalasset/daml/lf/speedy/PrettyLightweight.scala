@@ -17,6 +17,7 @@ private[speedy] object PrettyLightweight { // lightweight pretty printer for CEK
     control match {
       case Control.Value(v) => s"V-${pp(v)}"
       case Control.Expression(e) => s"E-${pp(e)}"
+      case Control.Suspend(_) => "suspend"
       case Control.Question(_) => "question"
       case Control.Complete(_) => "complete"
       case Control.Error(_) => "error"

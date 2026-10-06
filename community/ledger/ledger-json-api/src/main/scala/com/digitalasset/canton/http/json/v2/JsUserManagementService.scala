@@ -29,8 +29,10 @@ class JsUserManagementService(
     userManagementClient: UserManagementClient,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
-)(implicit val authInterceptor: AuthInterceptor, val executionContext: ExecutionContext)
-    extends Endpoints
+)(implicit
+    val authInterceptor: AuthInterceptor,
+    val executionContext: ExecutionContext,
+) extends Endpoints
     with NamedLogging {
   import JsUserManagementService.*
 

@@ -657,6 +657,30 @@ object ConfigTransforms {
   ): ConfigTransform =
     updateAllSequencerClientConfigs((_, _, config) => update(config))
 
+  /** Re-enables the Ledger API / JSON API endpoints and gRPC methods deprecated in 3.4. */
+  def enableDeprecatedEndpoints34: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.features.deprecated.enableDeprecatedEndpoints34).replace(true)
+    )
+
+  /** Re-enables the Ledger API / JSON API request fields deprecated in 3.4. */
+  def enableDeprecatedParameters34: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.features.deprecated.enableDeprecatedParameters34).replace(true)
+    )
+
+  /** Re-enables the Ledger API / JSON API endpoints and gRPC methods deprecated in 3.5. */
+  def enableDeprecatedEndpoints35: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.features.deprecated.enableDeprecatedEndpoints35).replace(true)
+    )
+
+  /** Re-enables all the endpoints and request fields deprecated in 3.4 and 3.5. */
+  def enableAllDeprecatedApis: ConfigTransform =
+    enableDeprecatedEndpoints34
+      .andThen(enableDeprecatedParameters34)
+      .andThen(enableDeprecatedEndpoints35)
+
   def enableAdvancedCommands(
       featureFlag: FeatureFlag
   ): ConfigTransform =

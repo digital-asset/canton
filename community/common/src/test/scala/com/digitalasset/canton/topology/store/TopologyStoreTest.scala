@@ -11,7 +11,6 @@ import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -23,7 +22,6 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   PositiveStoredTopologyTransactions,
 }
 import com.digitalasset.canton.topology.store.TopologyStore.{EffectiveStateChange, StateKeyFetch}
-import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
@@ -35,7 +33,6 @@ import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
-import org.slf4j.event.Level
 
 trait TopologyStoreTest
     extends AsyncWordSpec
@@ -712,23 +709,9 @@ trait TopologyStoreTest
                 asOfInclusive =
                   SequencedTime(SignedTopologyTransaction.InitialTopologySequencingTime)
               )
-            ts1Hash <-
-              loggerFactory.assertLogsSeq(LevelAndAbove(Level.DEBUG))(
-                store
-                  .findEssentialStateHashAtSequencedTime(
-                    asOfInclusive = SequencedTime(ts1)
-                  ),
-                logs =>
-                  store match {
-                    case _: DbTopologyStore[?] =>
-                      // Only the DB store caches the genesis hash
-                      logs.exists(
-                        _.message.contains(
-                          "Reusing existing genesis topology state hash computation"
-                        )
-                      ) shouldBe true
-                    case _ => succeed
-                  },
+            ts1Hash <- store
+              .findEssentialStateHashAtSequencedTime(
+                asOfInclusive = SequencedTime(ts1)
               )
           } yield {
             val expectedInitialHash =

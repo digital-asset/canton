@@ -17,11 +17,17 @@ import com.digitalasset.canton.config.ConfigErrors.{
 }
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
-import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ApiDeprecation,
+  ProtocolVersionCompatibility,
+  ReleaseVersion,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
@@ -424,6 +430,55 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
             ),
           )
         )
+    }
+  }
+
+  "the deprecated API feature flags" should {
+    // The flag that a deprecation advertises in its errors and documentation must be the
+    // configuration key that ends up in the node parameters its `isEnabledBy` consults.
+    val deprecations = ApiDeprecation.all
+
+    def participantGate(files: Seq[File]): DeprecatedApiGate =
+      DeprecatedApiGate(
+        CantonConfig
+          .parseAndLoad(files.map(_.toJava), Some(DefaultPorts.create()))
+          .valueOrFail("config should load")
+          .participantNodeParametersByString("participant1")
+          .deprecatedApis
+      )
+
+    "disable every deprecation by default" in {
+      val gate = participantGate(Seq(simpleConf))
+      forEvery(deprecations)(gate.isEnabled(_) shouldBe false)
+    }
+
+    "re-enable only the deprecation they are declared for" in {
+      forEvery(deprecations) { deprecation =>
+        val flag = File.newTemporaryFile(suffix = ".conf").deleteOnExit()
+        // the flags are per participant, so the advertised key names the node it applies to
+        val key = deprecation.featureFlag.replace("<participant>", "participant1")
+        flag.overwrite(s"$key = true").discard
+        val gate = participantGate(Seq(simpleConf, flag))
+        gate.isEnabled(deprecation) shouldBe true
+        forEvery(deprecations.filterNot(_ == deprecation))(gate.isEnabled(_) shouldBe false)
+      }
+    }
+
+    "leave the other participants untouched" in {
+      val flag = File.newTemporaryFile(suffix = ".conf").deleteOnExit()
+      flag
+        .overwrite(
+          "canton.participants.participant1.features.deprecated.enable-deprecated-endpoints-34 = true"
+        )
+        .discard
+      val config = CantonConfig
+        .parseAndLoad(Seq(simpleConf, flag).map(_.toJava), Some(DefaultPorts.create()))
+        .valueOrFail("config should load")
+
+      DeprecatedApiGate(config.participantNodeParametersByString("participant1").deprecatedApis)
+        .isEnabled(ApiDeprecation.Canton34.Endpoints) shouldBe true
+      DeprecatedApiGate(config.participantNodeParametersByString("participant2").deprecatedApis)
+        .isEnabled(ApiDeprecation.Canton34.Endpoints) shouldBe false
     }
   }
 

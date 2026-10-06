@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.version
 
+import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.digitalasset.canton.ProtoDeserializationError.UnknownProtoVersion
+import com.digitalasset.canton.ProtoDeserializationError.{OtherError, UnknownProtoVersion}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.transaction.TopologyTransaction
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
@@ -49,8 +51,26 @@ final case class SupportedProtoVersions[F[
 
   def deserializerFor(
       protoVersion: ProtoVersion
-  ): Deserializer =
-    converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
+  ): ParsingResult[Deserializer] =
+    converters.get(protoVersion).map(_.deserializer) match {
+      case Some(deserializer) => deserializer.asRight
+
+      case None =>
+        /*
+          We want to fail here. However, we have on MainNet a topology transaction with protobuf version 29.
+          Hence, for topology transactions, we make an exception.
+         */
+
+        // Converters are sorted in descending order, so the lowest supported version is the last one
+        val (lowestSupportedProtoVersion, lowestProtoCodec) = converters.last1
+
+        if (name == TopologyTransaction.name && protoVersion < lowestSupportedProtoVersion)
+          lowestProtoCodec.deserializer.asRight
+        else
+          OtherError(
+            s"Unable to find deserializer for version $protoVersion and message $name"
+          ).asLeft
+    }
 
   def protoVersionFor(
       protocolVersion: RepresentativeProtocolVersion[Comp]

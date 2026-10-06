@@ -104,12 +104,7 @@ trait SynchronizerParametersTimeoutChangesIntegrationTest
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         participant1.health.maybe_ping(participant2.id, timeout = 600.seconds) shouldBe None,
         LogEntry.assertLogSeq(
-          mustContainWithClue = Seq(
-            (
-              _.warningMessage should include regex "Response message for request .* timed out",
-              "participant timeout",
-            )
-          ),
+          mustContainWithClue = Seq.empty,
           mayContain = Seq(
             // MediatorError.Timeout is optional as sometimes the command service tracker times out first
             _.shouldBeCantonErrorCode(MediatorError.Timeout),

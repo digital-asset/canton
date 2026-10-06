@@ -1580,6 +1580,7 @@ class IssConsensusModuleTest
             metrics,
             loggerFactory,
             logEndOfEpochProgress = true,
+            windowSizeForRetransmissionOfCommitCertificates = None,
           )
         ),
         dependencies,

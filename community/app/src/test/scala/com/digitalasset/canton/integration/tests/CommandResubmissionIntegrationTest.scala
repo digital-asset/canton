@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isConfirmationResponse
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.*
@@ -87,16 +88,19 @@ trait CommandResubmissionIntegrationTest
       "processing and releasing the first confirmation response has failed",
     )
 
-    loggerFactory.assertLogsUnordered(
+    loggerFactory.assertLogsUnorderedOptional(
       assertPingSucceeds(
         participant1,
         participant1,
         timeoutMillis = 15000,
         id = "pingNeedingRetry",
       ),
-      _.warningMessage should (include("Response message for request") and include(
-        "timed out at"
-      )),
+      (
+        LogEntryOptionality.Optional,
+        _.warningMessage should (include("Response message for request") and include(
+          "timed out at"
+        )),
+      ),
     )
 
     // make sure that at least one command submission was rejected

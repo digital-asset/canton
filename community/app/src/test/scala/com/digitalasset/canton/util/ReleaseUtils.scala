@@ -64,6 +64,11 @@ object ReleaseUtils {
       .toList
   }
 
+  /** Ignored release bundles in `canton-open-source-<version>-<bundle>-(other).tar.gz` naming
+    * scheme.
+    */
+  private val ignoredSuffixes: Seq[String] = Seq("protobuf", "api", "docs")
+
   /** Lists `canton-open-source-*` releases published in the public S3 bucket.
     *
     * Returned versions are deduplicated and parsed as [[ReleaseVersion]]; entries that fail to
@@ -85,15 +90,15 @@ object ReleaseUtils {
       .split("\\s+")
       .toSeq
       .filter(_.endsWith(".tar.gz"))
-      .filterNot(_.contains("-protobuf"))
-      .flatMap { key =>
-        ReleaseVersion
-          .create(key.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
-          .toOption
-      }
+      .map(_.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
+      .filterNot(isIgnoredBundle)
+      .flatMap(ReleaseVersion.create(_).toOption)
       .filter(r => (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot))
       .distinct
   }
+
+  private[util] def isIgnoredBundle(version: String): Boolean =
+    ignoredSuffixes.exists(suffix => version.endsWith(s"-$suffix"))
 
   // All previous stable releases minus releases that support only deleted protocol versions
   lazy val previousSupportedStableReleases: List[ReleaseVersion] =

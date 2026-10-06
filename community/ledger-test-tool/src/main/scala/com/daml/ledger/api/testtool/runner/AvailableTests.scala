@@ -30,6 +30,7 @@ object AvailableTests {
 
   def testsForProtocol(protocolVersion: ProtocolVersion): AvailableTests =
     if (protocolVersion <= ProtocolVersion.v34) v2_2
+    else if (protocolVersion <= ProtocolVersion.v35) v2_3
     else latestStableTestDars
 
   private def map = Map(
