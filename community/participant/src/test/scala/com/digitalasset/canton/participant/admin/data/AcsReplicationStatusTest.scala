@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.admin.data
 
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiAcsReplicationStatus
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus as InternalStatus
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
@@ -25,8 +25,10 @@ class AcsReplicationStatusTest extends AnyWordSpec with BaseTest {
     synchronizerId = SynchronizerId.tryFromString("da::1220abcd"),
     sourceParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::source::1220abcd"),
     targetParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::target::1220abcd"),
-    serial = PositiveInt.one,
+    timestamp = CantonTimestamp.now(),
     participantPermission = ParticipantPermission.Submission,
+    acsReplicationDestination =
+      InternalStatus.AcsReplicationParameters.AcsReplicationDestination.Persistence,
   )
 
   private def createInternalStatus(

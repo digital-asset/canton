@@ -226,7 +226,7 @@ class TrafficCostEstimator(
 
       val client = cryptoClient(snapshot)
 
-      estimateUnassigmentRequestCost(submissionParam, client, snapshot).flatMap { requestCost =>
+      estimateUnassignmentRequestCost(submissionParam, client, snapshot).flatMap { requestCost =>
         (if (params.freeConfirmationResponses)
            EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
          else
@@ -306,7 +306,7 @@ class TrafficCostEstimator(
       estimatedCost <- computeCost(trafficStateController, snapshot, batch)
     } yield estimatedCost
 
-  private[traffic] def estimateUnassigmentRequestCost(
+  private[traffic] def estimateUnassignmentRequestCost(
       submissionParam: UnassignmentSubmissionParam,
       client: SynchronizerSnapshotSyncCryptoApi,
       snapshot: TopologySnapshot,

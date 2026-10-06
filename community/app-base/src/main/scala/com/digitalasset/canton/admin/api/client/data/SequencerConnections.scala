@@ -8,7 +8,11 @@ import cats.syntax.foldable.*
 import cats.{Id, Monad}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.{
   SequencerConnectionPoolDelays as SequencerConnectionPoolDelaysInternal,
   SequencerConnectionValidation as SequencerConnectionValidationInternal,
@@ -31,7 +35,7 @@ final case class SequencerConnections(
     submissionRequestAmplification: SubmissionRequestAmplification,
     sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
     subscriptionLivenessLimits: SubscriptionLivenessLimits,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   require(
     aliasToConnection.sizeIs >= sequencerTrustThreshold.unwrap,
     s"sequencerTrustThreshold cannot be greater than number of sequencer connections. Found threshold of $sequencerTrustThreshold and ${aliasToConnection.size} sequencer connections",
@@ -112,15 +116,8 @@ final case class SequencerConnections(
   def withLivenessMargin(sequencerLivenessMargin: NonNegativeInt): SequencerConnections =
     this.copy(sequencerLivenessMargin = sequencerLivenessMargin)
 
-  override protected def pretty: Pretty[SequencerConnections] =
-    prettyOfClass(
-      param("connections", _.aliasToConnection.forgetNE),
-      param("sequencer trust threshold", _.sequencerTrustThreshold),
-      param("sequencer liveness margin", _.sequencerLivenessMargin),
-      param("submission request amplification", _.submissionRequestAmplification),
-      param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
-      param("subscription liveness limits", _.subscriptionLivenessLimits),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerConnections] =
+    SequencerConnections
 
   private[canton] def toInternal: SequencerConnectionsInternal =
     SequencerConnectionsInternal
@@ -135,7 +132,17 @@ final case class SequencerConnections(
       .valueOr(err => throw new IllegalArgumentException(s"Invariants not respected: $err"))
 }
 
-object SequencerConnections {
+object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections] {
+  override protected val pretty: Pretty[SequencerConnections] =
+    prettyOfClass(
+      param("connections", _.aliasToConnection.forgetNE),
+      param("sequencer trust threshold", _.sequencerTrustThreshold),
+      param("sequencer liveness margin", _.sequencerLivenessMargin),
+      param("submission request amplification", _.submissionRequestAmplification),
+      param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
+      param("subscription liveness limits", _.subscriptionLivenessLimits),
+    )
+
   implicit private[data] def sequencerConnectionsToInternalTransformer
       : Transformer[SequencerConnections, SequencerConnectionsInternal] = _.toInternal
 
@@ -276,19 +283,23 @@ final case class SubmissionRequestAmplification(
     patience: config.NonNegativeFiniteDuration,
     confirmationResponseFactorO: Option[PositiveInt] = None,
     confirmationResponsePatienceO: Option[config.NonNegativeFiniteDuration] = None,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[SubmissionRequestAmplification] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SubmissionRequestAmplification] =
+    SubmissionRequestAmplification
+
+  private[canton] def toInternal: SubmissionRequestAmplificationInternal =
+    this.transformInto[SubmissionRequestAmplificationInternal]
+}
+
+object SubmissionRequestAmplification
+    extends PrettyPrintingCompanion[SubmissionRequestAmplification] {
+  override protected val pretty: Pretty[SubmissionRequestAmplification] = prettyOfClass(
     param("factor", _.factor),
     param("patience", _.patience),
     paramIfDefined("confirmationResponseFactor", _.confirmationResponseFactorO),
     paramIfDefined("confirmationResponsePatience", _.confirmationResponsePatienceO),
   )
 
-  private[canton] def toInternal: SubmissionRequestAmplificationInternal =
-    this.transformInto[SubmissionRequestAmplificationInternal]
-}
-
-object SubmissionRequestAmplification {
   val NoAmplification: SubmissionRequestAmplification =
     SubmissionRequestAmplificationInternal.NoAmplification
       .transformInto[SubmissionRequestAmplification]
@@ -316,13 +327,9 @@ final case class SequencerConnectionPoolDelays(
     maxRestartDelay: config.NonNegativeFiniteDuration,
     warnValidationDelay: config.NonNegativeFiniteDuration,
     subscriptionRequestDelay: config.NonNegativeFiniteDuration,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[SequencerConnectionPoolDelays] = prettyOfClass(
-    param("minRestartDelay", _.minRestartDelay),
-    param("maxRestartDelay", _.maxRestartDelay),
-    param("warnValidationDelay", _.warnValidationDelay),
-    param("subscriptionRequestDelay", _.subscriptionRequestDelay),
-  )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerConnectionPoolDelays] =
+    SequencerConnectionPoolDelays
 
   def withWarnValidationDelay(
       delay: config.NonNegativeFiniteDuration
@@ -333,7 +340,15 @@ final case class SequencerConnectionPoolDelays(
     this.transformInto[SequencerConnectionPoolDelaysInternal]
 }
 
-object SequencerConnectionPoolDelays {
+object SequencerConnectionPoolDelays
+    extends PrettyPrintingCompanion[SequencerConnectionPoolDelays] {
+  override protected val pretty: Pretty[SequencerConnectionPoolDelays] = prettyOfClass(
+    param("minRestartDelay", _.minRestartDelay),
+    param("maxRestartDelay", _.maxRestartDelay),
+    param("warnValidationDelay", _.warnValidationDelay),
+    param("subscriptionRequestDelay", _.subscriptionRequestDelay),
+  )
+
   val default: SequencerConnectionPoolDelays =
     SequencerConnectionPoolDelaysInternal.default.transformInto[SequencerConnectionPoolDelays]
 
@@ -359,17 +374,20 @@ object SequencerConnectionPoolDelays {
 final case class SubscriptionLivenessLimits(
     maxTimestampDelta: config.NonNegativeFiniteDuration,
     maxOrdinalDelta: NonNegativeInt,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[SubscriptionLivenessLimits] = prettyOfClass(
-    param("maxTimestampDelta", _.maxTimestampDelta),
-    param("maxOrdinalDelta", _.maxOrdinalDelta),
-  )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SubscriptionLivenessLimits] =
+    SubscriptionLivenessLimits
 
   private[canton] def toInternal: SubscriptionLivenessLimitsInternal =
     this.transformInto[SubscriptionLivenessLimitsInternal]
 }
 
-object SubscriptionLivenessLimits {
+object SubscriptionLivenessLimits extends PrettyPrintingCompanion[SubscriptionLivenessLimits] {
+  override protected val pretty: Pretty[SubscriptionLivenessLimits] = prettyOfClass(
+    param("maxTimestampDelta", _.maxTimestampDelta),
+    param("maxOrdinalDelta", _.maxOrdinalDelta),
+  )
+
   val default: SubscriptionLivenessLimits =
     SubscriptionLivenessLimitsInternal.default.transformInto[SubscriptionLivenessLimits]
 

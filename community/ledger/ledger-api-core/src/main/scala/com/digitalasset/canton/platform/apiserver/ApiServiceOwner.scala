@@ -8,7 +8,7 @@ import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
@@ -124,6 +124,7 @@ object ApiServiceOwner {
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
       lookupSynchronizerCryptoClient: SynchronizerId => Option[SynchronizerCryptoClient],
       pureCryptoApi: CryptoPureApi,
+      maxPruningBatchOffsetSize: PositiveInt,
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -235,6 +236,7 @@ object ApiServiceOwner {
         partyReplicationEndpointsO = partyReplicationEndpointsO,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,
+        maxPruningBatchOffsetSize = maxPruningBatchOffsetSize,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(

@@ -20,7 +20,9 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
+import select_rota as select_rota_lib
 from flaky_common import (
     branch,
     get_ci_commit_hash,
@@ -78,6 +80,29 @@ def select_rota(rotation: str) -> list[str]:
     if not ids:
         print(f"Unexpected output from select_rota.py: {result.stdout.strip()!r}. No one selected.")
     return ids
+
+
+def _notify_alert_post_failure(token: str, reason: str) -> None:
+    """Best-effort: page the CI rota when the alert itself fails to post.
+
+    Otherwise a broken Slack integration silently drops every flaky/red-main alert
+    with nothing but a CI log line nobody reads. Uses the same bot token as the failed
+    post, so this can't help if the token itself is what's broken (e.g. revoked), still
+    strictly better than nothing for every other failure mode (bad channel id, network
+    blip, oversized payload, ...).
+    """
+    try:
+        roster = json.loads(select_rota_lib.ROSTER_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"Could not load roster to report the post failure either: {exc!r}")
+        return
+    select_rota_lib.notify_tooling_failure(
+        f":warning: alert_slack.py failed to post the flaky/red-main Slack alert on "
+        f"`{branch}`: {reason}. The underlying test failure(s) may be going unreported, "
+        "can someone check the Slack app/credentials/channel?",
+        roster,
+        token,
+    )
 
 
 def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
@@ -167,7 +192,9 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
             if warnings:
                 print(f"Slack response warnings: {warnings}")
             if not result.get("ok"):
-                print(f"Slack API error: {result.get('error', 'unknown')}")
+                error = result.get("error", "unknown")
+                print(f"Slack API error: {error}")
+                _notify_alert_post_failure(token, f"Slack API error: {error}")
             else:
                 print(
                     f"Flaky test duplicate summary sent to Slack channel, mentioning {' '.join(responders)}."
@@ -176,6 +203,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
                 )
     except Exception as e:
         print(f"Failed to send Slack channel summary: {e}")
+        _notify_alert_post_failure(token, repr(e))
 
 
 def self_test() -> None:
@@ -196,7 +224,97 @@ def self_test() -> None:
         assert select_rota("ci") == []
     finally:
         subprocess.run = orig_run
+
+    # _notify_alert_post_failure: pages the CI rota via select_rota_lib.notify_tooling_failure
+    # whenever the alert itself fails to post. Fake that helper out (network-free) to
+    # check it's called with the right token/message, and that a broken roster read
+    # doesn't raise either.
+    real_notify = select_rota_lib.notify_tooling_failure
+    calls: list[tuple[str, str]] = []
+    try:
+        select_rota_lib.notify_tooling_failure = lambda message, roster, token, **kw: calls.append(
+            (message, token)
+        )
+        _notify_alert_post_failure("xoxb-test", "boom")
+        assert len(calls) == 1
+        assert calls[0][1] == "xoxb-test"
+        assert "boom" in calls[0][0]
+
+        real_roster_path = select_rota_lib.ROSTER_PATH
+        select_rota_lib.ROSTER_PATH = Path("/nonexistent/roster.json")
+        try:
+            _notify_alert_post_failure("xoxb-test", "boom")  # must not raise
+        finally:
+            select_rota_lib.ROSTER_PATH = real_roster_path
+        assert len(calls) == 1  # unreachable roster -> no additional (broken) call
+    finally:
+        select_rota_lib.notify_tooling_failure = real_notify
+
+    # send_duplicate_summary itself (not just the helper above in isolation) must call
+    # _notify_alert_post_failure on both Slack failure shapes: a non-"ok" API response
+    # and the post request raising. Stub the network and select_rota() so this runs
+    # without touching Slack or subprocess.
+    class _FakeResp:
+        def __init__(self, body: bytes):
+            self._body = body
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    saved_env = {
+        k: os.environ.get(k)
+        for k in ("SLACK_BOT_QA_NOTIFICATIONS", "SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS")
+    }
+    post_failure_calls: list[tuple[str, str]] = []
+    try:
+        os.environ["SLACK_BOT_QA_NOTIFICATIONS"] = "xoxb-test"
+        os.environ["SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS"] = "C123"
+        duplicates = [("123", "Some Test", "cause")]
+
+        with (
+            patch(f"{__name__}.select_rota", return_value=[]),
+            patch(
+                f"{__name__}._notify_alert_post_failure",
+                side_effect=lambda t, r: post_failure_calls.append((t, r)),
+            ),
+        ):
+            with patch(
+                "urllib.request.urlopen",
+                return_value=_FakeResp(
+                    json.dumps({"ok": False, "error": "channel_not_found"}).encode()
+                ),
+            ):
+                send_duplicate_summary(duplicates)
+            assert len(post_failure_calls) == 1, post_failure_calls
+            assert post_failure_calls[0][0] == "xoxb-test"
+            assert "channel_not_found" in post_failure_calls[0][1]
+            post_failure_calls.clear()
+
+            with patch("urllib.request.urlopen", side_effect=OSError("network down")):
+                send_duplicate_summary(duplicates)
+            assert len(post_failure_calls) == 1, post_failure_calls
+            assert post_failure_calls[0][0] == "xoxb-test"
+            assert "network down" in post_failure_calls[0][1]
+    finally:
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
     print("alert_slack self-checks passed")
+
+
+def test_self_test() -> None:
+    """Pytest entry point so lint_and_test_py_scripts.yml's plain `pytest` run exercises
+    these self-checks too, not just `--self-test` (which nothing else invokes in CI)."""
+    run_guarded_self_test(self_test)
 
 
 def run(streaks_json=None) -> None:

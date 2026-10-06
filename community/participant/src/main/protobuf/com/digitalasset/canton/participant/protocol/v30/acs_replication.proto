@@ -8,7 +8,6 @@ package com.digitalasset.canton.participant.protocol.v30;
 import "com/digitalasset/canton/admin/participant/v30/active_contract.proto";
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
-import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
 
 // Describes the various pieces of state of an ACS  replication.
@@ -19,15 +18,26 @@ message AcsReplicationStatus {
 
   // Static parameters that do not change throughout a single ACS replication operation.
   message AcsReplicationParameters {
+    // How the target participant handles contracts received during the ACS replication.
+    enum AcsReplicationDestination {
+      // Unspecified, considered invalid value.
+      ACS_REPLICATION_DESTINATION_UNSPECIFIED = 0;
+      // Persists the contracts. Used for online party replication.
+      // Contract handler can be recreated and replication continued after target participant restart.
+      ACS_REPLICATION_DESTINATION_PERSISTENCE = 1;
+      // Sends the contracts to an output stream. Used for get_remote_acs.
+      // Replication has to start from scratch after target participant restart.
+      ACS_REPLICATION_DESTINATION_OUTPUT_STREAM = 2;
+    }
+
     string request_id = 1;
     string party_id = 2;
     string synchronizer_id = 3;
     string source_participant_uid = 4;
     string target_participant_uid = 5;
-    // TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
-    uint32 topology_serial = 6;
-    // TODO(#35267) remove from here because ACS replicator doesn't need to know about permission
+    optional uint64 timestamp = 6;
     com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 7;
+    AcsReplicationDestination acs_replication_destination = 8;
   }
 
   // Sequencer channel agreement hasn't been proposed by target participant yet.
@@ -44,7 +54,7 @@ message AcsReplicationStatus {
 
     // Agreement time as determined by the record time of the Daml admin workflow agreement.
     // required
-    google.protobuf.Timestamp agreed_at = 2;
+    optional uint64 agreed_at = 2;
 
     // Sequencer hosting the channel for ACS replication.
     string sequencer_uid = 3;
@@ -88,20 +98,20 @@ message AcsReplicationStatus {
     string error_message = 2;
   }
 
-  // TODO (#35267) remove once authorization is no longer used in AcsReplicator
-  // Authorization by party owners and target participant to onboard the party.
-  message PartyReplicationAuthorization {
-    // The timestamp at which the party onboarding authorization becomes effective
-    // and the ACS snapshot for replication is based on.
+  // Topology transaction that confirms that party is hosted by both source and target participant.
+  // Used only for status reporting purposes, not for ACS replication logic.
+  message PartyToParticipantTopologyTransaction {
+    // The timestamp at which the party-to-participant topology transaction became effective
     // required
-    google.protobuf.Timestamp onboarding_at = 1;
+    optional uint64 valid_from = 1;
 
-    // Whether the party is fully onboarded to the target participant.
-    // A value of true means:
-    // - The party's ACS has been completely replicated to the target participant, and
-    // - the party participates in Daml transactions according to its target participant hosting permission.
+    // Whether the party is in the onboarding stage on the target participant.
     // required
-    bool is_onboarding_flag_cleared = 2;
+    bool is_onboarding = 2;
+
+    // Serial number of the last topology transaction
+    // that contains party-to-participant mapping for both source and target participant.
+    uint32 topology_serial = 3;
   }
 
   // Static ACS replication parameters.
@@ -115,9 +125,9 @@ message AcsReplicationStatus {
     AgreementExists exists = 4;
     AgreementArchived archived = 5;
   }
-  // TODO (#35267) remove once authorization is no longer used in AcsReplicator
-  // Authorization by party owners and target participant to onboard the party.
-  PartyReplicationAuthorization authorization = 6;
+  // Topology transaction that confirms that party is hosted by both source and target participant.
+  // Used only for status reporting purposes, not for ACS replication logic.
+  PartyToParticipantTopologyTransaction ptp_topology_transaction = 6;
   // I can use ProtoTimestamp which can be obtained from CantonTimestamp
   // Then I can use ledgerApiStore.lastSynchronizerOffset...
   // Or we could just pass offset as long and it's up to client to provide it (maybe that's the best)
@@ -215,7 +225,7 @@ message AcsDigest {
   // The human-readable timestamp at which the ACS request has been issued,
   // specifically the is the ledger effective time of the Daml PartyAcsReplication admin agreement.
   // required
-  google.protobuf.Timestamp agreed_at = 4;
+  optional uint64 agreed_at = 4;
 }
 
 // The arguments that determine the contents of the ACS snapshot and that are included
@@ -231,7 +241,7 @@ message GetAcsArguments {
   string synchronizer_id = 2;
   // The ACS snapshot timestamp at which the sent contracts are active.
   // required
-  google.protobuf.Timestamp as_of = 3;
+  optional uint64 as_of = 3;
   // The stakeholders whose ACS contracts to exclude from sending, typically because
   // the target participant already has these contracts.
   // optional: can be empty

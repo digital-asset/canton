@@ -178,7 +178,6 @@ class SequencedEventTestFixture(
       counter: Long = updatedCounter,
       timestamp: CantonTimestamp = CantonTimestamp.Epoch,
       previousTimestamp: Option[CantonTimestamp] = None,
-      topologyTimestamp: Option[CantonTimestamp] = None,
   ): FutureUnlessShutdown[SequencedSerializedEvent] = {
     import cats.syntax.option.*
     val message = {
@@ -199,7 +198,6 @@ class SequencedEventTestFixture(
       synchronizerId,
       MessageId.tryCreate("test").some,
       Batch(List(envelope), testedProtocolVersion),
-      topologyTimestamp,
       Option.empty[TrafficReceipt],
     )
 
@@ -218,7 +216,6 @@ class SequencedEventTestFixture(
       timestamp: CantonTimestamp,
       customSerialization: Option[ByteString] = None,
       messageIdO: Option[MessageId] = None,
-      topologyTimestampO: Option[CantonTimestamp] = None,
       previousTimestamp: Option[CantonTimestamp] = None,
   )(implicit executionContext: ExecutionContext): FutureUnlessShutdown[OrdinarySerializedEvent] = {
     val event =
@@ -226,7 +223,6 @@ class SequencedEventTestFixture(
         timestamp = timestamp,
         deserializedFrom = customSerialization,
         messageId = messageIdO,
-        topologyTimestampO = topologyTimestampO,
         previousTimestamp = previousTimestamp,
       )
     for {

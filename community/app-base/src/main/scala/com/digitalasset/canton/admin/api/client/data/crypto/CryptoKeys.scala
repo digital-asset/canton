@@ -3,14 +3,19 @@
 
 package com.digitalasset.canton.admin.api.client.data.crypto
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-
-sealed trait CryptoKeyFormat extends Product with Serializable with PrettyPrinting {
-  def name: String
-  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
 }
 
-object CryptoKeyFormat {
+sealed trait CryptoKeyFormat extends Product with Serializable with PrettyPrintingFromCompanion {
+  def name: String
+  override def prettyCompanion: PrettyPrintingCompanion[CryptoKeyFormat] = CryptoKeyFormat
+}
+
+object CryptoKeyFormat extends PrettyPrintingCompanion[CryptoKeyFormat] {
+  override protected val pretty: Pretty[CryptoKeyFormat] = prettyOfString(_.name)
   case object DerX509Spki extends CryptoKeyFormat {
     override val name: String = "DER-encoded X.509 SubjectPublicKeyInfo"
   }

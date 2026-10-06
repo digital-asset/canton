@@ -14,7 +14,6 @@ import com.digitalasset.canton.participant.admin.party.PartyManagementServiceErr
   InvalidTimestamp,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -104,7 +103,7 @@ final class HighestOffsetByTimestampIntegrationTest
       alice,
       target,
       daId,
-      onboarding = testedProtocolVersion >= ProtocolVersion.v35,
+      onboarding = true,
       Some(effectiveTimestamp.toInstant),
       beginOffsetExclusive = sourceLedgerEnd,
       completeAfter = PositiveInt.one,

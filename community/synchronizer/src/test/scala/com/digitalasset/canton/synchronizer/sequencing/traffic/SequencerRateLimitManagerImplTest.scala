@@ -123,7 +123,6 @@ final class SequencerRateLimitManagerImplTest
       MessageId.fromUuid(new UUID(1L, 1L)),
       Batch.empty(testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
       Option.empty[AggregationRule],
       Some(SequencingSubmissionCost(eventCostNonNegative, testedProtocolVersion)),
       testedProtocolVersion,

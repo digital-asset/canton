@@ -37,7 +37,6 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.TestEngine
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   NeedsNewLfContractIds,
   ReassignmentCounter,
@@ -192,6 +191,7 @@ trait RepairServiceIntegrationTest
 sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrationTest {
   override protected def cantonTestsPath: String = CantonTestsPath
 
+  // TODO(#36201) Enable this test again when we handle unassign + purge scenario correctly in ACS commitments
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   "RepairService" should {
@@ -960,117 +960,116 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
 
   "RepairService.addContract" should {
     "not add contract" when {
-      "contract has empty maintainers" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          withParticipantsInitialized { (alice, _) =>
-            import env.*
+      "contract has empty maintainers" in { implicit env =>
+        withParticipantsInitialized { (alice, _) =>
+          import env.*
 
-            val pureCrypto = participant1.underlying.map(_.cryptoPureApi).value
-            val authenticatedContractIdVersion = CantonContractIdVersion.maxV1
-            val creationTime = CreationTime.CreatedAt(environment.clock.now.toLf)
-            val contractIdSuffixer =
-              new ContractIdSuffixer(pureCrypto, authenticatedContractIdVersion)
-            val contractIdAbsolutizer =
-              new ContractIdAbsolutizer(
-                testedProtocolVersionValidation,
-                pureCrypto,
-                ContractIdAbsolutizationDataV1,
-              )
+          val pureCrypto = participant1.underlying.map(_.cryptoPureApi).value
+          val authenticatedContractIdVersion = CantonContractIdVersion.maxV1
+          val creationTime = CreationTime.CreatedAt(environment.clock.now.toLf)
+          val contractIdSuffixer =
+            new ContractIdSuffixer(pureCrypto, authenticatedContractIdVersion)
+          val contractIdAbsolutizer =
+            new ContractIdAbsolutizer(
+              testedProtocolVersionValidation,
+              pureCrypto,
+              ContractIdAbsolutizationDataV1,
+            )
 
-            // We can't create the contract with Canton, so we have to hand-craft it.
-            val module = "BasicKeys"
-            val template = "NoMaintainer"
-            val pkg =
-              participant1.packages.find_by_module(module).headOption.map(_.packageId).value
+          // We can't create the contract with Canton, so we have to hand-craft it.
+          val module = "BasicKeys"
+          val template = "NoMaintainer"
+          val pkg =
+            participant1.packages.find_by_module(module).headOption.map(_.packageId).value
 
-            val lfNoMaintainerTemplateId =
-              LfTemplateId(
-                Ref.PackageId.assertFromString(pkg),
-                Ref.QualifiedName.assertFromString(s"$module:$template"),
-              )
-            val lfPackageName = Ref.PackageName.assertFromString("CantonTestsLF23")
-            val keyWithMaintainers = ExampleTransactionFactory.globalKeyWithMaintainers(
-              LfGlobalKey(
-                lfNoMaintainerTemplateId,
-                lfPackageName,
-                Value.ValueUnit,
-                crypto.Hash.hashPrivateKey("dummy-key-hash"),
-              ),
-              Set.empty,
+          val lfNoMaintainerTemplateId =
+            LfTemplateId(
+              Ref.PackageId.assertFromString(pkg),
+              Ref.QualifiedName.assertFromString(s"$module:$template"),
+            )
+          val lfPackageName = Ref.PackageName.assertFromString("CantonTestsLF23")
+          val keyWithMaintainers = ExampleTransactionFactory.globalKeyWithMaintainers(
+            LfGlobalKey(
+              lfNoMaintainerTemplateId,
+              lfPackageName,
+              Value.ValueUnit,
+              crypto.Hash.hashPrivateKey("dummy-key-hash"),
+            ),
+            Set.empty,
+            LfSerializationVersion.V2,
+          )
+
+          val contractSalt = ContractSalt.createV1(pureCrypto)(
+            transactionUuid = new UUID(1L, 1L),
+            psid = daId,
+            mediator = MediatorGroupRecipient(MediatorGroupIndex.one),
+            viewParticipantDataSalt = TestSalt.generateSalt(1),
+            createIndex = 0,
+            viewPosition = ViewPosition(List.empty),
+          )
+          val unsuffixedContractId = LfContractId.V1(ExampleTransactionFactory.lfHash(1337))
+
+          val unsuffixedCreateNode =
+            LfNodeCreate(
+              unsuffixedContractId,
+              lfPackageName,
+              lfNoMaintainerTemplateId,
+              ValueRecord(None, ImmArray(None -> ValueParty(alice.toLf))),
+              Set(alice.toLf),
+              Set(alice.toLf),
+              Some(keyWithMaintainers.unversioned),
               LfSerializationVersion.V2,
             )
 
-            val contractSalt = ContractSalt.createV1(pureCrypto)(
-              transactionUuid = new UUID(1L, 1L),
-              psid = daId,
-              mediator = MediatorGroupRecipient(MediatorGroupIndex.one),
-              viewParticipantDataSalt = TestSalt.generateSalt(1),
-              createIndex = 0,
-              viewPosition = ViewPosition(List.empty),
+          val contractHash = TestEngine
+            .syncContractHasher(loggerFactory, cantonTestsPath)
+            .hash(
+              unsuffixedCreateNode,
+              contractIdSuffixer.contractHashingMethod,
             )
-            val unsuffixedContractId = LfContractId.V1(ExampleTransactionFactory.lfHash(1337))
 
-            val unsuffixedCreateNode =
-              LfNodeCreate(
-                unsuffixedContractId,
-                lfPackageName,
-                lfNoMaintainerTemplateId,
-                ValueRecord(None, ImmArray(None -> ValueParty(alice.toLf))),
-                Set(alice.toLf),
-                Set(alice.toLf),
-                Some(keyWithMaintainers.unversioned),
-                LfSerializationVersion.V2,
-              )
-
-            val contractHash = TestEngine
-              .syncContractHasher(loggerFactory, cantonTestsPath)
-              .hash(
-                unsuffixedCreateNode,
-                contractIdSuffixer.contractHashingMethod,
-              )
-
-            val ContractIdSuffixer.RelativeSuffixResult(
-              suffixedCreateNode,
-              _,
-              _,
-              authenticationData,
-            ) = contractIdSuffixer
-              .relativeSuffixForLocalContract(
-                contractSalt,
-                creationTime,
-                unsuffixedCreateNode,
-                contractHash,
-              )
-              .valueOr(err => fail(s"Failed to generate contract suffix: $err"))
-
-            val suffixedContractInstance = LfFatContractInst.fromCreateNode(
-              suffixedCreateNode,
+          val ContractIdSuffixer.RelativeSuffixResult(
+            suffixedCreateNode,
+            _,
+            _,
+            authenticationData,
+          ) = contractIdSuffixer
+            .relativeSuffixForLocalContract(
+              contractSalt,
               creationTime,
-              authenticationData.toLfBytes,
+              unsuffixedCreateNode,
+              contractHash,
             )
-            val absolutizedContractInstance =
-              contractIdAbsolutizer.absolutizeFci(suffixedContractInstance).value
-            loggerFactory.assertThrowsAndLogs[CommandFailure](
-              participant1.repair.add(
-                daId,
-                testedProtocolVersion,
-                Seq(
-                  RepairContract(
-                    daId,
-                    absolutizedContractInstance,
-                    ReassignmentCounter.Genesis,
-                    absolutizedContractInstance.templateId.packageId,
-                  )
-                ),
-                contractImportMode = Validation,
-              ),
-              _.commandFailureMessage should (
-                include("InvalidIndependentOfSystemState") and include(
-                  "key without maintainers"
+            .valueOr(err => fail(s"Failed to generate contract suffix: $err"))
+
+          val suffixedContractInstance = LfFatContractInst.fromCreateNode(
+            suffixedCreateNode,
+            creationTime,
+            authenticationData.toLfBytes,
+          )
+          val absolutizedContractInstance =
+            contractIdAbsolutizer.absolutizeFci(suffixedContractInstance).value
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.repair.add(
+              daId,
+              testedProtocolVersion,
+              Seq(
+                RepairContract(
+                  daId,
+                  absolutizedContractInstance,
+                  ReassignmentCounter.Genesis,
+                  absolutizedContractInstance.templateId.packageId,
                 )
               ),
-            )
-          }
+              contractImportMode = Validation,
+            ),
+            _.commandFailureMessage should (
+              include("InvalidIndependentOfSystemState") and include(
+                "key without maintainers"
+              )
+            ),
+          )
+        }
       }
     }
   }

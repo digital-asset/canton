@@ -9,7 +9,6 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
@@ -37,6 +36,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SingletonTraverse.syntax.SingletonTraverseOps
+import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import slick.jdbc.GetResult.GetInt
 import slick.jdbc.canton.SQLActionBuilder
@@ -282,14 +282,16 @@ class DbReassignmentStore(
      where target_synchronizer_idx=$indexedTargetSynchronizer and reassignment_id=$reassignmentId
     """.as[ReassignmentEntryRaw].headOption
 
-  def addReassignmentsOffsets(offsets: Map[ReassignmentId, ReassignmentGlobalOffset])(implicit
+  def addReassignmentsOffsets(updates: Seq[(ReassignmentId, ReassignmentGlobalOffset)])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
-    if (offsets.isEmpty) EitherT.pure[FutureUnlessShutdown, ReassignmentStoreError](())
+    if (updates.isEmpty) EitherT.pure[FutureUnlessShutdown, ReassignmentStoreError](())
     else {
-      logger.debug(s"Adding reassignment offsets: $offsets")
-      MonadUtil.sequentialTraverse_(offsets.toList.grouped(batchingConfig.maxItemsInBatch.unwrap))(
-        offsets => addReassignmentsOffsetsInternal(NonEmptyUtil.fromUnsafe(offsets))
+      logger.debug(s"Adding reassignment offsets: $updates")
+      // groupBy keeps the order of the offsets of each reassignment id
+      val offsetsById = updates.groupBy(_._1).view.mapValues(_.map(_._2)).toList
+      MonadUtil.sequentialTraverse_(offsetsById.grouped(batchingConfig.maxItemsInBatch.unwrap))(
+        offsets => addReassignmentsOffsetsInternal(checked(NonEmptyUtil.fromUnsafe(offsets)))
       )
     }
 
@@ -406,7 +408,7 @@ class DbReassignmentStore(
       - size of the list be within bounds that allow for single DB queries (use `batchSize`)
    */
   private def addReassignmentsOffsetsInternal(
-      offsets: NonEmpty[List[(ReassignmentId, ReassignmentGlobalOffset)]]
+      offsets: NonEmpty[List[(ReassignmentId, Seq[ReassignmentGlobalOffset])]]
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
@@ -442,25 +444,26 @@ class DbReassignmentStore(
         reassignmentId -> (unassignmentOffset, assignmentOffset)
       }.toMap
 
-      mergedGlobalOffsets <- EitherT.fromEither[FutureUnlessShutdown](offsets.forgetNE.traverse {
-        case (reassignmentId, newOffsets) =>
-          retrievedItems
-            .get(reassignmentId)
-            .toRight(UnknownReassignmentId(reassignmentId))
-            .map { case (offsetOutO, offsetInO) =>
-              ReassignmentGlobalOffset
-                .create(offsetOutO, offsetInO)
-                .valueOr(err => throw new DbDeserializationException(err))
-            }
-            .flatMap { case globalOffsetO =>
-              globalOffsetO
-                .fold[Either[String, ReassignmentGlobalOffset]](Right(newOffsets))(
-                  _.merge(newOffsets)
-                )
-                .leftMap(ReassignmentGlobalOffsetsMerge(reassignmentId, _))
-                .map((reassignmentId, _))
-            }
-      })
+      mergedGlobalOffsets <- EitherT
+        .fromEither[FutureUnlessShutdown](offsets.forgetNE.traverse {
+          case (reassignmentId, newOffsets) =>
+            retrievedItems
+              .get(reassignmentId)
+              .toRight(UnknownReassignmentId(reassignmentId))
+              .map { case (offsetOutO, offsetInO) =>
+                ReassignmentGlobalOffset
+                  .create(offsetOutO, offsetInO)
+                  .valueOr(err => throw new DbDeserializationException(err))
+              }
+              .map { storedOffsetsO =>
+                val (mergedOffsetsO, batchConflicts, storedConflicts) = ReassignmentStore
+                  .mergeBatchThenStored(reassignmentId, storedOffsetsO, newOffsets)
+                batchConflicts.foreach(alarmOnMergeFailure(_, "Keeping the first offsets"))
+                storedConflicts.foreach(alarmOnMergeFailure(_, "Keeping the stored offsets"))
+                mergedOffsetsO.map(reassignmentId -> _)
+              }
+        })
+        .map(_.flatten)
 
       batchUpdate = DbStorage.bulkOperation_(updateQuery, mergedGlobalOffsets, storage.profile)(
         pp => { case (reassignmentId, mergedGlobalOffset) =>

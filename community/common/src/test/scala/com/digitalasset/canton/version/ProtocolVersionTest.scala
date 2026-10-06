@@ -32,19 +32,19 @@ class ProtocolVersionTest extends AnyWordSpec with BaseTest {
     }
 
     "be comparable" in {
-      ProtocolVersion.v34 < ProtocolVersion.dev shouldBe true
-      ProtocolVersion.v34 <= ProtocolVersion.dev shouldBe true
+      ProtocolVersion.latest < ProtocolVersion.dev shouldBe true
+      ProtocolVersion.latest <= ProtocolVersion.dev shouldBe true
       ProtocolVersion.dev <= ProtocolVersion.dev shouldBe true
 
-      ProtocolVersion.dev < ProtocolVersion.v34 shouldBe false
-      ProtocolVersion.dev <= ProtocolVersion.v34 shouldBe false
+      ProtocolVersion.dev < ProtocolVersion.latest shouldBe false
+      ProtocolVersion.dev <= ProtocolVersion.latest shouldBe false
 
       ProtocolVersion.dev <= ProtocolVersion.dev shouldBe true
-      ProtocolVersion.v34 < ProtocolVersion.dev shouldBe true
-      ProtocolVersion.dev <= ProtocolVersion.v34 shouldBe false
+      ProtocolVersion.latest < ProtocolVersion.dev shouldBe true
+      ProtocolVersion.dev <= ProtocolVersion.latest shouldBe false
 
       ProtocolVersion.dev == ProtocolVersion.dev shouldBe true
-      ProtocolVersion.dev == ProtocolVersion.v34 shouldBe false
+      ProtocolVersion.dev == ProtocolVersion.latest shouldBe false
     }
 
     val invalidProtocolVersionNumber = Int.MinValue

@@ -9,7 +9,11 @@ import com.digitalasset.canton.ProtoDeserializationError.RefinedDurationConversi
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -313,8 +317,13 @@ final case class ListMultiHostingProposal(
     permission: ParticipantPermission,
     otherParticipants: Seq[HostingParticipant],
     threshold: PositiveInt,
-) extends PrettyPrinting {
-  override def pretty: Pretty[ListMultiHostingProposal] =
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ListMultiHostingProposal] =
+    ListMultiHostingProposal
+}
+
+object ListMultiHostingProposal extends PrettyPrintingCompanion[ListMultiHostingProposal] {
+  override protected val pretty: Pretty[ListMultiHostingProposal] =
     prettyOfClass(
       param("txHash", _.txHash.hash),
       param("party", _.party),
@@ -322,9 +331,7 @@ final case class ListMultiHostingProposal(
       param("others", _.otherParticipants.map(x => (x.participantId, x.permission.showType)).toMap),
       param("threshold", _.threshold),
     )
-}
 
-object ListMultiHostingProposal {
   def mapFilter(participantId: ParticipantId)(
       result: ListPartyToParticipantResult
   ): Option[ListMultiHostingProposal] =

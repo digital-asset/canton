@@ -419,7 +419,7 @@ class ReplayClientImpl(
     private def updateMetrics(event: SequencedEvent[GenBatch[ClosedEnvelope]]): Unit =
       withEmptyMetricsContext { implicit metricsContext =>
         val messageIdO: Option[MessageId] = event match {
-          case Deliver(_, _, _, messageId, _, _, _) => messageId
+          case Deliver(_, _, _, messageId, _, _) => messageId
           case DeliverError(_, _, _, messageId, _, _) => Some(messageId)
           case _ => None
         }

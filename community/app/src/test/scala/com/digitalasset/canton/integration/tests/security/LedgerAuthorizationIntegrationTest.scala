@@ -932,9 +932,6 @@ trait LedgerAuthorizationIntegrationTest
               ) >>>
                 ConfirmationResponses.localVerdictUnsafe.replace(localApprove)
             )(_)
-            // Change the topology timestamp in the same way as the requestId
-            .focus(_.topologyTimestamp)
-            .modify(_.map(_.immediateSuccessor))
         ),
         // Reject with correct requestId
         withLocalVerdict(localReject),

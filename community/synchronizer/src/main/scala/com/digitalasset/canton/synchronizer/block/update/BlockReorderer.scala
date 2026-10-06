@@ -30,13 +30,6 @@ trait BlockReorderer {
 }
 
 object BlockReorderer {
-  lazy val NoOp: BlockReorderer = new BlockReorderer {
-    override def reordered(events: Seq[Traced[LedgerBlockEvent]])(implicit
-        traceContext: TraceContext
-    ): Seq[Traced[LedgerBlockEvent]] =
-      events
-  }
-
   class Impl(consistencyChecks: Boolean, val loggerFactory: NamedLoggerFactory)
       extends BlockReorderer
       with NamedLogging {

@@ -136,17 +136,11 @@ final class GeneratorsProtocol(
   )
 
   implicit val batchArb: Arbitrary[Batch[Envelope[?]]] =
-    if (protocolVersion >= ProtocolVersion.v35) {
-      Arbitrary(for {
-        envelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
-          closedCompressedEnvelopeArb
-        )
-      } yield Batch(envelopes, protocolVersion))
-    } else {
-      Arbitrary(for {
-        envelopes <- Generators.nonEmptyListGen[Envelope[?]](envelopeV30Arb)
-      } yield Batch(envelopes.map(_.toClosedUncompressedEnvelopeUnsafe), protocolVersion))
-    }
+    Arbitrary(for {
+      envelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
+        closedCompressedEnvelopeArb
+      )
+    } yield Batch(envelopes, protocolVersion))
 
   implicit val submissionCostArb: Arbitrary[SequencingSubmissionCost] =
     Arbitrary(
@@ -157,48 +151,28 @@ final class GeneratorsProtocol(
       )
     )
 
-  val submissionRequestV30Arb: Arbitrary[SubmissionRequest] =
+  implicit val submissionRequestArb: Arbitrary[SubmissionRequest] =
     Arbitrary(
       for {
         sender <- Arbitrary.arbitrary[Member]
         messageId <- Arbitrary.arbitrary[MessageId]
-        envelopes <- Generators.nonEmptyListGen[ClosedUncompressedEnvelope](
-          closedUncompressedEnvelopeArb
-        )
-        batch = Batch(envelopes.map(_.toClosedUncompressedEnvelopeUnsafe), protocolVersion)
         maxSequencingTime <- Arbitrary.arbitrary[CantonTimestamp]
         aggregationRule <- Gen.option(Arbitrary.arbitrary[AggregationRule])
         submissionCost <- Gen.option(Arbitrary.arbitrary[SequencingSubmissionCost])
-        topologyTimestamp <-
-          if (aggregationRule.nonEmpty)
-            Arbitrary.arbitrary[CantonTimestamp].map(Some(_))
-          else Gen.const(None)
+        closedCompressedEnvelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
+          closedCompressedEnvelopeArb
+        )
+        batch = Batch(closedCompressedEnvelopes, protocolVersion),
       } yield SubmissionRequest.tryCreate(
         sender,
         messageId,
         batch,
         maxSequencingTime,
-        topologyTimestamp,
         aggregationRule,
         submissionCost,
         SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion).representative,
       )
     )
-
-  implicit val submissionRequestArb: Arbitrary[SubmissionRequest] =
-    if (protocolVersion >= ProtocolVersion.v35) {
-      Arbitrary(
-        for {
-          submissionRequest <- submissionRequestV30Arb.arbitrary
-          closedCompressedEnvelopes <- Generators.nonEmptyListGen[ClosedCompressedEnvelope](
-            closedCompressedEnvelopeArb
-          )
-        } yield submissionRequest.copy(
-          batch = Batch(closedCompressedEnvelopes, protocolVersion),
-          topologyTimestamp = None,
-        )
-      )
-    } else submissionRequestV30Arb
 
   implicit val topologyStateForInitRequestArb: Arbitrary[TopologyStateForInitRequest] = Arbitrary(
     for {
@@ -365,7 +339,6 @@ final class GeneratorsProtocol(
     previousTimestamp <- Arbitrary.arbitrary[Option[CantonTimestamp]]
     timestamp <- Arbitrary.arbitrary[CantonTimestamp]
     messageIdO <- Gen.option(Arbitrary.arbitrary[MessageId])
-    topologyTimestampO <- Gen.option(Arbitrary.arbitrary[CantonTimestamp])
     trafficReceipt <- Gen.option(Arbitrary.arbitrary[TrafficReceipt])
   } yield Deliver.create(
     previousTimestamp,
@@ -373,7 +346,6 @@ final class GeneratorsProtocol(
     synchronizerId,
     messageIdO,
     batch,
-    topologyTimestampO,
     trafficReceipt,
   )
 }

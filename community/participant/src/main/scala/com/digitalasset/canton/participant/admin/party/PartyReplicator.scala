@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicator.{
   PartyReplicationArguments,
 }
 import com.digitalasset.canton.participant.admin.party.acsreplication.*
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
   AcsReplicationProgress,
   EphemeralFileImporterProgress,
@@ -52,6 +53,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.nonempty.NonEmpty
+import io.scalaland.chimney.dsl.TransformationOps
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
@@ -314,6 +316,10 @@ final class PartyReplicator(
           args,
           syncPersistentState.topologyStore,
         )
+        partyReplicationIndexingStore <- EitherT.fromOption[FutureUnlessShutdown](
+          connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled,
+          s"Online party replication is not enabled on participant $participantId.",
+        )
         requestId = buildRequestIdHash(args, syncPersistentState.pureCryptoApi)
         fileImporter = PartyReplicationFileImporter(
           partyId,
@@ -322,6 +328,7 @@ final class PartyReplicator(
           partyReplicationStateManager,
           syncService.participantNodePersistentState,
           connectedSynchronizer,
+          partyReplicationIndexingStore,
           acsReader,
           testInterceptorO,
           () => isClosing,
@@ -442,9 +449,9 @@ final class PartyReplicator(
       )
       activeParticipantsOfParty = partyToParticipantTopologyHeadTx.mapping.participants
       eligibleSourceParticipants = activeParticipantsOfParty.collect {
-        case HostingParticipant(pid, _, isOnboarding)
-            if pid != targetParticipantId && !isOnboarding =>
-          pid
+        case hostingParticipant
+            if hostingParticipant.participantId != targetParticipantId && !hostingParticipant.onboarding =>
+          hostingParticipant.participantId
       }
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         Either.cond(
@@ -534,7 +541,6 @@ final class PartyReplicator(
             threshold = headTx.mapping.threshold,
             participants = newParticipants,
             partySigningKeysWithThreshold = headTx.mapping.partySigningKeysWithThreshold,
-            isOffline = false,
           )
         )
 
@@ -684,7 +690,8 @@ final class PartyReplicator(
         topologyStore,
       )
       activeParticipantsOfParty = partyToParticipantTopologyHeadTx.mapping.participants.collect {
-        case HostingParticipant(participantId, _, false) => participantId
+        case hostingParticipant if !hostingParticipant.onboarding =>
+          hostingParticipant.participantId
       }
       participantsExceptTargetParticipant = activeParticipantsOfParty.filterNot(
         _ == targetParticipantId
@@ -714,20 +721,18 @@ final class PartyReplicator(
 
   // TODO(#35267) reflect this in the PartyReplicationStatus?
   private def startAcsReplication(
-      replicationParams: ReplicationParams
+      replicationParams: ReplicationParams,
+      replicationAuthorization: PartyReplicationAuthorization,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
       _ <- acsReplicator.replicateAcsAsync(
-        AcsReplicationArguments(
-          replicationParams.requestId,
-          replicationParams.partyId,
-          replicationParams.synchronizerId,
-          replicationParams.sourceParticipantId,
-          replicationParams.serial,
-          replicationParams.participantPermission,
-        )
+        replicationParams
+          .into[AcsReplicationArguments]
+          .withFieldConst(_.timestamp, replicationAuthorization.onboardingAt.value)
+          .withFieldConst(_.replicationDestination, AcsReplicationDestination.Persistence)
+          .transform
       )
     } yield ()
 
@@ -1058,11 +1063,11 @@ final class PartyReplicator(
               authorizeOnboardingTopology(params.requestId)
 
             // Specific to SequencerChannel-based OnPR. About to trigger ACS replication via SequencerChannel
-            case NeedsToReplicatePartyAcs(params) =>
+            case NeedsToReplicatePartyAcs(params, authorization) =>
               logger.debug(
                 s"Starting ACS replication for party replication $requestId of party ${params.partyId}"
               )
-              startAcsReplication(params)
+              startAcsReplication(params, authorization)
 
             // Specific to SequencerChannel-based OnPR. Replication has been triggered but ACS replication hasn't started yet
             case TriggeredPartyAcsReplication(params) =>

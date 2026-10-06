@@ -75,7 +75,6 @@ object PartyOps {
                   participants =
                     Seq(HostingParticipant(participantId, ParticipantPermission.Submission)),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
             )
             .bimap(
@@ -100,7 +99,6 @@ object PartyOps {
                   ParticipantPermission.Submission,
                 ),
                 partySigningKeysWithThreshold = None,
-                isOffline = false,
               )
             )
             .biflatMap(

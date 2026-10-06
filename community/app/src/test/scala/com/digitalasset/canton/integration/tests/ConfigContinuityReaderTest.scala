@@ -65,6 +65,18 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
           )
         }
     ),
+    (3, 7, 0) -> Transforms(
+      Seq(
+        // only exists in 3.6, see #35565
+        "canton.sequencers.sequencer1.parameters.disable-aggregation-rule-size-check-for-testing",
+        // only exists in 3.6 until #36169 is forward-ported to main
+        "canton.participants.participant1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
+        "canton.sequencers.sequencer1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
+        "canton.mediators.mediator1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
+        // only exists in 3.6 until #35924 is forward-ported to main
+        "canton.participants.participant1.features.deprecated",
+      )
+    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking

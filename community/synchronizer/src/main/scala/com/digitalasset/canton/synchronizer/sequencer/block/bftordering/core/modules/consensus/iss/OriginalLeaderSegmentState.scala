@@ -25,14 +25,15 @@ import EpochState.Epoch
 /** Keeps track of progress of the segment this node is originally responsible for filling (leader)
   */
 class OriginalLeaderSegmentState(
-    state: SegmentState,
+    val state: SegmentState,
     epoch: Epoch,
     initialCompletedBlocks: Seq[Block],
     initialCurrentViewPrePrepareBlockNumbers: Seq[BlockNumber],
     override val loggerFactory: NamedLoggerFactory,
     initTraceContext: TraceContext,
 ) extends NamedLogging {
-  private val segment = state.segment
+
+  val segment: EpochState.Segment = state.segment
 
   private val completedBlockIsEmpty: mutable.Map[BlockNumber, Boolean] =
     mutable.Map(

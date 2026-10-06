@@ -980,7 +980,7 @@ private[lf] object Speedy {
       } catch {
         case serr: SError => // TODO: prefer Control over throw for SError
           SResultError(serr)
-        case ex: RuntimeException =>
+        case NonFatal(ex) =>
           SResultError(SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"exception: $ex")) // stop
       }
 

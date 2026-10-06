@@ -44,7 +44,6 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.version.HasTestCloseContext.makeTestCloseContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -58,7 +57,7 @@ import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-class DefaultVerdictSenderTest
+final class DefaultVerdictSenderTest
     extends AsyncWordSpec
     with ProtocolVersionChecksAsyncWordSpec
     with HasExecutionContext
@@ -200,8 +199,8 @@ class DefaultVerdictSenderTest
             any[Duration],
           )(any[ExecutionContext], any[CloseContext])
           val (_, aggregationRule) = tester.interceptedMessages.loneElement
-          if (testedProtocolVersion > ProtocolVersion.v34)
-            aggregationRule shouldBe expectedMediatorGroupAggregationRule
+
+          aggregationRule shouldBe expectedMediatorGroupAggregationRule
           succeed
         }
       }
@@ -268,55 +267,27 @@ class DefaultVerdictSenderTest
 
     val initialSynchronizerParameters = TestSynchronizerParameters.defaultDynamic
 
-    val synchronizerSyncCryptoApi: SynchronizerCryptoClient =
-      if (testedProtocolVersion >= ProtocolVersion.v34) {
-        val topology = TestingTopology.from(
-          Set(psid),
-          Map(
-            submitter -> Map(participant -> ParticipantPermission.Confirmation),
-            signatory ->
-              Map(participant -> ParticipantPermission.Confirmation),
-            observer ->
-              Map(participant -> ParticipantPermission.Observation),
-          ),
-          Set(mediatorGroup),
-        )
+    val synchronizerSyncCryptoApi: SynchronizerCryptoClient = {
+      val topology = TestingTopology.from(
+        Set(psid),
+        Map(
+          submitter -> Map(participant -> ParticipantPermission.Confirmation),
+          signatory ->
+            Map(participant -> ParticipantPermission.Confirmation),
+          observer ->
+            Map(participant -> ParticipantPermission.Observation),
+        ),
+        Set(mediatorGroup),
+      )
 
-        val identityFactory = TestingIdentityFactory(
-          topology,
-          loggerFactory,
-          dynamicSynchronizerParameters = initialSynchronizerParameters,
-        )
+      val identityFactory = TestingIdentityFactory(
+        topology,
+        loggerFactory,
+        dynamicSynchronizerParameters = initialSynchronizerParameters,
+      )
 
-        identityFactory.forOwnerAndSynchronizer(mediatorId, psid)
-      } else {
-        val topology = TestingTopology.from(
-          Set(psid),
-          Map(
-            submitter -> Map(participant -> ParticipantPermission.Confirmation),
-            signatory ->
-              Map(participant -> ParticipantPermission.Confirmation),
-            observer ->
-              Map(participant -> ParticipantPermission.Observation),
-          ),
-          Set(
-            MediatorGroup(
-              MediatorGroupIndex.zero,
-              NonEmpty(Seq, mediatorId),
-              Seq.empty,
-              PositiveInt.one,
-            )
-          ),
-        )
-
-        val identityFactory = TestingIdentityFactory(
-          topology,
-          loggerFactory,
-          dynamicSynchronizerParameters = initialSynchronizerParameters,
-        )
-
-        identityFactory.forOwnerAndSynchronizer(mediatorId, psid)
-      }
+      identityFactory.forOwnerAndSynchronizer(mediatorId, psid)
+    }
 
     private val sequencerClientSend: TestSequencerClientSend = new TestSequencerClientSend(
       clock

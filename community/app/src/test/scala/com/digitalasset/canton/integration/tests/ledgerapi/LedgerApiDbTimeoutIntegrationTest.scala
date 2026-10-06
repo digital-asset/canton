@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.daml.lf.value.Value.ContractId
 import monocle.macros.syntax.lens.*
@@ -126,17 +127,31 @@ trait LedgerApiDbTimeoutIntegrationTest
     lock.commitAndClose()
     logger.info("C1 unlocked")
 
-    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(event.Level.WARN))(
-      within = (),
-      assertion = logs => {
-        logs should have size 1
-        logs.head.warningMessage should include("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")
+    // If the restarted indexer is still initializing when the network timeout hits, its
+    // initialization fails (logged at INFO). If it has already initialized, the running consumer is
+    // terminated and additionally logs "Consumer terminated with a failure" (at WARN) shortly after
+    // the network timeout. Keep the suppression open until the indexer has recovered, so that this
+    // warning won't be logged after the suppression has ended.
+    loggerFactory.assertLogsUnorderedOptional(
+      {
+        eventually(maxPollInterval = 100.millis) {
+          forAtLeast(1, loggerFactory.fetchRecordedLogEntries) { entry =>
+            entry.level shouldBe event.Level.WARN
+            entry.message should include("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")
+          }
+        }
+        exclusiveAccessLockOnActivationTable.commitAndClose()
+        logger.info("lapi_events_activate_contract unlocked")
+        eventually()(c1Active shouldBe true)
       },
-      maxPollInterval = 100.millis,
+      LogEntryOptionality.Required -> (_.warningMessage should include(
+        "INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR"
+      )),
+      LogEntryOptionality.Optional -> { entry =>
+        entry.warningMessage should include("Consumer terminated with a failure")
+        entry.throwable.value.getMessage should include("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")
+      },
     )
-    exclusiveAccessLockOnActivationTable.commitAndClose()
-    logger.info("lapi_events_activate_contract unlocked")
-    eventually()(c1Active shouldBe true)
   }
 
 }

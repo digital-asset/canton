@@ -139,7 +139,7 @@ final class NextGenTransactionTreeFactoryTest
   }
 
   private val testedContractIdVersions: Seq[CantonContractIdVersion] =
-    if (testedProtocolVersion >= ProtocolVersion.v35) CantonContractIdVersion.all else Seq.empty
+    CantonContractIdVersion.all
 
   forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
@@ -546,7 +546,7 @@ final class NextGenTransactionTreeFactoryTest
             ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
           }
 
-          "accept a package if it has a non-vetted dependency" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+          "accept a package if it has a non-vetted dependency" in {
             val example = factory.standardHappyCases(2)
             createTransactionTree(
               treeFactory,

@@ -136,6 +136,7 @@ final case class AssignmentValidationResult private[reassignment] (
               },
               inst = reassign.contract.inst,
             ),
+            representativePackageId = reassign.targetValidationPackageId.unwrap,
           )
         }
         Update.SequencedReassignmentAccepted(
@@ -168,6 +169,7 @@ object AssignmentValidationResult {
         Unit,
       ],
       packageVettingResult: Option[ReassignmentValidationError],
+      contractSerializationResult: Option[ReassignmentValidationError],
       submitterCheckResult: Option[ReassignmentValidationError],
       reassignmentIdResult: Option[ReassignmentValidationError],
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],

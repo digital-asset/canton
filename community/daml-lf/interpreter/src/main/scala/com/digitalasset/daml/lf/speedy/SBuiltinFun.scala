@@ -31,10 +31,9 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value as V
 
 import java.nio.charset.StandardCharsets
-import java.security.spec.{InvalidKeySpecException, X509EncodedKeySpec}
+import java.security.spec.InvalidKeySpecException
 import java.security.{
   InvalidKeyException,
-  KeyFactory,
   NoSuchAlgorithmException,
   NoSuchProviderException,
   PublicKey,
@@ -811,11 +810,8 @@ private[lf] object SBuiltinFun {
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
-      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
-
-      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(byteEncodedPublicKey))
-    }
+    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
+      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
   }
 
   final case object SBSECP256K1ValidateKey extends SBuiltinFun(1) {
@@ -873,11 +869,8 @@ private[lf] object SBuiltinFun {
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
-      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
-
-      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(byteEncodedPublicKey))
-    }
+    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
+      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
   }
 
   final case object SBDecodeHex extends SBuiltinFun(1) {
@@ -2651,10 +2644,20 @@ private[lf] object SBuiltinFun {
         Control.Value(SInt64(42L))
     }
 
+    // Test-only fault injection: a well-typed program cannot otherwise reach an internal error.
+    private object SBExperimentalInternalError extends SBuiltinFun(1) {
+      override private[speedy] def execute[Q](
+          args: ArraySeq[SValue],
+          machine: Machine[Q],
+      ): Control.Value =
+        throw new Error("InternalError")
+    }
+
     // TODO: move this into the speedy compiler code
     private val mapping: Map[String, compileTime.SExpr] =
       List(
-        "ANSWER" -> SBExperimentalAnswer
+        "ANSWER" -> SBExperimentalAnswer,
+        "INTERNAL_ERROR" -> SBExperimentalInternalError,
       ).view.map { case (name, builtin) => name -> compileTime.SEBuiltin(builtin) }.toMap
 
     def apply(name: String): compileTime.SExpr =

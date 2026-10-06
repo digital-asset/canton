@@ -7,7 +7,6 @@ import com.daml.ledger.api.v2.commands.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config
 import com.digitalasset.canton.console.FeatureFlag
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
@@ -29,7 +28,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId, PartyId}
-import monocle.macros.syntax.lens.*
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.nowarn
@@ -48,6 +46,7 @@ trait RepairSynchronizerRecoveryIntegrationTest
     with RepairTestUtil
     with HasProgrammableSequencer {
 
+  // Disabling on purpose, because this test class tests inconsistent/malicious scenarios
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -162,12 +161,8 @@ trait RepairSynchronizerRecoveryIntegrationTest
                     if (submission.isConfirmationRequest) {
                       val previous = participantRequestCount.getAndIncrement()
                       if (previous == 1) {
-                        // Modify the request so that it gets refused
-                        val modifiedRequest = submission
-                          .focus(_.topologyTimestamp)
-                          .replace(Some(CantonTimestamp.MaxValue))
                         val signedModifiedRequest = signModifiedSubmissionRequest(
-                          modifiedRequest,
+                          submission,
                           participant1.underlying.value.sync.syncCrypto
                             .tryForSynchronizer(daId, staticSynchronizerParameters1),
                           Some(environment.now),
@@ -442,7 +437,7 @@ trait RepairSynchronizerRecoveryIntegrationTest
   }
 }
 
-class RepairSynchronizerRecoveryBftOrderingIntegrationTestPostgres
+final class RepairSynchronizerRecoveryBftOrderingIntegrationTestPostgres
     extends RepairSynchronizerRecoveryIntegrationTest {
 
   override protected val isClockTimeSupported: Boolean = false

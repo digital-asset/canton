@@ -8,7 +8,11 @@ import cats.syntax.traverse.*
 import cats.{Id, Monad}
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
@@ -30,7 +34,7 @@ final case class SequencerConnections private (
     sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
     subscriptionLivenessLimits: SubscriptionLivenessLimits,
 ) extends HasVersionedWrapper[SequencerConnections]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   require(
     aliasToConnection.sizeIs >= sequencerTrustThreshold.unwrap,
     s"sequencerTrustThreshold cannot be greater than number of sequencer connections. Found threshold of $sequencerTrustThreshold and ${aliasToConnection.size} sequencer connections",
@@ -82,15 +86,8 @@ final case class SequencerConnections private (
       }
       .getOrElse(M.pure(this))
 
-  override protected def pretty: Pretty[SequencerConnections] =
-    prettyOfClass(
-      param("connections", _.aliasToConnection.forgetNE),
-      param("sequencer trust threshold", _.sequencerTrustThreshold),
-      param("sequencer liveness margin", _.sequencerLivenessMargin),
-      param("submission request amplification", _.submissionRequestAmplification),
-      param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
-      param("subscription liveness limits", _.subscriptionLivenessLimits),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerConnections] =
+    SequencerConnections
 
   def toProtoV30: v30.SequencerConnections =
     new v30.SequencerConnections(
@@ -109,7 +106,17 @@ final case class SequencerConnections private (
 
 object SequencerConnections
     extends HasVersionedMessageCompanion[SequencerConnections]
-    with HasVersionedMessageCompanionDbHelpers[SequencerConnections] {
+    with HasVersionedMessageCompanionDbHelpers[SequencerConnections]
+    with PrettyPrintingCompanion[SequencerConnections] {
+  override protected val pretty: Pretty[SequencerConnections] =
+    prettyOfClass(
+      param("connections", _.aliasToConnection.forgetNE),
+      param("sequencer trust threshold", _.sequencerTrustThreshold),
+      param("sequencer liveness margin", _.sequencerLivenessMargin),
+      param("submission request amplification", _.submissionRequestAmplification),
+      param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
+      param("subscription liveness limits", _.subscriptionLivenessLimits),
+    )
 
   def single(
       connection: SequencerConnection

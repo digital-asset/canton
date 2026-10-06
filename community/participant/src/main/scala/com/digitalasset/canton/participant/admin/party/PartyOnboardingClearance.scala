@@ -125,34 +125,27 @@ class OnboardingClearanceScheduler(
       partyId: PartyId
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, OnboardingClearanceScheduler.ClearanceAttemptError, Unit] = {
-    import com.digitalasset.canton.version.ProtocolVersion
-
-    if (psid.protocolVersion >= ProtocolVersion.v35) {
-      EitherT(
-        pendingClearancesStore
-          .get(
-            psid.logical,
-            operationKey = OnboardingClearanceOperation.operationKey(partyId),
-            operationName = OnboardingClearanceOperation.operationName,
-          )
-          .value
-          .map {
-            case None =>
-              logger.info(
-                s"Aborting onboarding flag clearance because no pending onboarding clearance record found for $partyId."
-              )
-              // Actively remove the task as requested
-              pendingClearances.remove(partyId).discard
-              Left(OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord)
-            case Some(_) =>
-              Right(())
-          }
-      )
-    } else {
-      EitherT.rightT[FutureUnlessShutdown, OnboardingClearanceScheduler.ClearanceAttemptError](())
-    }
-  }
+  ): EitherT[FutureUnlessShutdown, OnboardingClearanceScheduler.ClearanceAttemptError, Unit] =
+    EitherT(
+      pendingClearancesStore
+        .get(
+          psid.logical,
+          operationKey = OnboardingClearanceOperation.operationKey(partyId),
+          operationName = OnboardingClearanceOperation.operationName,
+        )
+        .value
+        .map {
+          case None =>
+            logger.info(
+              s"Aborting onboarding flag clearance because no pending onboarding clearance record found for $partyId."
+            )
+            // Actively remove the task as requested
+            pendingClearances.remove(partyId).discard
+            Left(OnboardingClearanceScheduler.ClearanceAttemptError.NoPendingClearanceRecord)
+          case Some(_) =>
+            Right(())
+        }
+    )
 
   /** Attempts to clear the party's onboarding flag.
     *

@@ -36,8 +36,6 @@ import scala.concurrent.duration.*
 class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestCommon {
   import BasePerformanceIntegrationTest.*
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(

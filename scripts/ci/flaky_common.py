@@ -37,20 +37,23 @@ NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
 # on the job name (CIRCLE_JOB / GITHUB_JOB), so keep in sync across a GHA migration.
 NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset(
     {
-        "toxiproxy_test_slow",
-        "external_parties_test",
-        "test_with_java17",
-        "test_protocol_version_37",
+        "toxiproxy_test_slow_36",
+        "external_parties_test_36",
+        "test_36_with_java17",
+        "test_37",
         "protocol_continuity_test_all",
         "crash_recovery_test_35",
         "crash_recovery_test_37",
         "postgres_conformance_test_14",
         "postgres_conformance_test_15",
         "postgres_conformance_test_16",
+        "postgres_conformance_test_17",
         "postgres_conformance_test_18",
         "benchmark",
-        "topology_chaos_test",
-        "stability_crash_recovery_test",
+        "topology_chaos_test_36",
+        "stability_crash_recovery_test_36",
+        "ledger_api_compatibility_test_36",
+        "model_based_test_36",
     }
 )
 
@@ -66,6 +69,12 @@ branches_to_report = {
     "main": "733298b6",  # ID of the value "main" for the Release Line field in the project
     "main-2.x": "073b4df3",  # ID of the value "main-2.x" for the Release Line field in the project
 }
+
+# At most this many failing tests are reported per CI run: a fundamental problem
+# can fail everything, which should not become hundreds of issues. The first ones
+# in sorted order are reported (manage_flaky_issues) and get evidence
+# (collect_flake_evidence).
+FAILING_TESTS_MAX: Final[int] = 20
 
 GH_RETRY_ATTEMPTS: Final[int] = 3
 GH_RETRY_DELAY_SECONDS: Final[int] = 5
@@ -153,6 +162,12 @@ if "GITHUB_FLAKY_TEST_TOKEN" in gh_flaky_test_env:
     gh_flaky_test_env["GITHUB_TOKEN"] = os.environ["GITHUB_FLAKY_TEST_TOKEN"]
 
 
+def is_dry_run() -> bool:
+    """FLAKY_DRY_RUN=1: no GitHub or Datadog calls, on any branch. The evidence comments
+    are written to <artifact dir>/comments/ and the job summary instead."""
+    return os.environ.get("FLAKY_DRY_RUN", "") == "1"
+
+
 def should_report_issues():
     return branch in branches_to_report
 
@@ -186,15 +201,18 @@ def is_transient_gh_error(result) -> bool:
 
 
 def run_gh_with_retries(
-    args: list, attempts: int = GH_RETRY_ATTEMPTS
+    args: list, attempts: int = GH_RETRY_ATTEMPTS, stdin: Optional[str] = None
 ) -> subprocess.CompletedProcess:
-    result = subprocess.run(["gh"] + args, capture_output=True, text=True, env=gh_flaky_test_env)
+    # Linux caps a single arg at 128 KB, so large bodies have to be passed via stdin (using `--body-file -`).
+    result = subprocess.run(
+        ["gh"] + args, input=stdin, capture_output=True, text=True, env=gh_flaky_test_env
+    )
     if result.returncode != 0 and is_transient_gh_error(result) and attempts > 1:
         print(
             f"Transient gh error (attempt {GH_RETRY_ATTEMPTS - attempts + 1}/{GH_RETRY_ATTEMPTS}), retrying in {GH_RETRY_DELAY_SECONDS}s..."
         )
         time.sleep(GH_RETRY_DELAY_SECONDS)
-        return run_gh_with_retries(args, attempts - 1)
+        return run_gh_with_retries(args, attempts - 1, stdin)
     return result
 
 
@@ -204,11 +222,14 @@ def run_gh_with_retries(
 # once per row. `None` means "not resolved yet". _reset_gha_job_url_cache lets the
 # self-tests exercise each scenario from a clean slate.
 _gha_job_url_cache: Optional[str] = None
+# Number of the job's step that is running the flaky report, see get_ci_log_url.
+_gha_job_step_cache: Optional[int] = None
 
 
 def _reset_gha_job_url_cache() -> None:
-    global _gha_job_url_cache
+    global _gha_job_url_cache, _gha_job_step_cache
     _gha_job_url_cache = None
+    _gha_job_step_cache = None
 
 
 def resolve_gha_job_url(fallback_url: str) -> str:
@@ -228,13 +249,30 @@ def resolve_gha_job_url(fallback_url: str) -> str:
     `fallback_url` (the run-attempt URL), so the link is never worse than
     before. We log when that happens so it is visible in the CI step output.
     """
-    global _gha_job_url_cache
+    global _gha_job_url_cache, _gha_job_step_cache
     if _gha_job_url_cache is None:
-        _gha_job_url_cache = _resolve_gha_job_url_uncached(fallback_url)
+        _gha_job_url_cache, _gha_job_step_cache = _resolve_gha_job_uncached(fallback_url)
     return _gha_job_url_cache
 
 
-def _resolve_gha_job_url_uncached(fallback_url: str) -> str:
+def get_ci_log_url(build_url: str, node_index: str) -> str:
+    """Link to the CI log of the step that ran the failing tests.
+
+    On GHA the flaky report runs inside the test step itself (cleanup_test_job
+    is part of the run_tests composite), so the job's in-progress step is the
+    one whose log holds the failure: link it as <job url>#step:<n>. Without a
+    step number this is the job link of the issue table.
+    """
+    job_url = get_ci_parallel_run_url(build_url, node_index)
+    if is_github_actions_ci() and _gha_job_step_cache and "/job/" in job_url:
+        return f"{job_url}#step:{_gha_job_step_cache}"
+    return job_url
+
+
+def _resolve_gha_job_uncached(fallback_url: str) -> tuple[str, Optional[int]]:
+    """(job url, number of its in-progress step); the step is None if unknown."""
+    if is_dry_run():
+        return fallback_url, None
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
@@ -244,14 +282,16 @@ def _resolve_gha_job_url_uncached(fallback_url: str) -> str:
             "Cannot resolve GHA job URL (missing repository/run id/run attempt/runner "
             f"name), falling back to run URL {fallback_url}"
         )
-        return fallback_url
+        return fallback_url, None
     result = run_gh_with_retries(
         [
             "api",
             f"/repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}/jobs",
             "--paginate",
             "--jq",
-            f'.jobs[] | select(.runner_name == "{runner_name}" and .status == "in_progress") | .html_url',
+            f'.jobs[] | select(.runner_name == "{runner_name}" and .status == "in_progress")'
+            ' | "\\(.html_url) \\([.steps[]? | select(.status == "in_progress") | .number]'
+            ' | first // "")"',
         ]
     )
     if result.returncode != 0:
@@ -259,15 +299,16 @@ def _resolve_gha_job_url_uncached(fallback_url: str) -> str:
             f"Could not resolve GHA job URL (gh api failed: {result.stderr.strip()}), "
             f"falling back to run URL {fallback_url}"
         )
-        return fallback_url
+        return fallback_url, None
     urls = [line for line in result.stdout.splitlines() if line.strip()]
     if not urls:
         print(
             f"Could not resolve GHA job URL (no in-progress job matched runner {runner_name}), "
             f"falling back to run URL {fallback_url}"
         )
-        return fallback_url
-    return urls[0]
+        return fallback_url, None
+    url, _, step = urls[0].partition(" ")
+    return url, int(step) if step.strip().isdigit() else None
 
 
 def check_result(result):
@@ -328,17 +369,35 @@ DEFAULT_CAUSE: Final[str] = "regular"
 
 
 def create_issue_table_header():
-    return "| Date | Job | Node | Build | Commit | Cause |\n|---|---|---|---|---|---|"
+    return (
+        "| Date | Job | Shard | Build | Commit | Evidence | Cause |\n|---|---|---|---|---|---|---|"
+    )
 
 
-def create_issue_table_row(cause: str = DEFAULT_CAUSE):
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    commit_hash = get_ci_commit_hash()
+def get_ci_commit_url(commit_hash: str) -> str:
     if is_github_actions_ci():
         repo_owner = os.environ.get('GITHUB_REPOSITORY', 'DACH-NY/canton').split('/', 1)[0]
     else:
         repo_owner = os.environ.get('CIRCLE_PROJECT_USERNAME', 'DACH-NY')
-    commit_url = f"https://github.com/{repo_owner}/canton/commit/{commit_hash}"
+    return f"https://github.com/{repo_owner}/canton/commit/{commit_hash}"
+
+
+def with_evidence_link(row: str, evidence_url: Optional[str], label: str = "evidence") -> str:
+    """Fills the Evidence cell of a row built by create_issue_table_row with a link to
+    the failure's evidence comment, e.g. `[2 failing tests](...)`. The Evidence cell
+    is the second to last one."""
+    if not evidence_url:
+        return row
+    head, _evidence, cause, tail = row.rsplit("|", 3)
+    return f"{head}| [{label}]({evidence_url}) |{cause}|{tail}"
+
+
+def create_issue_table_row(
+    cause: str = DEFAULT_CAUSE, evidence_url: Optional[str] = None, evidence_label: str = "evidence"
+):
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    commit_hash = get_ci_commit_hash()
+    commit_url = get_ci_commit_url(commit_hash)
     build_url = get_ci_build_url()
     if is_github_actions_ci():
         # Derive the label from the run id directly. The URL now ends in
@@ -349,8 +408,10 @@ def create_issue_table_row(cause: str = DEFAULT_CAUSE):
         build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
     job = get_ci_job_name()
     node_index = get_ci_node_index()
-    parallel_run_url = get_ci_parallel_run_url(build_url, node_index)
-    return f"| {date_str} | {job} | {node_index} | [{build_number}]({parallel_run_url}) | [{commit_hash[:8]}]({commit_url}) | {cause} |"
+    # On GHA this points at the failing test step of the job (#step:<n>), see get_ci_log_url.
+    log_url = get_ci_log_url(build_url, node_index)
+    row = f"| {date_str} | {job} | {node_index} | [{build_number}]({log_url}) | [{commit_hash[:8]}]({commit_url}) |  | {cause} |"
+    return with_evidence_link(row, evidence_url, evidence_label)
 
 
 # --- JSON artifact contracts ---------------------------------------------
@@ -376,6 +437,10 @@ def failing_tests_path() -> str:
 
 def streaks_path() -> str:
     return os.path.join(artifact_dir(), "streaks.json")
+
+
+def evidence_path() -> str:
+    return os.path.join(artifact_dir(), "evidence.json")
 
 
 def write_failing_tests(path: str, tests, causes=None) -> None:
@@ -484,6 +549,7 @@ def self_test():
     test_gh_flags()
     test_format_test_name_collapses_shards()
     test_create_issue_table_row()
+    test_get_ci_log_url_links_the_running_step()
     test_is_nightly_job()
     test_is_unstable_job()
     print("flaky_common self-checks passed")
@@ -509,8 +575,8 @@ def test_format_test_name_collapses_shards():
 
 def test_gh_flags():
     checks = [
-        (["issue", "create", "--help"], ["--title", "--body", "--milestone", "--repo"]),
-        (["issue", "edit", "--help"], ["--title", "--body", "--repo"]),
+        (["issue", "create", "--help"], ["--title", "--body-file", "--milestone", "--repo"]),
+        (["issue", "edit", "--help"], ["--title", "--body-file", "--repo"]),
         (["issue", "reopen", "--help"], ["--repo"]),
     ]
     for subcommand, flags in checks:
@@ -520,6 +586,38 @@ def test_gh_flags():
             assert flag in help_text, (
                 f"`gh {' '.join(subcommand[:-1])}` help does not mention flag `{flag}` — was it renamed?"
             )
+
+
+def test_get_ci_log_url_links_the_running_step():
+    env = {
+        'CIRCLECI': 'false',
+        'GITHUB_ACTIONS': 'true',
+        'GITHUB_SHA': 'a' * 40,
+        'GITHUB_JOB': 'test',
+        'MATRIX_SHARD': '0',
+        'GITHUB_RUN_ID': '1',
+        'GITHUB_RUN_ATTEMPT': '1',
+        'GITHUB_REPOSITORY': 'DACH-NY/canton',
+        'GITHUB_SERVER_URL': 'https://github.com',
+        'RUNNER_NAME': 'r1',
+    }
+    job_url = 'https://github.com/DACH-NY/canton/actions/runs/1/job/2'
+    for stdout, expected in [
+        (f'{job_url} 6\n', f'{job_url}#step:6'),
+        # No step number from the API: the plain job link.
+        (f'{job_url} \n', job_url),
+        (f'{job_url}\n', job_url),
+    ]:
+        _reset_gha_job_url_cache()
+        ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr='')
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch(f'{__name__}.run_gh_with_retries', return_value=ok),
+        ):
+            assert get_ci_log_url(get_ci_build_url(), '0') == expected, (stdout, expected)
+            # The table's Build link points at the same place.
+            assert f'[1]({expected}) |' in create_issue_table_row(), create_issue_table_row()
+    _reset_gha_job_url_cache()
 
 
 def test_create_issue_table_row():
@@ -535,14 +633,22 @@ def test_create_issue_table_row():
     }
     with patch.dict(os.environ, env_circleci_dach, clear=False):
         header = create_issue_table_header()
-        assert '| Date | Job | Node | Build | Commit | Cause |' in header, (
-            f"Missing Cause column in header: {header}"
-        )
-        assert header.splitlines()[1] == '|---|---|---|---|---|---|', (
-            f"Separator row must match the six-column header: {header}"
+        assert (
+            header.splitlines()[0] == '| Date | Job | Shard | Build | Commit | Evidence | Cause |'
+        ), f"Missing Evidence/Cause columns in header: {header}"
+        assert header.splitlines()[1] == '|---|---|---|---|---|---|---|', (
+            f"Separator row must match the seven-column header: {header}"
         )
         line = create_issue_table_row("timeout")
         assert line.endswith('| timeout |'), f"Missing cause cell in: {line}"
+        linked = create_issue_table_row(
+            "timeout", "https://github.com/x/issues/1#issuecomment-2", "2 failing tests"
+        )
+        assert linked.endswith(
+            '| [2 failing tests](https://github.com/x/issues/1#issuecomment-2) | timeout |'
+        ), f"Missing evidence cell in: {linked}"
+        assert line.endswith('|  | timeout |'), f"Rows without evidence keep an empty cell: {line}"
+        assert line.count('|') == linked.count('|') == 8, (line, linked)
         assert create_issue_table_row().endswith(f'| {DEFAULT_CAUSE} |'), (
             "create_issue_table_row() must default the cause cell"
         )
@@ -649,20 +755,23 @@ def test_create_issue_table_row():
 def test_is_nightly_job():
     assert is_nightly_job("nightly_integration_test")
     assert is_nightly_job("nightly_test_upgrades_matrix")
-    assert is_nightly_job("toxiproxy_test_slow")  # nightly, keeps its historical name
-    assert is_nightly_job("external_parties_test")  # nightly, keeps its historical name
-    assert is_nightly_job("test_with_java17")  # nightly, keeps its historical name
-    assert is_nightly_job("test_protocol_version_37")  # nightly, keeps its historical name
+    assert is_nightly_job("toxiproxy_test_slow_36")  # nightly, keeps its historical name
+    assert is_nightly_job("external_parties_test_36")  # nightly, keeps its historical name
+    assert is_nightly_job("test_36_with_java17")  # nightly, keeps its historical name
+    assert is_nightly_job("test_37")  # nightly, keeps its historical name
     assert is_nightly_job("protocol_continuity_test_all")  # nightly, keeps its historical name
     assert is_nightly_job("crash_recovery_test_35")  # nightly, keeps its historical name
     assert is_nightly_job("crash_recovery_test_37")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_14")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_15")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_16")  # nightly, keeps its historical name
+    assert is_nightly_job("postgres_conformance_test_17")  # nightly, keeps its historical name
     assert is_nightly_job("postgres_conformance_test_18")  # nightly, keeps its historical name
     assert is_nightly_job("benchmark")  # nightly, keeps its historical name
-    assert is_nightly_job("topology_chaos_test")  # nightly, keeps its historical name
-    assert is_nightly_job("stability_crash_recovery_test")  # nightly, keeps its historical name
+    assert is_nightly_job("topology_chaos_test_36")  # nightly, keeps its historical name
+    assert is_nightly_job("stability_crash_recovery_test_36")  # nightly, keeps its historical name
+    assert is_nightly_job("ledger_api_compatibility_test_36")  # nightly, keeps its historical name
+    assert is_nightly_job("model_based_test_36")  # nightly, keeps its historical name
     assert not is_nightly_job("toxiproxy_test_fast")  # runs per-commit, not nightly
     assert not is_nightly_job("unstable_test")  # intentionally unstable, excluded
     assert not is_nightly_job("unstable_test_slow")  # intentionally unstable, excluded

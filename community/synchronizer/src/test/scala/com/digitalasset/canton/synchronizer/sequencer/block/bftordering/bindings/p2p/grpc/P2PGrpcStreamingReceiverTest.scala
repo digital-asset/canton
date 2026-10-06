@@ -19,6 +19,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.Duration
 
 class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest {
 
@@ -96,6 +97,10 @@ class P2PGrpcStreamingReceiverTest extends AnyWordSpec with BftSequencerBaseTest
       sequencerIdPromiseUS,
       isAuthenticationEnabled = true,
       metrics,
+      rttProbeInterval = Duration.Zero, // RTT probing disabled in these tests
+      sendToPeer = _ => (),
+      makeConnectionOpener = () =>
+        BftOrderingMessage(traceContext = "", body = None, sentBy = "", sentAt = None),
       loggerFactory,
     ) {
       override def shutdown(): Unit = ()

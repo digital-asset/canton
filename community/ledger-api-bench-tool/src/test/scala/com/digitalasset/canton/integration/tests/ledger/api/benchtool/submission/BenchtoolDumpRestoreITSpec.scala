@@ -18,7 +18,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   ObservedEvents,
 }
 import com.digitalasset.canton.ledger.api.benchtool.util.TypedActorSystemResourceOwner.Creator
-import com.digitalasset.canton.version.ProtocolVersion
 import org.apache.pekko.actor.typed.{ActorSystem, SpawnProtocol}
 
 import scala.concurrent.duration.DurationInt
@@ -74,49 +73,48 @@ class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with Ha
       ),
     )
 
-    "create persistent contracts" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env: TestConsoleEnvironment =>
-        import env.*
+    "create persistent contracts" in { implicit env: TestConsoleEnvironment =>
+      import env.*
 
-        def acsEvents(
-            apiServices: LedgerApiServices,
-            allocatedParties: AllocatedParties,
-        ): Future[ObservedEvents] =
-          acsObserver(apiServices, allocatedParties.observers.head)
+      def acsEvents(
+          apiServices: LedgerApiServices,
+          allocatedParties: AllocatedParties,
+      ): Future[ObservedEvents] =
+        acsObserver(apiServices, allocatedParties.observers.head)
 
-        (for {
-          (apiServices, allocatedParties, submission) <- benchtoolFooSubmissionFixture(
-            submissionConfig
-          )
-          _ <- submission.performSubmission(submissionConfig)
-          beforeDrop <- acsEvents(apiServices, allocatedParties)
-          _ <- Future(stopAll())
-          _ <- sequencerPlugin.dumpAllDatabases(actualConfig, tempDirectory)
-          _ <- postgresPlugin
-            .recreateDatabases(actualConfig)
-            .failOnShutdownToAbortException("recreateDatabases")
-          _ <- Future(startAll())
-          apiServices <- ledgerApiServices
-          afterDrop <- acsEvents(apiServices, allocatedParties)
-          _ <- Future(stopAll())
-          _ <- sequencerPlugin.restoreAllDatabases(actualConfig, tempDirectory)
-          _ <- Future(startAll())
-          apiServices <- ledgerApiServices
-          afterRestore <- acsEvents(apiServices, allocatedParties)
-        } yield {
-          beforeDrop.numberOfCreatesPerTemplateName(
-            Template1
-          ) shouldBe CreateCount * ConsumedFraction + 1
-          beforeDrop.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
+      (for {
+        (apiServices, allocatedParties, submission) <- benchtoolFooSubmissionFixture(
+          submissionConfig
+        )
+        _ <- submission.performSubmission(submissionConfig)
+        beforeDrop <- acsEvents(apiServices, allocatedParties)
+        _ <- Future(stopAll())
+        _ <- sequencerPlugin.dumpAllDatabases(actualConfig, tempDirectory)
+        _ <- postgresPlugin
+          .recreateDatabases(actualConfig)
+          .failOnShutdownToAbortException("recreateDatabases")
+        _ <- Future(startAll())
+        apiServices <- ledgerApiServices
+        afterDrop <- acsEvents(apiServices, allocatedParties)
+        _ <- Future(stopAll())
+        _ <- sequencerPlugin.restoreAllDatabases(actualConfig, tempDirectory)
+        _ <- Future(startAll())
+        apiServices <- ledgerApiServices
+        afterRestore <- acsEvents(apiServices, allocatedParties)
+      } yield {
+        beforeDrop.numberOfCreatesPerTemplateName(
+          Template1
+        ) shouldBe CreateCount * ConsumedFraction + 1
+        beforeDrop.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
 
-          afterDrop.numberOfCreatesPerTemplateName(Template1) shouldBe 0
+        afterDrop.numberOfCreatesPerTemplateName(Template1) shouldBe 0
 
-          afterRestore.numberOfCreatesPerTemplateName(
-            Template1
-          ) shouldBe CreateCount * ConsumedFraction + 1
-          afterRestore.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
-          succeed
-        }).futureValue
+        afterRestore.numberOfCreatesPerTemplateName(
+          Template1
+        ) shouldBe CreateCount * ConsumedFraction + 1
+        afterRestore.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
+        succeed
+      }).futureValue
     }
   }
 

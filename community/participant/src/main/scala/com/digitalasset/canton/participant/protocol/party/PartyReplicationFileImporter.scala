@@ -14,11 +14,12 @@ import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
-import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
+import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter.ImportFailedException
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
   ParticipantNodePersistentState,
+  PartyReplicationIndexingStore,
 }
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -43,7 +44,7 @@ import scala.util.control.NonFatal
   *   The "add party" request id that this replication is associated with.
   * @param replicationProgressState
   *   Interface for processor to read and update ACS replication progress.
-  * @param acsTransferContractHandler
+  * @param acsReplicationContractHandler
   *   Handler that validates and persists imported ACS contracts.
   * @param acsReader
   *   Pekko Source providing the stream of active contracts to import.
@@ -57,7 +58,7 @@ class PartyReplicationFileImporter(
     synchronizerId: SynchronizerId,
     requestId: AddPartyRequestId,
     protected val replicationProgressState: AcsReplicationProgress,
-    acsTransferContractHandler: AcsTransferContractHandler,
+    acsReplicationContractHandler: AcsReplicationContractHandler,
     acsReader: Source[ActiveContract, NotUsed],
     testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
     isClosing: () => Boolean,
@@ -117,7 +118,7 @@ class PartyReplicationFileImporter(
             )
 
             // Import the chunk
-            checkpoint <- acsTransferContractHandler.handleContracts(
+            checkpoint <- acsReplicationContractHandler.handleContracts(
               contractsNE,
               AcsTransferCheckpoint(
                 currentProgress.processedContractCount,
@@ -220,6 +221,7 @@ object PartyReplicationFileImporter {
       replicationProgressState: AcsReplicationProgress,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
+      partyReplicationIndexingStore: PartyReplicationIndexingStore,
       acsReader: Source[ActiveContract, NotUsed],
       testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
       isClosing: () => Boolean,
@@ -228,21 +230,18 @@ object PartyReplicationFileImporter {
       executionContext: ExecutionContext,
       mat: Materializer,
   ): PartyReplicationFileImporter = {
-    val partyReplicationIndexingStore =
-      connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
-        .getOrElse(throw new IllegalStateException("Expect store when OnPR enabled"))
     val contextualLoggerFactory = loggerFactory
       .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
       .append("partyId", partyId.toProtoPrimitive)
       .append("requestId", requestId.toHexString)
-    val acsTransferContractHandler = new TargetParticipantAcsPersistence(
+    val acsTransferContractHandler = TargetParticipantAcsPersistence(
       requestId,
-      connectedSynchronizer.psid,
-      partyOnboardingAt,
-      new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
-      connectedSynchronizer.ephemeral.requestTracker,
+      partyId,
+      partyOnboardingAt.value,
+      connectedSynchronizer,
       partyReplicationIndexingStore,
-      contextualLoggerFactory,
+      participantNodePersistentState,
+      loggerFactory,
     )
     new PartyReplicationFileImporter(
       connectedSynchronizer.psid.logical,

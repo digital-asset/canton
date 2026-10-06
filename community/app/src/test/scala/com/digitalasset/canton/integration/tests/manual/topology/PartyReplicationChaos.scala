@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import better.files.File
 import cats.syntax.parallel.*
-import com.digitalasset.canton.BaseTest.{eventually, testedProtocolVersion}
+import com.digitalasset.canton.BaseTest.eventually
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,7 +16,6 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, config}
 import org.scalatest.EitherValues.*
 import org.scalatest.OptionValues.convertOptionToValuable
@@ -233,19 +232,11 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
         s"Done replicating party $party from ${from.id} to ${to.id}; reconnecting ${to.id} to the synchronizer"
       )
 
-      val clearOnboardingFlagBeginOffsetOnPv34 =
-        Option.when(testedProtocolVersion < ProtocolVersion.v35) {
-          to.ledger_api.state.end()
-        }
       to.synchronizers.reconnect(daName)
 
       logOperationStep("party replication")(
         s"Clearing onboarding flag for $party on ${to.id}"
       )
-
-      clearOnboardingFlagBeginOffsetOnPv34.foreach {
-        to.parties.clear_party_onboarding_flag(party, daId, _).discard
-      }
 
       val now = environment.clock.now
       val minimumConfirmingTime: CantonTimestamp = now

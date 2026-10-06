@@ -63,7 +63,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, TryUtil}
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
-import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Sink
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -74,7 +74,7 @@ class GrpcSequencerInitializationService(
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
-    actorSystem: ActorSystem,
+    materializer: Materializer,
 ) extends SequencerInitializationService
     with NamedLogging {
 

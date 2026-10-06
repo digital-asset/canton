@@ -6,18 +6,18 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import com.digitalasset.canton.ProtoDeserializationError.{
-  ContractDeserializationError,
-  InvariantViolation,
-}
-import com.digitalasset.canton.ReassignmentCounter
-import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId, Stakeholders, v30}
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.protocol.{ReassignmentId, Stakeholders, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedSeq,
+  ProtoUnvalidatedString,
+  ProtoValidation,
+}
 import com.digitalasset.canton.version.*
 
 /** Stores the data of an unassignment that needs to be passed from the source synchronizer to the
@@ -51,12 +51,18 @@ final case class UnassignmentData(
 
   def toProtoV30: v30.UnassignmentData = v30.UnassignmentData(
     submitterMetadata = submitterMetadata.toProtoV30.some,
-    contracts = contractsBatch.contracts.map { reassign =>
-      v30.ActiveContract(
-        reassign.contract.encoded,
-        reassign.counter.toProtoPrimitive,
-      )
-    },
+    contracts = contractsBatch.contracts.map(_.toProtoV30),
+    reassigningParticipantUids =
+      reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
+    sourcePhysicalSynchronizerId = sourcePsid.unwrap.toProtoPrimitive,
+    targetPhysicalSynchronizerId = targetPsid.unwrap.toProtoPrimitive,
+    targetTimestamp = targetTimestamp.unwrap.toProtoTimestamp.some,
+    unassignmentTs = unassignmentTs.toProtoTimestamp.some,
+  )
+
+  def toProtoV31: v31.UnassignmentData = v31.UnassignmentData(
+    submitterMetadata = submitterMetadata.toProtoV30.some,
+    contracts = contractsBatch.contracts.map(_.toProtoV31),
     reassigningParticipantUids =
       reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
     sourcePhysicalSynchronizerId = sourcePsid.unwrap.toProtoPrimitive,
@@ -76,7 +82,12 @@ object UnassignmentData
       .storage(ReleaseProtocolVersion(ProtocolVersion.v35), v30.UnassignmentData)(
         supportedProtoVersionPVV(_)(fromProtoV30),
         _.toProtoV30,
-      )
+      ),
+    ProtoVersion(31) -> VersionedProtoCodec
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v37), v31.UnassignmentData)(
+        supportedProtoVersionPVV(_)(fromProtoV31),
+        _.toProtoV31,
+      ),
   )
 
   def apply(
@@ -92,35 +103,30 @@ object UnassignmentData
     targetTimestamp = unassignmentRequest.targetTimestamp,
   )
 
-  private def fromProtoV30(
+  private def fromProto[P](
       pvv: ProtocolVersionValidation,
-      proto: v30.UnassignmentData,
+      submitterMetadataP: Option[v30.ReassignmentSubmitterMetadata],
+      contractsP: ProtoUnvalidatedSeq[P],
+      reassigningParticipantUidsP: ProtoUnvalidatedSeq[ProtoUnvalidatedString],
+      sourcePhysicalSynchronizerIdP: ProtoUnvalidatedString,
+      targetPhysicalSynchronizerIdP: ProtoUnvalidatedString,
+      targetTimestampP: Option[com.google.protobuf.timestamp.Timestamp],
+      unassignmentTsP: Option[com.google.protobuf.timestamp.Timestamp],
+      parseContract: P => ParsingResult[ContractReassignment],
   ): ParsingResult[UnassignmentData] = for {
     submitterMetadata <- ProtoConverter.parseRequired(
       ReassignmentSubmitterMetadata.fromProtoV30(pvv, _),
       "submitter_metadata",
-      proto.submitterMetadata,
+      submitterMetadataP,
     )
 
     contracts <- ProtoValidation
       .validateLengthThen(
-        proto.contracts,
+        contractsP,
         "contracts",
         pvv,
         ProtoValidation.MaxCollectionSize,
-      ) { case (v30.ActiveContract(contractP, reassignmentCounterP), _) =>
-        ContractInstance
-          .decodeWithCreatedAt(contractP)
-          .leftMap(err => ContractDeserializationError(err))
-          .map(c =>
-            (
-              c,
-              Source(c.templateId.packageId),
-              Target(c.templateId.packageId),
-              ReassignmentCounter(reassignmentCounterP),
-            )
-          )
-      }
+      ) { case (contractP, _) => parseContract(contractP) }
       .flatMap(
         ContractsReassignmentBatch
           .create(_)
@@ -129,7 +135,7 @@ object UnassignmentData
 
     reassigningParticipants <- ProtoValidation
       .validateThen(
-        proto.reassigningParticipantUids,
+        reassigningParticipantUidsP,
         "reassigning_participant_uids",
         pvv,
         ProtoValidation.MaxCollectionSize,
@@ -139,7 +145,7 @@ object UnassignmentData
 
     sourceSynchronizer <- ProtoValidation
       .validateThen(
-        proto.sourcePhysicalSynchronizerId,
+        sourcePhysicalSynchronizerIdP,
         "source_physical_synchronizer_id",
         pvv,
       )(PhysicalSynchronizerId.fromProtoPrimitive)
@@ -147,7 +153,7 @@ object UnassignmentData
 
     targetSynchronizer <- ProtoValidation
       .validateThen(
-        proto.targetPhysicalSynchronizerId,
+        targetPhysicalSynchronizerIdP,
         "target_physical_synchronizer_id",
         pvv,
       )(PhysicalSynchronizerId.fromProtoPrimitive)
@@ -157,14 +163,14 @@ object UnassignmentData
       .parseRequired(
         CantonTimestamp.fromProtoTimestamp,
         "target_timestamp",
-        proto.targetTimestamp,
+        targetTimestampP,
       )
       .map(Target(_))
 
     unassignmentTs <- ProtoConverter.parseRequired(
       CantonTimestamp.fromProtoTimestamp,
       "unassignment_ts",
-      proto.unassignmentTs,
+      unassignmentTsP,
     )
   } yield new UnassignmentData(
     submitterMetadata = submitterMetadata,
@@ -175,6 +181,38 @@ object UnassignmentData
     targetTimestamp = targetTimestamp,
     unassignmentTs = unassignmentTs,
   )
+
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      proto: v30.UnassignmentData,
+  ): ParsingResult[UnassignmentData] =
+    fromProto(
+      pvv,
+      proto.submitterMetadata,
+      proto.contracts,
+      proto.reassigningParticipantUids,
+      proto.sourcePhysicalSynchronizerId,
+      proto.targetPhysicalSynchronizerId,
+      proto.targetTimestamp,
+      proto.unassignmentTs,
+      ContractReassignment.fromProtoV30,
+    )
+
+  private def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      proto: v31.UnassignmentData,
+  ): ParsingResult[UnassignmentData] =
+    fromProto(
+      pvv,
+      proto.submitterMetadata,
+      proto.contracts,
+      proto.reassigningParticipantUids,
+      proto.sourcePhysicalSynchronizerId,
+      proto.targetPhysicalSynchronizerId,
+      proto.targetTimestamp,
+      proto.unassignmentTs,
+      ContractReassignment.fromProtoV31(pvv),
+    )
 
   sealed trait ReassignmentGlobalOffset extends Product with Serializable {
     def merge(other: ReassignmentGlobalOffset): Either[String, ReassignmentGlobalOffset]

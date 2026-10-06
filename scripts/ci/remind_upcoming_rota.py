@@ -182,8 +182,17 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             prior_names = names_for_rotation(prior_values, rotation, prior_monday, expected)
-        except Exception:
-            prior_names = []  # unknown prior week: treat the target-week people as newly starting
+        except Exception as exc:
+            # Unknown prior week: treat the target-week people as newly starting, which can
+            # re-DM someone already mid-shift. Not severe enough for a CI-rota page (the
+            # whole-sheet failure above already covers that), but flag it: log it and mark
+            # the run degraded so it is visible in the job status instead of looking green.
+            select_rota.log(
+                f"warning: could not resolve prior-week {label} names ({exc!r}), "
+                "treating everyone in the target week as newly starting"
+            )
+            prior_names = []
+            exit_code = 1
 
         for name in newly_starting(target_names, prior_names):
             ids = select_rota.resolve_slack_ids([name], id_by_name)
@@ -275,6 +284,28 @@ def _self_test_main(
             newly_file.write_text(json.dumps(newly), encoding="utf-8")
             sent.clear()
             assert main(["--date", date, "--target-values-file", str(newly_file)]) == 0
+            assert sent == [("UB", sent[0][1])] and "CI rota" in sent[0][1], sent
+
+            # A per-rotation prior-week resolve failure (its row is simply missing from the
+            # prior sheet) still DMs the newly-starting person, but exits 1 to flag the
+            # degraded run instead of looking green.
+            prior_gap = [header, [target_serial, "Bo"]]  # no row for prior_monday
+            prior_gap_file = Path(tmp) / "prior_gap.json"
+            prior_gap_file.write_text(json.dumps(prior_gap), encoding="utf-8")
+            sent.clear()
+            assert (
+                main(
+                    [
+                        "--date",
+                        date,
+                        "--target-values-file",
+                        str(newly_file),
+                        "--prior-values-file",
+                        str(prior_gap_file),
+                    ]
+                )
+                == 1
+            )
             assert sent == [("UB", sent[0][1])] and "CI rota" in sent[0][1], sent
 
             # Al is on both weeks (a continuing shift): no reminder.

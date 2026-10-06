@@ -509,6 +509,22 @@ jobs:
 
             needs = json.loads(os.environ["NEEDS_JSON"])
 
+            # The `skip ci` label short-circuits every other job in this workflow to
+            # "skipped" via setup_and_validation's should-skip output, which the
+            # failure check below would otherwise treat as a pass. Fail here instead,
+            # so a skip-ci'd PR can only merge through an explicit branch-protection
+            # bypass rather than a silently green required check.
+            should_skip = (
+                needs.get("setup_and_validation", {}).get("outputs", {}).get("should-skip")
+                == "true"
+            )
+            if should_skip:
+                print(
+                    "The 'skip ci' label is set, so required jobs did not run. "
+                    "Failing this check intentionally: merging requires a branch-protection bypass."
+                )
+                sys.exit(1)
+
             failed_or_interrupted = {
                 job_name: job_data.get("result")
                 for job_name, job_data in needs.items()

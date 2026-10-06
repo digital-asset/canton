@@ -444,7 +444,6 @@ class ParticipantSimulator(
               )
             ),
             partySigningKeysWithThreshold = None,
-            isOffline = false,
           ),
           pv,
         ),
@@ -479,7 +478,6 @@ class ParticipantSimulator(
               )
             ),
             partySigningKeysWithThreshold = None,
-            isOffline = false,
           ),
           signedBy = Seq.empty,
           serial = None,
@@ -762,7 +760,6 @@ class ParticipantSimulator(
       messageId = MessageId.randomMessageId(),
       batch = batch,
       maxSequencingTime = maxSequencingTime,
-      topologyTimestamp = None,
       aggregationRule = None,
       // this works if sequencer.trafficConfig.autoFillEmptyCost = true
       submissionCost = None,

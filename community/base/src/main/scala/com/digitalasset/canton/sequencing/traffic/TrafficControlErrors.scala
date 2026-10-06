@@ -16,7 +16,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TrafficControlErrorGroup
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 
 object TrafficControlErrors extends TrafficControlErrorGroup {
   sealed trait TrafficControlError extends Product with Serializable with ContextualizedCantonError
@@ -150,8 +154,11 @@ object TrafficControlErrors extends TrafficControlErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends Alarm(cause)
         with TrafficControlError
-        with PrettyPrinting {
-      override protected def pretty: Pretty[Error] = prettyOfClass(
+        with PrettyPrintingFromCompanion {
+      override def prettyCompanion: PrettyPrintingCompanion[Error] = Error
+    }
+    object Error extends PrettyPrintingCompanion[Error] {
+      override protected val pretty: Pretty[Error] = prettyOfClass(
         param("code", _.code.id.unquoted),
         param("cause", _.cause.unquoted),
       )

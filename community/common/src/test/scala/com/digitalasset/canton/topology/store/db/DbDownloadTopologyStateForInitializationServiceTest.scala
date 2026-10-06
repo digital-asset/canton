@@ -6,12 +6,12 @@ package com.digitalasset.canton.topology.store.db
 import com.digitalasset.canton.store.db.{H2Test, PostgresTest}
 import com.digitalasset.canton.topology.store.DownloadTopologyStateForInitializationServiceTest
 
-class DownloadTopologyStateForInitializationServiceTestPostgres
+final class DownloadTopologyStateForInitializationServiceTestPostgres
     extends DownloadTopologyStateForInitializationServiceTest
     with DbTopologyStoreHelper
     with PostgresTest
 
-class DownloadTopologyStateForInitializationServiceTestH2
+final class DownloadTopologyStateForInitializationServiceTestH2
     extends DownloadTopologyStateForInitializationServiceTest
     with DbTopologyStoreHelper
     with H2Test

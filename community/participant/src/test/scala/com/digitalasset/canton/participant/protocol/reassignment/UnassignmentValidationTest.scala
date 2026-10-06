@@ -30,6 +30,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.StakeholderHostingErrors.stakeholdersNoReassigningParticipant
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractSerializationVersionNotSupported,
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   NonReassigningParticipantsDeclared,
@@ -48,6 +49,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -236,6 +238,24 @@ class UnassignmentValidationTest
 
     }
 
+    "create a reassigning participant validation failure if the contract serialization version is not supported by the target synchronize" onlyRunWithOrLessThan ProtocolVersion.latest in {
+
+      val devContract =
+        ExampleContractFactory.modify(contract, version = Some(LfSerializationVersion.VDev))
+
+      val result = performValidation(contract = devContract).futureValueUS.value
+
+      result.reassigningParticipantValidationResult.errors should contain(
+        ContractSerializationVersionNotSupported(
+          reassignmentRef = ReassignmentRef(devContract.contractId),
+          targetSynchronizerId = targetSynchronizer.unwrap,
+          maxSynchronizerVersion = maxSerializationVersionForProtocolVersion(testedProtocolVersion),
+          contractVersion = LfSerializationVersion.VDev,
+        )
+      )
+      result.isSuccessful.futureValueUS shouldBe false
+    }
+
     "fail when inconsistent stakeholders are given" in {
       /*
       We construct in this test an inconsistent `inconsistentTree: FullUnassignmentTree` :
@@ -355,7 +375,7 @@ class UnassignmentValidationTest
         stakeholders = Set(alice, bob),
       )
 
-      "fail if a stakeholder is hosted on a participant without the flag enabled on source synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "fail if a stakeholder is hosted on a participant without the flag enabled on source synchronizer" onlyRunWithOrLessThan ProtocolVersion.v36 in {
         def commonValidation(contract: ContractInstance, participants: ParticipantId*) =
           performValidation(
             contract = contract,
@@ -389,7 +409,7 @@ class UnassignmentValidationTest
         commonValidation(contract, aliceParticipant, bobParticipant) shouldBe None
       }
 
-      "fail if a stakeholder is hosted on a participant without the flag enabled on target synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "fail if a stakeholder is hosted on a participant without the flag enabled on target synchronizer" onlyRunWithOrLessThan ProtocolVersion.v36 in {
         def reassigningParticipantValidation(
             contract: ContractInstance,
             participants: ParticipantId*

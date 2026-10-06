@@ -499,6 +499,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
             Seq(
               commonContractAuthenticationResult.swap.toOption,
               validationResult.commonValidationResult.packageVettingResult,
+              validationResult.commonValidationResult.contractSerializationResult,
             ).flatten
               .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
 
@@ -620,6 +621,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
     commonValidationResult.contractAuthenticationResultF.value.map { contractAuthenticationResult =>
       val modelConformanceRejection = contractAuthenticationResult.swap.toOption
         .orElse(commonValidationResult.packageVettingResult)
+        .orElse(commonValidationResult.contractSerializationResult)
         .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
 
       val authenticationRejection =

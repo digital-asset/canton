@@ -8,7 +8,12 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.api.client.data.NodeStatus.*
 import com.digitalasset.canton.admin.sequencer.v30 as sequencerV30
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyInstances,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{
@@ -139,19 +144,19 @@ object SequencerStatus {
   *   implementation specific flag indicating whether the sequencer is active
   */
 final case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
-    extends PrettyPrinting {
-  override protected def pretty: Pretty[SequencerHealthStatus] =
-    SequencerHealthStatus.prettySequencerHealthStatus
+    extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerHealthStatus] =
+    SequencerHealthStatus
 }
 
-object SequencerHealthStatus extends PrettyUtil with ShowUtil {
+object SequencerHealthStatus extends PrettyPrintingCompanion[SequencerHealthStatus] with ShowUtil {
   def fromProtoV30(
       statusP: sequencerV30.SequencerHealthStatus
   ): ParsingResult[SequencerHealthStatus] =
     Right(SequencerHealthStatus(statusP.active, statusP.details))
 
   implicit val implicitPrettyString: Pretty[String] = PrettyInstances.prettyString
-  implicit val prettySequencerHealthStatus: Pretty[SequencerHealthStatus] =
+  override protected val pretty: Pretty[SequencerHealthStatus] =
     prettyOfClass[SequencerHealthStatus](
       param("active", _.isActive),
       paramIfDefined("details", _.details.map(_.unquoted)),
@@ -162,19 +167,20 @@ object SequencerHealthStatus extends PrettyUtil with ShowUtil {
   * @param acceptsAdminChanges
   *   indicates whether the sequencer node accepts administration commands
   */
-final case class SequencerAdminStatus(acceptsAdminChanges: Boolean) extends PrettyPrinting {
-  override protected def pretty: Pretty[SequencerAdminStatus] =
-    SequencerAdminStatus.prettySequencerHealthStatus
+final case class SequencerAdminStatus(acceptsAdminChanges: Boolean)
+    extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerAdminStatus] =
+    SequencerAdminStatus
 }
 
-object SequencerAdminStatus extends PrettyUtil with ShowUtil {
+object SequencerAdminStatus extends PrettyPrintingCompanion[SequencerAdminStatus] with ShowUtil {
   def fromProtoV30(
       statusP: sequencerV30.SequencerAdminStatus
   ): ParsingResult[SequencerAdminStatus] =
     Right(SequencerAdminStatus(statusP.acceptsAdminChanges))
 
   implicit val implicitPrettyString: Pretty[String] = PrettyInstances.prettyString
-  implicit val prettySequencerHealthStatus: Pretty[SequencerAdminStatus] =
+  override protected val pretty: Pretty[SequencerAdminStatus] =
     prettyOfClass[SequencerAdminStatus](
       param("admin", _.acceptsAdminChanges)
     )

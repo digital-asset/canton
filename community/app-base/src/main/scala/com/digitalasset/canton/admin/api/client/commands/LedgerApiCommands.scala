@@ -197,7 +197,12 @@ import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
@@ -1708,7 +1713,9 @@ object LedgerApiCommands {
 
   }
 
-  private[commands] trait SubmitCommand extends PrettyPrinting {
+  private[commands] trait SubmitCommand extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[SubmitCommand] = SubmitCommand
+
     def actAs: Seq[LfPartyId]
     def readAs: Seq[LfPartyId]
     def commands: Seq[Command]
@@ -1752,7 +1759,10 @@ object LedgerApiCommands {
       tapsMaxPasses = tapsMaxPasses,
     )
 
-    override protected def pretty: Pretty[this.type] =
+  }
+
+  private[commands] object SubmitCommand extends PrettyPrintingCompanion[SubmitCommand] {
+    override protected val pretty: Pretty[SubmitCommand] =
       prettyOfClass(
         param("actAs", _.actAs),
         param("readAs", _.readAs),

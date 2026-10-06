@@ -279,6 +279,7 @@ final class IndexServiceOwner(
       lfValueTranslation = lfValueTranslation,
       contractStore = participantContractStore,
       achsStateCache = achsStateCache,
+      contractPruningBatchSize = config.contractPruningBatchSize,
       contractPruningMaxRetries = config.contractPruningMaxRetries,
       contractPruningDelayBeforeRetry = config.contractPruningDelayBeforeRetry.underlying,
       contractPruningDbLockMeta = DbLockMeta(

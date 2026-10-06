@@ -2522,6 +2522,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               internalContractId = 42L,
               inst = contract.inst,
             ),
+            representativePackageId = contract.templateId.packageId,
           )
         ),
         recordTime = someRecordTime,

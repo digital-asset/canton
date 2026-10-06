@@ -148,7 +148,7 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
         "We get an LSU sequencing test message sequenced > upgradeTime to check that sequencer can handle that"
       ) {
         loggerFactory.assertEventuallyLogsSeq(
-          SuppressionRule.Level(Level.DEBUG)
+          SuppressionRule.Level(Level.INFO)
             && SuppressionRule.forLogger[OutputModule[?]] && SuppressionRule.LoggerNameContains(
               "sequencer=sequencer4"
             )
@@ -162,7 +162,7 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
             if (!this.isInstanceOf[ReferenceLsuSanityCheckSuccessorSynchronizerIntegrationTest]) {
               forAtLeast(1, logs) { log =>
                 val logPattern =
-                  """Sending block \d+ \(current epoch = \d+, block's BFT time = (.+), block size = (\d+).+""".r
+                  """Delivering block \d+ to post-ordering \(epoch = \d+, block's BFT time = (.+), block size = (\d+).+""".r
                 inside(log.message) {
                   case logPattern(ts, blockSize) if blockSize.toInt > 0 =>
                     CantonTimestamp.fromString(ts).value should be > upgradeTime.immediateSuccessor

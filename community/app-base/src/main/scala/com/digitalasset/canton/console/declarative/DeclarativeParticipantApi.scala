@@ -305,7 +305,6 @@ class DeclarativeParticipantApi(
             HostingParticipant(participantId, permission)
           ),
           partySigningKeysWithThreshold = None,
-          isOffline = false,
         )
         _ <- queryAdminApi(
           TopologyAdminCommands.Write.Propose(

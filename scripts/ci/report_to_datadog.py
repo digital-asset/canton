@@ -14,6 +14,7 @@ import os
 import sys
 
 from flaky_common import (
+    is_dry_run,
     metric_short_version,
     branch,
     format_test_name,
@@ -67,6 +68,9 @@ def run(failing_tests_json=None):
     failing_tests = read_failing_tests(in_path)
     if not failing_tests:
         print("No failing tests to report to Datadog.")
+        return
+    if is_dry_run():
+        print(f"Dry run: not reporting {len(failing_tests)} failed test(s) to Datadog.")
         return
 
     assert_required_env_vars(['DATADOG_API_KEY'] + ci_required_context_vars())

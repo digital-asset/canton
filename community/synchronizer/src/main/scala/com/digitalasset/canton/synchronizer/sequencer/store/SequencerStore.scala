@@ -183,12 +183,6 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
 
   def payloadO: Option[PayloadReference]
 
-  /** The timestamp of the snapshot to be used for determining the signing key of this event,
-    * resolving group addresses, and for checking signatures on envelopes, if absent, sequencing
-    * time will be used instead. Absent on errors.
-    */
-  def topologyTimestampO: Option[CantonTimestamp]
-
   /** If traffic management is enabled, there should always be traffic information. The information
     * might be discarded later though, in case the event is being processed as part of a
     * subscription for any of the recipients that isn't the sender.
@@ -199,7 +193,6 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
 final case class ReceiptStoreEvent(
     override val sender: SequencerMemberId,
     messageId: MessageId,
-    override val topologyTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
@@ -227,7 +220,6 @@ final case class DeliverStoreEvent[P](
     messageId: MessageId,
     override val members: NonEmpty[SortedSet[SequencerMemberId]],
     payload: P,
-    override val topologyTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[P] {
@@ -254,7 +246,6 @@ object DeliverStoreEvent {
       messageId: MessageId,
       members: Set[SequencerMemberId],
       payload: BytesPayload,
-      topologyTimestampO: Option[CantonTimestamp],
       trafficReceiptO: Option[TrafficReceipt],
   )(implicit traceContext: TraceContext): DeliverStoreEvent[BytesPayload] = {
     // ensure that sender is a recipient
@@ -264,7 +255,6 @@ object DeliverStoreEvent {
       messageId,
       recipientsWithSender,
       payload,
-      topologyTimestampO,
       traceContext,
       trafficReceiptO,
     )
@@ -283,8 +273,6 @@ final case class DeliverErrorStoreEvent(
   override val members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override def map[P](f: Nothing => P): StoreEvent[P] = this
   override val payloadO: Option[Nothing] = None
-
-  override val topologyTimestampO: Option[CantonTimestamp] = None
 }
 
 object DeliverErrorStoreEvent {

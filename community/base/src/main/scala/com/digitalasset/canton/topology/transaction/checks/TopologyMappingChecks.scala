@@ -1090,7 +1090,19 @@ class RequiredTopologyMappingChecks(
           upgradeTime = toValidate.mapping.upgradeTime,
         ),
       )
-
+      _ <- stateLookup.synchronizerId.fold(EitherTUtil.unitUS[TopologyTransactionRejection]) {
+        currentPsid =>
+          EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
+            !LsuAnnouncement.isForbiddenProtocolVersionDowngrade(
+              current = currentPsid,
+              successor = toValidate.mapping.successorSynchronizerId,
+            ),
+            RequiredMappingRejection.LsuProtocolVersionDowngrade(
+              successorSynchronizerId = toValidate.mapping.successorSynchronizerId,
+              currentSynchronizerId = currentPsid,
+            ),
+          )
+      }
     } yield ()
 
   private def checkLsuSequencerSuccessor(

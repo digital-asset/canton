@@ -72,7 +72,6 @@ class SendTrackerTest extends AnyWordSpec with BaseTest with MetricsUtils with F
           DefaultTestIdentities.physicalSynchronizerId,
           Some(msgId),
           Batch.empty(testedProtocolVersion),
-          None,
           trafficReceipt,
         )
       )

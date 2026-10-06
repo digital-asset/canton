@@ -138,7 +138,6 @@ final class MaxSequencingTimeIntegrationTest
       messageId = MessageId.randomMessageId(),
       batch = Batch(Nil, testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
       aggregationRule = None,
       submissionCost = None,
       protocolVersion = testedProtocolVersion,

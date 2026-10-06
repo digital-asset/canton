@@ -14,6 +14,7 @@ import com.daml.metrics.api.{
   MetricsContext,
 }
 import com.digitalasset.canton.SequencerAlias
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 
 import scala.collection.concurrent.TrieMap
 
@@ -320,4 +321,20 @@ class SequencerClientMetrics(
   }
 
   val submissions: SubmissionsMetrics = new SubmissionsMetrics
+
+  // The metrics documentation generation requires all metrics to be registered in the factory.
+  // However, the following metrics are registered on-demand during normal operation. Therefore,
+  // we use this environment variable approach to guard against instantiation in production; but
+  // register the metrics for the documentation generation.
+  if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
+    val dummyContext = MetricsContext("connection" -> "dummy")
+
+    connectionPool.connectionHealth(dummyContext).discard
+    connectionPool.subscriptionHealth(dummyContext).discard
+    handler.connectionMetrics(SequencerAlias.Default).discard
+    trafficConsumption.lastTrafficUpdateTimestamp(dummyContext).discard
+    trafficConsumption.extraTrafficPurchased(dummyContext).discard
+    trafficConsumption.extraTrafficConsumed(dummyContext).discard
+    trafficConsumption.baseTrafficRemainder(dummyContext).discard
+  }
 }

@@ -5,12 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.digitalasset.canton.ProtoDeserializationError.{
-  ContractDeserializationError,
-  InvariantViolation,
-  OtherError,
-}
-import com.digitalasset.canton.ReassignmentCounter
+import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
@@ -23,7 +18,11 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedSeq,
+  ProtoUnvalidatedString,
+  ProtoValidation,
+}
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -308,14 +307,12 @@ object UnassignmentCommonData
   */
 /** @param salt
   *   The salt used to blind the Merkle hash.
-  * @param contract
-  *   Contract being reassigned
+  * @param contracts
+  *   The contracts being reassigned
   * @param targetSynchronizerId
   *   The synchronizer to which the contract is reassigned.
   * @param targetTimestamp
   *   The timestamp of the topology on the target synchronizer to use for validations.
-  * @param targetProtocolVersion
-  *   Protocol version of the target synchronizer
   */
 final case class UnassignmentView private (
     override val salt: Salt,
@@ -344,12 +341,15 @@ final case class UnassignmentView private (
       salt = Some(salt.toProtoV30),
       targetPhysicalSynchronizerId = targetSynchronizerId.unwrap.toProtoPrimitive,
       targetTimestamp = targetTimestamp.unwrap.toProtoPrimitive,
-      contracts = contracts.contracts.map { reassign =>
-        v30.ActiveContract(
-          reassign.contract.encoded,
-          reassign.counter.toProtoPrimitive,
-        )
-      },
+      contracts = contracts.contracts.map(_.toProtoV30),
+    )
+
+  protected def toProtoV31: v31.UnassignmentView =
+    v31.UnassignmentView(
+      salt = Some(salt.toProtoV30),
+      targetPhysicalSynchronizerId = targetSynchronizerId.unwrap.toProtoPrimitive,
+      targetTimestamp = targetTimestamp.unwrap.toProtoPrimitive,
+      contracts = contracts.contracts.map(_.toProtoV31),
     )
 
   override def prettyCompanion: PrettyPrintingCompanion[UnassignmentView] = UnassignmentView
@@ -375,7 +375,11 @@ object UnassignmentView
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.UnassignmentView)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v37)(v31.UnassignmentView)(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -392,20 +396,18 @@ object UnassignmentView
       targetTimestamp,
     )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.unwrap), None)
 
-  private[this] def fromProtoV30(
+  private[this] def fromProto[P](
       pvv: ProtocolVersionValidation,
       hashOps: HashOps,
-      unassignmentViewP: v30.UnassignmentView,
+      protoVersion: ProtoVersion,
+      saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
+      targetSynchronizerIdP: ProtoUnvalidatedString,
+      targetTimestampP: Long,
+      contractsP: ProtoUnvalidatedSeq[P],
+      parseContract: P => ParsingResult[ContractReassignment],
   )(
       bytes: ByteString
-  ): ParsingResult[UnassignmentView] = {
-    val v30.UnassignmentView(
-      saltP,
-      targetSynchronizerIdP,
-      targetTimestampP,
-      contractsP,
-    ) = unassignmentViewP
-
+  ): ParsingResult[UnassignmentView] =
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
       targetSynchronizerId <- ProtoValidation.validateThen(
@@ -416,25 +418,14 @@ object UnassignmentView
       targetTimestamp <- CantonTimestamp.fromProtoPrimitive(targetTimestampP)
       contracts <- ProtoValidation
         .validateLengthThen(contractsP, "contracts", pvv, ProtoValidation.MaxCollectionSize) {
-          case (v30.ActiveContract(contractP, reassignmentCounterP), _) =>
-            ContractInstance
-              .decodeWithCreatedAt(contractP)
-              .leftMap(err => ContractDeserializationError(err))
-              .map(c =>
-                (
-                  c,
-                  Source(c.templateId.packageId),
-                  Target(c.templateId.packageId),
-                  ReassignmentCounter(reassignmentCounterP),
-                )
-              )
+          case (contractP, _) => parseContract(contractP)
         }
         .flatMap(
           ContractsReassignmentBatch
             .create(_)
             .leftMap(err => InvariantViolation(Some("contracts"), err.toString))
         )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      rpv <- protocolVersionRepresentativeFor(protoVersion)
     } yield UnassignmentView(
       salt,
       contracts,
@@ -446,7 +437,41 @@ object UnassignmentView
       Some(bytes),
     )
 
-  }
+  private[this] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      unassignmentViewP: v30.UnassignmentView,
+  )(
+      bytes: ByteString
+  ): ParsingResult[UnassignmentView] =
+    fromProto(
+      pvv,
+      hashOps,
+      ProtoVersion(30),
+      unassignmentViewP.salt,
+      unassignmentViewP.targetPhysicalSynchronizerId,
+      unassignmentViewP.targetTimestamp,
+      unassignmentViewP.contracts,
+      ContractReassignment.fromProtoV30,
+    )(bytes)
+
+  private[this] def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      unassignmentViewP: v31.UnassignmentView,
+  )(
+      bytes: ByteString
+  ): ParsingResult[UnassignmentView] =
+    fromProto(
+      pvv,
+      hashOps,
+      ProtoVersion(31),
+      unassignmentViewP.salt,
+      unassignmentViewP.targetPhysicalSynchronizerId,
+      unassignmentViewP.targetTimestamp,
+      unassignmentViewP.contracts,
+      ContractReassignment.fromProtoV31(pvv),
+    )(bytes)
 }
 
 /** A fully unblinded [[UnassignmentViewTree]]

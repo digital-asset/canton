@@ -365,20 +365,15 @@ class PartyReplicationIndexingWorkflow(
         reassignment = Reassignment.Batch(
           activationChanges.zipWithIndex.map[Reassignment] {
             // TODO(#26468): Use validation packages
-            case (
-                  ContractActivation(
-                    ContractReassignment(contract, _, _, reassignmentCounter),
-                    internalContractId,
-                  ),
-                  idx,
-                ) =>
+            case (ContractActivation(contractReassignment, internalContractId), idx) =>
               Reassignment.Assign(
-                reassignmentCounter = reassignmentCounter.v,
+                reassignmentCounter = contractReassignment.counter.v,
                 nodeId = idx,
                 persistedContractInstance = PersistedContractInstance(
                   internalContractId = internalContractId,
-                  inst = contract.inst,
+                  inst = contractReassignment.contract.inst,
                 ),
+                representativePackageId = contractReassignment.targetValidationPackageId.unwrap,
               )
             case (
                   ContractDeactivation(ContractReassignment(contract, _, _, reassignmentCounter)),

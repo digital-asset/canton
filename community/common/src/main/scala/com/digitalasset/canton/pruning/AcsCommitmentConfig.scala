@@ -7,7 +7,11 @@ import com.digitalasset.canton.admin.participant.v30 as partV30
 import com.digitalasset.canton.admin.pruning.v30 as prunV30
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeLong}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -114,7 +118,7 @@ final case class CounterParticipantIntervalsBehind(
     timeBehind: NonNegativeFiniteDuration,
     asOfSequencingTime: CantonTimestamp,
 ) extends HasVersionedWrapper[CounterParticipantIntervalsBehind]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def toProtoV30: partV30.CounterParticipantInfo =
     partV30.CounterParticipantInfo(
       participantId.toProtoPrimitive,
@@ -126,7 +130,16 @@ final case class CounterParticipantIntervalsBehind(
 
   override protected def companionObj = CounterParticipantIntervalsBehind
 
-  override def pretty: Pretty[CounterParticipantIntervalsBehind] =
+  override def prettyCompanion: PrettyPrintingCompanion[CounterParticipantIntervalsBehind] =
+    CounterParticipantIntervalsBehind
+}
+
+object CounterParticipantIntervalsBehind
+    extends HasVersionedMessageCompanion[CounterParticipantIntervalsBehind]
+    with HasVersionedMessageCompanionDbHelpers[CounterParticipantIntervalsBehind]
+    with PrettyPrintingCompanion[CounterParticipantIntervalsBehind] {
+
+  override protected val pretty: Pretty[CounterParticipantIntervalsBehind] =
     prettyOfClass(
       param("synchronizer", _.synchronizerId),
       param("participant", _.participantId),
@@ -134,11 +147,6 @@ final case class CounterParticipantIntervalsBehind(
       param("time behind", _.timeBehind),
       param("sequencing timestamp", _.asOfSequencingTime),
     )
-}
-
-object CounterParticipantIntervalsBehind
-    extends HasVersionedMessageCompanion[CounterParticipantIntervalsBehind]
-    with HasVersionedMessageCompanionDbHelpers[CounterParticipantIntervalsBehind] {
 
   override def name: String = "counter participant intervals behind"
 

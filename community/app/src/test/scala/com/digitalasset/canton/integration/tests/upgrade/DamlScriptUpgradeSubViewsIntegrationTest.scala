@@ -15,13 +15,13 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.SetupPackageVetting
-import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.value.Value.ContractId
 
-import java.io.File
+import java.nio.file.Path
 
 /*
 Creates a transaction of the following shape, then archives #cid2 in a second transaction. Since p1, p2, p3, p4 and p5
@@ -185,7 +185,7 @@ class DamlScriptUpgradeSubViewsIntegrationTest
   }
 
   private def getPkgId(darPath: String): LfPackageId =
-    DarDecoder.assertReadArchiveFromFile(new File(darPath)).main._1
+    DarMainPackageId.tryFromDarPath(Path.of(darPath)).toLfPackageId
 
   private def getContractId(tx: Transaction): ContractId =
     ContractId.assertFromString(tx.events.map(_.getCreated.contractId).loneElement)

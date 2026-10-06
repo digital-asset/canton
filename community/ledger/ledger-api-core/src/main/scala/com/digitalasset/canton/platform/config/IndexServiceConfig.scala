@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.config
 
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.typesafe.scalalogging.Logger
 
@@ -83,6 +84,7 @@ final case class IndexServiceConfig(
       IndexServiceConfig.OffsetCheckpointCacheUpdateInterval,
     idleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
       IndexServiceConfig.IdleStreamOffsetCheckpointTimeout,
+    contractPruningBatchSize: PositiveInt = IndexServiceConfig.DefaultContractPruningBatchSize,
     contractPruningMaxRetries: Int = IndexServiceConfig.DefaultContractPruningMaxRetries,
     contractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
       IndexServiceConfig.DefaultContractPruningDelayBeforeRetry,
@@ -109,6 +111,7 @@ object IndexServiceConfig {
     NonNegativeFiniteDuration.ofSeconds(15)
   val IdleStreamOffsetCheckpointTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMinutes(1)
+  val DefaultContractPruningBatchSize: PositiveInt = PositiveInt.tryCreate(10000)
   val DefaultContractPruningMaxRetries: Int = 10
   val DefaultContractPruningDelayBeforeRetry: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(2)

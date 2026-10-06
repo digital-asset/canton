@@ -22,8 +22,10 @@ It is split into four focused scripts that pass data via JSON artifacts in a sha
 |---|---|
 | `parse_failing_tests.py` | collect failing tests from `test-reports/` (+ `found_problems.txt`) → `failing_tests.json` |
 | `report_to_datadog.py` | post a metric per failing test (all branches) |
-| `manage_flaky_issues.py` | create/update the GitHub issue on tracked branches → `streaks.json` |
+| `manage_flaky_issues.py` | create/update the GitHub issue on tracked branches, post the evidence comment → `streaks.json` |
 | `alert_slack.py` | post the Slack summary for any streaks |
+
+Before the orchestrator, a separate step runs `collect_flake_evidence.py` → `evidence.json` + `flake-pkg/`, the input for the evidence comments (see [Failure evidence](#failure-evidence)).
 
 Shared code (CI-env detection, the `gh` wrapper, formatting, project/field config, the JSON contracts) lives in `flaky_common.py`.
 Each script carries its own inline self-tests, runnable with `--self-test`, which runs them and exits.
@@ -91,7 +93,7 @@ The goals of the system are:
 - **Visibility**: every failure, transient or not, is counted in Datadog under `canton.failed_test_grouped`.
   This powers dashboards and lets us spot trends across branches and jobs.
 - **Accountability**: for `main` and `main-2.x`, each distinct failing test gets a GitHub issue in [DACH-NY/canton](https://github.com/DACH-NY/canton), labelled under the "Flaky Tests" milestone and tracked on [the flaky test kanban board](https://github.com/orgs/DACH-NY/projects/38/).
-  The issue body accumulates a table of every failure with a link to the specific parallel run, the job name, and the commit.
+  The issue body accumulates a table of every failure with a link to the specific parallel run (on GHA: the failing test step of the job, `#step:<n>`), the job name, the commit, the cause, and (Evidence column) the failure's evidence comment, see [Failure evidence](#failure-evidence).
   Closed issues are automatically reopened on the next failure, and archived issues on the kanban board are unarchived. The exception is a stale flake: if the failing commit predates the issue's close, the reopen is skipped, so a run on pre-fix code cannot resurrect a just-fixed issue.
 - **Alerting**: on `main` and `main-2.x`, a Slack message is sent to `#team-canton-notifications` when a test fails on **3 distinct consecutive commits** (`CONSECUTIVE_FAILURES_THRESHOLD`).
   Multi-shard failures or manual retries on the same commit collapse to one entry for this count.
@@ -124,7 +126,8 @@ First failure on main/main-2.x
 
 Subsequent failures
   → gh issue reopen  (if closed, unless the failing commit predates the close)
-  → gh issue edit    (new row appended to the table)
+  → gh issue comment (evidence comment, see Failure evidence)
+  → gh issue edit    (new row appended to the table, linking the evidence comment)
   → if 3 consecutive commits all fail AND (issue is unassigned OR (assigned more than 24h ago AND no row from today yet)): Slack alert sent
 
 OSS (digital-asset/canton) or other branches
@@ -135,6 +138,59 @@ The "Release Line" custom field on the kanban board is set to `main` or `main-2.
 If a new release line branch is added, append it to `branches_to_report` in the script and run `listReleaseLineFields.graphql` to find the field value ID.
 
 All `gh` API calls are wrapped in `run_gh_with_retries`, which retries up to 3 times with a 5-second delay on transient 5xx errors (502, 503, 504) before giving up.
+
+### Failure evidence
+
+The issue table only says *that* a test failed. To also say *why*, every created or updated issue gets an **evidence comment** per failure:
+
+- the failing test cases with their failure message and stack trace (framework frames and recursion collapsed, long traces cut in the middle so the root cause survives)
+- the suite's lines from `found_problems.txt`
+- a **CI log** link to the failing test step (`<job url>#step:<n>`). The pipeline runs inside that step, so it is the job's in-progress step, looked up in the Actions API.
+- the **artifacts** of the failure, each with its `gh run download` command right below it, followed by a link to all artifacts of the run: the failing suite's [investigation package](#investigation-package) (linked directly; the browser asks to confirm the download; listed only when the issue's suite has a package in it, since the artifact holds the packages of all failing suites of the shard), and the shard bundle with the whole log (also linked directly). The package is kept 30 days, the bundle 7 days; each entry shows its expiry date.
+- the trace ids (`tid:`) of the failure, to grep the logs with
+
+How it is produced (GitHub Actions, `.github/actions/test/cleanup_test_job/action.yml`):
+
+1. `collect_flake_evidence.py` runs as its own step before the pipeline. It reads `test-reports/`, `found_problems.txt` and `log/canton_test.log`, and writes `evidence.json` plus an [investigation package](#investigation-package) per failing suite, `flake-pkg/<Suite>/`. Its suite log is the log from the suite's first record (a line carrying its MDC marker, its test thread name, or a LogReporter line naming it) to the end of its last record, including that record's stack trace. Lines of other suites running in parallel within that range are kept. Above 256 MB (16 MB for the log of a failing test) only the head and tail are kept, and all logs of a run's packages together are bounded by 1 GB (uncompressed); beyond that, packages have no logs. Like the issues, evidence is collected for at most 20 failing tests per run (`FAILING_TESTS_MAX`). The first-attempt log of a failed-only rerun (`log/canton_test_first_run_*.log`, PRs and merge queue only) is not read.
+2. `flake-pkg/` is uploaded as the `flake-pkg-*` artifact, and later the shard bundle as usual. The pipeline itself (`report_failing_tests.py`) runs after both uploads, so it can link both: their names, ids and URLs are passed as `FLAKE_PKG_ARTIFACT_NAME`/`_ID`/`_URL` and `SHARD_BUNDLE_ARTIFACT_NAME`/`_ID`/`_URL`. All names include the leg name (`job_name`), like the shard bundle, so legs that share `github.job` don't collide.
+3. `manage_flaky_issues.py` renders one comment per issue title and posts it with `gh issue comment`, then appends the table row with a link to it in the Evidence column, named after what it holds (`2 failing tests`, `log problems`). (A new issue has to exist before it can be commented on, so its first row gets the link in a second edit.) It is a comment rather than part of the body, because the body table is parsed by the streak logic and `close_stale_flake_issues.py`. A comment is posted at most once per (commit, job, shard), and failing to post it never fails the pipeline.
+
+Each comment starts with a machine-readable marker, `<!-- flaky-evidence v1 {...json...} -->`, parsed by `collect_flake_evidence.parse_evidence_marker`. Comments stay below GitHub's 65536-character limit. CircleCI does not run step 1, so its failures get no evidence comments.
+
+#### Investigation package
+
+Everything known about one suite's failure, in one directory, so that it can be investigated from the download alone, without access to the issue (for example by an AI assistant that is given only the package and the code). `flake-pkg/<Suite>/` holds:
+
+| File | Content |
+|---|---|
+| `README.md` | what failed, where and at which commit, the file index, and how to read the logs |
+| `manifest.json` | the same, machine-readable: `format` (`flake-pkg`), `version`, `suite`, `tests` (one per failing test: `name`, `types`: its JUnit failure types, `log`: its file under `tests/` or `null`), `problem_count`, `tids`, `ci` (`sha`, `branch`, `job`, `shard`, `protocol_version`, `run_url`, `run_id`, `run_attempt`, `runner`, `date`), `files`, and `truncated` (the logs of which only head and tail are kept) |
+| `suite.log.gz` | the suite's part of `canton_test.log`, as described above |
+| `tests/<test>.log` | per failing test, from its LogReporter `Starting '<Suite>/<test>'...` record to the end of its `Test failed: '<Suite>/<test>'` record, stack trace included; lines of other suites in between are kept |
+| `junit/*.xml` | the JUnit reports with the suite's test cases, unmodified: full failure messages, stack traces and test output |
+| `problems.txt` | the suite's lines from `found_problems.txt`. Only there for log-only failures: CI runs `checkErrors` after the tests in the same sbt command, so it does not run when a test fails. The suite's WARN/ERROR records are always in `suite.log.gz`. |
+
+Files without content are left out (a suite that failed on log problems only has no test logs, a suite not found in the log has no logs). Readers should check `format` and `version`: the version (`PACKAGE_FORMAT_VERSION`) is bumped when a field or file is renamed or removed, not when one is added.
+
+#### Testing the pipeline
+
+Besides the inline self-tests (`python3 scripts/ci/report_failing_tests.py --self-test`), the pipeline can be run locally on real test output with `FLAKY_DRY_RUN=1`. It then makes no GitHub or Datadog calls, on any branch, and writes the evidence comments to `$FLAKY_ARTIFACT_DIR/comments/` (and the job summary, if `GITHUB_STEP_SUMMARY` is set) instead of posting them. Run it from an empty working directory, with `FLAKY_ARTIFACT_DIR` pointing at the same directory for both steps:
+
+```bash
+# in the repo root: run a failing test suite, writing its log to the work directory
+LOG_FILE_NAME=/tmp/flaky/work/log/canton_test.log LOG_APPEND=false \
+  sbt "<project>/Test/testOnly <fully qualified suite name>"
+mkdir -p /tmp/flaky/work/test-reports/<project> /tmp/flaky/artifacts
+cp <project dir>/target/test-reports/TEST-*<Suite>.xml /tmp/flaky/work/test-reports/<project>/
+# optional, to include log problems: what check-logs.sh would report
+grep -E "(WARN|ERROR) " /tmp/flaky/work/log/canton_test.log | grep -v LogReporter > /tmp/flaky/work/found_problems.txt
+
+cd /tmp/flaky/work
+export FLAKY_DRY_RUN=1 FLAKY_ARTIFACT_DIR=/tmp/flaky/artifacts
+python3 "$OLDPWD/scripts/ci/collect_flake_evidence.py"
+python3 "$OLDPWD/scripts/ci/report_failing_tests.py"
+# inspect /tmp/flaky/artifacts/comments/*.md and /tmp/flaky/work/flake-pkg/
+```
 
 ### Required secrets
 

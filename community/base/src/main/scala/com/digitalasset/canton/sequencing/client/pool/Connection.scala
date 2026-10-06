@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.digitalasset.canton.health.AtomicHealthElement
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasRunOnClosing}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.GrpcError
@@ -66,10 +70,14 @@ object Connection {
       transportSecurity: Boolean,
       customTrustCertificates: Option[ByteString],
       expectedSequencerIdO: Option[SequencerId],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ConnectionConfig] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ConnectionConfig] = ConnectionConfig
+  }
+
+  object ConnectionConfig extends PrettyPrintingCompanion[ConnectionConfig] {
+    override protected val pretty: Pretty[ConnectionConfig] = prettyOfClass(
       param("name", _.name.singleQuoted),
-      param("endpoint", _.endpoint.toURI(transportSecurity)),
+      param("endpoint", c => c.endpoint.toURI(c.transportSecurity)),
       param("transportSecurity", _.transportSecurity),
       param("customTrustCertificates", _.customTrustCertificates.nonEmpty),
       paramIfDefined("expectedSequencerId", _.expectedSequencerIdO),
@@ -102,19 +110,18 @@ object Connection {
     final case class InvalidStateError(message: String) extends ConnectionError
   }
 
-  sealed trait ConnectionState extends Product with Serializable with PrettyPrinting
-  object ConnectionState {
+  sealed trait ConnectionState extends Product with Serializable with PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ConnectionState] = ConnectionState
+  }
+  object ConnectionState extends PrettyPrintingCompanion[ConnectionState] {
+    override protected val pretty: Pretty[ConnectionState] = prettyOfObject[ConnectionState]
 
     /** The connection has started.
       */
-    case object Started extends ConnectionState {
-      override protected def pretty: Pretty[Started.type] = prettyOfObject[Started.type]
-    }
+    case object Started extends ConnectionState
 
     /** The connection has stopped.
       */
-    case object Stopped extends ConnectionState {
-      override protected def pretty: Pretty[Stopped.type] = prettyOfObject[Stopped.type]
-    }
+    case object Stopped extends ConnectionState
   }
 }

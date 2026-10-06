@@ -2054,7 +2054,7 @@ class IssSegmentModuleTest
           log => {
             log.level shouldBe Level.INFO
             log.message should include("received proposal for block 13 from local availability")
-            log.message should include("Starting consensus process on 2 blocks to flush segment")
+            log.message should include("Starting consensus process on blocks")
           },
         )
 

@@ -219,7 +219,6 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
       messageId = MessageId.tryCreate("thisisamessage: hello"),
       batch = Batch(envelopes, testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
       aggregationRule = None,
       submissionCost = None,
       protocolVersion = testedProtocolVersion,

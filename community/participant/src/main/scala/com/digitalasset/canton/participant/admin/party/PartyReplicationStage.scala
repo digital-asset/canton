@@ -33,7 +33,8 @@ object PartyReplicationStage {
       extends PartyReplicationStage
 
   final case class NeedsToReplicatePartyAcs(
-      params: ReplicationParams
+      params: ReplicationParams,
+      replicationAuthorization: PartyReplicationStatus.PartyReplicationAuthorization,
   ) extends PartyReplicationStage
 
   /** ACS replication via sequencer channel has been triggered but is not running yet because the
@@ -122,8 +123,8 @@ object PartyReplicationStage {
             None,
           ) =>
         Some(AcsReplicationInProgress(params, replicationProgress))
-      case (params, Some(_), _, None, _, ReplicationMode.SequencerChannel, None) =>
-        Some(NeedsToReplicatePartyAcs(params))
+      case (params, Some(authorization), _, None, _, ReplicationMode.SequencerChannel, None) =>
+        Some(NeedsToReplicatePartyAcs(params, authorization))
       case (
             params,
             Some(_),

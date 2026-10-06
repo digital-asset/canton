@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.admin.participant_pruning_service.{
 }
 import com.daml.metrics.Tracked
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
@@ -45,6 +46,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final class ApiParticipantPruningService private (
     readBackend: IndexParticipantPruningService with LedgerEndService,
     syncService: SyncService,
+    maxPruningBatchOffsetSize: PositiveInt,
     metrics: LedgerApiServerMetrics,
     safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
     val loggerFactory: NamedLoggerFactory,
@@ -76,36 +78,20 @@ final class ApiParticipantPruningService private (
           pruneSyncService(pruneUpTo),
         )(MetricsContext(("phase", "underlyingLedger")))
 
-        _ = logger.debug("Getting incomplete reassignments")
-        getIncompleteReassignmentOffsets = (offset: Offset) =>
-          syncService
-            .incompleteReassignmentOffsets(
-              validAt = offset,
-              stakeholders = Set.empty, // getting all incomplete reassignments
-            )
-            .failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
         previousPrunedOffset <- readBackend.indexDbPrunedUpto
-        incompleteReassignmentOffsets <-
-          getIncompleteReassignmentOffsets(pruneUpTo)
-        previousIncompleteReassignmentOffsets <-
-          previousPrunedOffset
-            .map(getIncompleteReassignmentOffsets)
-            .getOrElse(Future.successful(Vector.empty))
-
-        _ = logger.debug("Pruning Ledger API Server")
-        pruneResponse <- Tracked.future(
+        _ = logger.debug(s"Pruning Ledger API Server from $previousPrunedOffset to $pruneUpTo")
+        _ <- Tracked.future(
           metrics.services.pruning.pruneCommandStarted,
           metrics.services.pruning.pruneCommandCompleted,
           pruneLedgerApiServerIndex(
-            previousPrunedOffset,
-            previousIncompleteReassignmentOffsets,
-            pruneUpTo,
-            incompleteReassignmentOffsets,
+            previousPruneUpToInclusive = previousPrunedOffset,
+            pruneUpTo = pruneUpTo,
           ),
         )(MetricsContext(("phase", "ledgerApiServerIndex")))
-
-      } yield pruneResponse)
-        .thereafter(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
+      } yield {
+        logger.info(s"Pruned ledger api server index up to ${pruneUpTo.unwrap} inclusively.")
+        PruneResponse()
+      }).thereafter(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
     }
   }
 
@@ -142,25 +128,59 @@ final class ApiParticipantPruningService private (
       }
   }
 
+  private def getIncompleteReassignmentOffsets(
+      atOffset: Offset
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Vector[Offset]] =
+    syncService
+      .incompleteReassignmentOffsets(
+        validAt = atOffset,
+        stakeholders = Set.empty, // getting all incomplete reassignments
+      )
+      .failOnShutdownTo(AbortedDueToShutdown.Error().asGrpcError)
+
   private def pruneLedgerApiServerIndex(
       previousPruneUpToInclusive: Option[Offset],
-      previousIncompleteReassignmentOffsets: Vector[Offset],
       pruneUpTo: Offset,
-      incompleteReassignmentOffsets: Vector[Offset],
-  )(implicit loggingContext: LoggingContextWithTrace): Future[PruneResponse] = {
-    logger.info(s"About to prune ledger api server index to ${pruneUpTo.unwrap} inclusively.")
-    readBackend
-      .prune(
-        previousPruneUpToInclusive = previousPruneUpToInclusive,
-        previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
-        pruneUpToInclusive = pruneUpTo,
-        incompleteReassignmentOffsets = incompleteReassignmentOffsets,
-      )
-      .map { _ =>
-        logger.info(s"Pruned ledger api server index up to ${pruneUpTo.unwrap} inclusively.")
-        PruneResponse()
-      }
-  }
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
+    previousPruneUpToInclusive match {
+      case Some(previousPruneUpTo) if previousPruneUpTo >= pruneUpTo =>
+        // Pruning is NOOP, only executing for Contract pruning to clean up.
+        readBackend.prune(
+          previousPruneUpToInclusive = previousPruneUpToInclusive,
+          previousIncompleteReassignmentOffsets = Vector.empty,
+          pruneUpToInclusive = previousPruneUpTo,
+          incompleteReassignmentOffsets = Vector.empty,
+        )
+
+      case _ =>
+        val effectivePruneUpto =
+          previousPruneUpToInclusive
+            .map(_ + maxPruningBatchOffsetSize.value.toLong)
+            .getOrElse(Offset.tryFromLong(maxPruningBatchOffsetSize.value.toLong))
+            .min(pruneUpTo)
+        logger.info(
+          s"About to prune Ledger API server from $previousPruneUpToInclusive to $effectivePruneUpto inclusively in this iteration (pruning upto $pruneUpTo eventually)."
+        )
+        logger.info("Getting incomplete reassignments")
+        (for {
+          incompleteReassignmentOffsets <- getIncompleteReassignmentOffsets(effectivePruneUpto)
+          previousIncompleteReassignmentOffsets <- previousPruneUpToInclusive
+            .map(getIncompleteReassignmentOffsets)
+            .getOrElse(Future.successful(Vector.empty))
+          _ = logger.info("Pruning Ledger API Server")
+          _ <- readBackend.prune(
+            previousPruneUpToInclusive = previousPruneUpToInclusive,
+            previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
+            pruneUpToInclusive = effectivePruneUpto,
+            incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+          )
+        } yield ()).flatMap(_ =>
+          pruneLedgerApiServerIndex(
+            previousPruneUpToInclusive = Some(effectivePruneUpto),
+            pruneUpTo = pruneUpTo,
+          )
+        )
+    }
 
   private def checkOffsetIsSpecified(
       offset: Long
@@ -209,6 +229,7 @@ object ApiParticipantPruningService {
   def createApiService(
       readBackend: IndexParticipantPruningService with LedgerEndService with IndexUpdateService,
       syncService: SyncService,
+      maxPruningBatchOffsetSize: PositiveInt,
       metrics: LedgerApiServerMetrics,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       loggerFactory: NamedLoggerFactory,
@@ -216,11 +237,12 @@ object ApiParticipantPruningService {
       executionContext: ExecutionContext
   ): ParticipantPruningServiceGrpc.ParticipantPruningService with GrpcApiService =
     new ApiParticipantPruningService(
-      readBackend,
-      syncService,
-      metrics,
-      safeToPruneCommitmentState,
-      loggerFactory,
+      readBackend = readBackend,
+      syncService = syncService,
+      maxPruningBatchOffsetSize = maxPruningBatchOffsetSize,
+      metrics = metrics,
+      safeToPruneCommitmentState = safeToPruneCommitmentState,
+      loggerFactory = loggerFactory,
     )
 
 }

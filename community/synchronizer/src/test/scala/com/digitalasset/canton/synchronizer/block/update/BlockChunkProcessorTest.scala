@@ -110,7 +110,6 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
                         `tickSequencingTimestamp`,
                         None,
                         None,
-                        None,
                       ),
                       `tickSequencingTimestamp`,
                       recipients,

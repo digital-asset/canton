@@ -44,7 +44,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.collection.IterableUtil
 import com.digitalasset.canton.util.{MonadUtil, TracedPossiblyPrevalidated}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
 
@@ -168,9 +167,7 @@ class BlockUpdateGeneratorImpl(
 
   private val epsilon = synchronizerSyncCryptoApi.staticSynchronizerParameters.topologyChangeDelay
   private val protocolVersion = synchronizerSyncCryptoApi.psid.protocolVersion
-  private val reorderer =
-    if (protocolVersion <= ProtocolVersion.v34) BlockReorderer.NoOp
-    else new BlockReorderer.Impl(consistencyChecks, loggerFactory)
+  private val reorderer = new BlockReorderer.Impl(consistencyChecks, loggerFactory)
 
   private val blockChunkProcessor =
     new BlockChunkProcessor(

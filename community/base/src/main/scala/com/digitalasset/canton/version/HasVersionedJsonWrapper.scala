@@ -5,6 +5,7 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.{Functor, Id}
+import com.digitalasset.canton.Errors.raiseCannotSerialize
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -45,7 +46,7 @@ trait HasVersionedJsonWrapperF[F[_], ValueClass] {
         case (protoVersion, supportedVersion) if version >= supportedVersion.fromInclusive =>
           toProtoVersioned(supportedVersion.serializer, protoVersion)
       }
-      .getOrElse(serializeToHighestVersion)
+      .getOrElse(raiseCannotSerialize(companionObj.name, version))
 
   private def toProtoVersioned(
       serializer: ValueClass => F[scalapb.GeneratedMessage],
@@ -54,12 +55,6 @@ trait HasVersionedJsonWrapperF[F[_], ValueClass] {
     functorF.map[scalapb.GeneratedMessage, VersionedJsonMessage[ValueClass]](
       serializer(self)
     )(proto => VersionedJsonMessage(JsonFormat.toJson(proto), protoVersion.v))
-
-  private def serializeToHighestVersion: F[VersionedJsonMessage[ValueClass]] =
-    toProtoVersioned(
-      companionObj.supportedProtoVersions.higherConverter.serializer,
-      companionObj.supportedProtoVersions.higherProtoVersion,
-    )
 
   /** Yields a string representation of the corresponding
     * [[com.digitalasset.canton.version.v1.UntypedVersionedMessage]] wrapper of this instance.
@@ -96,7 +91,10 @@ trait HasVersionedJsonMessageCompanion[ValueClass]
   def fromProtoVersioned(
       versionedJson: VersionedJsonMessage[ValueClass]
   ): ParsingResult[ValueClass] =
-    supportedProtoVersions.deserializerFor(ProtoVersion(versionedJson.version))(versionedJson.data)
+    for {
+      deserializer <- supportedProtoVersions.deserializerFor(ProtoVersion(versionedJson.version))
+      valueClass <- deserializer(versionedJson.data)
+    } yield valueClass
 
   /** The embedded version is not validated */
   def fromTrustedJsonString(jsonString: String): ParsingResult[ValueClass] = {

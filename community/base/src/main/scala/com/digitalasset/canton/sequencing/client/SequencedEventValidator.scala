@@ -654,7 +654,7 @@ class SequencedEventValidatorImpl(
   private def decompressionPolicy(
       snapshot: SyncCryptoApi
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[DecompressionPolicy] =
-    if (psid.protocolVersion <= ProtocolVersion.v35)
+    if (psid.protocolVersion == ProtocolVersion.v35)
       FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
     else
       snapshot.ipsSnapshot

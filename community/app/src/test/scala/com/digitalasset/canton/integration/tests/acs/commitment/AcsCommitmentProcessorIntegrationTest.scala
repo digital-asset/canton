@@ -53,7 +53,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
@@ -184,38 +183,37 @@ sealed trait AcsCommitmentProcessorIntegrationTest
     }
   }
 
-  "ACS commitment signature delegation aligns with the period end timestamp" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-    implicit env =>
-      import env.*
+  "ACS commitment signature delegation aligns with the period end timestamp" in { implicit env =>
+    import env.*
 
-      val receivedTs = participant2.commitments
-        .received(
-          daName,
-          CantonTimestamp.Epoch.toInstant,
-          tickBeforeOrAt(environment.simClock.value.now).toInstant,
-          Some(participant1),
-        )
+    val receivedTs = participant2.commitments
+      .received(
+        daName,
+        CantonTimestamp.Epoch.toInstant,
+        tickBeforeOrAt(environment.simClock.value.now).toInstant,
+        Some(participant1),
+      )
 
-      val toleranceShift =
-        participant1.config.crypto.sessionSigningKeys.toleranceShiftDuration.asJava
+    val toleranceShift =
+      participant1.config.crypto.sessionSigningKeys.toleranceShiftDuration.asJava
 
-      receivedTs should not be empty
+    receivedTs should not be empty
 
-      // We set a very small key eviction period to force a new session signing key for each request,
-      // so we expect the ACS commitments received by a participant to be signed with a validity period
-      // centered on their commitment end period.
-      forAll(receivedTs) { acsCommitment =>
-        val periodEnd = acsCommitment.typedMessage.content.period.toInclusive
+    // We set a very small key eviction period to force a new session signing key for each request,
+    // so we expect the ACS commitments received by a participant to be signed with a validity period
+    // centered on their commitment end period.
+    forAll(receivedTs) { acsCommitment =>
+      val periodEnd = acsCommitment.typedMessage.content.period.toInclusive
 
-        acsCommitment.signatures.forgetNE.foreach(signature =>
-          signature.signatureDelegation.foreach { delegation =>
-            val expectedStart =
-              delegation.validityPeriod.fromInclusive.plus(toleranceShift)
+      acsCommitment.signatures.forgetNE.foreach(signature =>
+        signature.signatureDelegation.foreach { delegation =>
+          val expectedStart =
+            delegation.validityPeriod.fromInclusive.plus(toleranceShift)
 
-            expectedStart.underlying shouldEqual periodEnd.underlying
-          }
-        )
-      }
+          expectedStart.underlying shouldEqual periodEnd.underlying
+        }
+      )
+    }
   }
 
   "No commitments without an ACS change or time proof" in { implicit env =>
@@ -329,6 +327,9 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         .map(t => t.forgetRefinement shouldBe start.forgetRefinement)
     }
 
+    val divergence = tickAfter(start.forgetRefinement)
+    val end = tickAfter(divergence.forgetRefinement)
+
     logger.info(s"Purging contract from participant2")
     loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
       {
@@ -343,7 +344,6 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           s"Advance the time on the synchronizer past the contract purge time"
         )
 
-        val divergence = tickAfter(start.forgetRefinement)
         simClock.advanceTo(divergence.forgetRefinement)
 
         logger.info(
@@ -381,7 +381,6 @@ sealed trait AcsCommitmentProcessorIntegrationTest
               ).forgetRefinement
             )
         }
-        val end = tickAfter(divergence.forgetRefinement)
         simClock.advanceTo(end.forgetRefinement)
 
         participant1.health.ping(participant1)
@@ -411,8 +410,21 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         }
       }.asJava,
       logs => {
-        forAtLeast(1, logs)(m => m.message should include(CommitmentsMismatch.id))
-        forAtLeast(1, logs)(m => m.message should include(NoSharedContracts.id))
+        // Wait for participant1 to compare commitments and log the mismatch, so the warning does not leak into the next test.
+        forAtLeast(1, logs) { m =>
+          m.toString should (
+            include(s"toInclusive = $end") and include("sender = PAR::participant2") and include(
+              "counterParticipant = PAR::participant1"
+            ) and include(CommitmentsMismatch.id)
+          )
+        }
+        forAtLeast(1, logs) { m =>
+          m.toString should (
+            include(s"toInclusive = $end") and include("sender = PAR::participant1") and include(
+              "counterParticipant = PAR::participant2"
+            ) and include(NoSharedContracts.id)
+          )
+        }
       },
     )
   }

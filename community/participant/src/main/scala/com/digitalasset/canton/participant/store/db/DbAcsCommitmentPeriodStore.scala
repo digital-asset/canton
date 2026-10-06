@@ -523,8 +523,18 @@ class DbAcsCommitmentPeriodStore(
       affirmationWatermark: Option[CantonTimestamp]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val allTables = Seq[String & Singleton](outstandingTable, mismatchTable, matchTable)
+
+    // Wait for all parallel checks to complete before failing. Otherwise, the remaining queries would keep
+    // running after this method has returned and could report violations caused by subsequent store updates.
+    def failOnFirstViolation(
+        violations: FutureUnlessShutdown[Seq[Option[String]]]
+    ): FutureUnlessShutdown[Unit] =
+      violations.map(_.collectFirst { case Some(violation) => violation }.foreach { violation =>
+        ErrorUtil.invalidState(violation)
+      })
+
     def checkGoodPeriods(): FutureUnlessShutdown[Unit] = {
-      def checkTable(tableName: String & Singleton): FutureUnlessShutdown[Unit] = {
+      def checkTable(tableName: String & Singleton): FutureUnlessShutdown[Option[String]] = {
         val query =
           sql"""
             select participant_id, from_exclusive, to_inclusive
@@ -535,19 +545,19 @@ class DbAcsCommitmentPeriodStore(
           """.as[(InternedParticipantId, CantonTimestamp, CantonTimestamp)].headOption
         storage
           .query(query, functionFullName + "-goodPeriods")
-          .map(_.foreach { case (participant, from, to) =>
-            ErrorUtil.invalidState(s"Invalid period for participant ${stringInterning.participantId
-                .externalize(participant)}: fromExclusive $from must be less than toInclusive $to")
+          .map(_.map { case (participant, from, to) =>
+            s"Invalid period for participant ${stringInterning.participantId
+                .externalize(participant)}: fromExclusive $from must be less than toInclusive $to"
           })
       }
-      allTables.parTraverse_(checkTable)
+      failOnFirstViolation(allTables.parTraverse(checkTable))
     }
 
     def checkDisjoint(): FutureUnlessShutdown[Unit] = {
       def checkDisjoint(
           table1: String & Singleton,
           table2: String & Singleton,
-      ): FutureUnlessShutdown[Unit] = {
+      ): FutureUnlessShutdown[Option[String]] = {
         val query =
           sql"""
             select tbl1.participant_id, tbl1.from_exclusive, tbl1.to_inclusive, tbl2.from_exclusive, tbl2.to_inclusive
@@ -572,14 +582,12 @@ class DbAcsCommitmentPeriodStore(
               )
             ]
             .headOption
-        storage.query(query, functionFullName + "-disjoint").map {
-          case Some((participant, from1, to1, from2, to2)) =>
-            ErrorUtil.invalidState(
-              s"Overlapping periods for participant ${stringInterning.participantId
-                  .externalize(participant)}: ($from1, $to1] and ($from2, $to2]"
-            )
-          case None =>
-        }
+        storage
+          .query(query, functionFullName + "-disjoint")
+          .map(_.map { case (participant, from1, to1, from2, to2) =>
+            s"Overlapping periods for participant ${stringInterning.participantId
+                .externalize(participant)}: ($from1, $to1] and ($from2, $to2]"
+          })
       }
 
       val tablePairs = for {
@@ -588,7 +596,9 @@ class DbAcsCommitmentPeriodStore(
         if table1 <= table2 // avoid checking the same pair twice
       } yield (table1, table2)
       // We only have 6 table pairs, so we can run them in parallel without worrying about overwhelming the database
-      tablePairs.parTraverse_ { case (first, second) => checkDisjoint(first, second) }
+      failOnFirstViolation(tablePairs.parTraverse { case (first, second) =>
+        checkDisjoint(first, second)
+      })
     }
 
     def checkWatermarkBounds(watermark: CantonTimestamp): FutureUnlessShutdown[Unit] = {

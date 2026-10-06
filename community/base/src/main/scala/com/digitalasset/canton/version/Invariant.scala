@@ -4,7 +4,6 @@
 package com.digitalasset.canton.version
 
 import scala.math.Ordered.orderingToOrdered
-import scala.reflect.ClassTag
 
 /** Invariants that an instance of `ValueClass` should respect.
   * @tparam ValueClass
@@ -53,7 +52,7 @@ private[version] sealed trait DefaultValue[ValueClass, Comp, T]
     validate(v, rpv.representative)
 }
 
-final case class DefaultValueFromInclusive[ValueClass, Comp: ClassTag, T](
+final case class DefaultValueFromInclusive[ValueClass, Comp, T](
     attribute: ValueClass => T,
     attributeName: String,
     startInclusive: RepresentativeProtocolVersion[Comp],
@@ -66,21 +65,28 @@ final case class DefaultValueFromInclusive[ValueClass, Comp: ClassTag, T](
   def orValue(v: T, protocolVersion: RepresentativeProtocolVersion[Comp]): T =
     if (protocolVersion >= startInclusive) defaultValue else v
 
-  override def validate(
+  override def validate(v: T, pv: ProtocolVersion): Either[String, Unit] =
+    validate(v, pv, "protocol version")
+
+  override def validate(v: T, rpv: RepresentativeProtocolVersion[Comp]): Either[String, Unit] =
+    validate(v, rpv.representative, "representative protocol version")
+
+  private def validate(
       v: T,
       pv: ProtocolVersion,
+      pvKind: String,
   ): Either[String, Unit] = {
     val shouldHaveDefaultValue = pv >= startInclusive.representative
 
     Either.cond(
       !shouldHaveDefaultValue || v == defaultValue,
       (),
-      s"expected default value for $attributeName in ${implicitly[ClassTag[Comp]].getClass.getSimpleName} but found $v",
+      s"$attributeName must have its default value for $pvKind $pv (default required for ${pvKind}s >= ${startInclusive.representative}): expected $defaultValue, found $v",
     )
   }
 }
 
-final case class DefaultValueUntilExclusive[ValueClass, Comp: ClassTag, T](
+final case class DefaultValueUntilExclusive[ValueClass, Comp, T](
     attribute: ValueClass => T,
     attributeName: String,
     untilExclusive: RepresentativeProtocolVersion[Comp],
@@ -92,16 +98,23 @@ final case class DefaultValueUntilExclusive[ValueClass, Comp: ClassTag, T](
   def orValue(v: T, protocolVersion: RepresentativeProtocolVersion[Comp]): T =
     if (protocolVersion < untilExclusive) defaultValue else v
 
-  override def validate(
+  override def validate(v: T, pv: ProtocolVersion): Either[String, Unit] =
+    validate(v, pv, "protocol version")
+
+  override def validate(v: T, rpv: RepresentativeProtocolVersion[Comp]): Either[String, Unit] =
+    validate(v, rpv.representative, "representative protocol version")
+
+  private def validate(
       v: T,
       pv: ProtocolVersion,
+      pvKind: String,
   ): Either[String, Unit] = {
     val shouldHaveDefaultValue = pv < untilExclusive.representative
 
     Either.cond(
       !shouldHaveDefaultValue || v == defaultValue,
       (),
-      s"expected default value for $attributeName in ${implicitly[ClassTag[Comp]].getClass.getSimpleName} but found $v",
+      s"$attributeName must have its default value for $pvKind $pv (default required for ${pvKind}s < ${untilExclusive.representative}): expected $defaultValue, found $v",
     )
   }
 }

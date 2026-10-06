@@ -7,6 +7,6 @@ import org.reactivestreams.tck.{PublisherVerification, TestEnvironment}
 import org.scalatestplus.testng.TestNGSuiteLike
 
 class ClientPublisherTest
-    extends PublisherVerification[Long](new TestEnvironment(500L, 100L, false))
+    extends PublisherVerification[Long](new TestEnvironment(2000L, 500L, false))
     with PublisherCreation
     with TestNGSuiteLike

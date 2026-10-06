@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.version.ProtocolVersion
 
 final class FindPartyActivationOffsetsIntegrationTest
     extends OfflinePartyReplicationIntegrationTestBase {
@@ -30,7 +29,7 @@ final class FindPartyActivationOffsetsIntegrationTest
           partyId = alice,
           participantId = target.id,
           synchronizerId = daId,
-          onboarding = testedProtocolVersion >= ProtocolVersion.v35,
+          onboarding = true,
           beginOffsetExclusive = ledgerEndP1,
           completeAfter = PositiveInt.one,
         ) should be > 0L

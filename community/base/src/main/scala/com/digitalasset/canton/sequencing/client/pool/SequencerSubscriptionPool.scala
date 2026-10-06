@@ -10,7 +10,11 @@ import com.digitalasset.canton.health.{
   HealthQuasiComponent,
 }
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, HasRunOnClosing}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.ProcessingSerializedEvent
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
@@ -96,19 +100,22 @@ object SequencerSubscriptionPool {
       subscriptionRequestDelay: NonNegativeFiniteDuration,
       maxTimestampDelta: NonNegativeFiniteDuration,
       maxOrdinalDelta: NonNegativeInt,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[SequencerSubscriptionPoolConfig] = prettyOfClass(
-      param("livenessMargin", _.livenessMargin),
-      param("subscriptionRequestDelay", _.subscriptionRequestDelay),
-      param("maxTimestampDelta", _.maxTimestampDelta),
-      param("maxOrdinalDelta", _.maxOrdinalDelta),
-    )
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerSubscriptionPoolConfig] =
+      SequencerSubscriptionPoolConfig
 
     lazy val silentSubscriptionDetectionIsDisabled: Boolean =
       maxTimestampDelta == NonNegativeFiniteDuration.Zero && maxOrdinalDelta == NonNegativeInt.zero
   }
 
-  object SequencerSubscriptionPoolConfig {
+  object SequencerSubscriptionPoolConfig
+      extends PrettyPrintingCompanion[SequencerSubscriptionPoolConfig] {
+    override protected val pretty: Pretty[SequencerSubscriptionPoolConfig] = prettyOfClass(
+      param("livenessMargin", _.livenessMargin),
+      param("subscriptionRequestDelay", _.subscriptionRequestDelay),
+      param("maxTimestampDelta", _.maxTimestampDelta),
+      param("maxOrdinalDelta", _.maxOrdinalDelta),
+    )
 
     /** Create a sequencer subscription pool configuration from the existing format.
       *

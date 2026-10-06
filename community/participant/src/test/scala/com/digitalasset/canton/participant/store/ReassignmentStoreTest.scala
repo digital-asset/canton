@@ -23,7 +23,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
   IncompleteReassignmentData,
@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.store.ReassignmentStore.*
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.{
   FailingOfflineTopologyLookup,
   OfflineTopologyLookup,
@@ -77,6 +78,16 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
   private implicit def refinePartyNE(party: LfPartyId): NonEmpty[Set[LfPartyId]] =
     NonEmpty.mk(Set, party)
+
+  private def assertOffsetsMergeAlarm(entry: LogEntry): Assertion = {
+    entry.shouldBeCantonErrorCode(SyncServiceAlarm)
+    entry.warningMessage should include("Keeping the stored offsets")
+  }
+
+  private def assertBatchOffsetsMergeAlarm(entry: LogEntry): Assertion = {
+    entry.shouldBeCantonErrorCode(SyncServiceAlarm)
+    entry.warningMessage should include("Keeping the first offsets")
+  }
 
   private implicit def toOffset(i: Long): Offset = Offset.tryFromLong(i)
 
@@ -257,11 +268,8 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         val updatedBatch = ContractsReassignmentBatch
           .create(assignmentData.contracts.contracts.map { reassign =>
             val newCid = ExampleContractFactory.buildContractId(77)
-            (
-              ExampleContractFactory.modify(reassign.contract, contractId = Some(newCid)),
-              reassign.sourceValidationPackageId,
-              reassign.targetValidationPackageId,
-              reassign.counter,
+            reassign.copy(contract =
+              ExampleContractFactory.modify(reassign.contract, contractId = Some(newCid))
             )
           })
           .value
@@ -508,7 +516,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
         }
       }
 
-      "return an error if assignment offset is the same as the unassignment" in {
+      "raise an alarm and keep the stored offsets if assignment offset is the same as the unassignment" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
@@ -520,16 +528,30 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               "add unassignment offset"
             )
 
-          failedAdd <- store
-            .addReassignmentsOffsets(
-              Map(reassignmentId -> AssignmentGlobalOffset(unassignmentOffset.offset))
-            )
-            .value
+          lookup1 <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
 
-        } yield failedAdd.left.value shouldBe a[ReassignmentGlobalOffsetsMerge]
+          conflictingAdd <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Map(reassignmentId -> AssignmentGlobalOffset(unassignmentOffset.offset))
+              )
+              .value,
+            assertOffsetsMergeAlarm,
+          )
+
+          lookup2 <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
+
+        } yield {
+          conflictingAdd.value shouldBe ()
+          lookup2 shouldBe lookup1
+        }
       }
 
-      "return an error if unassignment offset is the same as the assignment" in {
+      "raise an alarm and keep the stored offsets if unassignment offset is the same as the assignment" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
@@ -541,16 +563,30 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
               "add assignment offset"
             )
 
-          failedAdd <- store
-            .addReassignmentsOffsets(
-              Map(reassignmentId -> UnassignmentGlobalOffset(assignmentOffset.offset))
-            )
-            .value
+          lookup1 <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
 
-        } yield failedAdd.left.value shouldBe a[ReassignmentGlobalOffsetsMerge]
+          conflictingAdd <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Map(reassignmentId -> UnassignmentGlobalOffset(assignmentOffset.offset))
+              )
+              .value,
+            assertOffsetsMergeAlarm,
+          )
+
+          lookup2 <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
+
+        } yield {
+          conflictingAdd.value shouldBe ()
+          lookup2 shouldBe lookup1
+        }
       }
 
-      "return an error if the new value differs from the old one" in {
+      "raise an alarm and keep the stored offsets if the new value differs from the old one" in {
         val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
 
         for {
@@ -576,29 +612,35 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
             .addReassignmentsOffsets(Map(reassignmentId -> unassignmentOffset))
             .value
 
-          failedAddOutOffset <- store
-            .addReassignmentsOffsets(
-              Map(
-                reassignmentId -> UnassignmentGlobalOffset(
-                  Offset.tryFromLong(unassignmentOffset.offset.unwrap - 1)
+          conflictingAddOutOffset <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Map(
+                  reassignmentId -> UnassignmentGlobalOffset(
+                    Offset.tryFromLong(unassignmentOffset.offset.unwrap - 1)
+                  )
                 )
               )
-            )
-            .value
+              .value,
+            assertOffsetsMergeAlarm,
+          )
 
           successfulAddInOffset <- store
             .addReassignmentsOffsets(Map(reassignmentId -> assignmentOffset))
             .value
 
-          failedAddInOffset <- store
-            .addReassignmentsOffsets(
-              Map(
-                reassignmentId -> AssignmentGlobalOffset(
-                  Offset.tryFromLong(assignmentOffset.offset.unwrap - 1)
+          conflictingAddInOffset <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Map(
+                  reassignmentId -> AssignmentGlobalOffset(
+                    Offset.tryFromLong(assignmentOffset.offset.unwrap - 1)
+                  )
                 )
               )
-            )
-            .value
+              .value,
+            assertOffsetsMergeAlarm,
+          )
 
           lookup2 <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
             "lookup reassignment data"
@@ -606,13 +648,78 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
 
         } yield {
           successfulAddOutOffset.value shouldBe ()
-          failedAddOutOffset.left.value shouldBe a[ReassignmentGlobalOffsetsMerge]
+          conflictingAddOutOffset.value shouldBe ()
 
           successfulAddInOffset.value shouldBe ()
-          failedAddInOffset.left.value shouldBe a[ReassignmentGlobalOffsetsMerge]
+          conflictingAddInOffset.value shouldBe ()
 
           lookup1 shouldBe reassignmentEntryReassignmentComplete
           lookup2 shouldBe reassignmentEntryReassignmentComplete
+        }
+      }
+
+      "raise an alarm and keep the first offsets if offsets conflict within the same batch" in {
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
+
+        for {
+          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+
+          conflictingAdd <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Seq(
+                  reassignmentId -> unassignmentOffset,
+                  reassignmentId -> assignmentOffset,
+                  reassignmentId -> AssignmentGlobalOffset(
+                    Offset.tryFromLong(assignmentOffset.offset.unwrap + 1)
+                  ),
+                )
+              )
+              .value,
+            assertBatchOffsetsMergeAlarm,
+          )
+
+          lookup <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
+
+        } yield {
+          conflictingAdd.value shouldBe ()
+          lookup shouldBe reassignmentEntryReassignmentComplete
+        }
+      }
+
+      "raise an alarm and store the non-conflicting offset if a batch merges it with a conflicting one" in {
+        val store = mk(indexedTargetSynchronizer, new FailingOfflineTopologyLookup())
+
+        for {
+          _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
+
+          _ <- store
+            .addReassignmentsOffsets(Map(reassignmentId -> assignmentOffset))
+            .valueOrFail("add assignment offset")
+
+          partiallyConflictingAdd <- loggerFactory.assertLogs(
+            store
+              .addReassignmentsOffsets(
+                Seq(
+                  reassignmentId -> unassignmentOffset,
+                  reassignmentId -> AssignmentGlobalOffset(
+                    Offset.tryFromLong(assignmentOffset.offset.unwrap + 1)
+                  ),
+                )
+              )
+              .value,
+            assertOffsetsMergeAlarm,
+          )
+
+          lookup <- valueOrFail(store.findReassignmentEntry(reassignmentId))(
+            "lookup reassignment data"
+          )
+
+        } yield {
+          partiallyConflictingAdd.value shouldBe ()
+          lookup shouldBe reassignmentEntryReassignmentComplete
         }
       }
     }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.protocol.{
+  ContractInstance,
   ContractMetadata,
   ExampleContractFactory,
   LfTemplateId,
@@ -16,7 +17,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
-  private val contract1 = ExampleContractFactory.build()
+  private val contract1: ContractInstance = ExampleContractFactory.build()
   private val contract2 = ExampleContractFactory.build()
   private val contract3 = ExampleContractFactory.build()
 
@@ -30,6 +31,8 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
   private val packageName = contract1.inst.packageName
   private val stakeholders = Stakeholders(contract1.metadata)
   private val counter = ReassignmentCounter(1)
+
+  private val createReassignment = (ContractReassignment.apply _).tupled
 
   "ContractsReassignmentBatch.apply" in {
     val batch = ContractsReassignmentBatch(
@@ -58,7 +61,14 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
       val batch =
         ContractsReassignmentBatch
           .create(
-            Seq((contract1, sourceValidationPackageId, targetValidationPackageId, counter))
+            Seq(
+              ContractReassignment(
+                contract1,
+                sourceValidationPackageId,
+                targetValidationPackageId,
+                counter,
+              )
+            )
           )
           .value
       batch.contractIds.toList shouldBe List(contract1.contractId)
@@ -77,7 +87,12 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
       val batch = ContractsReassignmentBatch
         .create(
           Seq(contract1, contract2, contract3).map(contract =>
-            (contract, sourceValidationPackageId, targetValidationPackageId, counter)
+            ContractReassignment(
+              contract,
+              sourceValidationPackageId,
+              targetValidationPackageId,
+              counter,
+            )
           )
         )
         .value
@@ -101,7 +116,7 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
               targetValidationPackageId,
               counter,
             ),
-          )
+          ).map(createReassignment)
         )
         .value
 
@@ -113,14 +128,19 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
       val batch = ContractsReassignmentBatch
         .create(
           Seq(
-            (contract1, sourceValidationPackageId, targetValidationPackageId, counter),
+            (
+              contract1,
+              sourceValidationPackageId,
+              targetValidationPackageId,
+              counter,
+            ),
             (
               ExampleContractFactory.build(packageName = newPackageName),
               sourceValidationPackageId,
               targetValidationPackageId,
               counter,
             ),
-          )
+          ).map(createReassignment)
         )
         .value
       batch.contracts.map(_.packageName) shouldBe Seq(packageName, newPackageName)
@@ -141,7 +161,7 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
             targetValidationPackageId,
             counter,
           ),
-        )
+        ).map(createReassignment)
       ) shouldBe Left(
         ContractsReassignmentBatch.DifferingStakeholders(Seq(newStakeholders, stakeholders))
       )
@@ -157,7 +177,12 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
     "just one contract" in {
       val Seq(batch) = ContractsReassignmentBatch.partition(
         Seq(
-          (contract1, sourceValidationPackageId, targetValidationPackageId, counter)
+          ContractReassignment(
+            contract1,
+            sourceValidationPackageId,
+            targetValidationPackageId,
+            counter,
+          )
         )
       ): @unchecked
 
@@ -182,7 +207,7 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
               Target(contract3.templateId.packageId),
               counter,
             ),
-          )
+          ).map(createReassignment)
         ): @unchecked
 
       batch.contractIds.toList shouldBe List(
@@ -200,12 +225,15 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
           Seq(
             (contract1, sourceValidationPackageId, targetValidationPackageId, counter),
             (
-              ExampleContractFactory.modify(contract2, templateId = Some(newTemplateId)),
+              ExampleContractFactory.modify(
+                contract2,
+                templateId = Some(newTemplateId),
+              ): ContractInstance,
               sourceValidationPackageId,
               targetValidationPackageId,
               counter,
             ),
-          )
+          ).map(createReassignment)
         ): @unchecked
 
       batch.contractIds.toList shouldBe List(contract1.contractId, contract2.contractId)
@@ -226,7 +254,7 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
               targetValidationPackageId,
               counter,
             ),
-          )
+          ).map(createReassignment)
         ): @unchecked
 
       batch.contractIds.toList shouldBe List(contract1.contractId, contract2.contractId)
@@ -251,7 +279,7 @@ class ContractsReassignmentBatchTest extends AnyWordSpec with Matchers {
               targetValidationPackageId,
               counter,
             ),
-          )
+          ).map(createReassignment)
         )
         .sortBy(_.stakeholders.all.size): @unchecked
 

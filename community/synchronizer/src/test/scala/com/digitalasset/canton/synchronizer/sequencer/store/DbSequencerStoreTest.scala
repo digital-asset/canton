@@ -109,6 +109,6 @@ object DbSequencerStoreTest {
   }
 }
 
-class SequencerStoreTestH2 extends DbSequencerStoreTest with H2Test
+final class SequencerStoreTestH2 extends DbSequencerStoreTest with H2Test
 
-class SequencerStoreTestPostgres extends DbSequencerStoreTest with PostgresTest
+final class SequencerStoreTestPostgres extends DbSequencerStoreTest with PostgresTest

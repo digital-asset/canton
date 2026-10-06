@@ -59,6 +59,7 @@ build_docs:
     - checkout_and_restore_caches
     - restore_packaged_release:
         location: community/app/target/release
+    - allow_automatic_protocol_version
     - unpack_scaladoc_in_workspace
     - restore_generated_snippets
     - execute_sbt_command:

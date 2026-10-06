@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.tests.sequencer.channel.SequencerChan
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.{
   PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
@@ -35,7 +36,6 @@ import com.digitalasset.canton.participant.store.AcsReplicationStateManager
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelId
-import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -209,8 +209,9 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         daId,
         sourceParticipant.id,
         targetParticipant.id,
-        serial = PositiveInt.one,
+        timestamp = partyToTargetParticipantEffectiveAt,
         ParticipantPermission.Observation,
+        AcsReplicationDestination.Persistence,
       )
       val initialStatus = AcsReplicationStatus(
         replicationParams,
@@ -271,7 +272,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         new TargetParticipantAcsPersistence(
           requestId,
           connectedSynchronizer.psid,
-          EffectiveTime(partyToTargetParticipantEffectiveAt),
+          partyToTargetParticipantEffectiveAt,
           new TargetParticipantAcsPersistence.PersistsContractsImpl(
             targetParticipant.underlying.value.sync.participantNodePersistentState
           ),
@@ -286,7 +287,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           connectedSynchronizer.psid,
           alice,
           requestId,
-          EffectiveTime(partyToTargetParticipantEffectiveAt),
+          partyToTargetParticipantEffectiveAt,
           excludedStakeholders = Set.empty,
           sourceParticipant.id,
           agreedAt,

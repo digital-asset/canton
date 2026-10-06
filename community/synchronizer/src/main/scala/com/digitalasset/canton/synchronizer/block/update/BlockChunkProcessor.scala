@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.SequencerCounter
@@ -24,7 +23,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
-import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.{Acknowledgment, Send}
@@ -455,7 +453,6 @@ final class BlockChunkProcessor(
             messageId = MessageId.tryCreate(s"topology-tick-$height"),
             batch = Batch.empty(protocolVersion),
             maxSequencingTime = tickSequencingTimestamp,
-            topologyTimestamp = None,
             aggregationRule = None,
             submissionCost = None,
             protocolVersion = protocolVersion,
@@ -586,43 +583,6 @@ final class BlockChunkProcessor(
               )
               val submissionRequest = signedSubmissionRequest.content
               for {
-                topologySnapshotOrErrO <- submissionRequest.topologyTimestamp.traverse(
-                  topologyTimestamp =>
-                    EitherTUtil
-                      .condUnitET[FutureUnlessShutdown](
-                        protocolVersion <= ProtocolVersion.v34,
-                        SequencerErrors.UnsupportedFeature(
-                          "topology timestamp in submission request is not supported in protocol versions > 34"
-                        ),
-                      )
-                      .flatMap(_ =>
-                        SequencedEventValidator
-                          .validateTopologyTimestamp(
-                            synchronizerSyncCryptoApi,
-                            topologyTimestamp,
-                            sequencingTimestamp,
-                            latestSequencerEventTimestamp,
-                            warnIfApproximate,
-                            _.sequencerTopologyTimestampTolerance,
-                          )
-                          .leftMap {
-                            case SequencedEventValidator.TopologyTimestampAfterSequencingTime =>
-                              SequencerErrors.TopologyTimestampAfterSequencingTimestamp(
-                                topologyTimestamp,
-                                sequencingTimestamp,
-                              )
-                            case SequencedEventValidator.TopologyTimestampTooOld(_) |
-                                SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
-                              SequencerErrors.TopologyTimestampTooEarly(
-                                topologyTimestamp,
-                                sequencingTimestamp,
-                              )
-                          }
-                      )
-                      .value
-                )
-                (topologyTimestampFromRequestError, topologySnapshotFromRequestO) =
-                  topologySnapshotOrErrO.separate
                 snapshotAtSequencingTime <- SyncCryptoClient
                   .getSnapshotForTimestamp(
                     synchronizerSyncCryptoApi,
@@ -630,38 +590,23 @@ final class BlockChunkProcessor(
                     latestSequencerEventTimestamp,
                     warnIfApproximate,
                   )
-                /* In PV34<= The sequencer verifies submission request signatures using a topology snapshot taken at
-                 * either the sequencing time or at the `topologyTimestamp` provided in the request.
-                 * For example confirmation responses/results set this timestamp to the referenced confirmation request
-                 * time.
-                 * However, this is incorrect and is fixed for PV >= 35. Submission request signatures are always
+
+                /* Submission request signatures are always
                  * created using an approximate snapshot and must therefore be verified using the sequencing time.
                  * This keeps signing and verification timestamps aligned. Otherwise, delayed confirmation
                  * responses/results may cause the session key (when enabled) to appear expired at verification time
                  * and lead to valid requests being rejected.
                  */
-                snapshotToValidateSubmissionRequest = topologySnapshotFromRequestO match {
-                  case Some(ts) if protocolVersion < ProtocolVersion.v35 =>
-                    logger.debug(
-                      s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
-                        "obtained and using topology snapshot at successfully validated request-specified " +
-                        s"topology timestamp ${submissionRequest.topologyTimestamp}; " +
-                        s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
-                    )
-                    ts
-                  case _ =>
-                    logger.debug(
-                      s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
-                        "obtained and using topology snapshot at request sequencing time; " +
-                        s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
-                    )
-                    snapshotAtSequencingTime
-                }
+                _ = logger.debug(
+                  s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
+                    "obtained and using topology snapshot at request sequencing time; " +
+                    s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
+                )
                 // Now that the sequencing timestamp is assigned, we can resolve the topology
                 // snapshot and re-bind the envelope contents' decompression to the dynamic
                 // `maxRequestSize`. Earlier protocol versions keep the hardcoded value.
                 decompressionPolicy <-
-                  if (protocolVersion <= ProtocolVersion.v35)
+                  if (protocolVersion == ProtocolVersion.v35)
                     FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
                   else
                     snapshotAtSequencingTime.ipsSnapshot
@@ -684,9 +629,7 @@ final class BlockChunkProcessor(
                     .performIndependentValidations(
                       sequencingTimestamp,
                       tracedBoundedSubmissionRequest,
-                      snapshotToValidateSubmissionRequest,
-                      topologySnapshotFromRequestO,
-                      topologyTimestampFromRequestError,
+                      snapshotAtSequencingTime,
                     )(traceContext, executionContext)
                     .value
                     .run
@@ -721,14 +664,12 @@ final class BlockChunkProcessor(
       snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
         synchronizerSyncCryptoApi,
         state.lastBlockTs,
-        if (protocolVersion < ProtocolVersion.v35) state.latestSequencerEventTimestamp
-        else previousTimestampO,
+        previousTimestampO,
         // When the sequencer starts, we may encounter a situation where both
         // `latestSequencerEventTimestamp` and `sequencingTimeLowerBoundExclusive` are undefined.
         // In that case, we are forced to use an approximate timestamp.
         warnIfApproximate =
-          !(protocolVersion < ProtocolVersion.v35 || state.latestSequencerEventTimestamp.isEmpty &&
-            lsuSequencingBounds.isEmpty),
+          !(state.latestSequencerEventTimestamp.isEmpty && lsuSequencingBounds.isEmpty),
       )
       synchronizerSuccessorO <- snapshot.ipsSnapshot
         .announcedLsu()
@@ -777,15 +718,11 @@ final class BlockChunkProcessor(
             val ack = signedAck.content
             for {
               snapshotToVerify <- EitherT.right(
-                if (protocolVersion < ProtocolVersion.v35)
-                  FutureUnlessShutdown.pure(snapshot)
-                else {
-                  SyncCryptoClient.getSnapshotForTimestamp(
-                    synchronizerSyncCryptoApi,
-                    ack.timestamp,
-                    previousTimestampO,
-                  )
-                }
+                SyncCryptoClient.getSnapshotForTimestamp(
+                  synchronizerSyncCryptoApi,
+                  ack.timestamp,
+                  previousTimestampO,
+                )
               )
               // if the signature check already passed the prevalidation, then we restrict our check to ensuring that
               // the key used is still valid (now that we have access to the actual topology snapshot)

@@ -21,7 +21,6 @@ import com.digitalasset.canton.damltestslf23.java.basickeys.{BasicKey, KeyOps}
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.UUID
 import scala.jdk.CollectionConverters.*
@@ -49,16 +48,15 @@ trait InteractiveSubmissionNuckSetupTest extends InteractiveSubmissionIntegratio
           .headOption
           .value
 
-        if (testedProtocolVersion >= ProtocolVersion.v35) {
-          keyOpsContract = inside(
-            cpn.ledger_api.javaapi.commands
-              .submit(Seq(aliceE), Seq(keyOpsCreateCommand), includeCreatedEventBlob = true)
-              .getEvents
-              .loneElement
-          ) { case created: JCreatedEvent =>
-            JavaDecodeUtil.decodeCreated(KeyOps.COMPANION)(created).value
-          }
+        keyOpsContract = inside(
+          cpn.ledger_api.javaapi.commands
+            .submit(Seq(aliceE), Seq(keyOpsCreateCommand), includeCreatedEventBlob = true)
+            .getEvents
+            .loneElement
+        ) { case created: JCreatedEvent =>
+          JavaDecodeUtil.decodeCreated(KeyOps.COMPANION)(created).value
         }
+
       }
 
   protected def contractWithKeyCreateCommand: Command =
@@ -133,13 +131,13 @@ class InteractiveSubmissionNuckIntegrationTest extends InteractiveSubmissionNuck
     */
   "Interactive submission for Nuck" should {
 
-    "create contracts with keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "create contracts with keys" in { implicit env =>
       // Create 2 contracts with the same key (alice is the key)
       contractWithKeyTx1 = createContractWithKey(HASHING_SCHEME_VERSION_V3)
       contractWithKeyTx2 = createContractWithKey(HASHING_SCHEME_VERSION_V3)
     }
 
-    "exercise a choice by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "exercise a choice by key" in { implicit env =>
       import env.*
 
       // Make sure they have the same key (alice)
@@ -197,7 +195,7 @@ class InteractiveSubmissionNuckIntegrationTest extends InteractiveSubmissionNuck
       )
     }
 
-    "query by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "query by key" in { implicit env =>
       val queryCommand =
         keyOpsContract.id.exerciseLookup(aliceE.toProtoPrimitive).commands().loneElement
       val prepared = cpn.ledger_api.javaapi.interactive_submission

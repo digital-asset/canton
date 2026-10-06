@@ -261,7 +261,6 @@ object SequencedEvent
           )(Some(bytes)) {}
         case (None, Some(batch)) =>
           for {
-            topologyTimestampO <- topologyTimestampP.traverse(CantonTimestamp.fromProtoPrimitive)
             msgIdO <- ProtoValidation.validateThen(mbMsgIdP, "message_id", pvv)(
               MessageId.fromProtoPrimitive
             )
@@ -271,7 +270,6 @@ object SequencedEvent
             psid,
             msgIdO,
             batch,
-            topologyTimestampO,
             trafficConsumed,
           )(
             Some(bytes)
@@ -387,7 +385,6 @@ object SequencedEvent
             deliver.synchronizerId,
             deliver.messageIdO,
             newBatch,
-            deliver.topologyTimestampO,
             deliver.trafficReceipt,
           )(deliver.deserializedFrom): SequencedEvent[C]
         }
@@ -534,9 +531,6 @@ object DeliverError {
   *   populated with the message id used on the originating send operation only for the sender
   * @param batch
   *   a batch of envelopes.
-  * @param topologyTimestampO
-  *   the timestamp of the topology snapshot used for resolving group recipients if this timestamp
-  *   is different from the sequencing `timestamp`
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
 case class Deliver[+B <: GenBatch[?]] private[sequencing] (
@@ -545,7 +539,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
     override val synchronizerId: PhysicalSynchronizerId,
     messageIdO: Option[MessageId],
     batch: B,
-    topologyTimestampO: Option[CantonTimestamp],
     trafficReceipt: Option[TrafficReceipt],
 )(
     val deserializedFrom: Option[ByteString]
@@ -566,7 +559,7 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
     messageId = messageIdO.map(_.toProtoPrimitive),
     batch = Some(batch.toProtoV31),
     deliverErrorReason = None,
-    topologyTimestamp = topologyTimestampO.map(_.toProtoPrimitive),
+    topologyTimestamp = None,
     trafficReceipt = trafficReceipt.map(_.toProtoV30),
   )
 
@@ -577,7 +570,7 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
     messageId = messageIdO.map(_.toProtoPrimitive),
     batch = Some(batch.toProtoV32),
     deliverErrorReason = None,
-    topologyTimestamp = topologyTimestampO.map(_.toProtoPrimitive),
+    topologyTimestamp = None,
     trafficReceipt = trafficReceipt.map(_.toProtoV30),
   )
 
@@ -594,7 +587,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
         synchronizerId,
         messageIdO,
         newBatch,
-        topologyTimestampO,
         trafficReceipt,
       )(deserializedFrom)
     )
@@ -606,7 +598,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
       synchronizerId: PhysicalSynchronizerId = this.synchronizerId,
       messageIdO: Option[MessageId] = this.messageIdO,
       batch: Batch2,
-      topologyTimestampO: Option[CantonTimestamp] = this.topologyTimestampO,
       deserializedFromO: Option[ByteString] = None,
       trafficReceipt: Option[TrafficReceipt] = this.trafficReceipt,
   ): Deliver[Batch2] =
@@ -616,7 +607,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
       synchronizerId,
       messageIdO,
       batch,
-      topologyTimestampO,
       trafficReceipt,
     )(deserializedFromO)
 
@@ -629,7 +619,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
       param("timestamp", _.timestamp),
       paramIfNonEmpty("message id", _.messageIdO),
       param("synchronizer id", _.synchronizerId),
-      paramIfDefined("topology timestamp", _.topologyTimestampO),
       unnamedParam(_.batch),
       paramIfDefined("traffic receipt", _.trafficReceipt),
     )
@@ -637,7 +626,7 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
   def envelopes[Env <: Envelope[?]](implicit ev: B <:< Batch[Env]): Seq[Env] =
     ev(batch).envelopes
 
-  override def timestampOfSigningKey: CantonTimestamp = topologyTimestampO.getOrElse(timestamp)
+  override def timestampOfSigningKey: CantonTimestamp = timestamp
 }
 
 object Deliver {
@@ -647,7 +636,6 @@ object Deliver {
       synchronizerId: PhysicalSynchronizerId,
       messageIdO: Option[MessageId],
       batch: B,
-      topologyTimestampO: Option[CantonTimestamp],
       trafficReceipt: Option[TrafficReceipt],
   ): Deliver[B] =
     Deliver[B](
@@ -656,7 +644,6 @@ object Deliver {
       synchronizerId,
       messageIdO,
       batch,
-      topologyTimestampO,
       trafficReceipt,
     )(None)
 

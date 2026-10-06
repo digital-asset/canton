@@ -318,7 +318,6 @@ class RequiredTopologyMappingChecksTest
           PartyId.tryCreate("Alice", Namespace(key1.fingerprint)),
           PositiveInt.one,
           Seq(HostingParticipant(participant1, ParticipantPermission.Submission)),
-          isOffline = false,
         )
 
         val removePtpSerial1 = factory.mkRemove(
@@ -630,7 +629,6 @@ class RequiredTopologyMappingChecksTest
                 PositiveInt.one,
               )
             ),
-            isOffline = false,
           )
         )
 
@@ -662,7 +660,6 @@ class RequiredTopologyMappingChecksTest
                 PositiveInt.one,
               )
             ),
-            isOffline = false,
           )
         )
 
@@ -688,7 +685,6 @@ class RequiredTopologyMappingChecksTest
               party1,
               PositiveInt.one,
               participants.map[HostingParticipant](_ -> Submission),
-              isOffline = false,
             )
           )
           checkTransaction(checks, ptp) shouldBe Left(
@@ -710,7 +706,6 @@ class RequiredTopologyMappingChecksTest
               party1,
               PositiveInt.one,
               Seq(participant -> Submission),
-              isOffline = false,
             )
           )
           checkTransaction(checks, ptp) shouldBe Left(
@@ -732,7 +727,6 @@ class RequiredTopologyMappingChecksTest
               threshold = PositiveInt.one,
               participants = participants,
               partySigningKeysWithThreshold = None,
-              isOffline = false,
             )
             .value
         )
@@ -797,7 +791,6 @@ class RequiredTopologyMappingChecksTest
               party1,
               threshold,
               participants,
-              isOffline = false,
             )
           )
           checkTransaction(checks, ptp) shouldBe Either.unit
@@ -852,7 +845,6 @@ class RequiredTopologyMappingChecksTest
               threshold = PositiveInt.one,
               participants = Seq(HostingParticipant(participant1, Submission)),
               partySigningKeysWithThreshold = None,
-              isOffline = false,
             )
             .value
         )
@@ -866,7 +858,6 @@ class RequiredTopologyMappingChecksTest
               threshold = PositiveInt.one,
               participants = Seq(HostingParticipant(participant1, Submission)),
               partySigningKeysWithThreshold = None,
-              isOffline = false,
             )
             .value
         )

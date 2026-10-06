@@ -12,7 +12,6 @@ import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.google.protobuf
@@ -57,68 +56,67 @@ class JsonDamlDefinitionsServiceTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "Daml definitions service" should {
-    "output the definitions of the reference DAR" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in httpTestFixture {
-      fixture =>
-        val darContent: ByteString =
-          protobuf.ByteString.copyFrom(Files.readAllBytes(File(ReferenceTestDar).path))
+    "output the definitions of the reference DAR" in httpTestFixture { fixture =>
+      val darContent: ByteString =
+        protobuf.ByteString.copyFrom(Files.readAllBytes(File(ReferenceTestDar).path))
 
-        fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (_, headers) =>
-          for {
-            _ <- fixture
-              .postBinaryContent(Uri.Path("/v2/packages"), darContent, headers)
-              .map { case (status, _) => status should be(StatusCodes.OK) }
+      fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (_, headers) =>
+        for {
+          _ <- fixture
+            .postBinaryContent(Uri.Path("/v2/packages"), darContent, headers)
+            .map { case (status, _) => status should be(StatusCodes.OK) }
 
-            selectedPackagesIds <- findTestPackages(fixture, headers)
-            _ = selectedPackagesIds.foreach { packageId =>
-              File(s"$RootTestResources/$packageId")
-                .createDirectoryIfNotExists(createParents = true)
-                .discard
-              fixture
-                .getRequestString(Uri.Path(s"/v2/definitions/packages/$packageId"), headers)
-                .map { case (code, packageSigResult) =>
-                  code should be(StatusCodes.OK)
-                  val prettyResult = prettySortedJsonString(packageSigResult)
-                  File(s"$RootTestResources/$packageId/package-signature.json")
-                    .createFileIfNotExists()
-                    .overwrite(prettyResult)
-                    .discard
-                }
-                .futureValue
-            }
+          selectedPackagesIds <- findTestPackages(fixture, headers)
+          _ = selectedPackagesIds.foreach { packageId =>
+            File(s"$RootTestResources/$packageId")
+              .createDirectoryIfNotExists(createParents = true)
+              .discard
+            fixture
+              .getRequestString(Uri.Path(s"/v2/definitions/packages/$packageId"), headers)
+              .map { case (code, packageSigResult) =>
+                code should be(StatusCodes.OK)
+                val prettyResult = prettySortedJsonString(packageSigResult)
+                File(s"$RootTestResources/$packageId/package-signature.json")
+                  .createFileIfNotExists()
+                  .overwrite(prettyResult)
+                  .discard
+              }
+              .futureValue
+          }
 
-            templateIds <- fixture
-              .getRequestString(Uri.Path("/v2/definitions/templates"), headers)
-              .map(_._2)
-              .map(
-                decode[AllTemplatesResponse](_)
-                  .getOrElse(fail("unexpectedly failed"))
-                  .templates
-                  .filter(templateId => selectedPackagesIds.contains(templateId.packageId))
-              )
+          templateIds <- fixture
+            .getRequestString(Uri.Path("/v2/definitions/templates"), headers)
+            .map(_._2)
+            .map(
+              decode[AllTemplatesResponse](_)
+                .getOrElse(fail("unexpectedly failed"))
+                .templates
+                .filter(templateId => selectedPackagesIds.contains(templateId.packageId))
+            )
 
-            _ = templateIds.foreach { templateId =>
-              fixture
-                .getRequestString(Uri.Path(s"/v2/definitions/templates/$templateId"), headers)
-                .map { case (code, templateDefResult) =>
-                  code should be(StatusCodes.OK)
-                  val packageId = templateId.packageId
+          _ = templateIds.foreach { templateId =>
+            fixture
+              .getRequestString(Uri.Path(s"/v2/definitions/templates/$templateId"), headers)
+              .map { case (code, templateDefResult) =>
+                code should be(StatusCodes.OK)
+                val packageId = templateId.packageId
 
-                  val templateIdPath =
-                    s"$RootTestResources/$packageId/${windowsSafeTemplateId(templateId.toString())}.json"
-                  val prettyResult = prettySortedJsonString(templateDefResult)
-                  File(templateIdPath)
-                    .createFileIfNotExists()
-                    .overwrite(prettyResult)
-                    .discard
-                }
-                .futureValue
-            }
-          } yield ()
-        }
+                val templateIdPath =
+                  s"$RootTestResources/$packageId/${windowsSafeTemplateId(templateId.toString())}.json"
+                val prettyResult = prettySortedJsonString(templateDefResult)
+                File(templateIdPath)
+                  .createFileIfNotExists()
+                  .overwrite(prettyResult)
+                  .discard
+              }
+              .futureValue
+          }
+        } yield ()
+      }
     }
 
     // TODO(#27652): re-enable after using DARs generated with SBT or non-dev dars
-    "validate the definitions in the golden DAR against the golden files" onlyRunWithOrGreaterThan ProtocolVersion.v35 ignore httpTestFixture {
+    "validate the definitions in the golden DAR against the golden files" ignore httpTestFixture {
       fixture =>
         val darContent: ByteString =
           protobuf.ByteString.copyFrom(Files.readAllBytes(File(GoldenTestDar).path))

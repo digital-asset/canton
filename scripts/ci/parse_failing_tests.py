@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 from xml.etree.ElementTree import Element, ElementTree
 import os
 import re
-from typing import Dict
+from typing import Dict, Iterator, List, Tuple
 from pathlib import Path
 
 from flaky_common import (
@@ -34,17 +34,39 @@ from flaky_common import (
 # through the CircleCI command `upload_test_reports`
 # This methods reads those test reports to find out which tests failed
 # see also https://www.scala-sbt.org/1.x/docs/Testing.html#Test+Reports
-def iterate_through_test_reports():
+def iterate_through_test_reports(reports_dir: Path = Path('test-reports')):
     # Maps each failing test to its cause bucket (see flaky_common.DEFAULT_CAUSE).
     failing_tests: Dict[str, str] = {}
-    for entry in Path('./test-reports').rglob("*.xml"):
-        if entry.is_file():
-            process_test_report(entry, failing_tests)
+    for entry in junit_report_paths(reports_dir):
+        process_test_report(entry, failing_tests)
     return failing_tests
 
 
-def process_test_report(path: Path, failing_tests: Dict[str, str]):
-    tree: ElementTree = ET.parse(path)
+def junit_report_paths(reports_dir: Path) -> List[Path]:
+    """The JUnit reports under `reports_dir`, in a stable order."""
+    return sorted(p for p in reports_dir.rglob("*.xml") if p.is_file())
+
+
+def suite_key(classname: str) -> str:
+    # Example value: LedgerAPIParticipantPruningTestPostgres
+    return classname.split('.')[-1]
+
+
+def failing_testcases(path: Path) -> Iterator[Tuple[str, Element, List[Element]]]:
+    """(suite, test case, its <failure>/<error> elements) for each failing test case of
+    a JUnit report.
+
+    The one place that decides which test cases count as failing and which suite they
+    belong to: the issues (process_test_report) and their evidence
+    (collect_flake_evidence.collect_junit_failures) must agree on both.
+    An unparsable report, e.g. from a killed JVM, is skipped rather than failing the
+    whole run.
+    """
+    try:
+        tree: ElementTree = ET.parse(path)
+    except ET.ParseError as e:
+        print(f"::warning::Skipping unparsable test report {path}: {e}")
+        return
     root: Element = tree.getroot()
     # To understand this XML parsing I recommend to just go through this code with a debugger on
     # an example test report; alternatively see e.g. https://stackoverflow.com/a/26661423
@@ -53,19 +75,20 @@ def process_test_report(path: Path, failing_tests: Dict[str, str]):
             continue
         problems = [childchild for childchild in child if childchild.tag in ('failure', 'error')]
         if problems:
-            # Example value: LedgerAPIParticipantPruningTestPostgres
-            test_name = child.attrib.get('classname', child.attrib.get('name', 'unknown')).split(
-                '.'
-            )[-1]
-            # A watchdog kill is emitted by generate_watchdog_xml.py as a <failure
-            # type="WatchdogTimeout">, so distinguish it from a regular assertion.
-            is_timeout = any(p.get('type') == 'WatchdogTimeout' for p in problems)
-            cause = 'timeout' if is_timeout else DEFAULT_CAUSE
-            print(f"Found failing test '{test_name}' (cause: {cause})")
-            # A timeout is more specific than a plain failure, so never let a
-            # regular report for the same suite downgrade a recorded timeout.
-            if failing_tests.get(test_name) != 'timeout':
-                failing_tests[test_name] = cause
+            yield suite_key(child.attrib.get('classname', child.attrib['name'])), child, problems
+
+
+def process_test_report(path: Path, failing_tests: Dict[str, str]):
+    for test_name, _, problems in failing_testcases(path):
+        # A watchdog kill is emitted by generate_watchdog_xml.py as a <failure
+        # type="WatchdogTimeout">, so distinguish it from a regular assertion.
+        is_timeout = any(p.get('type') == 'WatchdogTimeout' for p in problems)
+        cause = 'timeout' if is_timeout else DEFAULT_CAUSE
+        print(f"Found failing test '{test_name}' (cause: {cause})")
+        # A timeout is more specific than a plain failure, so never let a
+        # regular report for the same suite downgrade a recorded timeout.
+        if failing_tests.get(test_name) != 'timeout':
+            failing_tests[test_name] = cause
     return failing_tests
 
 

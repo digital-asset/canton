@@ -12,9 +12,9 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
 }
+import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
-import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import io.circe.*
@@ -48,7 +48,7 @@ abstract class GetAndSetTimeReplayBenchmarkITBase(
     Option(getClass.getClassLoader.getResource(darFile))
       .map(path => Path.of(path.getPath))
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $darFile"))
-  val ReplayBenchmarkPkgId: LfPackageId = getPkgId(darPath)
+  val ReplayBenchmarkPkgId: LfPackageId = DarMainPackageId.tryFromDarPath(darPath).toLfPackageId
   val dummyProjectFile =
     """override-components:
       |  daml-script:
@@ -214,9 +214,6 @@ abstract class GetAndSetTimeReplayBenchmarkITBase(
     )
     throw new java.lang.Error(s"command failed: $cause")
   }
-
-  private def getPkgId(darPath: Path): LfPackageId =
-    DarDecoder.assertReadArchiveFromFile(darPath.toFile).main._1
 
   private def getEnv(name: String, default: String): String =
     sys.props.get(name) match {

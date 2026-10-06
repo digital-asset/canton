@@ -17,7 +17,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   ObservedCompletions,
 }
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
@@ -38,76 +37,75 @@ class WeightedUserIdsAndSubmittersITSpec
   private val timeout: FiniteDuration = 2.minutes
 
   "benchtool" should {
-    "populate participant with contracts using specified user-ids and submitters" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      env =>
-        import env.*
+    "populate participant with contracts using specified user-ids and submitters" in { env =>
+      import env.*
 
-        val submissionConfig = WorkflowConfig.FooSubmissionConfig(
-          numberOfInstances = 100,
-          numberOfObservers = 1,
-          numberOfExtraSubmitters = 3,
-          uniqueParties = false,
-          instanceDistribution = List(
-            WorkflowConfig.FooSubmissionConfig.ContractDescription(
-              template = "Foo1",
-              weight = 1,
-              payloadSizeBytes = 0,
-            )
-          ),
-          nonConsumingExercises = None,
-          consumingExercises = None,
-          userIds = List(
-            UserId(
-              userId = "App-1",
-              weight = 90,
-            ),
-            UserId(
-              userId = "App-2",
-              weight = 10,
-            ),
-          ),
-        )
-        (for {
-          (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
-            submissionConfig
+      val submissionConfig = WorkflowConfig.FooSubmissionConfig(
+        numberOfInstances = 100,
+        numberOfObservers = 1,
+        numberOfExtraSubmitters = 3,
+        uniqueParties = false,
+        instanceDistribution = List(
+          WorkflowConfig.FooSubmissionConfig.ContractDescription(
+            template = "Foo1",
+            weight = 1,
+            payloadSizeBytes = 0,
           )
-          _ <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
-          completionsApp1 <- observeCompletions(
-            parties = List(allocatedParties.signatory),
-            apiServices = apiServices,
+        ),
+        nonConsumingExercises = None,
+        consumingExercises = None,
+        userIds = List(
+          UserId(
             userId = "App-1",
-          )
-          completionsApp2 <- observeCompletions(
-            parties = List(allocatedParties.signatory),
-            apiServices = apiServices,
+            weight = 90,
+          ),
+          UserId(
             userId = "App-2",
+            weight = 10,
+          ),
+        ),
+      )
+      (for {
+        (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
+          submissionConfig
+        )
+        _ <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
+        completionsApp1 <- observeCompletions(
+          parties = List(allocatedParties.signatory),
+          apiServices = apiServices,
+          userId = "App-1",
+        )
+        completionsApp2 <- observeCompletions(
+          parties = List(allocatedParties.signatory),
+          apiServices = apiServices,
+          userId = "App-2",
+        )
+        completionsApp1Submitter0 <- observeCompletions(
+          parties = List(allocatedParties.extraSubmitters.head),
+          apiServices = apiServices,
+          userId = "App-1",
+        )
+        completionsApp1Submitter1 <- observeCompletions(
+          parties = List(allocatedParties.extraSubmitters(1)),
+          apiServices = apiServices,
+          userId = "App-1",
+        )
+      } yield {
+        val cp = new Checkpoint
+        // App only filters
+        cp(discard(completionsApp1.completions.size shouldBe 91))
+        cp(discard(completionsApp2.completions.size shouldBe 9))
+        // App and party filters
+        cp(
+          discard(
+            completionsApp1Submitter0.completions.size shouldBe completionsApp1.completions.size
           )
-          completionsApp1Submitter0 <- observeCompletions(
-            parties = List(allocatedParties.extraSubmitters.head),
-            apiServices = apiServices,
-            userId = "App-1",
-          )
-          completionsApp1Submitter1 <- observeCompletions(
-            parties = List(allocatedParties.extraSubmitters(1)),
-            apiServices = apiServices,
-            userId = "App-1",
-          )
-        } yield {
-          val cp = new Checkpoint
-          // App only filters
-          cp(discard(completionsApp1.completions.size shouldBe 91))
-          cp(discard(completionsApp2.completions.size shouldBe 9))
-          // App and party filters
-          cp(
-            discard(
-              completionsApp1Submitter0.completions.size shouldBe completionsApp1.completions.size
-            )
-          )
-          cp(discard(completionsApp1Submitter0.completions.size shouldBe 91))
-          cp(discard(completionsApp1Submitter1.completions.size shouldBe 9))
-          cp.reportAll()
-          succeed
-        }).futureValue(timeout = PatienceConfiguration.Timeout(timeout))
+        )
+        cp(discard(completionsApp1Submitter0.completions.size shouldBe 91))
+        cp(discard(completionsApp1Submitter1.completions.size shouldBe 9))
+        cp.reportAll()
+        succeed
+      }).futureValue(timeout = PatienceConfiguration.Timeout(timeout))
     }
   }
 

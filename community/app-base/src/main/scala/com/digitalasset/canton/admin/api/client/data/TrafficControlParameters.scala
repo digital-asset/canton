@@ -5,11 +5,25 @@ package com.digitalasset.canton.admin.api.client.data
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as TrafficControlParametersInternal
 import com.digitalasset.canton.time.PositiveFiniteDuration as InternalPositiveFiniteDuration
 
-object TrafficControlParameters {
+object TrafficControlParameters extends PrettyPrintingCompanion[TrafficControlParameters] {
+  override protected val pretty: Pretty[TrafficControlParameters] = prettyOfClass(
+    param("max base traffic amount", _.maxBaseTrafficAmount),
+    param("read vs write scaling factor", _.readVsWriteScalingFactor),
+    param("max base traffic accumulation duration", _.maxBaseTrafficAccumulationDuration),
+    param("set balance request submission window size", _.setBalanceRequestSubmissionWindowSize),
+    param("enforce rate limiting", _.enforceRateLimiting),
+    param("base event cost", _.baseEventCost),
+    param("free confirmation responses", _.freeConfirmationResponses),
+  )
+
   private[canton] val default: TrafficControlParameters = TrafficControlParameters(
     maxBaseTrafficAmount = TrafficControlParametersInternal.DefaultBaseTrafficAmount,
     readVsWriteScalingFactor = TrafficControlParametersInternal.DefaultReadVsWriteScalingFactor,
@@ -32,17 +46,10 @@ final case class TrafficControlParameters(
     enforceRateLimiting: Boolean,
     baseEventCost: NonNegativeLong,
     freeConfirmationResponses: Boolean,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[TrafficControlParameters] = prettyOfClass(
-    param("max base traffic amount", _.maxBaseTrafficAmount),
-    param("read vs write scaling factor", _.readVsWriteScalingFactor),
-    param("max base traffic accumulation duration", _.maxBaseTrafficAccumulationDuration),
-    param("set balance request submission window size", _.setBalanceRequestSubmissionWindowSize),
-    param("enforce rate limiting", _.enforceRateLimiting),
-    param("base event cost", _.baseEventCost),
-    param("free confirmation responses", _.freeConfirmationResponses),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TrafficControlParameters] =
+    TrafficControlParameters
 
   private[canton] def toInternal: TrafficControlParametersInternal =
     TrafficControlParametersInternal(

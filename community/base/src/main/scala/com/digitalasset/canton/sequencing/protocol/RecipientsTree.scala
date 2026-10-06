@@ -7,7 +7,11 @@ import cats.syntax.reducible.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -23,13 +27,9 @@ import com.digitalasset.nonempty.NonEmpty
 final case class RecipientsTree(
     recipientGroup: NonEmpty[Set[Recipient]],
     children: Seq[RecipientsTree],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[RecipientsTree] =
-    prettyOfClass(
-      param("recipient group", _.recipientGroup.toList),
-      paramIfNonEmpty("children", _.children),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[RecipientsTree] = RecipientsTree
 
   lazy val allRecipients: NonEmpty[Set[Recipient]] = {
     val tail: Set[Recipient] = children.flatMap(t => t.allRecipients).toSet
@@ -81,7 +81,13 @@ final case class RecipientsTree(
   }
 }
 
-object RecipientsTree {
+object RecipientsTree extends PrettyPrintingCompanion[RecipientsTree] {
+  override protected val pretty: Pretty[RecipientsTree] =
+    prettyOfClass(
+      param("recipient group", _.recipientGroup.toList),
+      paramIfNonEmpty("children", _.children),
+    )
+
   def ofRecipients(
       recipientGroup: NonEmpty[Set[Recipient]],
       children: Seq[RecipientsTree],

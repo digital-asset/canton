@@ -631,8 +631,7 @@ private[events] object TransactionLogUpdatesConversions {
                 lfValueTranslation = lfValueTranslation,
                 offset = reassignmentAccepted.offset,
                 nodeId = assign.nodeId,
-                // TODO(#28301): Use the assignment representative package ID when available
-                representativePackageId = contractInstance.templateId.packageId,
+                representativePackageId = assign.representativePackageId,
                 createdEventWitnesses = contractInstance.stakeholders,
                 flatEventWitnesses = contractInstance.stakeholders,
                 contractInstance = contractInstance,

@@ -30,6 +30,11 @@ class Offset private (val positive: Long)
 
   def max(other: Offset): Offset = new Offset(positive.max(other.unwrap))
 
+  def +(positiveDistance: Long): Offset = {
+    assert(positiveDistance >= 0)
+    new Offset(positive + positiveDistance)
+  }
+
   def decrement: Option[Offset] =
     Option.unless(this == firstOffset)(tryFromLong(positive - 1L))
 

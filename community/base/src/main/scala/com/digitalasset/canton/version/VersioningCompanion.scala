@@ -90,11 +90,11 @@ trait BaseVersioningCompanionF[
     */
   def protoVersionFor(
       protocolVersion: RepresentativeProtocolVersion[this.type]
-  ): ProtoVersion = versioningTable.protoVersionFor(protocolVersion)
+  ): Either[String, ProtoVersion] = versioningTable.protoVersionFor(protocolVersion)
 
   /** Return the Proto version corresponding to the protocol version
     */
-  def protoVersionFor(protocolVersion: ProtocolVersion): ProtoVersion =
+  def protoVersionFor(protocolVersion: ProtocolVersion): Either[String, ProtoVersion] =
     versioningTable.protoVersionFor(protocolVersionRepresentativeFor(protocolVersion))
 
   /** Proto versions that are supported by `fromByteString` See the helper `supportedProtoVersion`

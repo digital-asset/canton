@@ -55,6 +55,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   CommitSet,
   RequestTracker,
 }
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidation
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.validation.RecipientsValidator
@@ -81,7 +82,6 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -134,7 +134,6 @@ abstract class ProtocolProcessor[
       crypto,
       sequencerClient,
       clock,
-      sequencerClient.protocolVersion,
     )
     with RequestProcessor[RequestViewType, SequencedEventUpdate] {
 
@@ -514,7 +513,6 @@ abstract class ProtocolProcessor[
         .send(
           batch,
           timestamps = SendRequestTimestamps(
-            topologyTimestamp = None,
             approximateTimestampForSigning = approximateTimestampForSigning,
             maxSequencingTime = maxSequencingTime,
           ),
@@ -996,13 +994,14 @@ abstract class ProtocolProcessor[
           )
       )
 
+    val multiSynchronizerFlagRequired = rootHashMessage.viewType.isReassignment &&
+      ReassignmentValidation.isMultiSynchronizerFlagRequired(sequencerClient.psid)
+
     for {
       snapshot <- EitherT.right(crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts))
       multiSynchronizerEnabled <- isMultiSynchronizerEnabled(snapshot)
       result <-
-        if (
-          rootHashMessage.viewType.isReassignment && !multiSynchronizerEnabled && protocolVersion >= ProtocolVersion.v35
-        ) {
+        if (multiSynchronizerFlagRequired && !multiSynchronizerEnabled) {
           // Whether an alarm is raised depends on each participant's feature flag setting.
           // Participants with the flag enabled will still reject the request, but without triggering an alarm.
           SyncServiceAlarm

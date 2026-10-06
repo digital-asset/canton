@@ -643,6 +643,33 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
       )
     }
   }
+
+  "transactions.export_genesis_state" should {
+    "happy path" in { implicit env =>
+      import env.*
+
+      better.files.File.temporaryFile("genesis-state", ".proto").foreach { file =>
+        sequencer1.topology.transactions.export_genesis_state(file.canonicalPath)
+
+        utils.read_byte_string_from_file(file.canonicalPath) shouldEqual
+          sequencer1.topology.transactions.genesis_stateV2()
+      }
+    }
+  }
+
+  "transactions.export_topology_snapshot_to_file" should {
+    "happy path" in { implicit env =>
+      import env.*
+
+      better.files.File.temporaryFile("topology-snapshot", ".proto").foreach { file =>
+        participant1.topology.transactions
+          .export_topology_snapshot_to_file(file.canonicalPath, store = daId)
+
+        utils.read_byte_string_from_file(file.canonicalPath) shouldEqual
+          participant1.topology.transactions.export_topology_snapshotV2(store = daId)
+      }
+    }
+  }
 }
 
 // Default meaning in-memory

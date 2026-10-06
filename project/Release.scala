@@ -277,10 +277,10 @@ object Release {
       checkEnv("MAVEN_PASSWORD")
       checkEnv("gpg_code_signing")
       List(
-        "set ThisBuild / BuildCommon.publishToSonatypeEnabled := true",
+        "set ThisBuild / Release.publishToSonatypeEnabled := true",
         "publishSigned",
         "sonaRelease",
-        "set ThisBuild / BuildCommon.publishToSonatypeEnabled := false",
+        "set ThisBuild / Release.publishToSonatypeEnabled := false",
       ) ::: state
     }
   }

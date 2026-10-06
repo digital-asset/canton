@@ -416,7 +416,6 @@ class TopologyStateWriteThroughCacheTest
               party1b,
               threshold = PositiveInt.one,
               Seq(HostingParticipant(participant1, ParticipantPermission.Submission)),
-              isOffline = false,
             ),
             SigningKeys.key1,
           )
@@ -426,7 +425,6 @@ class TopologyStateWriteThroughCacheTest
               party1b,
               threshold = PositiveInt.one,
               Seq(HostingParticipant(participant1, ParticipantPermission.Submission)),
-              isOffline = false,
             ),
             signingKey = SigningKeys.key1,
             serial = PositiveInt.two,
@@ -472,7 +470,6 @@ class TopologyStateWriteThroughCacheTest
             Seq(
               HostingParticipant(participant6, permission)
             ),
-            isOffline = false,
           ),
           SigningKeys.key1,
           isProposal = true,
@@ -486,7 +483,6 @@ class TopologyStateWriteThroughCacheTest
           Seq(
             HostingParticipant(participant6, ParticipantPermission.Observation)
           ),
-          isOffline = false,
         ),
         signingKeys = NonEmpty.mk(Set, SigningKeys.key1, SigningKeys.key6),
         serial = PositiveInt.one,

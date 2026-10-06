@@ -424,11 +424,7 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
         _.recipients.allRecipients.contains(MemberRecipient(observerParticipant))
       )
 
-      if (testedProtocolVersion >= ProtocolVersion.v35) {
-        envelopes.length shouldBe 2
-      } else {
-        envelopes.length shouldBe 4
-      }
+      envelopes.length shouldBe 2
 
       val decryptionResult = decrypterForObserver
         .decryptViews(

@@ -15,25 +15,26 @@ import com.digitalasset.canton.concurrent.{
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.InstanceReference
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentSetupPlugin}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelInstanceFutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.resource.{DbStorage, DbStorageSingle}
-import com.digitalasset.canton.store.db.{DbStorageSetup, PostgresDbStorageSetup}
-import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.store.db.{
+  DbStorageSetup,
+  PostgresDbStorageSetup,
+  PostgresTestDatabase,
+}
+import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause, Success as RetrySuccess}
-import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
+import com.typesafe.config.{Config, ConfigFactory}
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext}
+import scala.util.Random
 import scala.util.control.NonFatal
-import scala.util.{Random, Success}
 
 /** Plugin to provide a postgres backend to a
   * [[com.digitalasset.canton.integration.BaseIntegrationTest]] instance.
@@ -85,7 +86,6 @@ class UsePostgres(
     with FlagCloseable
     with HasCloseContext
     with NoTracing {
-  import org.scalatest.TryValues.*
 
   private lazy val dbSetupExecutorService: ExecutionContextIdlenessExecutorService =
     Threading.newExecutionContext(
@@ -100,7 +100,7 @@ class UsePostgres(
   // Short prefix due to postgres database name limit of 63 bytes
   private lazy val dbPrefix = "d" + Random.alphanumeric.map(_.toLower).take(7).mkString
 
-  lazy val applicationName: String = loggerFactory.name
+  private lazy val applicationName: String = loggerFactory.name
 
   def generateDbName(nodeName: String): String =
     customDbNames match {
@@ -143,8 +143,8 @@ class UsePostgres(
 
     val basicConfigWithDbName =
       dbSetup.basicConfig.copy(
-        username = s"$dbName-user",
-        password = "user",
+        username = PostgresTestDatabase.userName(dbName),
+        password = PostgresTestDatabase.password,
         dbName = dbName,
         connectionPoolEnabled = true,
       )
@@ -192,7 +192,7 @@ class UsePostgres(
   }
 
   private def logOpenQueries(storage: DbStorage): FutureUnlessShutdown[Unit] = {
-    implicit val ec = dbSetupExecutionContext
+    implicit val ec: ExecutionContext = dbSetupExecutionContext
     import storage.api.*
 
     storage
@@ -209,7 +209,7 @@ class UsePostgres(
     dropDatabases(nodeNamesOfConfig(config))
 
   def dropDatabases(nodes: Seq[String]): FutureUnlessShutdown[Unit] = {
-    implicit val ec = dbSetupExecutionContext
+    implicit val ec: ExecutionContext = dbSetupExecutionContext
     val dbNames = nodes.map(generateDbName).distinct
     val storage = dbSetup.storage
     import storage.api.*
@@ -225,14 +225,7 @@ class UsePostgres(
     )
 
     val dropDbTask = storage.update_(
-      DBIO.seq(
-        dbNames.flatMap(db =>
-          List(
-            sqlu""" drop database if exists "#$db"""",
-            sqlu""" drop user if exists "#$db-user"""",
-          )
-        )*
-      ),
+      DBIO.seq(dbNames.flatMap(PostgresTestDatabase.dropStatements)*),
       functionFullName,
     )
 
@@ -246,7 +239,7 @@ class UsePostgres(
   }
 
   def recreateDatabases(config: CantonConfig): FutureUnlessShutdown[Unit] = {
-    implicit val ec = dbSetupExecutionContext
+    implicit val ec: ExecutionContext = dbSetupExecutionContext
     nodeNamesOfConfig(config)
       .map(generateDbName)
       .distinct
@@ -262,48 +255,14 @@ class UsePostgres(
   def recreateDatabase(dbName: String): FutureUnlessShutdown[Unit] = {
     val storage = dbSetup.storage
     import storage.api.*
-    implicit val ec = dbSetupExecutionContext
 
-    for {
-      _ <- storage.update_(
-        DBIO.seq(
-          sqlu"""drop database if exists "#$dbName" """,
-          sqlu"""drop user if exists "#$dbName-user" """,
-          sqlu"""create database "#$dbName" """,
-          sqlu"""create user "#$dbName-user" WITH PASSWORD 'user'""",
-          sqlu"""GRANT ALL PRIVILEGES ON DATABASE "#$dbName" TO "#$dbName-user"""",
-        ),
-        operationName = "Recreate databases",
-      )
-      storageForSettingSchemaRights = DbStorageSingle.tryCreate(
-        dbSetup.config.copy(config =
-          dbSetup.config.config
-            .withValue("properties.databaseName", ConfigValueFactory.fromAnyRef(dbName))
-        ),
-        new SimClock(CantonTimestamp.Epoch, loggerFactory),
-        None,
-        connectionPoolForParticipant =
-          false, // can always be false, because this storage is only used for initialization and unit tests
-        None,
-        CommonMockMetrics.dbStorage,
-        DefaultProcessingTimeouts.testing,
-        loggerFactory,
-        dbSetup.retryConfig,
-      )(dbSetupExecutionContext, TraceContext.empty, dbSetup.closeContext)
-      grantRightsResult <- storageForSettingSchemaRights
-        .update_(
-          DBIO.seq(
-            sqlu"""GRANT ALL ON SCHEMA public TO "#$dbName-user""""
-          ),
-          operationName = "Recreate databases part 2: granting rights on public schema",
-        )
-        .transform(t =>
-          Success(UnlessShutdown.Outcome(t))
-        ) // wrapping the result for finally closing the storageForSettingSchemaRights anyway
-    } yield {
-      storageForSettingSchemaRights.close()
-      grantRightsResult.success.value // unwrapping the result
-    }
+    storage.update_(
+      DBIO.seq(
+        (PostgresTestDatabase.dropStatements(dbName) ++
+          PostgresTestDatabase.createStatements(dbName))*
+      ),
+      operationName = "Recreate databases",
+    )
   }
 
   private def nodeNamesOfConfig(transformedConfig: CantonConfig): List[String] =

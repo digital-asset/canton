@@ -7,23 +7,23 @@ import cats.Eval
 import cats.data.EitherT
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.data.ContractReassignment
+import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
-import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
+import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.PersistsContracts
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
   PartyReplicationIndexingStore,
 }
+import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
-import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.nonempty.NonEmpty
@@ -31,9 +31,9 @@ import com.digitalasset.nonempty.NonEmptyColl.*
 
 import scala.concurrent.ExecutionContext
 
-trait AcsTransferContractHandler {
+trait AcsReplicationContractHandler {
 
-  /** Handles contracts as they arrive in chunks during the party ACS transfer.
+  /** Handles contracts as they arrive in chunks during the party ACS replication.
     *
     * The handler is deliberately unaware of how the caller tracks online party replication
     * progress: it consumes the checkpoint reached before the chunk and reports the checkpoint
@@ -69,7 +69,7 @@ trait AcsTransferContractHandler {
   ): EitherT[FutureUnlessShutdown, String, AcsTransferCheckpoint]
 }
 
-object AcsTransferContractHandler {
+object AcsReplicationContractHandler {
 
   /** How far the target participant ACS transfer has progressed.
     *
@@ -100,13 +100,13 @@ object AcsTransferContractHandler {
 class TargetParticipantAcsPersistence(
     requestId: AddPartyRequestId,
     psid: PhysicalSynchronizerId,
-    partyOnboardingAt: EffectiveTime,
+    partyOnboardingAt: CantonTimestamp,
     persistsContracts: PersistsContracts,
     requestTracker: RequestTracker,
     indexingStore: PartyReplicationIndexingStore,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends AcsTransferContractHandler
+    extends AcsReplicationContractHandler
     with NamedLogging {
 
   /** Import contracts as part of online party replication performing the following activities.
@@ -132,7 +132,7 @@ class TargetParticipantAcsPersistence(
         .persistContracts(validatedActivations.map(_.contract))
         .leftMap(err => s"Failed to persist contracts: $err")
       repairCounter = checkpoint.nextPersistenceCounter
-      toc = TimeOfChange(partyOnboardingAt.value, Some(repairCounter))
+      toc = TimeOfChange(partyOnboardingAt, Some(repairCounter))
       replicatedContracts = validatedActivations.map {
         // TODO(#26468): Use validation packages
         case ContractReassignment(contract, _, _, reassignmentCounter) =>
@@ -144,7 +144,7 @@ class TargetParticipantAcsPersistence(
           )
       }
       _ <- requestTracker
-        .addReplicatedContracts(requestId, partyOnboardingAt.value, replicatedContracts)
+        .addReplicatedContracts(requestId, partyOnboardingAt, replicatedContracts)
         .leftMap(e => s"Failed to add contracts $replicatedContracts to ActiveContractStore: $e")
 
       indexingWatermark = PartyReplicationIndexingStore.Watermark(
@@ -170,6 +170,30 @@ object TargetParticipantAcsPersistence {
 
   // TODO(#22251): Make this configurable.
   private[party] val contractsToRequestEachTime = PositiveInt.tryCreate(10)
+
+  def apply(
+      requestId: AddPartyRequestId,
+      partyId: PartyId,
+      partyOnboardingAt: CantonTimestamp,
+      connectedSynchronizer: ConnectedSynchronizer,
+      indexingStore: PartyReplicationIndexingStore,
+      participantNodePersistentState: Eval[ParticipantNodePersistentState],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): TargetParticipantAcsPersistence = {
+    val contextualLoggerFactory = loggerFactory
+      .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
+      .append("partyId", partyId.toProtoPrimitive)
+      .append("requestId", requestId.toHexString)
+    new TargetParticipantAcsPersistence(
+      requestId,
+      connectedSynchronizer.psid,
+      partyOnboardingAt,
+      new PersistsContractsImpl(participantNodePersistentState),
+      connectedSynchronizer.ephemeral.requestTracker,
+      indexingStore,
+      contextualLoggerFactory,
+    )
+  }
 
   // not sealed for testing
   trait PersistsContracts {

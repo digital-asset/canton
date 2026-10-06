@@ -17,7 +17,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
 }
 import com.digitalasset.canton.ledger.api.benchtool.util.TypedActorSystemResourceOwner.Creator
 import com.digitalasset.canton.ledger.api.benchtool.{BenchtoolSandboxFixture, PruningBenchmark}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.apache.pekko.actor.typed.{ActorSystem, SpawnProtocol}
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 
@@ -46,7 +45,7 @@ class PruningITSpec
   }
 
   "benchtool" should {
-    "benchmark pruning" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
+    "benchmark pruning" in { env =>
       import env.*
 
       val reconciliationInterval: java.time.Duration = participant1.topology.synchronizer_parameters

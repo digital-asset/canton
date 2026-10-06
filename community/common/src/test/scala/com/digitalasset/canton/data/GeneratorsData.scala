@@ -282,27 +282,26 @@ final class GeneratorsData(
 
       createdInSubviewArchivedInCore <- boundedSetGen[LfContractId]
 
-      keyResolution <-
-        if (protocolVersion >= ProtocolVersion.v35) {
-          val keyedInputs =
-            coreInputs.map(c => (c.contract.contractKeyWithMaintainers, c)).collect {
-              case (Some(key), contract) => key -> contract
-            }
-          Gen.someOf(keyedInputs).map {
-            _.groupMapReduce(_._1.globalKey) { case (k, c) =>
-              LfVersioned(
-                c.contract.inst.version,
-                KeyResolutionWithMaintainers(Vector(c.contractId), k.maintainers),
-              )
-            }((kr1, kr2) =>
-              LfVersioned(
-                kr1.version,
-                kr1.unversioned
-                  .copy(contracts = kr1.unversioned.contracts ++ kr2.unversioned.contracts),
-              )
-            )
+      keyResolution <- {
+        val keyedInputs =
+          coreInputs.map(c => (c.contract.contractKeyWithMaintainers, c)).collect {
+            case (Some(key), contract) => key -> contract
           }
-        } else Gen.const(Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]])
+        Gen.someOf(keyedInputs).map {
+          _.groupMapReduce(_._1.globalKey) { case (k, c) =>
+            LfVersioned(
+              c.contract.inst.version,
+              KeyResolutionWithMaintainers(Vector(c.contractId), k.maintainers),
+            )
+          }((kr1, kr2) =>
+            LfVersioned(
+              kr1.version,
+              kr1.unversioned
+                .copy(contracts = kr1.unversioned.contracts ++ kr2.unversioned.contracts),
+            )
+          )
+        }
+      }
 
       rollbackContext <- rollbackContextArb.arbitrary
       salt <- Arbitrary.arbitrary[Salt]

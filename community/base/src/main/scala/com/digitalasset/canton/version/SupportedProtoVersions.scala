@@ -5,6 +5,7 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.digitalasset.canton.Errors.raiseCannotSerialize
 import com.digitalasset.canton.ProtoDeserializationError.{OtherError, UnknownProtoVersion}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -47,7 +48,7 @@ final case class SupportedProtoVersions[F[
         case (_, converter) if protocolVersion >= converter.fromInclusive.representative =>
           converter
       }
-      .getOrElse(higherConverter)
+      .getOrElse(raiseCannotSerialize(name, protocolVersion))
 
   def deserializerFor(
       protoVersion: ProtoVersion
@@ -74,12 +75,12 @@ final case class SupportedProtoVersions[F[
 
   def protoVersionFor(
       protocolVersion: RepresentativeProtocolVersion[Comp]
-  ): ProtoVersion = converters
+  ): Either[String, ProtoVersion] = converters
     .collectFirst {
       case (protoVersion, converter) if protocolVersion >= converter.fromInclusive =>
         protoVersion
     }
-    .getOrElse(higherProtoVersion)
+    .toRight(s"Unable to find proto version for $name for protocol version $protocolVersion")
 
   def converterFor(
       protocolVersion: RepresentativeProtocolVersion[Comp]

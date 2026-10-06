@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.topology.transaction.LsuAnnouncement
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Outcome
 
@@ -97,6 +98,10 @@ sealed abstract class LsuSuccessorAcceptedIntegrationTest extends LsuSuccessorIn
 
 sealed abstract class LsuSuccessorRejectedIntegrationTest extends LsuSuccessorIntegrationTest {
 
+  /** Expected substring of the rejection message */
+  protected def expectedRejectionMessage: String =
+    "successor id is not greater than current synchronizer id"
+
   override protected def testName: String =
     s"lsu-psid-rejected-from-${currentSerial}_$currentPV-to-${successorSerial}_$successorPV"
 
@@ -115,13 +120,17 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest extends LsuSuccessorIn
               _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
             )
           },
-          _.message should include("successor id is not greater than current synchronizer id"),
+          _.message should include(expectedRejectionMessage),
         )
     }
   }
 }
 
-// If the elements change in opposite directions, serial takes priority.
+/*
+ * If the elements change in opposite directions, serial takes priority.
+ * Protocol version downgrades are only allowed if the current protocol version is lower than
+ * `LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade` (v37).
+ */
 final class LsuSuccessorSerialUpPVDownIntegrationTest extends LsuSuccessorAcceptedIntegrationTest {
 
   override val currentPV: ProtocolVersion = testedProtocolVersion
@@ -133,6 +142,39 @@ final class LsuSuccessorSerialUpPVDownIntegrationTest extends LsuSuccessorAccept
     if (currentPV == successorPV) {
       cancel(
         s"Skipping test because there's no supported PV lower than the tested protocol version $testedProtocolVersion."
+      )
+    } else if (currentPV >= LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade) {
+      cancel(
+        s"Skipping test because PV downgrades are forbidden from ${LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade} on (tested protocol version is $testedProtocolVersion)."
+      )
+    } else {
+      super.withFixture(test)
+    }
+}
+
+/*
+ * Protocol version downgrades are forbidden if the current protocol version is at least
+ * `LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade` (v37), even if the serial increases.
+ */
+final class LsuSuccessorSerialUpPVDownForbiddenIntegrationTest
+    extends LsuSuccessorRejectedIntegrationTest {
+
+  override protected def expectedRejectionMessage: String = "protocol version downgrade"
+
+  // Ensure the current PV is one for which downgrades are forbidden
+  override val currentPV: ProtocolVersion =
+    Ordering[ProtocolVersion].max(
+      testedProtocolVersion,
+      LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade,
+    )
+  override val currentSerial: NonNegativeInt = zero
+  override val successorPV: ProtocolVersion = currentPV.previousSupported.getOrElse(currentPV)
+  override val successorSerial: NonNegativeInt = one
+
+  override def withFixture(test: OneArgTest): Outcome =
+    if (currentPV == successorPV) {
+      cancel(
+        s"Skipping test because there's no supported PV lower than the protocol version $currentPV."
       )
     } else {
       super.withFixture(test)

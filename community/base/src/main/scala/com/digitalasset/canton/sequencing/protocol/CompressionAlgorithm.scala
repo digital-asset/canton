@@ -5,17 +5,30 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.UnrecognizedEnum
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.protocol.v30.CompressedBatch
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.CompressionAlgo
 
-sealed trait CompressionAlgorithm extends Product with Serializable with PrettyPrinting {
+sealed trait CompressionAlgorithm
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
   def toProtoV30: v30.CompressedBatch.CompressionAlgorithm
+
+  override def prettyCompanion: PrettyPrintingCompanion[CompressionAlgorithm] =
+    CompressionAlgorithm
 }
 
-object CompressionAlgorithm {
+object CompressionAlgorithm extends PrettyPrintingCompanion[CompressionAlgorithm] {
+  override protected val pretty: Pretty[CompressionAlgorithm] =
+    prettyOfObject[CompressionAlgorithm]
+
   def apply(algo: com.digitalasset.canton.util.CompressionAlgo): CompressionAlgorithm =
     algo match {
       case CompressionAlgo.Gzip => GZIP
@@ -26,24 +39,17 @@ object CompressionAlgorithm {
   case object Unspecified extends CompressionAlgorithm {
     override def toProtoV30: CompressedBatch.CompressionAlgorithm =
       v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED
-
-    override protected def pretty: Pretty[Unspecified.type] =
-      prettyOfObject[Unspecified.type]
   }
 
   case object GZIP extends CompressionAlgorithm {
     override def toProtoV30: CompressedBatch.CompressionAlgorithm =
       v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP
-
-    override protected def pretty: Pretty[GZIP.type] = prettyOfObject[GZIP.type]
   }
 
   case object ZSTD extends CompressionAlgorithm {
     override def toProtoV30: CompressedBatch.CompressionAlgorithm = throw new IllegalStateException(
       "Cannot serialize zstd to v30.CompressionAlgorithm"
     )
-
-    override protected def pretty: Pretty[ZSTD.type] = prettyOfObject[ZSTD.type]
   }
 
   def fromProtoV30(

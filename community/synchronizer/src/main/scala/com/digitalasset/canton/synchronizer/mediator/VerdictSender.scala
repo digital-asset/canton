@@ -53,7 +53,7 @@ private[mediator] trait VerdictSender {
       requestId: RequestId,
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
-      aggregationRule: Option[AggregationRule],
+      aggregationRule: AggregationRule,
       sendVerdictWithDelay: Option[Duration],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
@@ -143,7 +143,7 @@ private[mediator] class DefaultVerdictSender(
       requestId: RequestId,
       batch: Batch[DefaultOpenEnvelope],
       decisionTime: CantonTimestamp,
-      aggregationRule: Option[AggregationRule],
+      aggregationRule: AggregationRule,
       sendVerdictWithDelay: Option[Duration],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val callback: SendCallback = {
@@ -189,14 +189,12 @@ private[mediator] class DefaultVerdictSender(
             .send(
               batch,
               timestamps = SendRequestTimestamps(
-                topologyTimestamp =
-                  if (protocolVersion <= ProtocolVersion.v34) Some(requestId.unwrap) else None,
                 // We use `clock.now` to stay consistent with how other submission requests are signed.
                 approximateTimestampForSigning = sequencerSend.clock.now,
                 maxSequencingTime = decisionTime,
               ),
               callback = callback,
-              aggregationRule = aggregationRule,
+              aggregationRule = Some(aggregationRule),
               amplify = true,
             )
         ) {
@@ -347,7 +345,7 @@ private[mediator] class DefaultVerdictSender(
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Option[AggregationRule]] = {
+  ): EitherT[FutureUnlessShutdown, String, AggregationRule] = {
     val index = mediatorGroup.group
     for {
       mediatorGroup <- EitherT(
@@ -360,14 +358,9 @@ private[mediator] class DefaultVerdictSender(
           )
       )
     } yield {
-      // We need aggregation only if the mediator group is truly decentralized
-      // With PV35 we do always need to set it as we will be checking the group at
-      // time of delivery and not at time of construction.
-      Option.when(mediatorGroup.threshold.unwrap > 1 || protocolVersion > ProtocolVersion.v34)(
-        AggregationRule.activeMediators(
-          mediatorGroup.index,
-          protocolVersion,
-        )
+      AggregationRule.activeMediators(
+        mediatorGroup.index,
+        protocolVersion,
       )
     }
   }
@@ -440,7 +433,7 @@ private[mediator] class DefaultVerdictSender(
             // if no mediator could be detected from RHMs, participants will also detect this and there's not need to send a reject
             mediatorGroup =>
               for {
-                aggregationRuleO <- groupAggregationRule(
+                aggregationRule <- groupAggregationRule(
                   snapshot.ipsSnapshot,
                   mediatorGroup,
                   protocolVersion,
@@ -458,7 +451,7 @@ private[mediator] class DefaultVerdictSender(
                     requestId,
                     batch,
                     decisionTime,
-                    aggregationRule = aggregationRuleO,
+                    aggregationRule = aggregationRule,
                     sendVerdict,
                   ),
                   s"Failed to send REJECT verdict for request=$requestId",

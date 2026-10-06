@@ -23,7 +23,11 @@ import com.digitalasset.canton.crypto.{
   RequiredSigningSpecs as RequiredSigningSpecsInternal,
   SymmetricKeyScheme as SymmetricKeySchemeInternal,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
@@ -69,7 +73,7 @@ final case class StaticSynchronizerParameters(
     protocolVersion: ProtocolVersion,
     serial: NonNegativeInt,
     synchronizerLimits: SynchronizerLimits,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   @deprecated("Recreate the StaticSynchronizerParameters manually", since = "3.6")
   def writeToFile(outputFile: String)(implicit consoleEnvironment: ConsoleEnvironment): Unit =
     BinaryFileUtil.writeByteStringToFile(
@@ -102,7 +106,12 @@ final case class StaticSynchronizerParameters(
       )
       .leftMap(_.toString)
 
-  override protected def pretty: Pretty[StaticSynchronizerParameters] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[StaticSynchronizerParameters] =
+    StaticSynchronizerParameters
+}
+
+object StaticSynchronizerParameters extends PrettyPrintingCompanion[StaticSynchronizerParameters] {
+  override protected val pretty: Pretty[StaticSynchronizerParameters] = prettyOfClass(
     param("required signing specs", _.requiredSigningSpecs),
     param("required encryption specs", _.requiredEncryptionSpecs),
     param("required symmetric key schemes", _.requiredSymmetricKeySchemes),
@@ -114,9 +123,6 @@ final case class StaticSynchronizerParameters(
     param("serial", _.serial),
     param("synchronizer limits", _.synchronizerLimits),
   )
-}
-
-object StaticSynchronizerParameters {
 
   // This method is unsafe. Not prefixing by `try` to have nicer docs snippets.
   def fromConfig(
@@ -535,7 +541,7 @@ final case class DynamicSynchronizerParameters(
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
     confirmationResponseTimeout + mediatorReactionTimeout
@@ -561,23 +567,8 @@ final case class DynamicSynchronizerParameters(
     // See i9028 for a detailed design. (This is the second clause of item 2 of Lemma 2).
     preparationTimeRecordTimeTolerance + newPreparationTimeRecordTimeTolerance <= mediatorDeduplicationTimeout
 
-  override protected def pretty: Pretty[DynamicSynchronizerParameters] =
-    prettyOfClass(
-      param("confirmation response timeout", _.confirmationResponseTimeout),
-      param("mediator reaction timeout", _.mediatorReactionTimeout),
-      param("assignment exclusivity timeout", _.assignmentExclusivityTimeout),
-      param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
-      param("mediator deduplication timeout", _.mediatorDeduplicationTimeout),
-      param("reconciliation interval", _.reconciliationInterval),
-      param("confirmation requests max rate", _.confirmationRequestsMaxRate),
-      param("max request size", _.maxRequestSize.value),
-      param("sequencer aggregate submission timeout", _.sequencerAggregateSubmissionTimeout),
-      paramIfDefined("traffic control", _.trafficControl),
-      paramIfDefined("ACS commitment catchup", _.acsCommitmentsCatchUp),
-      param("participant synchronizer limits", _.participantSynchronizerLimits),
-      param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
-      param("onboarding restriction", _.onboardingRestriction),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[DynamicSynchronizerParameters] =
+    DynamicSynchronizerParameters
 
   def update(
       confirmationResponseTimeout: config.NonNegativeFiniteDuration = confirmationResponseTimeout,
@@ -650,7 +641,25 @@ final case class DynamicSynchronizerParameters(
   }
 }
 
-object DynamicSynchronizerParameters {
+object DynamicSynchronizerParameters
+    extends PrettyPrintingCompanion[DynamicSynchronizerParameters] {
+  override protected val pretty: Pretty[DynamicSynchronizerParameters] =
+    prettyOfClass(
+      param("confirmation response timeout", _.confirmationResponseTimeout),
+      param("mediator reaction timeout", _.mediatorReactionTimeout),
+      param("assignment exclusivity timeout", _.assignmentExclusivityTimeout),
+      param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+      param("mediator deduplication timeout", _.mediatorDeduplicationTimeout),
+      param("reconciliation interval", _.reconciliationInterval),
+      param("confirmation requests max rate", _.confirmationRequestsMaxRate),
+      param("max request size", _.maxRequestSize.value),
+      param("sequencer aggregate submission timeout", _.sequencerAggregateSubmissionTimeout),
+      paramIfDefined("traffic control", _.trafficControl),
+      paramIfDefined("ACS commitment catchup", _.acsCommitmentsCatchUp),
+      param("participant synchronizer limits", _.participantSynchronizerLimits),
+      param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
+      param("onboarding restriction", _.onboardingRestriction),
+    )
 
   private[canton] def initialValues(protocolVersion: ProtocolVersion) =
     DynamicSynchronizerParameters(
@@ -663,14 +672,23 @@ object DynamicSynchronizerParameters {
     synchronizer.transformInto[DynamicSynchronizerParameters]
 }
 
-sealed trait OnboardingRestriction extends Product with Serializable with PrettyPrinting {
+sealed trait OnboardingRestriction
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
   def toProtoV30: v30.OnboardingRestriction
   def isLocked: Boolean
   def isRestricted: Boolean
   final def isOpen: Boolean = !isLocked
+
+  override def prettyCompanion: PrettyPrintingCompanion[OnboardingRestriction] =
+    OnboardingRestriction
 }
 
-object OnboardingRestriction {
+object OnboardingRestriction extends PrettyPrintingCompanion[OnboardingRestriction] {
+  override protected val pretty: Pretty[OnboardingRestriction] =
+    prettyOfObject[OnboardingRestriction]
+
   def fromProtoV30(
       onboardingRestrictionP: v30.OnboardingRestriction
   ): ParsingResult[OnboardingRestriction] = onboardingRestrictionP match {
@@ -694,8 +712,6 @@ object OnboardingRestriction {
 
     override def isLocked: Boolean = false
     override def isRestricted: Boolean = false
-
-    override def pretty: Pretty[UnrestrictedOpen.type] = prettyOfObject[UnrestrictedOpen.type]
   }
 
   /** In theory, anyone can join, except now, the registration procedure is closed */
@@ -705,8 +721,6 @@ object OnboardingRestriction {
 
     override def isLocked: Boolean = true
     override def isRestricted: Boolean = false
-
-    override def pretty: Pretty[UnrestrictedLocked.type] = prettyOfObject[UnrestrictedLocked.type]
   }
 
   /** Only participants on the allowlist can join
@@ -720,9 +734,6 @@ object OnboardingRestriction {
 
     override def isLocked: Boolean = false
     override def isRestricted: Boolean = true
-
-    override def pretty: Pretty[RestrictedOpen.type] = prettyOfObject[RestrictedOpen.type]
-
   }
 
   /** Only participants on the allowlist can join in theory, except now, the registration procedure
@@ -734,23 +745,27 @@ object OnboardingRestriction {
 
     override def isLocked: Boolean = true
     override def isRestricted: Boolean = true
-
-    override def pretty: Pretty[RestrictedLocked.type] = prettyOfObject[RestrictedLocked.type]
   }
 }
 
 final case class AcsCommitmentsCatchUpParameters(
     catchUpIntervalSkip: PositiveInt,
     nrIntervalsToTriggerCatchUp: PositiveInt,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[AcsCommitmentsCatchUpParameters] =
-    prettyOfClass(
-      param("catch up interval skip", _.catchUpIntervalSkip),
-      param("number of intervals to trigger catch up", _.nrIntervalsToTriggerCatchUp),
-    )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[AcsCommitmentsCatchUpParameters] =
+    AcsCommitmentsCatchUpParameters
 
   /** The internal representation enforces invariants on these values, so the conversion can fail.
     */
   private[canton] def toInternal: Either[String, AcsCommitmentsCatchUpParametersInternal] =
     AcsCommitmentsCatchUpParametersInternal.create(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+}
+
+object AcsCommitmentsCatchUpParameters
+    extends PrettyPrintingCompanion[AcsCommitmentsCatchUpParameters] {
+  override protected val pretty: Pretty[AcsCommitmentsCatchUpParameters] =
+    prettyOfClass(
+      param("catch up interval skip", _.catchUpIntervalSkip),
+      param("number of intervals to trigger catch up", _.nrIntervalsToTriggerCatchUp),
+    )
 }

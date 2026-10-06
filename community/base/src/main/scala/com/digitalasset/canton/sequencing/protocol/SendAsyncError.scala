@@ -3,22 +3,24 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcRequestRefusedByServer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.ExceededMaxSequencingTime
 
 /** Synchronous error returned by a sequencer. */
-sealed trait SendAsyncError extends PrettyPrinting {
+sealed trait SendAsyncError extends PrettyPrintingFromCompanion {
 
   protected val message: String
 
   /** One line summary based on decoded error code if it exists */
   def shortMessage: String
 
-  override protected def pretty: Pretty[SendAsyncError] = prettyOfClass(
-    unnamedParam(_.message.unquoted)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SendAsyncError] = SendAsyncError
 
   /** The Sequencer is overloaded and declined to handle the request */
   def isOverload: Boolean
@@ -30,7 +32,10 @@ sealed trait SendAsyncError extends PrettyPrinting {
 
 }
 
-object SendAsyncError {
+object SendAsyncError extends PrettyPrintingCompanion[SendAsyncError] {
+  override protected val pretty: Pretty[SendAsyncError] = prettyOfClass(
+    unnamedParam(_.message.unquoted)
+  )
 
   /** Implementation of [[SendAsyncError]]s for gRPC transports */
   final case class SendAsyncErrorGrpc(error: GrpcError) extends SendAsyncError {

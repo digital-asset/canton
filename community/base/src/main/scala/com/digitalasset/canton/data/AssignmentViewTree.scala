@@ -5,14 +5,8 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.digitalasset.canton.ProtoDeserializationError.{
-  ContractDeserializationError,
-  InvariantViolation,
-  OtherError,
-}
-import com.digitalasset.canton.ReassignmentCounter
+import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
@@ -24,8 +18,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
+import com.digitalasset.canton.version.{ProtoVersion, *}
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -351,12 +345,14 @@ final case class AssignmentView private (
   protected def toProtoV30: v30.AssignmentView =
     v30.AssignmentView(
       salt = Some(salt.toProtoV30),
-      contracts = contracts.contracts.map { case reassign =>
-        v30.ActiveContract(
-          reassign.contract.encoded,
-          reassign.counter.toProtoPrimitive,
-        )
-      },
+      contracts = contracts.contracts.map(_.toProtoV30),
+      reassignmentId = Some(reassignmentId.toProtoV30),
+    )
+
+  protected def toProtoV31: v31.AssignmentView =
+    v31.AssignmentView(
+      salt = Some(salt.toProtoV30),
+      contracts = contracts.contracts.map(_.toProtoV31),
       reassignmentId = Some(reassignmentId.toProtoV30),
     )
 
@@ -381,7 +377,11 @@ object AssignmentView
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentView)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v37)(v31.AssignmentView)(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -399,19 +399,17 @@ object AssignmentView
     )
     .leftMap(_.getMessage)
 
-  private[this] def fromProtoV30(
+  private[this] def fromProto[P](
       pvv: ProtocolVersionValidation,
       hashOps: HashOps,
-      assignmentViewP: v30.AssignmentView,
+      protoVersion: ProtoVersion,
+      saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
+      contractsP: ProtoUnvalidatedSeq[P],
+      reassignmentIdP: Option[v30.ReassignmentId],
+      parseContract: P => ParsingResult[ContractReassignment],
   )(
       bytes: ByteString
-  ): ParsingResult[AssignmentView] = {
-    val v30.AssignmentView(
-      saltP,
-      contractsP,
-      reassignmentIdP,
-    ) =
-      assignmentViewP
+  ): ParsingResult[AssignmentView] =
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
       reassignmentId <- ProtoConverter
@@ -422,31 +420,54 @@ object AssignmentView
         )
       contracts <- ProtoValidation
         .validateLengthThen(contractsP, "contracts", pvv, ProtoValidation.MaxCollectionSize) {
-          case (v30.ActiveContract(contractP, reassignmentCounterP), _) =>
-            ContractInstance
-              .decodeWithCreatedAt(contractP)
-              .leftMap(err => ContractDeserializationError(err))
-              .map(c =>
-                (
-                  c,
-                  Source(c.templateId.packageId),
-                  Target(c.templateId.packageId),
-                  ReassignmentCounter(reassignmentCounterP),
-                )
-              )
+          case (contractP, _) => parseContract(contractP)
         }
         .flatMap(
           ContractsReassignmentBatch
             .create(_)
             .leftMap(err => InvariantViolation(Some("contracts"), err.toString))
         )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      rpv <- protocolVersionRepresentativeFor(protoVersion)
     } yield AssignmentView(
       salt,
       reassignmentId,
       contracts,
     )(hashOps, rpv, Some(bytes))
-  }
+
+  private[this] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      assignmentViewP: v30.AssignmentView,
+  )(
+      bytes: ByteString
+  ): ParsingResult[AssignmentView] =
+    fromProto(
+      pvv,
+      hashOps,
+      ProtoVersion(30),
+      assignmentViewP.salt,
+      assignmentViewP.contracts,
+      assignmentViewP.reassignmentId,
+      ContractReassignment.fromProtoV30,
+    )(bytes)
+
+  private[this] def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      assignmentViewP: v31.AssignmentView,
+  )(
+      bytes: ByteString
+  ): ParsingResult[AssignmentView] =
+    fromProto(
+      pvv,
+      hashOps,
+      ProtoVersion(31),
+      assignmentViewP.salt,
+      assignmentViewP.contracts,
+      assignmentViewP.reassignmentId,
+      ContractReassignment.fromProtoV31(pvv),
+    )(bytes)
+
 }
 
 /** A fully unblinded [[AssignmentViewTree]]

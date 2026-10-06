@@ -47,12 +47,14 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.MapsUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, FutureHelpers, LfPackageId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -120,6 +122,9 @@ import TestingTopology.*
   *   of `participants` have higher precedence.
   * @param keyPurposes
   *   The purposes of the keys that will be generated.
+  * @param hostingStates
+  *   Hosting state per (party, participant) entry of `topology`. Entries without a state are
+  *   ONBOARDING if their `ParticipantAttributes.onboarding` is set, ACTIVE otherwise.
   */
 final case class TestingTopology(
     synchronizers: Set[PhysicalSynchronizerId] = defaultSynchronizers,
@@ -138,6 +143,8 @@ final case class TestingTopology(
     externalParties: Map[PartyId, (ParticipantId, SigningKeysWithThreshold)] = Map.empty,
     cryptoConfig: CryptoConfig = CryptoConfig(),
     freshKeys: AtomicBoolean = new AtomicBoolean(false),
+    // TODO(#36492): Check if this could be integrated in `PartyInfo` (`topology` field)
+    hostingStates: Map[LfPartyId, Map[ParticipantId, HostingState]] = Map.empty,
 ) {
   def mediators: Seq[MediatorId] = mediatorGroups.toSeq.flatMap(_.all)
 
@@ -265,6 +272,55 @@ final case class TestingTopology(
     this.copy(topology = tmp)
   }
 
+  /** Overwrites the `hostingStates` field. Validates the states against `topology`, so call it
+    * after the topology is set. Fails if a state is set for an entry missing from `topology`,
+    * conflicts with the entry's `onboarding` flag, or cannot be serialized on the tested protocol
+    * version.
+    */
+  def withHostingStates(
+      hostingStates: Map[LfPartyId, Map[ParticipantId, HostingState]]
+  ): Either[String, TestingTopology] = {
+    val entries = for {
+      (party, states) <- hostingStates.toSeq
+      (participant, state) <- states.toSeq
+    } yield HostingStateEntry(
+      party,
+      participant,
+      state,
+      topologyAttributes = topology.get(party).flatMap(_.participants.get(participant)),
+    )
+    val missing = entries.filter(_.topologyAttributes.isEmpty).map(_.describe)
+    val conflicting = entries
+      .filter(entry =>
+        entry.topologyAttributes.exists(_.onboarding) && entry.state != HostingState.Onboarding
+      )
+      .map(_.describe)
+    val v31Only = entries
+      .filter(entry =>
+        entry.state == HostingState.Nominated || entry.state == HostingState.Freezing
+      )
+      .map(_.describe)
+    for {
+      _ <- Either.cond(
+        missing.isEmpty,
+        (),
+        s"Hosting states set for entries missing from the topology: ${missing.mkString(", ")}",
+      )
+      _ <- Either.cond(
+        conflicting.isEmpty,
+        (),
+        s"Hosting states conflict with onboarding = true: ${conflicting.mkString(", ")}",
+      )
+      supported <- supportsAllHostingStates(BaseTest.testedProtocolVersion)
+      _ <- Either.cond(
+        v31Only.isEmpty || supported,
+        (),
+        s"NOMINATED and FREEZING require PartyToParticipant v31, which protocol version " +
+          s"${BaseTest.testedProtocolVersion} does not use: ${v31Only.mkString(", ")}",
+      )
+    } yield this.copy(hostingStates = hostingStates)
+  }
+
   def withPackages(packages: Map[ParticipantId, Seq[LfPackageId]]): TestingTopology =
     this.copy(packages = packages.view.mapValues(VettedPackage.unbounded).toMap)
 
@@ -349,6 +405,20 @@ object TestingTopology {
       synchronizerParameters = synchronizerParameters,
       cryptoConfig = cryptoConfig,
     )
+
+  private final case class HostingStateEntry(
+      party: LfPartyId,
+      participant: ParticipantId,
+      state: HostingState,
+      topologyAttributes: Option[ParticipantAttributes],
+  ) {
+    def describe: String = s"$party@$participant -> $state"
+  }
+
+  /** Whether `protocolVersion` can serialize every hosting state (NOMINATED and FREEZING need v31).
+    */
+  def supportsAllHostingStates(protocolVersion: ProtocolVersion): Either[String, Boolean] =
+    TopologyTransaction.protoVersionFor(protocolVersion).map(_.v >= 31)
 
   private def toPartyInfo(participants: Map[ParticipantId, ParticipantPermission]): PartyInfo = {
     val participantAttributes = participants.map { case (participantId, permission) =>
@@ -621,7 +691,6 @@ class TestingIdentityFactory(
             participants =
               Seq(HostingParticipant(participantId, ParticipantPermission.Confirmation)),
             partySigningKeysWithThreshold = Some(signingKeys),
-            isOffline = false,
           )
         )
     }
@@ -804,20 +873,25 @@ class TestingIdentityFactory(
       .toList
   }
 
-  private def partyToParticipantTxs()
+  @VisibleForTesting
+  private[topology] def partyToParticipantTxs()
       : Iterable[SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]] =
     topology.topology
       .map { case (lfParty, partyInfo) =>
         val partyId = PartyId.tryFromLfParty(lfParty)
         val participantsForParty = partyInfo.participants.filter(_._1.uid != partyId.uid)
+        val states = topology.hostingStates.getOrElse(lfParty, Map.empty)
         mkAdd(
           PartyToParticipant.tryCreate(
             partyId,
             threshold = partyInfo.threshold,
             participantsForParty.map { case (id, attributes) =>
-              HostingParticipant(id, attributes.permission)
+              val state = states.getOrElse(
+                id,
+                if (attributes.onboarding) HostingState.Onboarding else HostingState.Active,
+              )
+              HostingParticipant(id, attributes.permission, state)
             }.toSeq,
-            isOffline = false,
           )
         )
       }

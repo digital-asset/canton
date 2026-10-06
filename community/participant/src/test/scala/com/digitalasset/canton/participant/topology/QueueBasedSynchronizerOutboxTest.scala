@@ -84,7 +84,6 @@ class QueueBasedSynchronizerOutboxTest
     PartyId(UniqueIdentifier.tryCreate(name, namespace)),
     PositiveInt.one,
     Seq.empty,
-    isOffline = false,
   )
   private lazy val transactions =
     Seq("alpha", "beta", "gamma", "delta").map(mkPTP).map(txAddFromMapping)

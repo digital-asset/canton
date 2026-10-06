@@ -36,6 +36,15 @@ trait LeaderSelectionPolicy[E <: Env[E]] {
       viewNumber: ViewNumber,
   )(implicit traceContext: TraceContext): Unit
 
+  /** The original (assigned) segment leader of the given block, if the block belongs to the epoch
+    * this policy is currently tracking (see [[currentEpoch]]). This is the view-change-independent
+    * leader derived from the block's position in the epoch, so it is a consistent attribution key
+    * regardless of which node actually proposed the block. Returns [[scala.None$]] when the block
+    * is not part of the current epoch (e.g. a future or already-superseded epoch), in which case
+    * the caller has no authoritative mapping and should fall back accordingly.
+    */
+  def assignedSegmentLeaderInCurrentEpochFromBlock(blockNumber: BlockNumber): Option[BftNodeId]
+
   /** Computes the first block we need to [[addBlock]] from. We are snapshotting the state at the
     * epoch boundary so this will usually be the first block in the epoch. If we don't rely on
     * replaying old blocks this will return [[scala.None$]].

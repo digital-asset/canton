@@ -10,7 +10,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithT
 import com.digitalasset.canton.platform.apiserver.services.admin.AuthenticatedUserContextResolver.AuthenticatedUserContext
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.store.UserManagementStore.UserInfo
-import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, UserRight}
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, UserRight, UserRightForParty}
 import com.digitalasset.daml.lf.data.Ref
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -106,7 +106,8 @@ object Utils {
       case Some(rights) =>
         for {
           authenticatedUserContext <- authenticatedUserContextF
-          resultingRightsCount = rights.flatMap(_.getParty).size + outstandingCalls
+          resultingRightsCount = rights.collect { case r: UserRightForParty => r.party }.size
+            + outstandingCalls
           _ <-
             if (
               authenticatedUserContext.isRegularUser && resultingRightsCount > maxSelfAllocatedParties

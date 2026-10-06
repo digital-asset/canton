@@ -955,17 +955,17 @@ class ConnectedSynchronizer(
         logger.debug(s"Started synchronizer for $psid")(initializationTraceContext)
         ephemeral.markAsRecovered()
         logger.debug("Sync synchronizer is ready.")(initializationTraceContext)
-        if (psid.protocolVersion >= ProtocolVersion.v35) {
-          FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-            schedulePendingOnboardingClearances(
-              ephemeral.onboardingClearanceScheduler,
-              persistent.pendingOnboardingClearanceStore,
-            )(
-              initializationTraceContext
-            ),
-            "Pending onboarding flag clearances scheduling",
-          )
-        }
+
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          schedulePendingOnboardingClearances(
+            ephemeral.onboardingClearanceScheduler,
+            persistent.pendingOnboardingClearanceStore,
+          )(
+            initializationTraceContext
+          ),
+          "Pending onboarding flag clearances scheduling",
+        )
+
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           completeAssignment,
           "Failed to complete outstanding assignments on startup. " +

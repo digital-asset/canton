@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ParsedReassignmentRequest
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractSerializationVersionNotSupported,
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   PackageIdUnknownOrUnvetted,
@@ -47,6 +48,7 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -467,6 +469,33 @@ final class AssignmentValidationTest
       result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
     }
 
+    "create a common validation failure if the contract serialization version is not supported by the target synchronizer" onlyRunWithOrLessThan ProtocolVersion.latest in {
+      val devContract =
+        ExampleContractFactory.modify(contract, version = Some(LfSerializationVersion.VDev))
+
+      val devAssignmentRequest = makeFullAssignmentTree(
+        unassignmentData.reassignmentId,
+        devContract,
+      )
+
+      val result = assignmentValidation()
+        .perform(
+          unassignmentDataE = Right(unassignmentData),
+          activenessF = activenessF,
+        )(mkParsedRequest(devAssignmentRequest))
+        .futureValueUS
+        .value
+
+      result.commonValidationResult.contractSerializationResult.value shouldBe
+        ContractSerializationVersionNotSupported(
+          reassignmentRef = ReassignmentRef(unassignmentData.reassignmentId),
+          targetSynchronizerId = targetSynchronizer.unwrap,
+          maxSynchronizerVersion = maxSerializationVersionForProtocolVersion(testedProtocolVersion),
+          contractVersion = LfSerializationVersion.VDev,
+        )
+      result.isSuccessful.futureValueUS shouldBe false
+    }
+
     "create a common validation failure if the target package is unvetted in the target topology" in {
 
       val unvettedPackageId = LfPackageId.assertFromString("unvetted-package-id")
@@ -541,7 +570,7 @@ final class AssignmentValidationTest
           .commonValidationResult
           .multiSynchronizerFeatureFlagCheckResult
       }
-      "be enabled on all participants hosting a stakeholder" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "be enabled on all participants hosting a stakeholder" onlyRunWithOrLessThan ProtocolVersion.v36 in {
         val contract = ExampleContractFactory.build(
           signatories = Set(alice),
           stakeholders = Set(alice, bob),

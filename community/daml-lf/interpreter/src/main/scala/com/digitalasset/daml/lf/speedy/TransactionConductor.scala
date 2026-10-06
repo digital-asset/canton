@@ -28,9 +28,6 @@ import scala.collection.immutable.{ArraySeq, TreeSet}
   * [[Speedy.CmdMachine]]s and pure computations on a fresh [[Speedy.PureMachine]] via [[runPure]].
   * Its [[Speedy.Control]] is therefore only ever a `Question` / `Complete` / `Error`, so [[run]] is
   * a small trampoline over `Question.Update`.
-  *
-  * The cmd path has no exception handling: an uncaught Daml `throw` crashes (`SErrorCrash`) instead
-  * of becoming a failure status.
   */
 private[lf] final class TransactionConductor(
     private[speedy] var compiledPackages: CompiledPackages,
@@ -73,7 +70,9 @@ private[lf] final class TransactionConductor(
       case SResult.SResultFinal(value) =>
         Upd.WithException.pure(value)
       case SResult.SResultInterruption =>
-        driveCmdMachine(cmdMachine)
+        Upd.WithException
+          .liftSuccess(needInterruption(cmdMachine))
+          .flatMap(_ => driveCmdMachine(cmdMachine))
       case SResult.SResultError(err) =>
         err match {
           case SError.InterpretationError(error) =>
@@ -232,6 +231,14 @@ private[lf] final class TransactionConductor(
       assert(compiledPackages.contains(packageId))
     }
 
+  private def needInterruption(machine: Speedy.Machine[?]): Upd.T[Unit] =
+    Upd.lift(
+      Upd.NeedInterruption { () =>
+        machine.abort()
+        Some(transactionTrace(transactionTraceMaxLength))
+      }
+    )
+
   private def needKeys(
       key: GlobalKey,
       n: Int,
@@ -331,12 +338,12 @@ private[lf] final class TransactionConductor(
   ): Upd.WithException[SValue] = {
 
     val machine = Speedy.Machine
-      .fromPureSExpr(compiledPackages, SExpr.SEApp(SExpr.SEVal(defRef), args), logger)
-
-    val abort = { () =>
-      machine.abort()
-      Some(transactionTrace(transactionTraceMaxLength))
-    }
+      .fromPureSExpr(
+        compiledPackages,
+        SExpr.SEApp(SExpr.SEVal(defRef), args),
+        logger,
+        iterationsBetweenInterruptions,
+      )
 
     @scala.annotation.nowarn("msg=dead code following this construct")
     def loop: Upd.T[Either[SValue.SAny, SValue]] =
@@ -353,7 +360,7 @@ private[lf] final class TransactionConductor(
               throw crash
           }
         case SResult.SResultInterruption =>
-          Upd.lift(Upd.NeedInterruption(abort)).map(_ => Right(SValue.SUnit))
+          needInterruption(machine).flatMap(_ => loop)
         case SResult.SResultQuestion(nothing) =>
           nothing
       }
@@ -438,14 +445,16 @@ private[lf] final class TransactionConductor(
         )
     }
 
+  private def preventCatch[A](w: Upd.WithException[A]): Upd.T[A] =
+    w.valueOrF(raiseFailureWithStatus(_))
+
   private def computeChoiceParties(
       defRef: SExpr.SDefinitionRef,
       label: String,
       thisValue: SValue,
       choiceArg: SValue,
   ): Upd.T[TreeSet[Ref.Party]] =
-    runPure(defRef, ArraySeq(thisValue, choiceArg))
-      .valueOrF(raiseFailureWithStatus)
+    preventCatch(runPure(defRef, ArraySeq(thisValue, choiceArg)))
       .map(TransactionConductor.extractParties(label, _))
 
   // ---------------------------------------------------------------------------
@@ -878,10 +887,10 @@ private[lf] final class TransactionConductor(
       context: => String,
       tmplId: Ref.TypeConId,
       keyValue: SValue,
-  ): Upd.WithException[V.ContractId] =
+  ): Upd.T[V.ContractId] =
     for {
-      keyWithM <- computeKeyWithMaintainers(tmplId, keyValue)
-      coid <- Upd.WithException.liftSuccess(resolveContractKey(context, keyWithM))
+      keyWithM <- preventCatch(computeKeyWithMaintainers(tmplId, keyValue))
+      coid <- resolveContractKey(context, keyWithM)
     } yield coid
 
   private def resolveContractKey(
@@ -1013,18 +1022,18 @@ private[lf] final class TransactionConductor(
   private def handleFetchByKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
-  ): Upd.WithException[SValue] =
+  ): Upd.T[SValue] =
     for {
       coid <- resolveContractKey("FetchByKey", tmplId, keyValue)
-      templateArg <- Upd.WithException.liftSuccess(handleFetchTemplate(tmplId, coid, byKey = true))
+      templateArg <- handleFetchTemplate(tmplId, coid, byKey = true)
     } yield SValue.SPair(SValue.SContractId(coid), templateArg)
 
   private def handleQueryContractKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
       n: Int,
-  ): Upd.WithException[SValue] =
-    computeKeyWithMaintainers(tmplId, keyValue).semiflatMap(handleQueryContractKey(_, n))
+  ): Upd.T[SValue] =
+    preventCatch(computeKeyWithMaintainers(tmplId, keyValue)).flatMap(handleQueryContractKey(_, n))
 
   private def handleQueryContractKey(
       keyWithM: GlobalKeyWithMaintainers,
@@ -1215,15 +1224,10 @@ private[lf] final class TransactionConductor(
       keyValue: SValue,
       choiceArg: SValue,
   ): Upd.WithException[SValue] =
-    resolveContractKey("ExerciseByKey", tmplId, keyValue).flatMap { coid =>
-      handleExerciseTemplate(
-        tmplId,
-        choiceName,
-        coid,
-        choiceArg,
-        byKey = true,
-      )
-    }
+    for {
+      coid <- Upd.WithException.liftSuccess(resolveContractKey("ExerciseByKey", tmplId, keyValue))
+      result <- handleExerciseTemplate(tmplId, choiceName, coid, choiceArg, byKey = true)
+    } yield result
 
   private def handleExerciseInterface(
       ifaceId: Ref.TypeConId,
@@ -1377,9 +1381,9 @@ private[lf] final class TransactionConductor(
       case Question.Cmd.FetchInterface(interfaceId, coid) =>
         Upd.WithException.liftSuccess(handleFetchInterface(interfaceId, coid))
       case Question.Cmd.FetchByKey(tmplId, key) =>
-        handleFetchByKey(tmplId, key)
+        Upd.WithException.liftSuccess(handleFetchByKey(tmplId, key))
       case Question.Cmd.QueryContractKey(tmplId, key, n) =>
-        handleQueryContractKey(tmplId, key, n)
+        Upd.WithException.liftSuccess(handleQueryContractKey(tmplId, key, n))
       case Question.Cmd.ExerciseTemplate(
             tmplId,
             coid,

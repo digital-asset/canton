@@ -173,7 +173,6 @@ class DbSequencerStore(
       senderO: Option[SequencerMemberId] = None,
       recipientsO: Option[NonEmpty[SortedSet[SequencerMemberId]]] = None,
       payloadO: Option[P] = None,
-      topologyTimestampO: Option[CantonTimestamp] = None,
       traceContext: TraceContext,
       // TODO(#15628) We should represent this differently, so that DeliverErrorStoreEvent.fromByteString parameter is always defined as well
       errorO: Option[ByteString],
@@ -199,7 +198,6 @@ class DbSequencerStore(
         messageId,
         recipients,
         payload,
-        topologyTimestampO,
         traceContext,
         trafficReceiptO,
       )
@@ -223,7 +221,6 @@ class DbSequencerStore(
       } yield ReceiptStoreEvent(
         sender,
         messageId,
-        topologyTimestampO,
         traceContext,
         trafficReceiptO,
       )
@@ -241,7 +238,6 @@ class DbSequencerStore(
               messageId,
               members,
               payloadId,
-              topologyTimestampO,
               traceContext,
               trafficReceiptO,
             ) =>
@@ -253,7 +249,6 @@ class DbSequencerStore(
             senderO = Some(sender),
             recipientsO = Some(members),
             payloadO = Some(payloadId),
-            topologyTimestampO = topologyTimestampO,
             traceContext = traceContext,
             errorO = None,
             trafficReceiptO = trafficReceiptO,
@@ -274,7 +269,6 @@ class DbSequencerStore(
         case ReceiptStoreEvent(
               sender,
               messageId,
-              topologyTimestampO,
               traceContext,
               trafficReceiptO,
             ) =>
@@ -288,7 +282,6 @@ class DbSequencerStore(
               Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
             traceContext = traceContext,
             errorO = None,
-            topologyTimestampO = topologyTimestampO,
             trafficReceiptO = trafficReceiptO,
           )
       }
@@ -309,7 +302,6 @@ class DbSequencerStore(
 
   private implicit val getDeliverStoreEventRowResult: GetResult[Sequenced[PayloadId]] = {
     val timestampGetter = implicitly[GetResult[CantonTimestamp]]
-    val timestampOGetter = implicitly[GetResult[Option[CantonTimestamp]]]
     val discriminatorGetter = implicitly[GetResult[EventTypeDiscriminator]]
     val messageIdGetter = implicitly[GetResult[Option[MessageId]]]
     val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
@@ -328,7 +320,6 @@ class DbSequencerStore(
         memberIdGetter(r),
         memberIdNesGetter(r),
         payloadIdGetter(r),
-        timestampOGetter(r),
         traceContextGetter(r).unwrap,
         errorOGetter(r),
         trafficReceipt(r),
@@ -665,9 +656,9 @@ class DbSequencerStore(
     val saveEventSql =
       """insert into sequencer_events (
         |  ts, node_index, event_type, message_id, sender, recipients,
-        |  payload_id, topology_timestamp, trace_context, error, consumed_cost, extra_traffic_consumed, base_traffic_remainder
+        |  payload_id, trace_context, error, consumed_cost, extra_traffic_consumed, base_traffic_remainder
         |)
-        |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         |  on conflict do nothing""".stripMargin
 
     val eventRows = events.map(DeliverStoreEventRow(instanceIndex, _))
@@ -682,7 +673,6 @@ class DbSequencerStore(
           sender,
           recipients,
           payloadId,
-          topologyTimestampO,
           traceContext,
           errorO,
           trafficReceiptO,
@@ -695,7 +685,6 @@ class DbSequencerStore(
         pp >> sender
         pp >> recipients
         pp >> payloadId
-        pp >> topologyTimestampO
         pp >> SerializableTraceContext(traceContext)
         pp >> errorO
         pp >> trafficReceiptO.map(_.consumedCost)
@@ -1096,7 +1085,6 @@ class DbSequencerStore(
         topologyClientMemberId: SequencerMemberId
     ): GetResult[Sequenced[PayloadId]] = {
       val timestampGetter = implicitly[GetResult[CantonTimestamp]]
-      val timestampOGetter = implicitly[GetResult[Option[CantonTimestamp]]]
       val discriminatorGetter = implicitly[GetResult[EventTypeDiscriminator]]
       val messageIdGetter = implicitly[GetResult[Option[MessageId]]]
       val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
@@ -1119,7 +1107,6 @@ class DbSequencerStore(
             Some(NonEmpty(SortedSet, memberId))
           },
           payloadIdGetter(r),
-          timestampOGetter(r),
           traceContextGetter(r).unwrap,
           errorOGetter(r),
           trafficReceipt(r),
@@ -1150,7 +1137,7 @@ class DbSequencerStore(
                 when #$memberContainsBefore $topologyClientMemberId #$memberContainsAfter or #$memberContainsBefore ${SequencerMemberId.Broadcast} #$memberContainsAfter then true
                 else false
               end as addressed_to_sequencer,
-              events.payload_id, events.topology_timestamp,
+              events.payload_id,
               events.trace_context, events.error,
               events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
             from
@@ -1204,7 +1191,7 @@ class DbSequencerStore(
                 when #$memberContainsBefore $topologyClientMemberId #$memberContainsAfter or #$memberContainsBefore ${SequencerMemberId.Broadcast} #$memberContainsAfter then true
                 else false
               end as addressed_to_sequencer,
-              events.payload_id, events.topology_timestamp,
+              events.payload_id,
               events.trace_context, events.error,
               events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
             from sequencer_event_recipients recipients
@@ -1262,7 +1249,7 @@ class DbSequencerStore(
     ): SqlStreamingAction[Vector[Sequenced[IdOrPayload]], Sequenced[IdOrPayload], Effect.Read] =
       sql"""
         select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
-          events.recipients, events.payload_id, events.topology_timestamp,
+          events.recipients, events.payload_id,
           events.trace_context, events.error,
           events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
         from sequencer_events events

@@ -107,8 +107,27 @@ runs:
       with:
         test_job_success: ${{ inputs.test_job_success }}
 
-    - name: Collect Failing Test Data And Send to Datadog
-      uses: ./.github/actions/cache/collect_failing_test_data_and_send_to_datadog
+    # The CI context the flake evidence collection and the flaky pipeline below report: the
+    # packages' manifest.json and the issue rows. Via $GITHUB_ENV, since step-level env does
+    # not reach into the nix_run composite.
+    - name: Make the CI context known to the flake evidence collection
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        {
+          # The job name the pipeline reports (flaky_common.get_ci_job_name): the leg name,
+          # as _test.yml already sets it, so that legs sharing github.job (e.g. the external
+          # KMS legs of the crash recovery and toxiproxy tests) keep their evidence apart.
+          echo "CANTON_CI_JOB_NAME=${{ env.CANTON_CI_JOB_NAME || inputs.job_name || github.job }}"
+          echo "MATRIX_SHARD=${{ inputs.shard_index }}"
+        } >> "$GITHUB_ENV"
+
+    # Failure evidence for the flaky-test issues (scripts/ci/collect_flake_evidence.py):
+    # evidence.json and an investigation package per failing suite. Runs before the flaky
+    # pipeline below so the packages can be uploaded first and the artifact URL linked
+    # from the evidence comments. A no-op on branches that do not report issues (see
+    # flaky_common.should_report_issues).
+    - name: Collect flake evidence
       if: |
         !cancelled() &&
         inputs.report_to_datadog == 'true' &&
@@ -116,8 +135,56 @@ runs:
           github.event_name != 'pull_request' ||
           github.event.pull_request.head.repo.full_name == github.repository
         )
+      uses: ./.github/actions/nix/nix_run
       with:
-        matrix-shard: ${{ inputs.shard_index }}
+        command: python3 scripts/ci/collect_flake_evidence.py
+
+    - name: Upload flake investigation packages
+      id: upload_flake_pkg
+      if: ${{ !cancelled() && hashFiles('flake-pkg/**') != '' }}
+      uses: actions/upload-artifact@v7
+      with:
+        # Same shape as the shard bundle name below, so the two are easy to match up.
+        name: >-
+          flake-pkg-${{ inputs.job_name || github.job }}-run-${{ github.run_id
+          }}-pv-${{ env.CANTON_PROTOCOL_VERSION || 'default'
+          }}-shard-${{ inputs.shard_index }}-attempt-${{ github.run_attempt }}
+        path: flake-pkg
+        # Longer than the 7-day shard bundle: the evidence comments on the flaky issues
+        # list this artifact and are read long after the failure. Keep in sync with
+        # FLAKE_PKG_RETENTION_DAYS in scripts/ci/collect_flake_evidence.py.
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Upload test results to Datadog Test Optimization
+      # Experiment (PR #35868): upload the merged per-shard JUnit reports so
+      # Datadog Test Optimization can track per-test and per-suite trends and
+      # flakiness. Gated on the DATADOG_TEST_OPTIMIZATION env var, set per workflow
+      # so we can scope the cost experiment (on in _test.yml only to start), and
+      # continue-on-error so an upload issue never reds a job. Runs on PRs too
+      # (where flaky detection matters most), behind the same fork guard as the
+      # failing-test step. Uses the action with a pinned datadog-ci (not in our
+      # nixpkgs), avoiding a CI image rebuild.
+      if: |
+        !cancelled() &&
+        inputs.report_to_datadog == 'true' &&
+        env.DATADOG_TEST_OPTIMIZATION == 'true' &&
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      continue-on-error: true
+      uses: datadog/junit-upload-github-action@v4.0.0
+      with:
+        api_key: ${{ env.DATADOG_API_KEY }}
+        service: canton
+        env: ci
+        site: datadoghq.com
+        files: .ci-test-results/merged
+        tags: shard:${{ inputs.shard_index }},job:${{ github.job }}
+        # Pin the datadog-ci binary the action pulls at runtime so uploads stay
+        # reproducible instead of drifting with the action's floating default.
+        datadog-ci-version: v5.24.1
 
     - name: Pack Logfiles
       if: always()
@@ -168,6 +235,7 @@ runs:
         echo "bundle_artifact_name=$NAME" >> $GITHUB_OUTPUT
 
     - name: Upload shard bundle artifact
+      id: upload_shard_bundle
       if: always()
       uses: actions/upload-artifact@v7
       with:
@@ -176,3 +244,39 @@ runs:
         retention-days: 7
         include-hidden-files: 'true'
         if-no-files-found: warn
+
+    # The flaky pipeline runs after the shard bundle upload, so that the evidence comments can
+    # link the bundle as well. The names, ids and URLs of the artifacts are linked with a
+    # download command each (manage_flaky_issues.evidence_artifacts). The evidence itself is
+    # collected earlier, before "Pack Logfiles" compresses canton_test.log.
+    - name: Make flake artifacts known to the flaky pipeline
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        {
+          if [[ -n "${{ steps.upload_flake_pkg.outputs.artifact-id }}" ]]; then
+            # Same shape as the flake-pkg upload above, including its leg name (job_name).
+            suffix="run-${{ github.run_id }}-pv-${{ env.CANTON_PROTOCOL_VERSION || 'default' }}"
+            suffix="${suffix}-shard-${{ inputs.shard_index }}-attempt-${{ github.run_attempt }}"
+            echo "FLAKE_PKG_ARTIFACT_NAME=flake-pkg-${{ inputs.job_name || github.job }}-${suffix}"
+            echo "FLAKE_PKG_ARTIFACT_ID=${{ steps.upload_flake_pkg.outputs.artifact-id }}"
+            echo "FLAKE_PKG_ARTIFACT_URL=${{ steps.upload_flake_pkg.outputs.artifact-url }}"
+          fi
+          if [[ -n "${{ steps.upload_shard_bundle.outputs.artifact-id }}" ]]; then
+            echo "SHARD_BUNDLE_ARTIFACT_NAME=${{ steps.artifact_name_gen.outputs.bundle_artifact_name }}"
+            echo "SHARD_BUNDLE_ARTIFACT_ID=${{ steps.upload_shard_bundle.outputs.artifact-id }}"
+            echo "SHARD_BUNDLE_ARTIFACT_URL=${{ steps.upload_shard_bundle.outputs.artifact-url }}"
+          fi
+        } >> "$GITHUB_ENV"
+
+    - name: Collect Failing Test Data And Send to Datadog
+      uses: ./.github/actions/cache/collect_failing_test_data_and_send_to_datadog
+      if: |
+        !cancelled() &&
+        inputs.report_to_datadog == 'true' &&
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      with:
+        matrix-shard: ${{ inputs.shard_index }}

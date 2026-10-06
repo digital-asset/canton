@@ -381,7 +381,6 @@ class PartyToParticipantDeclarative(
             )
           }.toSeq,
           partySigningKeysWithThreshold = signingKeysWithThreshold,
-          isOffline = false,
         )
         .value,
       protocolVersion = psid.protocolVersion,

@@ -64,10 +64,27 @@ object ReleaseUtils {
       .toList
   }
 
+  /** Matches the `<version>` part of a `releases/canton-open-source-<version>.tar.gz` object that
+    * is an actual Canton release, namely:
+    *   - stable: `3.5.2`
+    *   - release candidate: `3.5.3-rc1`
+    *   - snapshot: `3.6.0-snapshot.20260929.20331.0.v07b3f95b` (older ones carry an extra leading
+    *     number, e.g. `3.0.0-snapshot.100000000.20240214.12557.0.v052dc804`, and/or a git hash
+    *     without the `v` prefix, e.g. `2.7.0-snapshot.20230522.10377.0.6e5cea28`)
+    *   - ad-hoc: `3.4.12-ad-hoc.100000000.20240215.12560.0.vb11aba02`, also spelled `adhoc` and
+    *     `ad-hoc-snapshot`
+    *
+    * This deliberately ignores artifacts with names ending with -api, -proto etc.
+    */
+  private val releaseName =
+    raw"""\d+\.\d+\.\d+(?:-rc\d+|-(?:ad-?hoc-)?(?:snapshot|ad-?hoc)(?:\.\d+)+\.v?[0-9a-f]+)?""".r
+
+  private[util] def isReleaseName(version: String): Boolean = releaseName.matches(version)
+
   /** Lists `canton-open-source-*` releases published in the public S3 bucket.
     *
-    * Returned versions are deduplicated and parsed as [[ReleaseVersion]]; entries that fail to
-    * parse (e.g. legacy or unrelated objects) are silently ignored.
+    * Returned versions are deduplicated and parsed as [[ReleaseVersion]]; entries that are not
+    * release names (see [[releaseName]]) or that fail to parse are silently ignored.
     *
     * @param includeAdHoc:
     *   default to `false`. If false, ad-hoc releases are excluded
@@ -85,12 +102,9 @@ object ReleaseUtils {
       .split("\\s+")
       .toSeq
       .filter(_.endsWith(".tar.gz"))
-      .filterNot(_.contains("-protobuf"))
-      .flatMap { key =>
-        ReleaseVersion
-          .create(key.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
-          .toOption
-      }
+      .map(_.stripPrefix("releases/canton-open-source-").stripSuffix(".tar.gz"))
+      .filter(isReleaseName)
+      .flatMap(ReleaseVersion.create(_).toOption)
       .filter(r => (includeAdHoc || !r.isAdHoc) && (includeSnapshot || !r.isSnapshot))
       .distinct
   }

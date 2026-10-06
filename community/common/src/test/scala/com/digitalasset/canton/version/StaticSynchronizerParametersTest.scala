@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{CryptoSchemes, RequiredEncryptionSpecs, RequiredSigningSpecs}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters.InvalidStaticSynchronizerParameters
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -17,10 +18,18 @@ import org.scalatest.wordspec.AnyWordSpec
   * This verifies that we cannot stuff e.g. synchronizer parameters with PV=36 into a gRPC message
   * such as `InitializeSequencerFromGenesisStateV2Request` using the `v30` alternative and have it
   * deserialize cleanly.
+  *
+  * It also checks how a violated default-value invariant is reported.
   */
 final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
 
-  private def mkSsp(protocolVersion: ProtocolVersion): StaticSynchronizerParameters = {
+  private def mkSsp(protocolVersion: ProtocolVersion): StaticSynchronizerParameters =
+    createSsp(protocolVersion, SynchronizerLimits.defaultFor(protocolVersion)).value
+
+  private def createSsp(
+      protocolVersion: ProtocolVersion,
+      synchronizerLimits: SynchronizerLimits,
+  ): Either[InvalidStaticSynchronizerParameters, StaticSynchronizerParameters] = {
     val cryptoConfig = CryptoConfig()
     val schemes = CryptoSchemes.fromConfig(cryptoConfig).value
 
@@ -44,9 +53,8 @@ final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
         enableTransparencyChecks = false,
         protocolVersion = protocolVersion,
         serial = NonNegativeInt.zero,
-        synchronizerLimits = SynchronizerLimits.defaultFor(protocolVersion),
+        synchronizerLimits = synchronizerLimits,
       )
-      .value
   }
 
   "StaticSynchronizerParameters" should {
@@ -76,6 +84,18 @@ final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
           )
         case other => fail(s"Unexpected result: $other")
       }
+    }
+
+    // The invariant's message itself is covered by InvariantTest
+    "report the protocol version if the limits are not the default for PV<36" in {
+      val limits = SynchronizerLimits.defaultFor(ProtocolVersion.v36)
+      limits should not be SynchronizerLimits.max
+
+      val error = createSsp(ProtocolVersion.v35, limits).left.value.getMessage
+      error should startWith(
+        s"Invalid static synchronizer parameters for protocol version ${ProtocolVersion.v35}: synchronizerLimits "
+      )
+      error should include(s"expected ${SynchronizerLimits.max}, found $limits")
     }
   }
 }

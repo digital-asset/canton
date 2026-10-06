@@ -133,15 +133,10 @@ private[mediator] class MediatorEventsProcessor(
   ): Seq[Traced[MediatorEvent]] = {
     implicit val traceContext: TraceContext = tracedProtocolEvent.traceContext
     val event = tracedProtocolEvent.value
-    val topologyTimestampO = event match {
-      case deliver: Deliver[?] => deliver.topologyTimestampO
-      case _ => None
-    }
     val stages =
       extractMediatorEvents(
         tracedProtocolEvent.counter,
         event.timestamp,
-        topologyTimestampO,
         envelopes,
       )
 
@@ -151,17 +146,14 @@ private[mediator] class MediatorEventsProcessor(
   private def extractMediatorEvents(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
-      topologyTimestamp: Option[CantonTimestamp],
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit traceContext: TraceContext): Seq[MediatorEvent] = {
     val requests = envelopes.mapFilter(ProtocolMessage.select[MediatorConfirmationRequest])
     val responses =
       envelopes.mapFilter(ProtocolMessage.select[SignedProtocolMessage[ConfirmationResponses]])
 
-    val containsTopologyTransactions = DefaultOpenEnvelopesFilter.containsTopology(
-      envelopes = envelopes,
-      withExplicitTopologyTimestamp = false, // we do not care about this for mediator
-    )
+    val containsTopologyTransactions = DefaultOpenEnvelopesFilter
+      .containsTopology(envelopes = envelopes)
 
     if (requests.nonEmpty && responses.nonEmpty) {
       MediatorError.MalformedMessage
@@ -199,7 +191,6 @@ private[mediator] class MediatorEventsProcessor(
           counter,
           timestamp,
           res.protocolMessage,
-          topologyTimestamp,
           res.recipients,
         )
       )

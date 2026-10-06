@@ -131,7 +131,7 @@ class CommandDeduplicationPeriodValidationIT(testDars: TestDars) extends LedgerT
           _ <- ledger.submitAndWait(
             ledger.submitAndWaitRequest(party, new Dummy(party).create.commands)
           )
-          _ <- ledger.prune(pruneUpTo = end, attempts = 1)
+          _ <- ledger.pruneWithAcsCheck(parties = Some(Seq(party)), pruneUpTo = end, attempts = 1)
         } yield {}
       }
       failure <- submitAndWaitWithDeduplication(

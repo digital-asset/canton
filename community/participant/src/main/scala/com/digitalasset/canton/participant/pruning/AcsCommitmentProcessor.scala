@@ -38,7 +38,6 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   CantonTimestampSecond,
@@ -1730,13 +1729,10 @@ class AcsCommitmentProcessor private (
       message: SignedProtocolMessage[LegacyAcsCommitment]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     for {
-      cryptoSnapshot <-
-        if (protocolVersion >= ProtocolVersion.v35)
-          synchronizerCrypto.awaitSnapshot(
-            message.message.period.toInclusive.forgetRefinement
-          )
-        else
-          synchronizerCrypto.currentSnapshotApproximation
+      cryptoSnapshot <- synchronizerCrypto.awaitSnapshot(
+        message.message.period.toInclusive.forgetRefinement
+      )
+
       result <- message.verifySignature(cryptoSnapshot, message.typedMessage.content.sender).value
     } yield result
       .tapLeft(err => logger.error(s"Commitment signature verification failed with $err"))
@@ -2254,30 +2250,13 @@ class AcsCommitmentProcessor private (
         signedCmtMsgs <- EitherT.right(MonadUtil.parTraverseWithLimit(threadCount)(msgsFiltered) {
           case (participant, commitment) =>
             for {
+              // We sign the ACS commitment messages with a `fixed` timestamp - the end period
+              // timestamp - so no approximate timestamp override is needed.
               snapshotForSigning <-
-                if (protocolVersion >= ProtocolVersion.v35) {
-                  // For PV >= 35, we sign the ACS commitment messages with a `fixed` timestamp - the end period
-                  // timestamp - so no approximate timestamp override is needed.
-                  synchronizerCrypto
-                    .awaitSnapshot(
-                      commitment.period.toInclusive.forgetRefinement
-                    )
-                    .map(snapshot => (snapshot, None))
-                } else {
-                  synchronizerCrypto.currentSnapshotApproximation.map(snapshot =>
-                    // We do not specify a `validityPeriodEnd` because session signing keys should only be used
-                    // for PV > 34, and it avoids having to pass the max sequencing time through.
-                    (
-                      snapshot,
-                      Some(
-                        SigningTimestampOverrides(
-                          approximateTimestamp = clock.now,
-                          validityPeriodEnd = None,
-                        )
-                      ),
-                    )
-                  )
-                }
+                synchronizerCrypto
+                  .awaitSnapshot(commitment.period.toInclusive.forgetRefinement)
+                  .map(snapshot => (snapshot, None))
+
               (cryptoSnapshot, signingTimestampOverrides) = snapshotForSigning
               signedCommitment <- SignedProtocolMessage
                 .trySignAndCreate(

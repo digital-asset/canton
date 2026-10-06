@@ -239,7 +239,6 @@ class SequencerTest
         clock.now.plusSeconds(10),
         None,
         None,
-        None,
         testedProtocolVersion,
       )
 

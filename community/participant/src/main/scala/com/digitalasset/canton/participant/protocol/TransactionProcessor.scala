@@ -126,11 +126,7 @@ class TransactionProcessor(
         damle.enrichTransaction,
         damle.enrichContract,
         new AuthorizationValidator(participantId),
-        InternalConsistencyChecker(
-          participantId,
-          staticSynchronizerParameters.protocolVersion,
-          loggerFactory,
-        ),
+        InternalConsistencyChecker(participantId, loggerFactory),
         new ExternalCallCheck(
           participantId,
           externalCallValidator,

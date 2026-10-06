@@ -80,6 +80,7 @@ object Reassignment {
       reassignmentCounter: Long,
       nodeId: Int,
       persistedContractInstance: PersistedContractInstance,
+      representativePackageId: Ref.PackageId,
   ) extends Reassignment {
     def createNode: Node.Create = persistedContractInstance.inst.toCreateNode
     def ledgerEffectiveTime: Timestamp = persistedContractInstance.inst.createdAt.time

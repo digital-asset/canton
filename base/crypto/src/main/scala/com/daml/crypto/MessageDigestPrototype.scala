@@ -4,10 +4,9 @@
 package com.daml.crypto
 
 import com.daml.scalautil.Statement.discard
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.slf4j.LoggerFactory
 
-import java.security.{MessageDigest, Security}
+import java.security.MessageDigest
 
 /*
  * Use MessageDigest prototypes as a workaround for
@@ -15,11 +14,10 @@ import java.security.{MessageDigest, Security}
  * workaround https://github.com/google/guava/issues/1197
  */
 final class MessageDigestPrototype(val algorithm: String) {
-  Security.addProvider(new BouncyCastleProvider)
-
   private[this] val logger = LoggerFactory.getLogger(getClass)
 
-  private def createDigest: MessageDigest = MessageDigest.getInstance(algorithm)
+  private def createDigest: MessageDigest =
+    MessageDigest.getInstance(algorithm, Providers.bouncyCastle)
 
   private val prototype = createDigest
 

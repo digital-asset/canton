@@ -102,6 +102,7 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
       params: ClientChannelParams,
       loadBalancingPolicy: Option[String] = Some("round_robin"),
       healthCheck: Boolean = true,
+      channelCustomizer: NettyChannelBuilder => Unit = _ => (),
   ): NettyChannelBuilder = {
     // the bulk of this channel builder is the same between community and enterprise
     // we only extract the bits that are different into calls to the protected implementation specific methods
@@ -139,6 +140,9 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
       }
     } else
       builder.usePlaintext().discard
+
+    // Apply implementation-specific channel customizations (e.g. transport-level instrumentation)
+    channelCustomizer(builder)
 
     builder
   }

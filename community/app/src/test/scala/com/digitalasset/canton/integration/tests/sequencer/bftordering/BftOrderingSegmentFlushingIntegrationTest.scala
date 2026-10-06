@@ -104,7 +104,8 @@ class BftOrderingSegmentFlushingIntegrationTest
       },
       logs => {
         forAtLeast(1, logs) { log =>
-          log.infoMessage should include("blocks to flush segment")
+          log.loggerName should include("sequencer4")
+          log.infoMessage should include("to flush segment")
         }
       },
       timeUntilSuccess = 1.minute,

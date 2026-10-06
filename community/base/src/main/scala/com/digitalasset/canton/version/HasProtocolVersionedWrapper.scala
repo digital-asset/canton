@@ -5,6 +5,8 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.{Id, Monad}
+import com.digitalasset.canton.Errors.raiseCannotSerialize
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.ByteString
 
@@ -61,12 +63,6 @@ trait HasProtocolVersionedWrapperF[F[_], ValueClass <: HasRepresentativeProtocol
   def isEquivalentTo(protocolVersion: ProtocolVersion): Boolean =
     companionObj.protocolVersionRepresentativeFor(protocolVersion) == representativeProtocolVersion
 
-  private def serializeToHighestVersion: F[VersionedMessage[ValueClass]] =
-    toProtoVersioned(
-      companionObj.versioningTable.higherConverter.serializer,
-      companionObj.versioningTable.higherProtoVersion,
-    )
-
   private def toProtoVersioned(
       serializer: ValueClass => F[ByteString],
       protoVersion: ProtoVersion,
@@ -91,28 +87,51 @@ trait HasProtocolVersionedWrapperF[F[_], ValueClass <: HasRepresentativeProtocol
             if representativeProtocolVersion >= supportedVersion.fromInclusive =>
           toProtoVersioned(supportedVersion.serializer, protoVersion)
       }
-      .getOrElse(serializeToHighestVersion)
+      // This indicates a programming bug and should not fire
+      .getOrElse(
+        raiseCannotSerialize(companionObj.name, representativeProtocolVersion)
+      )
 
   /** Yields the Proto version that this class will be serialized to
     */
   def protoVersion: ProtoVersion =
-    companionObj.protoVersionFor(representativeProtocolVersion)
+    companionObj
+      .protoVersionFor(representativeProtocolVersion)
+      .valueOr(err =>
+        raiseCannotSerialize(companionObj.name, representativeProtocolVersion, Some(err))
+      )
 
   /** Yields a byte string representation of the corresponding `UntypedVersionedMessage` wrapper of
     * this instance.
     */
-  def toByteString: F[ByteString] = companionObj.versioningTable.converters
-    .collectFirst {
-      case (protoVersion, supportedVersion)
-          if representativeProtocolVersion >= supportedVersion.fromInclusive =>
-        supportedVersion match {
-          case versioned if versioned.isVersioned =>
-            monadF.map(toProtoVersioned(supportedVersion.serializer, protoVersion))(_.toByteString)
-          case legacy =>
-            legacy.serializer(self)
+  def toByteString: F[ByteString] = {
+    def serialize: F[DataByteString] =
+      companionObj.versioningTable.converters
+        .collectFirst {
+          case (protoVersion, supportedVersion)
+              if representativeProtocolVersion >= supportedVersion.fromInclusive =>
+            supportedVersion match {
+              case versioned if versioned.isVersioned =>
+                monadF.map(toProtoVersioned(supportedVersion.serializer, protoVersion))(
+                  _.toByteString
+                )
+              case legacy =>
+                legacy.serializer(self)
+            }
         }
+        // This indicates a programming bug and should not fire
+        .getOrElse(
+          raiseCannotSerialize(companionObj.name, representativeProtocolVersion)
+        )
+
+    this match {
+      case withMemoization: ProtocolVersionedMemoizedEvidence =>
+        // Re-use the memoized bytestring if possible
+        withMemoization.deserializedFrom.fold(serialize)(byteString => monadF.pure(byteString))
+
+      case _ => serialize
     }
-    .getOrElse(monadF.map(serializeToHighestVersion)(_.toByteString))
+  }
 
   /** Serializes this instance to a message together with a delimiter (the message length) to the
     * given output stream.

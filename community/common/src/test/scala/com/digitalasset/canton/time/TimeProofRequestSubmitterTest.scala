@@ -88,7 +88,6 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
               DefaultTestIdentities.physicalSynchronizerId,
               Some(MessageId(String73.tryCreate(s"tick-$seconds"))),
               Batch.empty(testedProtocolVersion),
-              None,
               Option.empty[TrafficReceipt],
             ),
             SymbolicCrypto.emptySignature,

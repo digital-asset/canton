@@ -38,6 +38,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
+import org.scalatest.Outcome
 import org.slf4j.event.Level
 
 import scala.annotation.nowarn
@@ -71,6 +72,12 @@ final class LsuAnnounceUnsupportedPvIntegrationTest extends LsuBase {
   private var managingNode: LocalInstanceReference = _
 
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+
+  // The unsupported PV (999) would be a forbidden PV downgrade from pv=dev
+  override def withFixture(test: OneArgTest): Outcome =
+    if (testedProtocolVersion.isDev)
+      cancel("Skipping test because an unsupported PV would be a forbidden downgrade from pv=dev.")
+    else super.withFixture(test)
 
   override protected def configTransforms: List[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "mediator2")

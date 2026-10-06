@@ -72,6 +72,8 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
         synchronizerBootstrapFile <- File
           .temporaryFile("syncBootstrap", ".proto")
           .map(_.canonicalPath)
+        // this file will be used for sequencer2's initial topology snapshot
+        initialSnapshotFile <- File.temporaryFile("initialSnapshot", ".proto").map(_.canonicalPath)
       } yield {
         // all synchronizer founders, sequencers and mediators share their identifiers
         val sequencer1Id = sequencer1.id
@@ -245,17 +247,16 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
             ForceFlag.AlienMember,
           )
 
-          // create the initial topology snapshot by loading all transactions from the sequencer's authorized store
-          val initialSnapshot =
-            sequencer2.topology.transactions
-              .export_topology_snapshotV2(store = tempStoreId)
+          // create the initial topology snapshot file by exporting all transactions from the sequencer's authorized store
+          sequencer2.topology.transactions
+            .export_topology_snapshot_to_file(initialSnapshotFile, store = tempStoreId)
 
           // load the static synchronizer parameters
           val synchronizerParams =
             StaticSynchronizerParameters.tryReadFromFile(paramsFile): @nowarn("cat=deprecation")
 
-          // and finally initialize the sequencer with the topology snapshot
-          sequencer2.setup.assign_from_genesis_stateV2(initialSnapshot, synchronizerParams)
+          // and finally initialize the sequencer with the topology snapshot file
+          sequencer2.setup.import_genesis_state(initialSnapshotFile, synchronizerParams)
         }
 
         // Sequencer1 console:

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
 
-import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,7 +13,11 @@ import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
-import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.metrics.{
+  BftOrderingMetrics,
+  SequencerHistograms,
+  SequencerMetrics,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
@@ -1007,7 +1012,7 @@ class OutputModuleTest
         initialBlock.blockHeight shouldBe BlockNumber.First
         initialBlock.requests.size shouldBe 1
         initialBlock.requests.head shouldBe Traced(
-          OrderedRequest(aTimestamp.toMicros, aTag, ByteString.EMPTY, BftNodeId.Empty)
+          OrderedRequest(aTimestamp.toMicros, aTag, ByteString.EMPTY, BftNodeId("node1"))
         )
         val nextBlock = blocks(1)
         nextBlock.value.blockHeight shouldBe secondBlockNumber
@@ -1192,7 +1197,9 @@ class OutputModuleTest
 
             val piped1 = context.runPipedMessages()
             piped1 should contain only Output.BlockDataStored(
-              blockData1,
+              blockData1.copy(orderedBlockForOutput =
+                blockData1.orderedBlockForOutput.copy(originalLeader = BftNodeId("node1"))
+              ),
               BlockNumber.First,
               aTimestamp,
               epochCouldAlterOrderingTopology = true,
@@ -1205,7 +1212,9 @@ class OutputModuleTest
 
             val piped2 = context.runPipedMessages()
             piped2 should contain only Output.BlockDataStored(
-              blockData2,
+              blockData2.copy(orderedBlockForOutput =
+                blockData2.orderedBlockForOutput.copy(originalLeader = BftNodeId("node1"))
+              ),
               BlockNumber(1L),
               anotherTimestamp,
               epochCouldAlterOrderingTopology = true,
@@ -1323,10 +1332,13 @@ class OutputModuleTest
 
         val piped1 = context.runPipedMessages()
 
-        // Only the block in the first epoch will be polled from the completed blocks queue
+        // Only the block in the first epoch will be polled from the completed blocks queue.
+        //  Its leader is normalized to the position-derived segment leader (node1 for block 0).
         piped1 should contain only
           Output.BlockDataStored(
-            blockData1,
+            blockData1.copy(orderedBlockForOutput =
+              blockData1.orderedBlockForOutput.copy(originalLeader = BftNodeId("node1"))
+            ),
             BlockNumber.First,
             aTimestamp,
             epochCouldAlterOrderingTopology = true,
@@ -1515,7 +1527,9 @@ class OutputModuleTest
 
         context.runPipedMessagesThenVerifyAndReceiveOnModule(output) { msg =>
           msg shouldBe Output.BlockDataStored(
-            blockData,
+            blockData.copy(orderedBlockForOutput =
+              blockData.orderedBlockForOutput.copy(originalLeader = BftNodeId("node1"))
+            ),
             BlockNumber.First,
             aTimestamp,
             epochCouldAlterOrderingTopology = false,
@@ -2193,6 +2207,291 @@ class OutputModuleTest
           )
         )
     }
+
+    "attribute output Peano queue interleaving wait to the leaders of the delaying holes" when {
+
+      // The leader attribution is derived by the leader-selection policy from each block's position in the epoch,
+      //  not from the block's carried `originalLeader` field. With this 3-node membership the (rotation-free, epoch
+      //  0) segment assignment is purely positional: block N is owned by leaders[N % 3], i.e. leaderA owns slots
+      //  0, 3, ..., leaderB owns 1, 4, ..., and leaderC owns 2, 5, ...
+      val leaderA = BftNodeId("node1")
+      val leaderB = BftNodeId("node2")
+      val leaderC = BftNodeId("node3")
+      def interleavingMembership: Membership =
+        Membership.forTesting(leaderA, Set(leaderB, leaderC))
+
+      def blockFromLeader(
+          blockNumber: Long,
+          leader: BftNodeId,
+          epochNumber: Long = EpochNumber.First,
+      ): CompleteBlockData =
+        CompleteBlockData(
+          anOrderedBlockForOutput(
+            epochNumber = epochNumber,
+            blockNumber = blockNumber,
+            originalLeader = leader,
+          ),
+          batches = Seq.empty,
+        )
+
+      "blocks wait behind holes that are filled in ascending order by distinct leaders" in {
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = true)
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
+          IgnoringUnitTestContext()
+        val output = createOutputModule[IgnoringUnitTestEnv](
+          initialMembership = interleavingMembership,
+          metrics = metrics,
+        )()
+        output.interleavingWaitTracker.now = () => clock.get()
+
+        output.receive(Output.Start) // anchors the open interval at t = 0
+
+        clock.set(Instant.EPOCH.plusSeconds(1))
+        // Block 2 (ordered by a third leader C) arrives first and is buffered behind the missing holes 0 and 1.
+        output.receive(Output.BlockDataFetched(blockFromLeader(2L, leaderC)))
+
+        clock.set(Instant.EPOCH.plusSeconds(5))
+        // Hole 0 (ordered by leader A) is filled; only block 0 is extracted, block 1 is still missing.
+        output.receive(Output.BlockDataFetched(blockFromLeader(0L, leaderA)))
+
+        clock.set(Instant.EPOCH.plusSeconds(9))
+        // Hole 1 (ordered by leader B) is filled; blocks 1 and 2 are extracted.
+        output.receive(Output.BlockDataFetched(blockFromLeader(1L, leaderB)))
+
+        // Block 2 waited 8s total: 4s behind leader A's hole (block 0) and 4s behind leader B's hole (block 1).
+        //  Blocks 0 and 1 filled the holes themselves, so they carry no interleaving wait.
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe Map(
+          leaderA -> Seq(4000L),
+          leaderB -> Seq(4000L),
+        )
+        // The per-block total is recorded once for every extracted block: the head-filling blocks 0 and 1 emit a
+        //  zero total (so the total series counts the same population as the output-stage duration) and block 2
+        //  emits the sum over its delaying leaders (4s + 4s). Extraction order is block 0, then blocks 1 and 2.
+        interleavingTotalWaitSamplesMillis(metricsFactory) shouldBe Seq(0L, 0L, 8000L)
+      }
+
+      "blocks arrive fully in order and carry no interleaving wait even as the clock advances" in {
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = true)
+        // An auto-advancing clock: every read returns the current instant and then advances by 1s, so the `now`
+        //  sampled while attributing a block's wait is strictly later than any instant sampled when the block
+        //  arrived. A block that fills the current queue head has no lower hole below it and never waited behind
+        //  one, so it must carry no interleaving wait despite this gap; a regression that tracks head-filling
+        //  blocks would spuriously attribute the inter-sample delta to each block's own leader.
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
+          IgnoringUnitTestContext()
+        val output = createOutputModule[IgnoringUnitTestEnv](
+          initialMembership = interleavingMembership,
+          metrics = metrics,
+        )()
+        output.interleavingWaitTracker.now = () => clock.getAndUpdate(_.plusSeconds(1))
+
+        output.receive(Output.Start)
+
+        // Blocks 0, 1 and 2 (leaders A, B and C) each arrive in order, immediately filling the queue head and
+        //  being extracted right away, without ever being buffered behind a missing lower block.
+        output.receive(Output.BlockDataFetched(blockFromLeader(0L, leaderA)))
+        output.receive(Output.BlockDataFetched(blockFromLeader(1L, leaderB)))
+        output.receive(Output.BlockDataFetched(blockFromLeader(2L, leaderC)))
+
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe empty
+        // Every extracted block still records one per-block total, all zero here since no block waited, so the
+        //  total series counts the same per-block population as the output-stage duration.
+        interleavingTotalWaitSamplesMillis(metricsFactory) shouldBe Seq(0L, 0L, 0L)
+      }
+
+      "blocks wait behind holes that are filled out of order" in {
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = true)
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
+          IgnoringUnitTestContext()
+        val output = createOutputModule[IgnoringUnitTestEnv](
+          initialMembership = interleavingMembership,
+          metrics = metrics,
+        )()
+        output.interleavingWaitTracker.now = () => clock.get()
+
+        output.receive(Output.Start) // anchors the open interval at t = 0
+
+        clock.set(Instant.EPOCH.plusSeconds(1))
+        // Block 2 (leader C) arrives first, buffered behind the missing holes 0 and 1.
+        output.receive(Output.BlockDataFetched(blockFromLeader(2L, leaderC)))
+
+        clock.set(Instant.EPOCH.plusSeconds(4))
+        // Hole 1 (leader B) is filled before hole 0: the queue head is still 0, so nothing is extracted and block 1
+        //  never becomes a head hole that delays anyone.
+        output.receive(Output.BlockDataFetched(blockFromLeader(1L, leaderB)))
+
+        clock.set(Instant.EPOCH.plusSeconds(8))
+        // Hole 0 (leader A) is finally filled, becoming the only head hole throughout; blocks 0, 1 and 2 are all
+        //  extracted at once.
+        output.receive(Output.BlockDataFetched(blockFromLeader(0L, leaderA)))
+
+        // Both waiting blocks are attributed entirely to leader A, whose hole (block 0) was the queue head the
+        //  whole time; leader B is never credited because its block filled before it was ever the head.
+        //  Block 1 (leader B) waited 4s (t=4..8) and block 2 (leader C) waited 7s (t=1..8) behind hole 0.
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe Map(
+          leaderA -> Seq(4000L, 7000L)
+        )
+        // Every extracted block records one per-block total, in extraction order (blocks 0, 1, 2): head-filling
+        //  block 0 emits a zero total, then block 1 = 4s and block 2 = 7s (each has a single delaying leader here).
+        interleavingTotalWaitSamplesMillis(metricsFactory) shouldBe Seq(0L, 4000L, 7000L)
+      }
+
+      "a block is present at the queue head but held back by the epoch gate" in {
+        implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = true)
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            initialMembership = interleavingMembership,
+            metrics = metrics,
+            consensusRef = fakeIgnoringModule,
+          )()
+        output.interleavingWaitTracker.now = () => clock.get()
+
+        output.receive(Output.Start)
+
+        // Process an epoch-0 block first so that the "currently processing" epoch is pinned to 0.
+        output.receive(
+          Output.BlockDataFetched(blockFromLeader(BlockNumber.First, leaderA, EpochNumber.First))
+        )
+        context.runPipedMessagesUntilNoMorePiped(output)
+
+        // An epoch-1 block now arrives as the actual queue head, but it is held back by the epoch gate (not by a
+        //  missing lower-numbered hole), so nothing is extracted yet.
+        clock.set(Instant.EPOCH.plusSeconds(1))
+        output.receive(
+          Output.BlockDataFetched(blockFromLeader(1L, leaderB, EpochNumber.First + 1L))
+        )
+        context.runPipedMessages() shouldBe empty
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe empty
+
+        // Release epoch 1 after a long delay: the gated block is now drained via the epoch-release path, so its
+        //  wait is topology wait and must not be attributed to any leader as interleaving wait.
+        clock.set(Instant.EPOCH.plusSeconds(100))
+        val newEpochQueue =
+          new PeanoQueue[EpochNumber, Consensus.NewEpochMembership[ProgrammableUnitTestEnv]](
+            EpochNumber(1L)
+          )(fail(_))
+        output.maybeNewEpochTopologyMessagePeanoQueue.putIfAbsent(newEpochQueue)
+        newEpochQueue.insert(
+          EpochNumber(1L),
+          Consensus.NewEpochMembership(
+            EpochNumber(1L),
+            defaultTestMembership,
+            failingCryptoProvider,
+          ),
+        )
+        output.receive(Output.ProcessNewEpochTopologyMessagesIfPossible)
+
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe empty
+      }
+
+      "a head hole is filled while epoch-gated, behind an already-buffered higher block" in {
+        implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = true)
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            initialMembership = interleavingMembership,
+            metrics = metrics,
+            consensusRef = fakeIgnoringModule,
+          )()
+        output.interleavingWaitTracker.now = () => clock.get()
+
+        output.receive(Output.Start) // anchors the open interval at t = 0
+
+        // Process an epoch-0 block first so that the "currently processing" epoch is pinned to 0.
+        output.receive(
+          Output.BlockDataFetched(blockFromLeader(BlockNumber.First, leaderA, EpochNumber.First))
+        )
+        context.runPipedMessagesUntilNoMorePiped(output)
+
+        // A higher epoch-1 block (block 2, leader C) arrives first and is buffered behind the missing head hole
+        //  (block 1).
+        clock.set(Instant.EPOCH.plusSeconds(3))
+        output.receive(
+          Output.BlockDataFetched(blockFromLeader(2L, leaderC, EpochNumber.First + 1L))
+        )
+
+        // The head hole (block 1, leader B) is now filled, but extraction is still held back by the epoch gate.
+        //  The head was empty for 7s (interleaving wait behind leader B's hole); this interval must be closed and
+        //  credited to leader B now, even though nothing is extracted yet.
+        clock.set(Instant.EPOCH.plusSeconds(7))
+        output.receive(
+          Output.BlockDataFetched(blockFromLeader(1L, leaderB, EpochNumber.First + 1L))
+        )
+        context.runPipedMessages() shouldBe empty
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe empty
+
+        // Release epoch 1 after a long delay: blocks 1 and 2 are drained. The "head present but epoch-gated"
+        //  interval (7s..100s) is topology wait, credited to nobody. Block 2's 4s wait for the head hole to be
+        //  filled (3s..7s), however, is interleaving wait and must be attributed to leader B.
+        clock.set(Instant.EPOCH.plusSeconds(100))
+        val newEpochQueue =
+          new PeanoQueue[EpochNumber, Consensus.NewEpochMembership[ProgrammableUnitTestEnv]](
+            EpochNumber(1L)
+          )(fail(_))
+        output.maybeNewEpochTopologyMessagePeanoQueue.putIfAbsent(newEpochQueue)
+        newEpochQueue.insert(
+          EpochNumber(1L),
+          Consensus.NewEpochMembership(
+            EpochNumber(1L),
+            defaultTestMembership,
+            failingCryptoProvider,
+          ),
+        )
+        output.receive(Output.ProcessNewEpochTopologyMessagesIfPossible)
+
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe Map(leaderB -> Seq(4000L))
+      }
+
+      "performance metrics are toggled off and on" in {
+        val metricsFactory = new InMemoryMetricsFactory
+        val metrics = capturingBftOrderingMetrics(metricsFactory, enabled = false)
+        val clock = new AtomicReference[Instant](Instant.EPOCH)
+        implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
+          IgnoringUnitTestContext()
+        val output = createOutputModule[IgnoringUnitTestEnv](
+          initialMembership = interleavingMembership,
+          metrics = metrics,
+        )()
+        output.interleavingWaitTracker.now = () => clock.get()
+
+        output.receive(Output.Start)
+
+        // While disabled, a full out-of-order extraction must not emit anything.
+        clock.set(Instant.EPOCH.plusSeconds(1))
+        output.receive(Output.BlockDataFetched(blockFromLeader(1L, leaderB)))
+        clock.set(Instant.EPOCH.plusSeconds(5))
+        output.receive(Output.BlockDataFetched(blockFromLeader(0L, leaderA)))
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe empty
+
+        // Enabling metrics resets the bookkeeping synchronously and re-bases the open interval to now, so the
+        //  disabled interval is never charged.
+        clock.set(Instant.EPOCH.plusSeconds(10))
+        output.receive(Output.Admin.SetPerformanceMetricsEnabled(enabled = true))
+
+        // A fresh out-of-order scenario after enabling: block 3 (leader A's next slot) waits behind block 2's hole
+        //  (leader C) for 4s.
+        clock.set(Instant.EPOCH.plusSeconds(11))
+        output.receive(Output.BlockDataFetched(blockFromLeader(3L, leaderA)))
+        clock.set(Instant.EPOCH.plusSeconds(15))
+        output.receive(Output.BlockDataFetched(blockFromLeader(2L, leaderC)))
+
+        // Only the 4s wait measured entirely after enabling is attributed; the disabled interval is excluded.
+        interleavingWaitSamplesMillisByLeader(metricsFactory) shouldBe Map(leaderC -> Seq(4000L))
+      }
+    }
   }
 
   private def completeBlockData(
@@ -2217,6 +2516,55 @@ class OutputModuleTest
         )
       ).map(x => BatchId.from(x) -> x),
     )
+
+  private def capturingBftOrderingMetrics(
+      metricsFactory: InMemoryMetricsFactory,
+      enabled: Boolean,
+  ): BftOrderingMetrics = {
+    val metrics =
+      new SequencerMetrics(
+        new SequencerHistograms(MetricName("test"))(new HistogramInventory),
+        metricsFactory,
+      ).bftOrdering
+    metrics.performance.enabled = enabled
+    metrics
+  }
+
+  // Reads the interleaving-wait samples (in milliseconds) captured by the given factory, grouped by the `leader`
+  //  label. Isolates them from other ordering-stage latencies via the `ordering-stage` label.
+  private def interleavingWaitSamplesMillisByLeader(
+      metricsFactory: InMemoryMetricsFactory
+  ): Map[String, Seq[Long]] =
+    metricsFactory.metrics.timers.values
+      .flatMap(_.values)
+      .flatMap(_.data.recordedValues.toSeq)
+      .collect {
+        case (labelsContext, values)
+            if labelsContext.labels
+              .get("ordering-stage")
+              .contains("output-block-interleaving-wait") =>
+          labelsContext.labels("leader") -> values
+      }
+      .toMap
+
+  // Reads the per-block total interleaving-wait samples (in milliseconds): one observation per extracted block
+  //  that waited, equal to the sum over the leaders of its delaying holes. Isolated via the `ordering-stage` label
+  //  and carries no `leader` label.
+  private def interleavingTotalWaitSamplesMillis(
+      metricsFactory: InMemoryMetricsFactory
+  ): Seq[Long] =
+    metricsFactory.metrics.timers.values
+      .flatMap(_.values)
+      .flatMap(_.data.recordedValues.toSeq)
+      .collect {
+        case (labelsContext, values)
+            if labelsContext.labels
+              .get("ordering-stage")
+              .contains("output-block-interleaving-total-wait") =>
+          values
+      }
+      .flatten
+      .toSeq
 
   private def assertBlock(
       actualBlock: OutputMetadataStore.OutputBlockMetadata,
@@ -2243,6 +2591,7 @@ class OutputModuleTest
       areTherePendingTopologyChangesInOnboardingEpoch: Boolean = false,
       requestInspector: RequestInspector = DefaultRequestInspector,
       tracer: Tracer = NoReportingTracerProvider.tracer,
+      metrics: BftOrderingMetrics = SequencerMetrics.noop("output-module-test").bftOrdering,
   )(
       blockSubscription: BlockSubscription = new EmptyBlockSubscription
   ): OutputModule[E] = {
@@ -2288,7 +2637,7 @@ class OutputModuleTest
       store,
       epochStoreReader,
       blockSubscription,
-      SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+      metrics,
       SynchronizerLimits.defaultFor(synchronizerProtocolVersion),
       availabilityRef,
       consensusRef,
@@ -2419,6 +2768,7 @@ object OutputModuleTest {
       lastInEpoch: Boolean = false,
       orderingMode: OrderingMode = OrderingMode.Consensus,
       batchIds: Seq[BatchId] = Seq.empty,
+      originalLeader: BftNodeId = BftNodeId.Empty,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): OrderedBlockForOutput =
     OrderedBlockForOutput(
       OrderedBlock(
@@ -2441,7 +2791,7 @@ object OutputModuleTest {
         ),
       ),
       ViewNumber.First,
-      BftNodeId.Empty,
+      originalLeader,
       lastInEpoch,
       orderingMode,
     )

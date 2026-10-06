@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.security
 
+import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
+import com.daml.test.evidence.tag.Security.SecurityTest.Property.Availability
+import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -31,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentProcessor,
   ReassignmentDataHelpers,
 }
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.Verdict
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -44,11 +48,10 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.AtomicReference
 
 /** This integration test checks that participants commit an assignment approved by the mediator
-  * whose reassignment id is either forged or reused. This is the expected behaviour: once the
-  * mediator approves, a participant that refuses to commit forks the ledger. They commit, they do
-  * not crash, and the contract ends up active on the target synchronizer on all three participants:
-  * the reassigning participants behave like the others. The only issue is the indexer of the
-  * reassigning participants, which fails when the reassignment id is reused. Topology:
+  * whose reassignment id is either forged or reused. This is the expected behaviour: they commit,
+  * they do not crash, and the contract ends up active on the target synchronizer on all three
+  * participants. When the reassignment id is reused, the reassigning participants raise an alarm.
+  * Topology:
   *   - Synchronizers: da (source) and acme (target)
   *   - signatory -> P1 (malicious submitter), connected to both
   *   - observer -> P2, connected to both, and P3, connected to acme only
@@ -59,6 +62,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
     with HasProgrammableSequencer
     with HasCycleUtils
     with SecurityTestHelpers
+    with SecurityTestSuite
     with EntitySyntax
     with AcsInspection {
 
@@ -84,7 +88,11 @@ final class ForgedReassignmentIdIntegrationTestPostgres
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
-      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransforms(
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        // TODO(i31578) Remove this when corrupted ACS commitments are fixed
+        ConfigTransforms.disableAdditionalConsistencyChecks,
+      )
       .withSetup { implicit env =>
         import env.*
 
@@ -247,12 +255,6 @@ final class ForgedReassignmentIdIntegrationTestPostgres
             entry.loggerName should include("participant=participant1")
             entry.message should include("LOCAL_VERDICT_ACTIVATES_EXISTING_CONTRACTS")
           }
-          forEvery(Seq("participant1", "participant2", "participant3")) { participant =>
-            forAtLeast(1, entries) { entry =>
-              entry.loggerName should include(s"participant=$participant")
-              entry.message should include("ReassignmentCounterShouldIncrease")
-            }
-          }
         },
       )
 
@@ -262,7 +264,15 @@ final class ForgedReassignmentIdIntegrationTestPostgres
       Seq(participant1, participant2, participant3).foreach(_.health.ping(participant1))
     }
 
-    "be committed by all participants when reusing a reassignment id" in { implicit env =>
+    "be committed by all participants when reusing a reassignment id" taggedAs SecurityTest(
+      property = Availability,
+      asset = "participant node",
+      attack = Attack(
+        actor = "a malicious participant hosting a signatory",
+        threat = "reuse a reassignment id during the assignment",
+        mitigation = "raise an alarm and keep the stored reassignment offsets",
+      ),
+    ) in { implicit env =>
       import env.*
 
       val contract = createContract()
@@ -275,49 +285,26 @@ final class ForgedReassignmentIdIntegrationTestPostgres
         .submit_assign(signatory, unassigned.reassignmentId, daId, acmeId)
         .discard
 
-      loggerFactory.assertEventuallyLogsSeq(
-        SuppressionRule.LevelAndAbove(Level.WARN) ||
-          (SuppressionRule.LoggerNameContains("ParallelIndexerFactory") &&
-            SuppressionRule.Level(Level.INFO))
-      )(
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
         // participant3 is not a reassigning participant, so its ledger API keeps working
         assignApproved(data)(
           participant3.health.ping(participant3, synchronizerId = Some(acmeId))
         ),
-        // TODO(#23636): The indexer of reassigning participants cannot store the global offset of
-        //  a second assignment with the same reassignment id in the reassignment store and keeps failing
         entries =>
           forEvery(Seq("participant1", "participant2")) { participant =>
             forAtLeast(1, entries) { entry =>
               entry.loggerName should include(s"participant=$participant")
+              entry.shouldBeCantonErrorCode(SyncServiceAlarm)
               entry.message should include("Unable to merge assignment offsets")
-            }
-            forAtLeast(1, entries) { entry =>
-              entry.warningMessage should include("Consumer terminated with a failure")
-              entry.throwable.value.getMessage should include(
-                "Unable to update global offsets for reassignments"
-              )
             }
           },
       )
 
-      loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-        {
-          assertNotInAcs(Seq(participant1, participant2), daName, cid)
-          assertInAcsSync(Seq(participant1, participant2, participant3), acmeName, cid)
+      assertNotInAcs(Seq(participant1, participant2), daName, cid)
+      assertInAcsSync(Seq(participant1, participant2, participant3), acmeName, cid)
 
-          participant3.health.ping(participant3, synchronizerId = Some(acmeId))
-          participant1.stop()
-          participant2.stop()
-        },
-        entries =>
-          forEvery(entries) { entry =>
-            entry.warningMessage should include("Consumer terminated with a failure")
-            entry.throwable.value.getMessage should (
-              include("Unable to update global offsets for reassignments") or
-                include("Notification upon published reassignment aborted due to shutdown")
-            )
-          },
+      Seq(participant1, participant2, participant3).foreach(
+        _.health.ping(participant3, synchronizerId = Some(acmeId))
       )
     }
   }

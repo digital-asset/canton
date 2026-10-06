@@ -152,7 +152,6 @@ object SequencerTestHelper {
       MessageId.randomMessageId(),
       Batch.empty(BaseTest.testedProtocolVersion),
       CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
       aggregationRule = None,
       submissionCost = None,
       BaseTest.testedProtocolVersion,

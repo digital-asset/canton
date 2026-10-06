@@ -13,7 +13,11 @@ import com.digitalasset.canton.health.{
   HealthComponent,
 }
 import com.digitalasset.canton.lifecycle.{HasRunOnClosing, OnShutdownRunner}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidator,
@@ -297,8 +301,12 @@ object SequencerAggregatorPekko {
       sequencingTimestamp: Option[CantonTimestamp],
       contentHash: Hash,
       representativeProtocolVersion: RepresentativeProtocolVersion[SignedContent.type],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[Bucket] =
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[Bucket] = Bucket
+  }
+
+  private[SequencerAggregatorPekko] object Bucket extends PrettyPrintingCompanion[Bucket] {
+    override protected val pretty: Pretty[Bucket] =
       prettyOfClass(
         param("sequencing timestamp", _.sequencingTimestamp),
         param("content hash", _.contentHash),
@@ -310,7 +318,7 @@ object SequencerAggregatorPekko {
       override protected val associatedHasRunOnClosing: HasRunOnClosing,
       override protected val logger: TracedLogger,
   ) extends CompositeHealthComponent[SequencerId, HealthComponent]
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
 
     private val additionalState: AtomicReference[SequencerAggregatorHealth.State] =
       new AtomicReference[SequencerAggregatorHealth.State](
@@ -365,13 +373,17 @@ object SequencerAggregatorPekko {
           refreshFromDependencies()(TraceContext.empty)
       }
 
-    override protected def pretty: Pretty[SequencerAggregatorHealth] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerAggregatorHealth] =
+      SequencerAggregatorHealth
+  }
+
+  private[SequencerAggregatorPekko] object SequencerAggregatorHealth
+      extends PrettyPrintingCompanion[SequencerAggregatorHealth] {
+    override protected val pretty: Pretty[SequencerAggregatorHealth] = prettyOfClass(
       param("synchronizer id", _.synchronizerId),
       param("state", _.getState),
     )
-  }
 
-  private[SequencerAggregatorPekko] object SequencerAggregatorHealth {
     private final case class State(
         currentThreshold: PositiveInt,
         deadlocked: Boolean,

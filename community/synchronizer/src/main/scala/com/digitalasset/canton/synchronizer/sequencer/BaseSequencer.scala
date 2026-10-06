@@ -126,10 +126,7 @@ abstract class BaseSequencer(
       EitherTUtil.unitUS
     } else {
       for {
-        estimatedSequencingTime <-
-          if (protocolVersion >= ProtocolVersion.v35)
-            EitherT.rightT[FutureUnlessShutdown, String](None)
-          else EitherT.right(sequencingTime).map(ts => Some(ts.getOrElse(clock.now)))
+        estimatedSequencingTime <- EitherT.rightT[FutureUnlessShutdown, String](None)
         _ <- signatureVerifier.verifyAcknowledgeRequestSignature(
           signedAcknowledgeRequest,
           HashPurpose.AcknowledgementSignature,

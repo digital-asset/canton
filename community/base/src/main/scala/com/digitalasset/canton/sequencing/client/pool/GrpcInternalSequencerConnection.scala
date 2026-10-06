@@ -20,7 +20,12 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
   RunOnClosing,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.RetryPolicy
@@ -60,7 +65,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor, esf: ExecutionSequencerFactory, materializer: Materializer)
     extends InternalSequencerConnection
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   import GrpcInternalSequencerConnection.*
 
   private val lock = Mutex()
@@ -419,14 +424,17 @@ class GrpcInternalSequencerConnection private[sequencing] (
     LifeCycle.close(toClose)(logger)
   }
 
-  override protected def pretty: Pretty[GrpcInternalSequencerConnection] =
+  override def prettyCompanion: PrettyPrintingCompanion[GrpcInternalSequencerConnection] =
+    GrpcInternalSequencerConnection
+}
+
+object GrpcInternalSequencerConnection
+    extends PrettyPrintingCompanion[GrpcInternalSequencerConnection] {
+  override protected val pretty: Pretty[GrpcInternalSequencerConnection] =
     prettyOfClass(
       param("name", _.name.singleQuoted),
       param("attributes", _.attributesCell.get),
     )
-}
-
-object GrpcInternalSequencerConnection {
   abstract class GrpcSequencerConnectionHealth(
       override val name: String,
       override val associatedHasRunOnClosing: HasRunOnClosing,

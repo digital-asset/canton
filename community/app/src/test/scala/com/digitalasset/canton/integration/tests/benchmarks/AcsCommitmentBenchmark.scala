@@ -212,7 +212,7 @@ trait AcsCommitmentBenchmark
     s"%1.${d}f" format (value / divider)
   }
 
-  "Benchmarking ACS commitments should be not too terrible" onlyRunWithOrLessThan ProtocolVersion.v35 in {
+  "Benchmarking ACS commitments should be not too terrible" onlyRunWhen (_ == ProtocolVersion.v35) in {
     implicit env =>
       import env.*
 

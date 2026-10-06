@@ -77,17 +77,18 @@ object PostgresQueryStrategy extends QueryStrategy {
 
   override def vacuumAndReindexTable(
       tableName: String
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit = {
-    errorLoggingContext.info(s"Vacuuming $tableName table")
-    vacuumTable(tableName)
-    errorLoggingContext.info(s"Vacuumed $tableName table")
-    if (reindexTableIfPossible(tableName))
-      errorLoggingContext.info(s"Successfully reindexed $tableName table")
-    else
-      errorLoggingContext.info(
-        s"Unable to reindex $tableName table due to concurrent access of the table."
-      )
-  }
+  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit =
+    QueryStrategy.withoutNetworkTimeout {
+      errorLoggingContext.info(s"Vacuuming $tableName table")
+      vacuumTable(tableName)
+      errorLoggingContext.info(s"Vacuumed $tableName table")
+      if (reindexTableIfPossible(tableName))
+        errorLoggingContext.info(s"Successfully reindexed $tableName table")
+      else
+        errorLoggingContext.info(
+          s"Unable to reindex $tableName table due to concurrent access of the table."
+        )
+    }(connection, errorLoggingContext.noTracingLogger)
 
   def handleNowaitException[T](t: => T)(uponLockNotAvailable: => T): T =
     try {

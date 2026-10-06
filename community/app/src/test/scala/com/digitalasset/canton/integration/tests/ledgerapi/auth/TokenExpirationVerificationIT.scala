@@ -176,9 +176,9 @@ class TokenExpirationVerificationIT
   )
 
   val userTokenWithoutExpiration = scopeBaseToken.copy(userId = randomPartyActUser)
-  val userTokenWithShortExpiration =
+  def generateUserTokenWithShortExpiration =
     userTokenWithoutExpiration.copy(exp = Some(Instant.now().plus(2, ChronoUnit.MINUTES)))
-  val userTokenWithLongExpiration =
+  def generateUserTokenWithLongExpiration =
     userTokenWithoutExpiration.copy(exp = Some(Instant.now().plus(200, ChronoUnit.MINUTES)))
 
   val userTokenWithNolifetimeCheckScope = noLifetimeCheckScopeToken.copy(
@@ -197,7 +197,7 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.OK)(
-          partyCall(fixture, toScopeContext(userTokenWithShortExpiration))
+          partyCall(fixture, toScopeContext(generateUserTokenWithShortExpiration))
         )
       } yield ()
     }
@@ -254,7 +254,7 @@ class TokenExpirationVerificationIT
     loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
       for {
         _ <- expect(StatusCodes.Unauthorized)(
-          partyCall(fixture, toScopeContext(userTokenWithLongExpiration))
+          partyCall(fixture, toScopeContext(generateUserTokenWithLongExpiration))
         )
       } yield ()
     }

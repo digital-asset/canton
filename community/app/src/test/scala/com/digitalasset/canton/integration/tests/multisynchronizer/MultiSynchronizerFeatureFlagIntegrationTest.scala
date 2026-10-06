@@ -138,7 +138,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
         )
       }
 
-  "Unassignment: MultiSynchronizer topology feature flag should be enabled on the source synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+  "Unassignment: MultiSynchronizer topology feature flag should be enabled on the source synchronizer" onlyRunWithOrLessThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 
@@ -162,7 +162,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
       IouSyntax.archive(participant1, Some(daId))(iou, aliceId)
   }
 
-  "Unassignment: MultiSynchronizer topology feature flag should be enabled on the target synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+  "Unassignment: MultiSynchronizer topology feature flag should be enabled on the target synchronizer" onlyRunWithOrLessThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 
@@ -208,7 +208,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
       IouSyntax.archive(participant1, Some(acmeId))(iou, aliceId)
   }
 
-  "Unassignment: should not process unassignment requests if the multi-synchronizer feature flag is not enabled" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+  "Unassignment: should not process unassignment requests if the multi-synchronizer feature flag is not enabled" onlyRunWithOrLessThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 
@@ -274,7 +274,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
       IouSyntax.archive(participant1, Some(daId))(iou, aliceId)
   }
 
-  "Assignment: MultiSynchronizer topology feature flag should be enabled on the target synchronizer." onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+  "Assignment: MultiSynchronizer topology feature flag should be enabled on the target synchronizer." onlyRunWithOrLessThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 
@@ -337,7 +337,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
       IouSyntax.archive(participant1, Some(acmeId))(iou, aliceId)
   }
 
-  "Assignment: should not process assignment requests if the multi-synchronizer feature flag is not enabled" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+  "Assignment: should not process assignment requests if the multi-synchronizer feature flag is not enabled" onlyRunWithOrLessThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 

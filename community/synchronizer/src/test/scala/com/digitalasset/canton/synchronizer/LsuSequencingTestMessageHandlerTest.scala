@@ -142,7 +142,6 @@ final class LsuSequencingTestMessageHandlerTest
         psid,
         MessageId.tryCreate("test").some,
         Batch(List(openEnvelope), testedProtocolVersion),
-        topologyTimestampO = None,
         trafficReceipt = None,
       )
 

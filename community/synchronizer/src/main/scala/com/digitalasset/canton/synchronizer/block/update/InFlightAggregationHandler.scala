@@ -106,7 +106,6 @@ class InFlightAggregationHandler(
   def computeAggregationIdAndValidateAggregationRule(
       sequencingTimestamp: CantonTimestamp,
       sequencingSnapshot: SyncCryptoApi,
-      topologyOrSequencingSnapshot: SyncCryptoApi,
       submissionRequest: SubmissionRequest,
   )(implicit
       traceContext: TraceContext,
@@ -128,19 +127,11 @@ class InFlightAggregationHandler(
     )
 
     for {
-      _ <-
-        // in pv34, we perform this test before checking envelope signatures and computing recipients
-        // we cannot change the order in pv34 as otherwise, we would generate different outcomes for a
-        // malformed transaction that fails both checks.
-        // starting with pv35, we perform this check here (and can subsequently change
-        // the method to be private and only be called here when we drop the pv34 code path)
-        if (protocolVersion > ProtocolVersion.v34)
-          validateMaxSequencingTimeForAggregationRule(
-            submissionRequest,
-            topologyOrSequencingSnapshot,
-            sequencingTimestamp,
-          )
-        else EitherTUtil.unitUS
+      _ <- validateMaxSequencingTimeForAggregationRule(
+        submissionRequest,
+        sequencingSnapshot,
+        sequencingTimestamp,
+      )
       aggregationIdAndRuleO <- aggregationIdETO
       _ <- aggregationIdAndRuleO.traverse { case (_, rule) =>
         wellFormedAggregationRule(submissionRequest, rule, sequencingSnapshot.ipsSnapshot)
@@ -149,9 +140,9 @@ class InFlightAggregationHandler(
 
   }
 
-  def validateMaxSequencingTimeForAggregationRule(
+  private def validateMaxSequencingTimeForAggregationRule(
       submissionRequest: SubmissionRequest,
-      topologyOrSequencingSnapshot: SyncCryptoApi,
+      sequencingSnapshot: SyncCryptoApi,
       sequencingTimestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
@@ -160,7 +151,7 @@ class InFlightAggregationHandler(
     submissionRequest.aggregationRule.traverse_ { _ =>
       for {
         synchronizerParameters <- EitherT(
-          topologyOrSequencingSnapshot.ipsSnapshot.findDynamicSynchronizerParameters()
+          sequencingSnapshot.ipsSnapshot.findDynamicSynchronizerParameters()
         )
           .leftMap(error =>
             SubmissionOutcome.Reject.logAndCreate(

@@ -158,7 +158,6 @@ final class ParticipantTopologyTerminateProcessingTest
       party1,
       PositiveInt.one,
       Seq(HostingParticipant(participant1, Confirmation)),
-      isOffline = false,
     )
   )
 
@@ -167,7 +166,6 @@ final class ParticipantTopologyTerminateProcessingTest
       party1,
       PositiveInt.one,
       Seq(HostingParticipant(participant1, Submission, onboarding = true)),
-      isOffline = false,
     )
   )
 
@@ -179,7 +177,6 @@ final class ParticipantTopologyTerminateProcessingTest
         HostingParticipant(participant1, Submission, onboarding = true),
         HostingParticipant(participant2, Submission, onboarding = false),
       ),
-      isOffline = false,
     )
   )
 
@@ -188,7 +185,6 @@ final class ParticipantTopologyTerminateProcessingTest
       party1,
       PositiveInt.one,
       Seq(HostingParticipant(participant1, Submission, onboarding = false)),
-      isOffline = false,
     )
   )
 
@@ -200,7 +196,6 @@ final class ParticipantTopologyTerminateProcessingTest
         HostingParticipant(participant1, Confirmation),
         HostingParticipant(participant2, Submission),
       ),
-      isOffline = false,
     )
   )
 
@@ -211,7 +206,6 @@ final class ParticipantTopologyTerminateProcessingTest
       Seq(
         HostingParticipant(participant2, Submission)
       ),
-      isOffline = false,
     )
   )
 
@@ -223,7 +217,6 @@ final class ParticipantTopologyTerminateProcessingTest
         HostingParticipant(participant1, Confirmation),
         HostingParticipant(participant2, Submission),
       ),
-      isOffline = false,
     )
   )
 
@@ -235,7 +228,6 @@ final class ParticipantTopologyTerminateProcessingTest
         HostingParticipant(participant1, Observation),
         HostingParticipant(participant2, Submission),
       ),
-      isOffline = false,
     )
   )
 
@@ -246,7 +238,6 @@ final class ParticipantTopologyTerminateProcessingTest
       party,
       PositiveInt.one,
       Seq(HostingParticipant(participant1, Confirmation)),
-      isOffline = false,
     )
   )
 
@@ -748,14 +739,13 @@ final class ParticipantTopologyTerminateProcessingTest
           EffectiveTime(cts0),
         )
       } yield {
-        // Evaluate the short-circuited logic: only v35+ emits `Onboarding`
-        if (testedProtocolVersion >= ProtocolVersion.v35) {
-          verify(pendingOnboardingStore, times(1)).get(
-            any[SynchronizerId],
-            any[String],
-            any[NonEmptyString],
-          )(any[TraceContext])
-        }
+
+        verify(pendingOnboardingStore, times(1)).get(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+
         succeed
       }
     }
@@ -774,14 +764,13 @@ final class ParticipantTopologyTerminateProcessingTest
           EffectiveTime(cts1),
         )
       } yield {
-        // Process is only evaluated cleanly if the `clearingOnboardingLocallyHostedParty` flag is hit
-        if (testedProtocolVersion >= ProtocolVersion.v35) {
-          verify(pendingOnboardingStore, times(1)).delete(
-            any[SynchronizerId],
-            any[String],
-            any[NonEmptyString],
-          )(any[TraceContext])
-        }
+
+        verify(pendingOnboardingStore, times(1)).delete(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+
         succeed
       }
     }
@@ -796,7 +785,6 @@ final class ParticipantTopologyTerminateProcessingTest
           party1,
           PositiveInt.one,
           Seq(HostingParticipant(participant2, Submission, onboarding = true)),
-          isOffline = false,
         )
       )
       val party1participant2_added = mkAdd(
@@ -804,7 +792,6 @@ final class ParticipantTopologyTerminateProcessingTest
           party1,
           PositiveInt.one,
           Seq(HostingParticipant(participant2, Submission, onboarding = false)),
-          isOffline = false,
         )
       )
 
@@ -850,14 +837,13 @@ final class ParticipantTopologyTerminateProcessingTest
           EffectiveTime(cts1),
         )
       } yield {
-        if (testedProtocolVersion >= ProtocolVersion.v35) {
-          // Because the local participant (P1) no longer should host the (still onboarding) party, we must clean up any pending onboarding clearances
-          verify(pendingOnboardingStore, times(1)).delete(
-            any[SynchronizerId],
-            any[String],
-            any[NonEmptyString],
-          )(any[TraceContext])
-        }
+
+        verify(pendingOnboardingStore, times(1)).delete(
+          any[SynchronizerId],
+          any[String],
+          any[NonEmptyString],
+        )(any[TraceContext])
+
         succeed
       }
     }

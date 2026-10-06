@@ -4,7 +4,11 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Synchronizer
@@ -13,15 +17,13 @@ final case class PendingOperationMetadata(
     operationName: String,
     operationKey: String,
     synchronizer: Synchronizer,
-) extends PrettyPrinting {
-  override def pretty = PendingOperationMetadata.pretty
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[PendingOperationMetadata] =
+    PendingOperationMetadata
 }
 
-object PendingOperationMetadata {
-  import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-  import com.digitalasset.canton.util.ShowUtil.*
-
-  val pretty: Pretty[PendingOperationMetadata] = prettyOfClass(
+object PendingOperationMetadata extends PrettyPrintingCompanion[PendingOperationMetadata] {
+  override protected val pretty: Pretty[PendingOperationMetadata] = prettyOfClass(
     param("operationName", _.operationName.unquoted),
     param("operationKey", _.operationKey.unquoted),
     param("synchronizer", _.synchronizer),

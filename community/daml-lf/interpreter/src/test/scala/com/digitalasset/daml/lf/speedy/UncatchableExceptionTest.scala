@@ -4,12 +4,12 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.Ast.Package
-import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SValue.{SContractId, SParty, SUnit}
 import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
 import com.digitalasset.daml.lf.speedy.TestPkg.*
@@ -17,6 +17,7 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, SerializationVersion}
+import com.digitalasset.daml.lf.validation.Validation
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.Inside
 import org.scalatest.freespec.AnyFreeSpec
@@ -24,6 +25,98 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
+
+/** Test support for writing transactions as data: an LF interpreter for a small `Action` language,
+  * where the placement of exception handlers is an input of the test rather than generated code.
+  *
+  * An `Action` is one of:
+  *   - `Do kind`: a ledger operation, implemented by the `doUpdate` function supplied by the user
+  *   - `Throw`: an ordinary, catchable user exception
+  *   - `Catch a`: runs `a` inside a try/catch whose handler swallows any exception
+  *   - `Child a`: runs `a` in a nested exercise of the `Run` choice of the same contract
+  *
+  * The LF definitions are meant to be embedded in module `Mod` of a test package; see
+  * [[definitions]] and [[runChoice]].
+  */
+private object Actions {
+
+  val throwMessage = "Throw"
+
+  /** LF definitions to embed in module `Mod`: the `Action` and `RunArg` types, `doUpdate`, and the
+    * interpreter `run`. `doUpdateBody` is an LF lambda of type `ContractId Unit -> keyType ->
+    * kindType -> Update Unit`; `exceptionType` needs a `Text` field `message`.
+    */
+  def definitions(
+      testTemplate: String,
+      kindType: String,
+      keyType: String,
+      exceptionType: String,
+      doUpdateBody: String,
+  ): String =
+    s"""
+       variant @serializable Action =
+         Do: $kindType |
+         Throw: Unit |
+         Catch: Mod:Action |
+         Child: Mod:Action;
+
+       record @serializable RunArg = { cid: ContractId Unit, key: $keyType, action: Mod:Action };
+
+       val doUpdate : ContractId Unit -> $keyType -> $kindType -> Update Unit = $doUpdateBody;
+
+       val run : ContractId $testTemplate -> Mod:RunArg -> Mod:Action -> Update Unit =
+         \\(self: ContractId $testTemplate) -> \\(env: Mod:RunArg) -> \\(a: Mod:Action) ->
+           case a of
+             Mod:Action:Do k -> Mod:doUpdate (Mod:RunArg {cid} env) (Mod:RunArg {key} env) k |
+             Mod:Action:Throw u -> throw @(Update Unit) @$exceptionType ($exceptionType { message = "$throwMessage" }) |
+             Mod:Action:Catch b -> try @Unit (Mod:run self env b) catch e -> Some @(Update Unit) (upure @Unit ()) |
+             Mod:Action:Child b -> exercise @$testTemplate Run self (Mod:RunArg { cid = Mod:RunArg {cid} env, key = Mod:RunArg {key} env, action = b });
+       """
+
+  /** The choice `Run` to add to the template `testTemplate` passed to [[definitions]]. */
+  def runChoice(controllers: String): String =
+    s"""choice @nonConsuming Run (self) (env: Mod:RunArg): Unit, controllers $controllers, observers (Nil @Party) to Mod:run self env (Mod:RunArg {action} env);"""
+
+  /** Action expressions, as LF source. `kind` is an expression of the type `kindType` above. */
+  def perform(kind: String): String = s"Mod:Action:Do ($kind)"
+  val throws: String = "Mod:Action:Throw ()"
+  def catchAround(action: String): String = s"Mod:Action:Catch ($action)"
+  def child(action: String): String = s"Mod:Action:Child ($action)"
+
+  /** The argument of the `Run` choice. */
+  def runArg(
+      pkgId: Ref.PackageId,
+      cid: SValue.SContractId,
+      key: SValue,
+      action: SValue,
+  ): SValue.SRecord =
+    SValue.SRecord(
+      Ref.Identifier(pkgId, Ref.QualifiedName.assertFromString("Mod:RunArg")),
+      ImmArray("cid", "key", "action").map(Ref.Name.assertFromString),
+      ArraySeq(cid, key, action),
+    )
+
+  /** Evaluates a pure LF expression to a value. */
+  def eval[P](
+      pkgs: CompiledPackages,
+      parserParameters: ParserParameters[P],
+      src: String,
+  )(implicit loggingContext: NamedLoggingContext): SValue =
+    Speedy.Machine.runPureExpr(e"$src" (parserParameters), pkgs) match {
+      case Right(value) => value
+      case Left(err) => sys.error(s"cannot evaluate `$src`: $err")
+    }
+
+  def evalRecord[P](
+      pkgs: CompiledPackages,
+      parserParameters: ParserParameters[P],
+      src: String,
+  )(implicit loggingContext: NamedLoggingContext): SValue.SRecord =
+    eval(pkgs, parserParameters, src) match {
+      case record: SValue.SRecord => record
+      case other => sys.error(s"`$src` evaluated to $other, expected a record")
+    }
+}
 
 // TEST_EVIDENCE: Integrity: Exceptions, throw/catch.
 //
@@ -193,13 +286,12 @@ abstract class UncatchableExceptionTestBase
     }
   }
 
-  // Section testing exceptions thrown when computing the metadata of a contract
+  // Exceptions thrown when computing the metadata of a contract
   {
     val parserParameters =
       defaultParserParameters.copy(languageVersion = LanguageVersion.defaultLfVersion)
 
-    // A package that defines an interface, a key type, an exception, and a party to be used by
-    // the packages defined below.
+    // An interface, a key type, an exception and a party shared by the packages below.
     val commonDefsPkgId = Ref.PackageId.assertFromString("-common-defs-v1-")
     val commonDefsPkg =
       p"""metadata ( '-common-defs-' : '1.0.0' )
@@ -217,7 +309,9 @@ abstract class UncatchableExceptionTestBase
                   to upure @Text "MyChoice was called";
             };
 
-            record @serializable Key = { label: Text, maintainers: List Party };
+            // Selects which metadata expression of the -fail-defs- V2 template throws.
+            enum @serializable Fail = NoFailure | Precondition | Signatories | Observers | Key | Maintainers | ChoiceControllers | ChoiceObservers;
+            record @serializable FKey = { label: Text, maintainers: List Party, fail: Mod:Fail };
 
             record @serializable Ex = { message: Text } ;
             exception Ex = {
@@ -229,142 +323,133 @@ abstract class UncatchableExceptionTestBase
           }
       """ (parserParameters.copy(defaultPackageId = commonDefsPkgId))
 
-    /** An abstract class whose [[templateDefinition]] method generates LF code that defines a
-      * template named [[templateName]]. The class is meant to be extended by concrete case objects
-      * which override one the metadata's expressions with an expression that throws an exception.
-      */
-    abstract class TemplateGenerator(val templateName: String) {
-      def precondition = """True"""
-      def signatories = s"""Cons @Party [Mod:$templateName {p} this] (Nil @Party)"""
-      def observers = """Nil @Party"""
-      def key =
-        s"""
-           |  '$commonDefsPkgId':Mod:Key {
-           |    label = "test-key",
-           |    maintainers = (Cons @Party [Mod:$templateName {p} this] (Nil @Party))
-           |  }""".stripMargin
-      def choiceControllers = s"""Cons @Party [Mod:$templateName {p} this] (Nil @Party)"""
-      def choiceObservers = """Nil @Party"""
+    val failDefsPkgName = Ref.PackageName.assertFromString("-fail-defs-")
 
-      def maintainers =
-        s"""\\(key: '$commonDefsPkgId':Mod:Key) -> ('$commonDefsPkgId':Mod:Key {maintainers} key)"""
+    // Template T whose metadata throws as selected by its `fail` field if `checkFail`, else never.
+    //
+    // For example, with `checkFail = true` and the payload `T { p = Alice, fail = Signatories }`,
+    // the generated template reads (simplified, `Fail:X` stands for the `Fail` enum constructor X):
+    //
+    //   template (this: T) = {
+    //     precondition (case fail of Fail:Precondition -> throw Ex "Precondition" | _ -> True);
+    //     signatories  (case fail of Fail:Signatories -> throw Ex "Signatories" | _ -> [p]);  // throws here
+    //     observers    (case fail of Fail:Observers -> throw Ex "Observers" | _ -> []);
+    //     implements Iface {
+    //       method myChoiceControllers = (case fail of Fail:ChoiceControllers -> throw ... | _ -> [p]);
+    //       method myChoiceObservers   = (case fail of Fail:ChoiceObservers -> throw ... | _ -> []);
+    //     };
+    //     key @FKey (case fail of Fail:Key -> throw ... | _ -> FKey {label, maintainers = [p], fail})
+    //                (\k -> case k.fail of Fail:Maintainers -> throw ... | _ -> k.maintainers);
+    //   };
+    //
+    // With `checkFail = false` every `case` is replaced by its non-throwing branch, so the
+    // template never throws whatever `fail` is.
+    def failTemplateDefinition(checkFail: Boolean): String = {
+      val c = commonDefsPkgId
+      val keyType = s"'$c':Mod:FKey"
+      val partyList = "Cons @Party [Mod:T {p} this] (Nil @Party)"
+      val keyValue =
+        s"""$keyType { label = "test-key", maintainers = ($partyList), fail = Mod:T {fail} this }"""
 
-      def templateDefinition: String =
-        s"""
-           |  record @serializable $templateName = { p: Party };
-           |  template (this: $templateName) = {
-           |    precondition $precondition;
-           |    signatories $signatories;
-           |    observers $observers;
-           |
-           |    choice @nonConsuming SomeChoice (self) (u: Unit): Text
-           |      , controllers (Cons @Party [Mod:$templateName {p} this] (Nil @Party))
-           |      , observers (Nil @Party)
-           |      to upure @Text "SomeChoice was called";
-           |
-           |    implements '$commonDefsPkgId':Mod:Iface {
-           |      view = '$commonDefsPkgId':Mod:MyUnit {};
-           |      method myChoiceControllers = $choiceControllers;
-           |      method myChoiceObservers = $choiceObservers;
-           |    };
-           |
-           |    key @'$commonDefsPkgId':Mod:Key ($key) ($maintainers);
-           |  };""".stripMargin
-    }
+      def throwing(failure: String, resultType: String): String =
+        s"""throw @$resultType @'$c':Mod:Ex ('$c':Mod:Ex {message = "$failure"})"""
 
-    case class ValidMetadata(override val templateName: String)
-        extends TemplateGenerator(templateName)
+      def guarded(failure: String, resultType: String, valid: String): String =
+        if (checkFail)
+          s"(case Mod:T {fail} this of '$c':Mod:Fail:$failure -> ${throwing(failure, resultType)} | _ -> $valid)"
+        else s"($valid)"
 
-    case object FailingPrecondition extends TemplateGenerator("Precondition") {
-      override def precondition =
-        s"""throw @Bool @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Precondition"})"""
-    }
-    case object FailingSignatories extends TemplateGenerator("Signatories") {
-      override def signatories =
-        s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Signatories"})"""
-    }
-    case object FailingObservers extends TemplateGenerator("Observers") {
-      override def observers =
-        s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Observers"})"""
-    }
-    case object FailingKey extends TemplateGenerator("Key") {
-      override def key =
-        s"""throw @'$commonDefsPkgId':Mod:Key @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Key"})"""
-    }
-    case object FailingMaintainers extends TemplateGenerator("Maintainers") {
-      override def maintainers =
-        s"""throw @('$commonDefsPkgId':Mod:Key -> List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "Maintainers"})"""
-    }
-    case object FailingMaintainersBody extends TemplateGenerator("MaintainersBody") {
-      override def maintainers =
-        s"""\\(key: '$commonDefsPkgId':Mod:Key) -> throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "MaintainersBody"})"""
-    }
-    case object FailingChoiceControllers extends TemplateGenerator("ChoiceControllers") {
-      override def choiceControllers =
-        s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "ChoiceControllers"})"""
-    }
-    case object FailingChoiceObservers extends TemplateGenerator("ChoiceObservers") {
-      override def choiceObservers =
-        s"""throw @(List Party) @'$commonDefsPkgId':Mod:Ex ('$commonDefsPkgId':Mod:Ex {message = "ChoiceObservers"})"""
-    }
+      val maintainers =
+        if (checkFail) {
+          val maintainersThrow = throwing("Maintainers", "(List Party)")
+          s"""(\\(k: $keyType) -> case $keyType {fail} k of '$c':Mod:Fail:Maintainers -> $maintainersThrow | _ -> $keyType {maintainers} k)"""
+        } else s"(\\(k: $keyType) -> $keyType {maintainers} k)"
 
-    val templateDefsPkgName = Ref.PackageName.assertFromString("-template-defs-")
-
-    /** A package that defines templates called Precondition, Signatories, ... whose metadata should
-      * evaluate without throwing exceptions.
-      */
-    val templateDefsV1PkgId = Ref.PackageId.assertFromString("-template-defs-v1-id-")
-    val templateDefsV1ParserParams = parserParameters.copy(defaultPackageId = templateDefsV1PkgId)
-    val templateDefsV1Pkg =
-      p"""metadata ( '$templateDefsPkgName' : '1.0.0' )
-          module Mod {
-            ${ValidMetadata("Precondition").templateDefinition}
-            ${ValidMetadata("Signatories").templateDefinition}
-            ${ValidMetadata("Observers").templateDefinition}
-            ${ValidMetadata("Key").templateDefinition}
-            ${ValidMetadata("Maintainers").templateDefinition}
-            ${ValidMetadata("MaintainersBody").templateDefinition}
-            ${ValidMetadata("ChoiceControllers").templateDefinition}
-            ${ValidMetadata("ChoiceObservers").templateDefinition}
-          }
-      """ (templateDefsV1ParserParams)
-
-    /** Version 2 of the package above. It upgrades the previously defined templates such that:
-      *   - the precondition in the Precondition template is changed to throw an exception
-      *   - the signatories in the Signatories template is changed to throw an exception
-      *   - etc.
-      */
-    val templateDefsV2PkgId = Ref.PackageId.assertFromString("-template-defs-v2-id-")
-    val templateDefsV2ParserParams = parserParameters.copy(defaultPackageId = templateDefsV2PkgId)
-    val templateDefsV2Pkg =
-      p"""metadata ( '$templateDefsPkgName' : '2.0.0' )
-          module Mod {
-            ${FailingPrecondition.templateDefinition}
-            ${FailingSignatories.templateDefinition}
-            ${FailingObservers.templateDefinition}
-            ${FailingKey.templateDefinition}
-            ${FailingMaintainers.templateDefinition}
-            ${FailingMaintainersBody.templateDefinition}
-            ${FailingChoiceControllers.templateDefinition}
-            ${FailingChoiceObservers.templateDefinition}
-          }
-      """ (templateDefsV2ParserParams)
-
-    // A choice on the Test template below: creates a $templateName instance, catching the
-    // exception thrown by its metadata, if any.
-    def createAndCatchErrorChoice(pkgId: Ref.PackageId, templateName: String): String = {
-      val tplQualifiedName = s"'$pkgId':Mod:$templateName"
       s"""
-         |    choice CreateAndCatchError$templateName (self) (u: Unit): Unit,
-         |      controllers Cons @Party [Mod:Test {party} this] (Nil @Party),
-         |      observers (Nil @Party)
-         |      to try @Unit
-         |           (ubind _: (ContractId $tplQualifiedName) <-
-         |              create @$tplQualifiedName ($tplQualifiedName { p = '$commonDefsPkgId':Mod:alice })
-         |            in upure @Unit ())
-         |         catch
-         |           e -> Some @(Update Unit) (upure @Unit ());""".stripMargin
+         record @serializable T = { p: Party, fail: '$c':Mod:Fail };
+         template (this: T) = {
+           precondition ${guarded("Precondition", "Bool", "True")};
+           signatories ${guarded("Signatories", "(List Party)", partyList)};
+           observers ${guarded("Observers", "(List Party)", "Nil @Party")};
+
+           choice @nonConsuming SomeChoice (self) (u: Unit): Text
+             , controllers (Cons @Party [Mod:T {p} this] (Nil @Party))
+             , observers (Nil @Party)
+             to upure @Text "SomeChoice was called";
+
+           implements '$c':Mod:Iface {
+             view = '$c':Mod:MyUnit {};
+             method myChoiceControllers = ${guarded(
+          "ChoiceControllers",
+          "(List Party)",
+          partyList,
+        )};
+             method myChoiceObservers = ${guarded("ChoiceObservers", "(List Party)", "Nil @Party")};
+           };
+
+           key @$keyType ${guarded("Key", keyType, keyValue)} $maintainers;
+         };"""
     }
+
+    val failDefsV1PkgId = Ref.PackageId.assertFromString("-fail-defs-v1-id-")
+    val failDefsV1Pkg =
+      p"""metadata ( '$failDefsPkgName' : '1.0.0' )
+          module Mod {
+            ${failTemplateDefinition(checkFail = false)}
+          }
+      """ (parserParameters.copy(defaultPackageId = failDefsV1PkgId))
+
+    val failDefsV2PkgId = Ref.PackageId.assertFromString("-fail-defs-v2-id-")
+    val failDefsV2Pkg =
+      p"""metadata ( '$failDefsPkgName' : '2.0.0' )
+          module Mod {
+            ${failTemplateDefinition(checkFail = true)}
+          }
+      """ (parserParameters.copy(defaultPackageId = failDefsV2PkgId))
+
+    val failV2Template = s"'$failDefsV2PkgId':Mod:T"
+    val ifaceType = s"'$commonDefsPkgId':Mod:Iface"
+    val failKeyType = s"'$commonDefsPkgId':Mod:FKey"
+    val tuple2Type = {
+      import stablePackages.Tuple2
+      s"'${Tuple2.packageId}':${Tuple2.qualifiedName}"
+    }
+
+    // The operations selectable by the Action interpreter, as bodies of the `doUpdate` cases.
+    def coerceCid(target: String) = s"(COERCE_CONTRACT_ID @Unit @$target cid)"
+    val updateKindBodies = List(
+      "Create" ->
+        s"ubind _: ContractId $failV2Template <- create @$failV2Template ($failV2Template { p = '$commonDefsPkgId':Mod:alice, fail = $failKeyType {fail} key }) in upure @Unit ()",
+      "Exercise" ->
+        s"ubind _: Text <- exercise @$failV2Template SomeChoice ${coerceCid(failV2Template)} () in upure @Unit ()",
+      "ExerciseByKey" ->
+        s"ubind _: Text <- exercise_by_key @$failV2Template SomeChoice key () in upure @Unit ()",
+      "Fetch" ->
+        s"ubind _: $failV2Template <- fetch_template @$failV2Template ${coerceCid(failV2Template)} in upure @Unit ()",
+      "FetchByInterface" ->
+        s"ubind _: $ifaceType <- fetch_interface @$ifaceType ${coerceCid(ifaceType)} in upure @Unit ()",
+      "FetchByKey" ->
+        s"ubind _: $tuple2Type (ContractId $failV2Template) $failV2Template <- fetch_by_key @$failV2Template key in upure @Unit ()",
+      "QueryNByKey" ->
+        s"ubind _: Option (List ($tuple2Type (ContractId $failV2Template) $failV2Template)) <- query_n_by_key @$failV2Template 1 key in upure @Unit ()",
+      "ExerciseByInterface" ->
+        s"ubind _: Text <- exercise_interface @$ifaceType MyChoice ${coerceCid(ifaceType)} () in upure @Unit ()",
+    )
+    val updateKinds: List[String] = updateKindBodies.map(_._1)
+    val updateKindNames: String = updateKinds.mkString(" | ")
+
+    val doUpdateCases: String =
+      updateKindBodies.map { case (k, body) => s"Mod:UpdateKind:$k -> $body" }.mkString(" | ")
+    val doUpdateBody: String =
+      s"""\\(cid: ContractId Unit) -> \\(key: $failKeyType) -> \\(kind: Mod:UpdateKind) -> case kind of $doUpdateCases"""
+
+    val actionDefinitions: String = Actions.definitions(
+      testTemplate = "Mod:Test",
+      kindType = "Mod:UpdateKind",
+      keyType = failKeyType,
+      exceptionType = s"'$commonDefsPkgId':Mod:Ex",
+      doUpdateBody = doUpdateBody,
+    )
 
     val testTemplateDefinition: String =
       s"""
@@ -373,12 +458,7 @@ abstract class UncatchableExceptionTestBase
          |    precondition True;
          |    signatories Cons @Party [Mod:Test {party} this] (Nil @Party);
          |    observers (Nil @Party);
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "Precondition")}
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "Signatories")}
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "Observers")}
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "Key")}
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "Maintainers")}
-         |${createAndCatchErrorChoice(templateDefsV2PkgId, "MaintainersBody")}
+         |    ${Actions.runChoice("Cons @Party [Mod:Test {party} this] (Nil @Party)")}
          |  };
       """.stripMargin
 
@@ -388,23 +468,28 @@ abstract class UncatchableExceptionTestBase
       p"""metadata ( '-metadata-tests-' : '1.0.0' )
           module Mod {
             $testTemplateDefinition
+            enum @serializable UpdateKind = $updateKindNames;
+            $actionDefinitions
           }
     """ (metadataTestsParserParams)
 
     // Command.FetchByKey/QueryNByKey compile to definitions that construct the stable Tuple2
     // record internally, so the stable Tuple2 package must be part of the package map even
     // though no DAML source below references it syntactically.
+    val allPackages: Map[Ref.PackageId, Package] = Map(
+      stablePackages.Tuple2.packageId -> stablePackages.packagesMap(
+        stablePackages.Tuple2.packageId
+      ),
+      commonDefsPkgId -> commonDefsPkg,
+      failDefsV1PkgId -> failDefsV1Pkg,
+      failDefsV2PkgId -> failDefsV2Pkg,
+      metadataTestsPkgId -> metadataTestsPkg,
+    )
+    // The Action interpreter is hand-written LF, so typecheck it.
+    Validation.unsafeCheckPackages(PackageInterface(allPackages), allPackages)
     val compiledPackages: PureCompiledPackages =
       PureCompiledPackages.assertBuild(
-        Map(
-          stablePackages.Tuple2.packageId -> stablePackages.packagesMap(
-            stablePackages.Tuple2.packageId
-          ),
-          commonDefsPkgId -> commonDefsPkg,
-          templateDefsV1PkgId -> templateDefsV1Pkg,
-          templateDefsV2PkgId -> templateDefsV2Pkg,
-          metadataTestsPkgId -> metadataTestsPkg,
-        ),
+        allPackages,
         Compiler.Config.Default.copy(cmdMode = cmdMode),
       )
 
@@ -420,20 +505,6 @@ abstract class UncatchableExceptionTestBase
 
     val contractOrigins: List[ContractOrigin] = List(Global, Local)
 
-    val failingTemplateMetadataTemplates: List[String] = List(
-      FailingPrecondition.templateName,
-      FailingSignatories.templateName,
-      FailingObservers.templateName,
-      FailingKey.templateName,
-      FailingMaintainers.templateName,
-      FailingMaintainersBody.templateName,
-    )
-
-    val failingChoiceMetadataTemplates: List[String] = List(
-      FailingChoiceControllers.templateName,
-      FailingChoiceObservers.templateName,
-    )
-
     val testTemplateId = Ref.Identifier.assertFromString(s"$metadataTestsPkgId:Mod:Test")
     val testPayload = SValue.SRecord(
       testTemplateId,
@@ -441,150 +512,148 @@ abstract class UncatchableExceptionTestBase
       ArraySeq(SParty(alice)),
     )
 
-    s"metadata exceptions can be caught when creating a contract" - {
-      for (templateName <- failingTemplateMetadataTemplates) {
-        templateName in {
-          val (result, _) = runCmdFlow(
-            pkgs = compiledPackages,
-            setup = CmdFlow.submit(Command.Create(testTemplateId, testPayload)),
-            test = cid =>
-              CmdFlow.submit(
-                Command.ExerciseTemplate(
-                  testTemplateId,
-                  asSCid(cid),
-                  Ref.ChoiceName.assertFromString(s"CreateAndCatchError$templateName"),
-                  SValue.SUnit,
-                )
-              ),
-            parties = Set(alice),
-            packageResolution = Map.empty,
-          )
-          result shouldBe Right(SUnit)
-        }
-      }
-    }
+    // The transaction is data (see Actions): a sequence of nested exercises of the Run choice of
+    // a Test contract, where a handler can be placed around any of them.
+    "metadata exceptions and exception handlers" - {
+      val noFailure = "NoFailure"
+      val templateLevelFailures =
+        List("Precondition", "Signatories", "Observers", "Key", "Maintainers")
+      val choiceLevelFailures = List("ChoiceControllers", "ChoiceObservers")
 
-    s"metadata exceptions cannot be caught" - {
-      val ifaceId = Ref.Identifier.assertFromString(s"$commonDefsPkgId:Mod:Iface")
-      val keyBasedPrefixes =
-        Set("exerciseByKeyAndCatchError", "fetchByKeyAndCatchError", "lookUpByKeyAndCatchError")
+      def relevantFailures(kind: String): List[String] =
+        if (kind == "ExerciseByInterface") templateLevelFailures ++ choiceLevelFailures
+        else templateLevelFailures
 
-      // Builds the Command corresponding to a given test-kind prefix: the "risky" action that
-      // should fail to have its metadata exception caught.
-      def riskyCommand(prefix: String, v2TemplateId: Ref.Identifier, arg: SValue): Command =
-        prefix match {
-          case "exerciseAndCatchError" =>
-            Command.ExerciseTemplate(v2TemplateId, asSCid(arg), n"SomeChoice", SValue.SUnit)
-          case "exerciseByKeyAndCatchError" =>
-            Command.ExerciseByKey(v2TemplateId, arg, n"SomeChoice", SValue.SUnit)
-          case "fetchAndCatchError" =>
-            Command.FetchTemplate(v2TemplateId, asSCid(arg))
-          case "fetchByInterfaceAndCatchError" =>
-            Command.FetchInterface(ifaceId, asSCid(arg))
-          case "fetchByKeyAndCatchError" =>
-            Command.FetchByKey(v2TemplateId, arg)
-          case "lookUpByKeyAndCatchError" =>
-            Command.QueryNByKey(v2TemplateId, SValue.SInt64(1L), arg)
-          case "exerciseByInterfaceAndCatchError" =>
-            Command.ExerciseInterface(ifaceId, asSCid(arg), n"MyChoice", SValue.SUnit)
-        }
-
-      // A test case is a LF test method prefix and a list of relevant template names to test.
-      val testCases = List[(String, List[String])](
-        "exerciseAndCatchError" -> failingTemplateMetadataTemplates,
-        "exerciseByKeyAndCatchError" -> failingTemplateMetadataTemplates,
-        "fetchAndCatchError" -> failingTemplateMetadataTemplates,
-        "fetchByInterfaceAndCatchError" -> failingTemplateMetadataTemplates,
-        "fetchByKeyAndCatchError" -> failingTemplateMetadataTemplates,
-        "lookUpByKeyAndCatchError" -> failingTemplateMetadataTemplates,
-        "exerciseByInterfaceAndCatchError" ->
-          (failingTemplateMetadataTemplates ++ failingChoiceMetadataTemplates),
+      // Where the handler sits relative to the risky action, and whether it is around it.
+      val shapes = List[(String, String => String, Boolean)](
+        ("bare", a => a, false),
+        ("catch in the same exercise body", a => Actions.child(Actions.catchAround(a)), true),
+        ("catch in the parent exercise", a => Actions.catchAround(Actions.child(a)), true),
       )
 
-      for ((prefix, relevantTemplates) <- testCases) {
-        prefix - {
-          for (templateName <- relevantTemplates) {
-            templateName - {
-              val v1TemplateId =
-                Ref.Identifier.assertFromString(s"$templateDefsV1PkgId:Mod:$templateName")
-              val v2TemplateId =
-                Ref.Identifier.assertFromString(s"$templateDefsV2PkgId:Mod:$templateName")
-              val v1Payload = SValue.SRecord(
-                v1TemplateId,
-                ImmArray(Ref.Name.assertFromString("p")),
-                ArraySeq(SParty(alice)),
-              )
-              val cid = Value.ContractId.V1(Hash.hashPrivateKey("abc"))
-              val key = SValue.SRecord(
-                Ref.Identifier.assertFromString(s"$commonDefsPkgId:Mod:Key"),
-                ImmArray(
-                  Ref.Name.assertFromString("label"),
-                  Ref.Name.assertFromString("maintainers"),
-                ),
-                ArraySeq(
-                  SValue.SText("test-key"),
-                  SValue.SList(FrontStack(SValue.SParty(alice))),
-                ),
-              )
-              val globalKey = GlobalKeyWithMaintainers(
-                templateId = v1TemplateId,
-                value = key.toNormalizedValue,
-                valueHash = SValueHash.assertHashContractKey(
-                  packageName = templateDefsPkgName,
-                  templateName = v1TemplateId.qualifiedName,
-                  key = key,
-                ),
-                maintainers = Set(alice),
-                packageName = templateDefsPkgName,
-              )
-              val globalContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = templateDefsV1Pkg.pkgName,
-                template = v1TemplateId,
-                arg = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
-                signatories = List(alice),
-                observers = List.empty,
-                contractKeyWithMaintainers = Some(globalKey),
-                contractId = cid,
-              )
+      val v1TemplateId = Ref.Identifier.assertFromString(s"$failDefsV1PkgId:Mod:T")
+      val commonAlice = s"'$commonDefsPkgId':Mod:alice"
+      val packageResolution = Map(
+        failDefsPkgName -> failDefsV2PkgId,
+        metadataTestsPkg.pkgName -> metadataTestsPkgId,
+      )
 
-              for (origin <- contractOrigins) {
-                origin.description in {
-                  val (result, _) = origin match {
-                    case Global =>
-                      runCmdFlow(
-                        pkgs = compiledPackages,
-                        test = _ =>
-                          CmdFlow.submit(
-                            riskyCommand(
-                              prefix,
-                              v2TemplateId,
-                              if (keyBasedPrefixes(prefix)) key else SContractId(cid),
-                            )
-                          ),
-                        parties = Set(alice),
-                        packageResolution = Map(templateDefsPkgName -> templateDefsV2PkgId),
-                        getContract = Map(globalContract.contractId -> globalContract),
-                        getKeys = Map(globalKey.globalKey -> Vector(globalContract)),
-                      )
-                    case Local =>
-                      runCmdFlow(
-                        pkgs = compiledPackages,
-                        setup = CmdFlow.submit(Command.Create(v1TemplateId, v1Payload)),
-                        test = createdCid =>
-                          CmdFlow.submit(
-                            riskyCommand(
-                              prefix,
-                              v2TemplateId,
-                              if (keyBasedPrefixes(prefix)) key else createdCid,
-                            )
-                          ),
-                        parties = Set(alice),
-                        packageResolution = Map(templateDefsPkgName -> templateDefsV2PkgId),
-                      )
+      // A V1 contract whose payload and key both carry `fail`.
+      def payloadAndKey(failure: String): (SValue.SRecord, SValue.SRecord) = {
+        val failValue = s"'$commonDefsPkgId':Mod:Fail:$failure"
+        val payload = Actions.evalRecord(
+          compiledPackages,
+          metadataTestsParserParams,
+          s"'$failDefsV1PkgId':Mod:T { p = $commonAlice, fail = $failValue }",
+        )
+        val key = Actions.evalRecord(
+          compiledPackages,
+          metadataTestsParserParams,
+          s"""'$commonDefsPkgId':Mod:FKey { label = "test-key", maintainers = Cons @Party [$commonAlice] (Nil @Party), fail = $failValue }""",
+        )
+        (payload, key)
+      }
+
+      def runCommand(
+          testCid: SValue,
+          targetCid: SValue.SContractId,
+          key: SValue,
+          action: SValue,
+      ): Command =
+        Command.ExerciseTemplate(
+          testTemplateId,
+          asSCid(testCid),
+          n"Run",
+          Actions.runArg(metadataTestsPkgId, targetCid, key, action),
+        )
+
+      // Runs `action` against a V1 contract with the given `failure` that gets upgraded to V2.
+      def runAction(
+          origin: ContractOrigin,
+          failure: String,
+          action: String,
+      ): Either[Throwable, SValue] = {
+        val (payload, key) = payloadAndKey(failure)
+        val actionValue = Actions.eval(compiledPackages, metadataTestsParserParams, action)
+        val setupTest = CmdFlow.submit(Command.Create(testTemplateId, testPayload))
+        origin match {
+          case Global =>
+            val cid = Value.ContractId.V1(Hash.hashPrivateKey("abc"))
+            val globalKey = GlobalKeyWithMaintainers(
+              templateId = v1TemplateId,
+              value = key.toNormalizedValue,
+              valueHash = SValueHash.assertHashContractKey(
+                packageName = failDefsPkgName,
+                templateName = v1TemplateId.qualifiedName,
+                key = key,
+              ),
+              maintainers = Set(alice),
+              packageName = failDefsPkgName,
+            )
+            val globalContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+              version = SerializationVersion.StableVersions.max,
+              packageName = failDefsPkgName,
+              template = v1TemplateId,
+              arg = payload.toNormalizedValue,
+              signatories = List(alice),
+              observers = List.empty,
+              contractKeyWithMaintainers = Some(globalKey),
+              contractId = cid,
+            )
+            val (result, _) = runCmdFlow[SValue](
+              pkgs = compiledPackages,
+              setup = setupTest,
+              test =
+                testCid => CmdFlow.submit(runCommand(testCid, SContractId(cid), key, actionValue)),
+              parties = Set(alice),
+              packageResolution = packageResolution,
+              getContract = Map(globalContract.contractId -> globalContract),
+              getKeys = Map(globalKey.globalKey -> Vector(globalContract)),
+            )
+            result
+          case Local =>
+            val (result, _) = runCmdFlow[SValue](
+              pkgs = compiledPackages,
+              setup = for {
+                testCid <- setupTest
+                localCid <- CmdFlow.submit(Command.Create(v1TemplateId, payload))
+              } yield SValue.SList(FrontStack(testCid, localCid)),
+              test = {
+                case SValue.SList(ids) =>
+                  ids.iterator.toList match {
+                    case List(testCid, localCid) =>
+                      CmdFlow.submit(runCommand(testCid, asSCid(localCid), key, actionValue))
+                    case other => sys.error(s"unexpected setup result: $other")
                   }
-                  inside(result) { case Left(UnhandledExceptionError(msg)) =>
-                    msg should include(templateName)
+                case other => sys.error(s"unexpected setup result: $other")
+              },
+              parties = Set(alice),
+              packageResolution = packageResolution,
+            )
+            result
+        }
+      }
+
+      // Only exceptions thrown while creating a contract can be caught.
+      "metadata exceptions" - {
+        for (kind <- updateKinds) {
+          kind - {
+            for (failure <- relevantFailures(kind)) {
+              failure - {
+                for (origin <- contractOrigins) {
+                  origin.description - {
+                    for ((shapeName, shape, handled) <- shapes) {
+                      shapeName in {
+                        val action = shape(Actions.perform(s"Mod:UpdateKind:$kind"))
+                        val result = runAction(origin, failure, action)
+                        if (kind == "Create" && handled)
+                          result shouldBe Right(SUnit)
+                        else
+                          inside(result) { case Left(UnhandledExceptionError(msg)) =>
+                            msg should include(failure)
+                          }
+                      }
+                    }
                   }
                 }
               }
@@ -592,6 +661,122 @@ abstract class UncatchableExceptionTestBase
           }
         }
       }
+
+      "valid metadata (control)" - {
+        for (kind <- updateKinds) {
+          kind - {
+            for (origin <- contractOrigins) {
+              origin.description - {
+                for ((shapeName, shape, _) <- shapes) {
+                  shapeName in {
+                    val action = shape(Actions.perform(s"Mod:UpdateKind:$kind"))
+                    runAction(origin, noFailure, action) shouldBe Right(SUnit)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      "user exceptions (control)" - {
+        "are not caught without a handler" in {
+          inside(runAction(Global, noFailure, Actions.throws)) {
+            case Left(UnhandledExceptionError(msg)) =>
+              msg shouldBe Actions.throwMessage
+          }
+        }
+        "are caught by a handler around them" in {
+          runAction(Global, noFailure, Actions.catchAround(Actions.throws)) shouldBe Right(SUnit)
+        }
+        "are caught by a handler in the same exercise body" in {
+          runAction(
+            Global,
+            noFailure,
+            Actions.child(Actions.catchAround(Actions.throws)),
+          ) shouldBe Right(SUnit)
+        }
+        "are caught by a handler in the parent exercise" in {
+          runAction(
+            Global,
+            noFailure,
+            Actions.catchAround(Actions.child(Actions.throws)),
+          ) shouldBe Right(SUnit)
+        }
+      }
+    }
+  }
+
+  // The expression evaluating to the key maintainers function is closed (`this` is not in scope),
+  // so a field of the payload cannot select a throw there. A dedicated template always throws.
+  "exception in the key maintainers expression" - {
+    val pkg: Package = p"""
+        metadata ( 'maintainers-expr' : '1.0.0' )
+
+        module M {
+          record @serializable E = { msg: Text };
+          exception E = { message \(e: M:E) -> M:E {msg} e };
+
+          record @serializable Bad = { party: Party };
+          template (this: Bad) = {
+            precondition True;
+            signatories Cons @Party [M:Bad {party} this] Nil @Party;
+            observers Nil @Party;
+            key @Party (M:Bad {party} this) (throw @(Party -> List Party) @M:E (M:E { msg = "MaintainersExpr" }));
+          };
+
+          record @serializable Test = { party: Party };
+          template (this: Test) = {
+            precondition True;
+            signatories Cons @Party [M:Test {party} this] Nil @Party;
+            observers Nil @Party;
+            choice @nonConsuming Bare (self) (u: Unit) : Unit,
+              controllers Cons @Party [M:Test {party} this] Nil @Party,
+              observers Nil @Party
+              to ubind cid : ContractId M:Bad <- create @M:Bad (M:Bad {party = M:Test {party} this}) in upure @Unit ();
+            choice @nonConsuming Caught (self) (u: Unit) : Unit,
+              controllers Cons @Party [M:Test {party} this] Nil @Party,
+              observers Nil @Party
+              to try @Unit (ubind cid : ContractId M:Bad <- create @M:Bad (M:Bad {party = M:Test {party} this}) in upure @Unit ())
+                 catch e -> Some @(Update Unit) (upure @Unit ());
+          };
+        }
+    """
+
+    val pkgs: PureCompiledPackages = typeAndCompile(pkg, cmdMode = cmdMode)
+
+    val testTemplate = Ref.Identifier.assertFromString(s"$defaultPackageId:M:Test")
+    val testPayload = SValue.SRecord(
+      testTemplate,
+      ImmArray(Ref.Name.assertFromString("party")),
+      ArraySeq(SParty(alice)),
+    )
+
+    def run(choice: String): Either[Throwable, SValue] =
+      runCmdFlow(
+        pkgs = pkgs,
+        setup = CmdFlow.submit(Command.Create(testTemplate, testPayload)),
+        test = cid =>
+          CmdFlow.submit(
+            Command.ExerciseTemplate(
+              testTemplate,
+              asSCid(cid),
+              Ref.ChoiceName.assertFromString(choice),
+              SValue.SUnit,
+            )
+          ),
+        parties = Set(alice),
+        packageResolution = Map(pkg.pkgName -> defaultParserParameters.defaultPackageId),
+      )._1
+
+    "bare" in {
+      inside(run("Bare")) { case Left(UnhandledExceptionError(msg)) =>
+        msg should include("MaintainersExpr")
+      }
+    }
+
+    "caught by a handler around the create" in {
+      run("Caught") shouldBe Right(SUnit)
     }
   }
 }

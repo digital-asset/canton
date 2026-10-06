@@ -192,6 +192,27 @@ showJavaVersion := {
   println(System.getProperty("java.version"))
 }
 
+lazy val sharedDependenciesJsonFile = file("shared_dependencies.json")
+
+lazy val generateSharedDependencies =
+  taskKey[Unit]("Generate shared_dependencies.json from SharedDependencies.scala")
+generateSharedDependencies := {
+  IO.write(sharedDependenciesJsonFile, SharedDependencies.json)
+  streams.value.log.info(s"Wrote $sharedDependenciesJsonFile")
+}
+
+lazy val checkSharedDependenciesUpToDate =
+  taskKey[Unit]("Check that shared_dependencies.json matches SharedDependencies.scala")
+checkSharedDependenciesUpToDate := {
+  val actual = IO.read(sharedDependenciesJsonFile)
+  val expected = SharedDependencies.json
+  if (actual != expected) {
+    sys.error(
+      s"$sharedDependenciesJsonFile is out of date with SharedDependencies.scala. Run `generateSharedDependencies` to regenerate it."
+    )
+  }
+}
+
 lazy val testLibraries = Seq(
   `community-testing`,
   `community-integration-testing`,

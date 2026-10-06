@@ -384,6 +384,20 @@ object TopologyTransactionRejection extends PrettyPrintingCompanion[TopologyTran
         )
     }
 
+    final case class LsuProtocolVersionDowngrade(
+        successorSynchronizerId: OpaquePhysicalSynchronizerId,
+        currentSynchronizerId: PhysicalSynchronizerId,
+    ) extends TopologyTransactionRejection {
+      override def asString: String =
+        s"The declared successor $successorSynchronizerId has a lower protocol version than the current synchronizer $currentSynchronizerId. Protocol version downgrades are not allowed."
+
+      override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
+        TopologyManagerError.InvalidSynchronizerSuccessor.Reject.protocolVersionDowngrade(
+          currentSynchronizerId = currentSynchronizerId,
+          successorSynchronizerId = successorSynchronizerId,
+        )
+    }
+
     final case class InvalidUpgradeTime(
         synchronizerId: SynchronizerId,
         effective: EffectiveTime,

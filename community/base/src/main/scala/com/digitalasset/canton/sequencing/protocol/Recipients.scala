@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -17,7 +21,8 @@ import com.digitalasset.nonempty.NonEmpty
   * [[com.digitalasset.canton.sequencing.protocol.RecipientsTree]]s that define the members
   * receiving a batch, and which members see which other recipients.
   */
-final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends PrettyPrinting {
+final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]])
+    extends PrettyPrintingFromCompanion {
 
   lazy val allRecipients: NonEmpty[Set[Recipient]] = trees
     .flatMap(t => t.allRecipients)
@@ -39,8 +44,7 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
     new v30.Recipients(protoTrees.toList)
   }
 
-  override protected def pretty: Pretty[Recipients.this.type] =
-    prettyOfClass(param("Recipient trees", _.trees.toList))
+  override def prettyCompanion: PrettyPrintingCompanion[Recipients] = Recipients
 
   def asSingleGroup: Option[NonEmpty[Set[Recipient]]] =
     trees match {
@@ -56,7 +60,9 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
     trees.toNEF.reduceLeftTo(_.leafRecipients)(_ ++ _.leafRecipients)
 }
 
-object Recipients {
+object Recipients extends PrettyPrintingCompanion[Recipients] {
+  override protected val pretty: Pretty[Recipients] =
+    prettyOfClass(param("Recipient trees", _.trees.toList))
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,

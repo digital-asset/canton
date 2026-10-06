@@ -150,7 +150,6 @@ trait SequencerRestartTest extends InFlightAggregationTestHelper { self: Communi
       val ts = env.environment.clock.now
       val maxTs = ts.plusSeconds(300)
       val timestamps = SendRequestTimestamps(
-        topologyTimestamp = None,
         approximateTimestampForSigning = ts,
         maxSequencingTime = maxTs,
       )

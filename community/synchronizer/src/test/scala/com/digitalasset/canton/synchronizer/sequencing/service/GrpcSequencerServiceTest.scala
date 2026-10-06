@@ -219,7 +219,6 @@ final class GrpcSequencerServiceTest
       batch,
       CantonTimestamp.MaxValue,
       None,
-      None,
       Option.empty[SequencingSubmissionCost],
       testedProtocolVersion,
     )
@@ -342,22 +341,19 @@ final class GrpcSequencerServiceTest
         .focus(_.batch.envelopes)
         .modify(_.map {
           case closedEnvelope: ClosedEnvelope =>
-            if (testedProtocolVersion >= ProtocolVersion.v35) {
-              val compressed = closedEnvelope
-                .toClosedCompressedEnvelope(
-                  com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
-                )
-              ClosedCompressedEnvelope.create(
-                ByteString.empty,
-                compressed.recipients,
-                compressed.algorithm,
-              )(
-                DecompressionBudget(MaxBytesToDecompress.HardcodedDefault),
-                testedProtocolVersionValidation,
+            val compressed = closedEnvelope
+              .toClosedCompressedEnvelope(
+                com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
               )
-            } else {
-              closedEnvelope.toClosedUncompressedEnvelopeUnsafe.copy(bytes = ByteString.empty)
-            }
+            ClosedCompressedEnvelope.create(
+              ByteString.empty,
+              compressed.recipients,
+              compressed.algorithm,
+            )(
+              DecompressionBudget(MaxBytesToDecompress.HardcodedDefault),
+              testedProtocolVersionValidation,
+            )
+
           case other => other // Won't happen, but is required for the match to be exhaustive
         })
 
@@ -412,11 +408,7 @@ final class GrpcSequencerServiceTest
             )
           )
 
-      val alarmMsg =
-        if (testedProtocolVersion >= ProtocolVersion.v35)
-          "Batch contains envelope with max bytes exceeded. The limit is 1000 bytes."
-        else
-          s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
+      val alarmMsg = "Batch contains envelope with max bytes exceeded. The limit is 1000 bytes."
 
       loggerFactory.assertLogs(
         sendAndCheckError(request) { case ex: StatusRuntimeException =>

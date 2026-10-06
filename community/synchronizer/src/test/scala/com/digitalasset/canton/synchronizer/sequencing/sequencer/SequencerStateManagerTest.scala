@@ -113,7 +113,6 @@ class SequencerStateManagerTest
     senderSignedSubmissionRequest(
       sender,
       Recipients.cc(alice),
-      topologyTimestamp = Some(ts1),
       maxSequencingTime = maxSequencingTime,
       aggregationRule = Some(rule),
     )

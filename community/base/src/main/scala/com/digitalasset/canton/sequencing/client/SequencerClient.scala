@@ -124,7 +124,7 @@ import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.{nowarn, unused}
+import scala.annotation.unused
 import scala.compat.java8.DurationConverters.FiniteDurationops
 import scala.concurrent.*
 import scala.concurrent.duration.*
@@ -349,7 +349,7 @@ abstract class SequencerClientImpl(
       request: SubmissionRequest,
       maxRequestSize: MaxRequestSize,
   ): Either[SendAsyncClientError, Unit] =
-    if (protocolVersion <= ProtocolVersion.v35) Either.unit
+    if (protocolVersion == ProtocolVersion.v35) Either.unit
     else
       for {
         uncompressedBatch <- request.batch.toClosedUncompressedBatchResult.leftMap(err =>
@@ -364,7 +364,7 @@ abstract class SequencerClientImpl(
           ),
         )
       } yield ()
-  @nowarn("cat=deprecation")
+
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
       timestamps: SendRequestTimestamps,
@@ -390,7 +390,6 @@ abstract class SequencerClientImpl(
             messageId,
             Batch.closeEnvelopes(batch),
             timestamps.maxSequencingTime,
-            timestamps.topologyTimestamp,
             aggregationRule,
             cost,
             SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion),
@@ -450,7 +449,6 @@ abstract class SequencerClientImpl(
                 psid,
                 messageIdO = None,
                 Batch(List.empty, protocolVersion),
-                topologyTimestampO = None,
                 Option.empty[TrafficReceipt],
               )
             )
@@ -1125,25 +1123,14 @@ abstract class SequencerClientImpl(
     def ack(
         request: AcknowledgeRequest,
         approximateSnapshot: SyncCryptoApi,
-        protocolVersion: ProtocolVersion,
     ): EitherT[FutureUnlessShutdown, String, Boolean] = for {
       signedRequest <- requestSigner.signRequest(
         request,
         HashPurpose.AcknowledgementSignature,
         approximateSnapshot,
-        // In PV34, session signing keys are not intended to be used. However, to maintain the
-        // previous behavior, we do not assign an end validity period and simply let Canton choose
-        // a session signing key that is valid for the current approximate signing timestamp.
-        if (protocolVersion < ProtocolVersion.v35)
-          Some(
-            SigningTimestampOverrides(
-              clock.now,
-              None,
-            )
-          )
-        // In PV35, acknowledgements are signed and verified using the same `fixed` timestamp - the timestamp
+        // Acknowledgements are signed and verified using the same `fixed` timestamp - the timestamp
         // being acknowledged.
-        else None,
+        signingTimestampOverrides = None,
       )
       acceptableSequencersO <- EitherT.right(
         getAcceptableSequencers(approximateSnapshot.ipsSnapshot)
@@ -1154,18 +1141,14 @@ abstract class SequencerClientImpl(
     if (LogicalUpgradeTime.canProcessKnowingPredecessor(synchronizerPredecessor, timestamp)) {
       val request = AcknowledgeRequest(member, timestamp, protocolVersion)
       for {
-        snapshot <- EitherT.liftF(
-          if (protocolVersion < ProtocolVersion.v35)
-            syncCryptoClient.currentSnapshotApproximation
-          else syncCryptoClient.snapshot(timestamp)
-        )
+        snapshot <- EitherT.liftF(syncCryptoClient.snapshot(timestamp))
         synchronizerSuccessor <- EitherT
           .liftF(snapshot.ipsSnapshot.announcedLsu())
           .map(_.map { case (successor, _) => successor })
 
         result <-
           if (LogicalUpgradeTime.canProcessKnowingSuccessor(synchronizerSuccessor, timestamp)) {
-            ack(request, snapshot, protocolVersion)
+            ack(request, snapshot)
           } else {
             logger.debug(
               s"Not acknowledging the timestamp $timestamp past the upgrade time (${synchronizerSuccessor

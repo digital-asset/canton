@@ -125,10 +125,7 @@ class ParticipantTopologyTerminateProcessing(
           )
         events = effectiveStateChanges.headOption.flatMap(getNewEvents)
 
-        _ <-
-          if (store.protocolVersion >= ProtocolVersion.v35) {
-            events.traverse(processPartyHostingEvents)
-          } else { FutureUnlessShutdown.unit }
+        _ <- events.traverse(processPartyHostingEvents)
 
         _ <- FutureUnlessShutdown.lift(
           events

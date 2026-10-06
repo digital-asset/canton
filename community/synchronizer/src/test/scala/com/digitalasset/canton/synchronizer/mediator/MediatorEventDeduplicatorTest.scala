@@ -42,7 +42,7 @@ import scala.util.Random
 
 import TestVerdictSender.Result
 
-class MediatorEventDeduplicatorTest
+final class MediatorEventDeduplicatorTest
     extends BaseTestWordSpec
     with HasExecutionContext
     with HasTestCloseContext {
@@ -382,7 +382,7 @@ class MediatorEventDeduplicatorTest
           requestId: RequestId,
           batch: Batch[DefaultOpenEnvelope],
           decisionTime: CantonTimestamp,
-          aggregationRule: Option[AggregationRule],
+          aggregationRule: AggregationRule,
           sendVerdictWithDelay: Option[Duration],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
         FutureUnlessShutdown.never

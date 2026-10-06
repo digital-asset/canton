@@ -177,6 +177,12 @@ object UnassignmentRequest {
         _.targetValidationPackageId.unwrap,
       )
 
+      _ <- ReassignmentValidation.checkMaxSerializationVersion(
+        ReassignmentRef.ContractIdRef(contractIds),
+        targetPsid,
+        contracts,
+      )
+
     } yield {
       val unassignmentRequest = UnassignmentRequest(
         submitterMetadata,
@@ -194,5 +200,4 @@ object UnassignmentRequest {
       )
     }
   }
-
 }

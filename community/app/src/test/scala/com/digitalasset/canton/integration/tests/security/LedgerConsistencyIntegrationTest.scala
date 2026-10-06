@@ -107,7 +107,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
     with HasProgrammableSequencer
     with HasCycleUtils {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+  // Disabling the check on purpose, since this test class tests various scenarios with inconsistent state
+  override val enableAcsDigestConsistencyCheck: Boolean = false
 
   // Using AtomicRef, because this gets read from various threads.
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()

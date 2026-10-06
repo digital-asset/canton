@@ -226,7 +226,31 @@ final class ProtobufCompatibilityReaderTest
       // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
     ),
+    (3, 6) -> Seq(
+      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
+      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionRequest" was deleted from file.""",
+      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
+      """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
+      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1000" with name "unpack_template" on message "Update" was deleted.""",
+      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1001" with name "unpack_interface" on message "Update" was deleted.""",
+      // Removal of pv=34
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved name "lookup_by_key" on message "ActionDescription" was deleted.""",
+      """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved range "[4]" on message "ActionDescription" is missing values: [4] were removed.""",
+      // Adding of new StaticSynchronizerParameters v32 in other messages
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "6" with name "v32" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
+      """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
+    ),
   )
+
+  // 3.6 and later releases already ship the current google protobuf files
+  private def googleProtobufBreakingChanges(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 6))) breakingChangesInGoogleProtobuf else Seq.empty
 
   val breakingChangesInGoogleProtobuf = Seq(
     """google/protobuf/descriptor.proto:Previously present field "42" with name "php_generic_services" on message "FileOptions" was deleted.""",
@@ -316,7 +340,7 @@ final class ProtobufCompatibilityReaderTest
             val acceptedBreakingChanges =
               acceptedBreakingChangesByVersion(
                 majorMinor
-              ) ++ breakingChangesInGoogleProtobuf ++ removalOfPv34
+              ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

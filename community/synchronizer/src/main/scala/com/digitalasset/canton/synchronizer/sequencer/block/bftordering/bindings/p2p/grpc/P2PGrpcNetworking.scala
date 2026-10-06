@@ -21,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.stub.StreamObserver
 
 import scala.concurrent.ExecutionContextExecutor
@@ -146,6 +147,7 @@ object P2PGrpcNetworking {
   private[grpc] def createNettyClientChannelBuilder(
       clientChannelBuilder: ClientChannelBuilder,
       endpointConfig: P2PEndpointConfig,
+      channelCustomizer: NettyChannelBuilder => Unit = _ => (),
   )(implicit executionContextExecutor: ExecutionContextExecutor) =
     clientChannelBuilder.create(
       endpoint = Endpoint(endpointConfig.address, endpointConfig.port),
@@ -157,6 +159,7 @@ object P2PGrpcNetworking {
       //  as the ordering protocol itself provides resilience.
       loadBalancingPolicy = None,
       healthCheck = false,
+      channelCustomizer = channelCustomizer,
     )
 
   private[grpc] def completeGrpcStreamObserver(

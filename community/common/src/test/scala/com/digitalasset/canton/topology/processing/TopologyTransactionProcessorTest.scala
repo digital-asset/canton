@@ -170,7 +170,6 @@ abstract class TopologyTransactionProcessorTest
               Seq(
                 HostingParticipant(participant1, ParticipantPermission.Submission)
               ),
-              isOffline = false,
             ),
             key1,
           )
@@ -181,7 +180,6 @@ abstract class TopologyTransactionProcessorTest
               party1b,
               threshold = PositiveInt.one,
               Seq(HostingParticipant(participant1, ParticipantPermission.Observation)),
-              isOffline = false,
             ),
             key1,
             serial = PositiveInt.one,
@@ -192,7 +190,6 @@ abstract class TopologyTransactionProcessorTest
               party1b,
               threshold = PositiveInt.one,
               Seq(HostingParticipant(participant1, ParticipantPermission.Observation)),
-              isOffline = false,
             ),
             key1,
             serial = PositiveInt.three,
@@ -313,7 +310,6 @@ abstract class TopologyTransactionProcessorTest
               party6,
               threshold = PositiveInt.one,
               Seq(HostingParticipant(participant1, permission)),
-              isOffline = false,
             ),
             signingKeys = signingKeys,
             serial = serial,

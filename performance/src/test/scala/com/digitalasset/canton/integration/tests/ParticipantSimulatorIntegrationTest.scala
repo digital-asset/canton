@@ -42,8 +42,6 @@ sealed trait ParticipantSimulatorIntegrationTest
 
   override protected def numPermits: PositiveInt = PositiveInt.two
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(

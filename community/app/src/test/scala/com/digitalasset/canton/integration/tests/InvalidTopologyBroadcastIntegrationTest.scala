@@ -19,7 +19,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.v30.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.digitalasset.canton.crypto.v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_UNSPECIFIED
 import com.digitalasset.canton.crypto.{Fingerprint, Signature, SigningKeyUsage, v30}
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.{
@@ -613,7 +612,6 @@ class InvalidTopologyBroadcastIntegrationTest
       signedBy: Fingerprint,
       serial: PositiveInt,
       op: TopologyChangeOp = TopologyChangeOp.Replace,
-      topologyTimestamp: Option[CantonTimestamp] = None,
       recipient: Recipients = Recipients.cc(AllMembersOfSynchronizer),
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
@@ -634,7 +632,6 @@ class InvalidTopologyBroadcastIntegrationTest
         ),
       serial,
       op,
-      topologyTimestamp,
       recipient,
     )
   }
@@ -644,7 +641,6 @@ class InvalidTopologyBroadcastIntegrationTest
       mkSignatures: TopologyTransaction[?, ?] => NonEmpty[Seq[Signature]],
       serial: PositiveInt,
       op: TopologyChangeOp,
-      topologyTimestamp: Option[CantonTimestamp] = None,
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
   ): Unit = {
     val tx =
@@ -664,7 +660,6 @@ class InvalidTopologyBroadcastIntegrationTest
     maliciousP1
       .submitTopologyTransactionRequest(
         signedTx,
-        topologyTimestamp = topologyTimestamp,
         recipients = recipients,
       )
       .futureValueUS

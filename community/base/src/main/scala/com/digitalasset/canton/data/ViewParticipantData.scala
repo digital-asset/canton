@@ -111,7 +111,6 @@ final case class ViewParticipantData private (
       _ <- checkSubviewCoreOverlap
       _ <- checkExternalCallResults
       _ <- checkMaxSerializationVersion(protocolVersion)
-      _ <- checkKeyResolution(protocolVersion)
       _ <- rootActionE
     } yield this
 
@@ -237,13 +236,6 @@ final case class ViewParticipantData private (
         )
       case _ => Right(())
     }
-
-  private def checkKeyResolution(protocolVersion: ProtocolVersion): Either[String, Unit] =
-    Either.cond(
-      !(protocolVersion < ProtocolVersion.v35 && keyResolution.nonEmpty),
-      (),
-      s"Keys not supported in $protocolVersion, but found ${keyResolution.size} keys.",
-    )
 
   private lazy val rootActionE: Either[String, RootAction] =
     actionDescription match {

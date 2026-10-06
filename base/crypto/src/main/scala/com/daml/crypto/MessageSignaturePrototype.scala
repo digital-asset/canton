@@ -3,7 +3,6 @@
 
 package com.daml.crypto
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.math.ec.custom.sec.SecP256K1Curve
 
 import java.security.interfaces.ECPublicKey
@@ -11,7 +10,6 @@ import java.security.{
   InvalidKeyException,
   NoSuchProviderException,
   PublicKey,
-  Security,
   Signature,
   SignatureException,
 }
@@ -21,13 +19,11 @@ import java.security.{
  * and used.
  */
 final class MessageSignaturePrototype(val algorithm: String) {
-  Security.addProvider(new BouncyCastleProvider)
-
   @throws(classOf[NoSuchProviderException])
   @throws(classOf[InvalidKeyException])
   @throws(classOf[SignatureException])
   def verify(signature: Array[Byte], message: Array[Byte], publicKey: PublicKey): Boolean = {
-    val signatureVerify = Signature.getInstance(algorithm, "BC")
+    val signatureVerify = Signature.getInstance(algorithm, Providers.bouncyCastle)
 
     signatureVerify.initVerify(publicKey)
     signatureVerify.update(message)

@@ -109,14 +109,14 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
   private def testVersionedCommon[T <: HasVersionedWrapper[?]](
       companion: HasVersionedMessageCompanionCommon[T],
       protocolVersion: ProtocolVersion,
-      deserializer: ByteString => ParsingResult[?],
+      deserializer: ByteString => ParsingResult[T],
       defaults: List[DefaultValueUntilExclusive[T]],
   )(implicit arb: Arbitrary[T]): Assertion =
     forAll { (instance: T) =>
-      val proto = instance.toByteString(protocolVersion)
+      val byteString1 = instance.toByteString(protocolVersion)
 
       val deserializedInstance = clue(s"Deserializing serialized ${companion.name}")(
-        deserializer(proto).value
+        deserializer(byteString1).value
       )
 
       val updatedInstance = defaults.foldLeft(instance) {
@@ -124,11 +124,20 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
           if (protocolVersion < untilExclusive) transformer(instance) else instance
       }
 
+      val byteString2 = deserializedInstance.toByteString(protocolVersion)
+
       withClue(
         s"Comparing ${companion.name} with (de)serialization done for pv=$protocolVersion"
       ) {
         updatedInstance shouldBe deserializedInstance
       }
+
+      withClue(
+        s"Comparing bytestring for ${companion.name} with (de)serialization done for pv=$protocolVersion"
+      ) {
+        byteString2 shouldBe byteString1
+      }
+
     }
 
   /*
@@ -149,11 +158,11 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
 
     val start = System.nanoTime()
     val result = forAll { (instance: T) =>
-      val proto =
+      val byteString1 =
         clue(s"Serializing instance of ${companion.name}")(instance.toByteString)
 
       val deserializedInstance =
-        clue(s"Deserializing serialized ${companion.name}")(deserializer(proto).value)
+        clue(s"Deserializing serialized ${companion.name}")(deserializer(byteString1).value)
 
       withClue(
         s"Comparing ${companion.name} with representative ${instance.representativeProtocolVersion}"
@@ -161,7 +170,16 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
         instance shouldBe deserializedInstance
         instance.representativeProtocolVersion shouldBe deserializedInstance.representativeProtocolVersion
       }
+
+      val byteString2 = deserializedInstance.asInstanceOf[T].toByteString
+
+      withClue(
+        s"Comparing bytestrings for ${companion.name} with (de)serialization done with representative ${instance.representativeProtocolVersion}"
+      ) {
+        byteString2 shouldBe byteString1
+      }
     }
+
     val elapsed = Duration.fromNanos(System.nanoTime() - start)
 
     if (elapsed > warnWhenTestRunsLongerThan)

@@ -27,6 +27,14 @@ on:
         default: false
         description: Allow empty merged current timings in merge_timings.py.
         type: boolean
+      datadog_test_optimization:
+        required: false
+        default: false
+        description: >-
+          When true, append a link to the Datadog Test Optimization results for
+          this commit to the run summary. Set by callers that enable the JUnit
+          upload experiment in cleanup_test_job (see PR #35868).
+        type: boolean
 
 permissions:
   contents: read
@@ -106,6 +114,20 @@ jobs:
               --summary-path "$GITHUB_STEP_SUMMARY" \
               --previous-state "$CALLER_JOB/.summary-state/previous/summary-state.json" \
               --state-output "$CALLER_JOB/.summary-state/summary-state.json"
+
+      - name: Link Datadog Test Optimization results
+        # Experiment (PR #35868): the JUnit upload happens four levels deep inside
+        # the Cleanup Test Job step, so surface a one-click link to the per-test
+        # and per-suite results on the run summary. Gated on the same flag the
+        # upload uses. github.sha is the commit datadog-ci tagged the results with.
+        if: ${{ !cancelled() && inputs.datadog_test_optimization }}
+        shell: bash
+        run: |
+          {
+            echo "### Datadog Test Optimization"
+            echo
+            echo "[View per-test and per-suite results for this commit](https://app.datadoghq.com/ci/test-runs?query=%40git.commit.sha%3A${{ github.sha }})"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload summary state
         uses: actions/upload-artifact@v7

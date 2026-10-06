@@ -46,6 +46,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDe
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractSerializationVersionNotSupported,
   ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   PackageIdUnknownOrUnvetted,
@@ -104,7 +105,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag, ResourceUtil}
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -113,6 +115,7 @@ import com.digitalasset.canton.{
   LedgerUserId,
   LfPackageId,
   LfPartyId,
+  ProtocolVersionChecksAsyncWordSpec,
   ReassignmentCounter,
   RequestCounter,
   SequencerCounter,
@@ -133,6 +136,7 @@ final class UnassignmentProcessingStepsTest
     with BaseTest
     with HasExecutorService
     with HasTestCloseContext
+    with ProtocolVersionChecksAsyncWordSpec
     with FailOnShutdown {
 
   private implicit val ec: ExecutionContext = executorService
@@ -501,6 +505,22 @@ final class UnassignmentProcessingStepsTest
 
     "fail if contract does not authenticate against target validation package" in {
       testInvalidRepresentativeContract(targetValidationPackageId.unwrap)
+    }
+
+    "fail if the contract serialization version is not supported by the target synchronizer" onlyRunWithOrLessThan ProtocolVersion.latest in {
+      val devContract =
+        ExampleContractFactory.modify(contract, version = Some(LfSerializationVersion.VDev))
+
+      mkUnassignmentResultForContract(
+        testingTopology,
+        testingTopology,
+        devContract,
+      ).left.value shouldBe ContractSerializationVersionNotSupported(
+        reassignmentRef = ReassignmentRef(devContract.contractId),
+        targetSynchronizerId = targetSynchronizer.unwrap,
+        maxSynchronizerVersion = maxSerializationVersionForProtocolVersion(testedProtocolVersion),
+        contractVersion = LfSerializationVersion.VDev,
+      )
     }
 
     "fail if submitting party is not hosted on participant" in {
@@ -1132,7 +1152,6 @@ final class UnassignmentProcessingStepsTest
         sourceSynchronizer.unwrap,
         Some(MessageId.tryCreate("msg-0")),
         batch,
-        None,
         Option.empty[TrafficReceipt],
       )
     }

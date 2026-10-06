@@ -57,7 +57,7 @@ class InMemoryAcsDigestJournal[K](
     lookupInternal(key, toInclusive)
   }
 
-  override def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, AtInclusive)])(implicit
+  override def bulkLookup(keysUptoInclusive: Seq[(K, AtInclusive)])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[(K, Offset), store.AcsDigestStore.ParticipantAcsDigestUpdate[K]]] = {
     val result = keysUptoInclusive.flatMap { case item @ (key, toInclusive) =>

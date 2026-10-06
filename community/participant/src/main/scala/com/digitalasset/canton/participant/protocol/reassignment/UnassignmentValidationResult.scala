@@ -136,6 +136,9 @@ object UnassignmentValidationResult {
       multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.CommonValidationResult {
 
+    // The contract must be serializable on the source synchronizer
+    override val contractSerializationResult: Option[ReassignmentValidationError] = None
+
     // During unassignment the reassignment id is computed, rather than being passed in
     // so there's no need to validate it.
     def reassignmentIdResult: Option[ReassignmentValidationError] = None

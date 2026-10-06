@@ -23,7 +23,6 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
   UploadDarFileRequest,
   ValidateDarFileRequest,
 }
-import com.daml.ledger.api.v2.admin.participant_pruning_service.PruneResponse
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
@@ -675,10 +674,10 @@ trait ParticipantTestContext extends UserManagementTestContext {
       identityProviderId: Option[String] = None,
   ): Future[Set[String]]
 
-  def prune(
+  def pruneMustFail(
       pruneUpTo: Long,
-      attempts: Int = 10,
-  ): Future[PruneResponse]
+      message: String,
+  ): Future[Throwable]
 
   /** We are retrying a command submission + pruning to get a safe-to-prune offset for Canton.
     * That's because in Canton pruning will fail unless ACS commitments have been exchanged between
@@ -689,6 +688,13 @@ trait ParticipantTestContext extends UserManagementTestContext {
       pruneUpTo: Long,
       party: Party,
       dummyCommand: Party => JList[Command],
+  )(implicit ec: ExecutionContext): Future[Unit]
+
+  def pruneWithAcsCheck(
+      parties: Option[Seq[Party]],
+      pruneUpTo: Long,
+      attempts: Int = 10,
+      activeAtOffset0: Option[Long] = None,
   )(implicit ec: ExecutionContext): Future[Unit]
 
   def latestPrunedOffsets(): Future[(Long, Long)]

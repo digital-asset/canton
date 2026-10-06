@@ -566,7 +566,6 @@ class IssSegmentModule[E <: Env[E]](
       context: E#ActorContextT[ConsensusSegment.Message],
       traceContext: TraceContext,
   ): Unit = {
-    logger.debug(s"$logPrefix. Starting consensus process.")
     val orderedBlock =
       myOriginalLeaderSegmentState.assignToSlot(orderingBlock, latestCompletedEpochLastCommits)
     val prePrepare =
@@ -577,7 +576,14 @@ class IssSegmentModule[E <: Env[E]](
         orderedBlock.canonicalCommitSet,
         from = thisNode,
       )
-    startTracingBlock(orderedBlock.metadata.blockNumber, orderingBlock)
+    val blockNumber = orderedBlock.metadata.blockNumber
+    val epochNumber = orderedBlock.metadata.epochNumber
+    val originalLeader = myOriginalLeaderSegmentState.segment.originalLeader
+    logger.info(
+      s"$logPrefix. Starting consensus process for block $blockNumber in epoch $epochNumber " +
+        s"with original leader $originalLeader"
+    )
+    startTracingBlock(blockNumber, orderingBlock)
     signMessage(prePrepare)(context, traceContext)
   }
 
@@ -594,11 +600,14 @@ class IssSegmentModule[E <: Env[E]](
   ): Unit = {
     val orderedBlock =
       myOriginalLeaderSegmentState.assignToSlot(orderingBlock, latestCompletedEpochLastCommits)
+    val epochNumber = orderedBlock.metadata.epochNumber
+    val originalLeader = myOriginalLeaderSegmentState.segment.originalLeader
     val allEmptyBlocks = myOriginalLeaderSegmentState.assignAllEmptyBlocksToRestOfSegment()
     val blocks = orderedBlock +: allEmptyBlocks
 
     logger.info(
-      s"$logPrefix. Starting consensus process on ${blocks.size} blocks to flush segment."
+      s"$logPrefix. Starting consensus process on blocks ${blocks.map(_.metadata.blockNumber)} in epoch $epochNumber " +
+        s"with original leader $originalLeader to flush segment."
     )
     metrics.consensus.flushedBlocks.mark(allEmptyBlocks.size.toLong)
 

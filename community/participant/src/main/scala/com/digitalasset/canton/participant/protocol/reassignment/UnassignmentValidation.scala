@@ -248,6 +248,15 @@ private[reassignment] object UnassignmentValidation {
               psid = parsedRequest.fullViewTree.targetSynchronizer.unwrap,
             )
         )
+
+        contractSerializationErrors <- validationErrorFromUnitEither(
+          ReassignmentValidation.checkMaxSerializationVersion(
+            parsedRequest.fullViewTree.reassignmentRef,
+            parsedRequest.fullViewTree.targetSynchronizer,
+            parsedRequest.fullViewTree.contracts,
+          )
+        )
+
       } yield {
         val contractAuthenticationResultF =
           ReassignmentValidation.authenticateContractsAgainstTarget(
@@ -256,7 +265,12 @@ private[reassignment] object UnassignmentValidation {
           )
         ReassigningParticipantValidationResult(
           contractAuthenticationResultF,
-          participantsErrors.toList ++ packageVettingErrors.toList ++ multiSynchronizerCheckResult.toList,
+          Seq(
+            participantsErrors,
+            packageVettingErrors,
+            multiSynchronizerCheckResult,
+            contractSerializationErrors,
+          ).flatten,
         )
       }
 

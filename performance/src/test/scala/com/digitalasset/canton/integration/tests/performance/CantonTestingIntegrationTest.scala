@@ -17,8 +17,6 @@ import scala.concurrent.duration.DurationInt
 
 class CantonTestingIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(

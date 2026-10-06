@@ -9,11 +9,15 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.PackageIdUnknownOrUnvetted
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractSerializationVersionNotSupported,
+  PackageIdUnknownOrUnvetted,
+}
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   LfContractId,
+  LfSerializationVersion,
   ReassignmentId,
   Stakeholders,
 }
@@ -22,11 +26,14 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{ContractValidator, EitherTUtil, MonadUtil, ReassignmentTag}
+import com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfPackageId, LfPartyId, protocol}
 
 import scala.concurrent.ExecutionContext
+import scala.math.Ordered.orderingToOrdered
 
 object ReassignmentValidation {
 
@@ -82,16 +89,18 @@ object ReassignmentValidation {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
-    for {
-      participants <- topologySnapshot
-        .activeParticipantsOfAll(stakeholders.all.toList)
-        .leftMap(inactiveParties =>
-          ReassignmentValidationError.StakeholderHostingErrors(
-            s"The following stakeholders are not active: $inactiveParties"
+    EitherTUtil.ifThenET(isMultiSynchronizerFlagRequired(psid))(
+      for {
+        participants <- topologySnapshot
+          .activeParticipantsOfAll(stakeholders.all.toList)
+          .leftMap(inactiveParties =>
+            ReassignmentValidationError.StakeholderHostingErrors(
+              s"The following stakeholders are not active: $inactiveParties"
+            )
           )
-        )
-      _ <- checkMultiSynchronizerEnabled(topologySnapshot, participants, psid)
-    } yield ()
+        _ <- checkMultiSynchronizerEnabled(topologySnapshot, participants, psid)
+      } yield ()
+    )
 
   def checkMultiSynchronizerEnabled(
       topologySnapshot: TopologySnapshot,
@@ -101,7 +110,7 @@ object ReassignmentValidation {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
-    if (psid.protocolVersion >= ProtocolVersion.v35)
+    EitherTUtil.ifThenET(isMultiSynchronizerFlagRequired(psid))(
       for {
         participantWithMultiSynchronizerEnabled <- EitherT.right(
           topologySnapshot.participantsWithSupportedFeature(
@@ -120,7 +129,13 @@ object ReassignmentValidation {
           )
         )
       } yield ()
-    else EitherTUtil.unitUS
+    )
+
+  /** The `ParticipantTopologyFeatureFlag.EnableMultiSynchronizer` flag is only required for
+    * reassignments before protocol version 37.
+    */
+  def isMultiSynchronizerFlagRequired(psid: PhysicalSynchronizerId): Boolean =
+    psid.protocolVersion < ProtocolVersion.v37
 
   def checkStakeholders(
       reassignmentRequest: FullReassignmentViewTree
@@ -242,4 +257,33 @@ object ReassignmentValidation {
         topologySnapshot.timestamp,
       )
       .leftMap(u => PackageIdUnknownOrUnvetted(contractIds, u.unknownTo, synchronizerId))
+
+  def checkMaxSerializationVersion(
+      reassignmentRef: ReassignmentRef,
+      targetPsId: Target[PhysicalSynchronizerId],
+      batch: ContractsReassignmentBatch,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] = {
+
+    val targetSynchronizerId: PhysicalSynchronizerId = targetPsId.unwrap
+    val maxSynchronizerVersion: LfSerializationVersion = maxSerializationVersionForProtocolVersion(
+      targetPsId.unwrap.protocolVersion
+    )
+    val maxContractVersion: LfSerializationVersion =
+      protocol.maxSerializationVersion(batch.contracts.map(_.contract.inst.version))
+
+    EitherT.cond(
+      maxSynchronizerVersion >= maxContractVersion,
+      (),
+      ContractSerializationVersionNotSupported(
+        reassignmentRef = reassignmentRef,
+        targetSynchronizerId = targetSynchronizerId,
+        maxSynchronizerVersion = maxSynchronizerVersion,
+        contractVersion = maxContractVersion,
+      ),
+    )
+
+  }
+
 }

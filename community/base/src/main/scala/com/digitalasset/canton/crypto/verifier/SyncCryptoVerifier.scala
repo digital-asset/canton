@@ -47,7 +47,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.protobuf.ByteString
@@ -379,14 +378,6 @@ class SyncCryptoVerifier(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
     signature.signatureDelegation match {
-      case Some(_) if staticSynchronizerParameters.protocolVersion < ProtocolVersion.v35 =>
-        EitherT.leftT[FutureUnlessShutdown, Unit](
-          SignatureCheckError.UnsupportedDelegationSignatureError(
-            s"Session signing keys are not supposed to be used with protocol version " +
-              s"${staticSynchronizerParameters.protocolVersion} and must be used with protocol version " +
-              s"${ProtocolVersion.v35} or higher."
-          )
-        )
       case Some(signatureDelegation) =>
         verifySignatureWithSessionKey(
           signatureDelegation,
@@ -532,29 +523,26 @@ class SyncCryptoVerifier(
             ).fold(
               _.invalid,
               _ => {
-                if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v35) {
-                  val fp = signature.authorizingLongTermKey
-                  keyMembers.get(fp) match {
-                    case Some(Seq(singleMember)) =>
-                      singleMember.valid[SignatureCheckError]
-                    case Some(members) =>
-                      // The key fingerprint is shared by multiple members in the group.
-                      // We cannot reliably attribute the signature to a specific member,
-                      // so we reject it to prevent threshold bypass via misattribution.
-                      SignatureWithWrongKey(
-                        s"Key $fp is shared by multiple group members " +
-                          s"(${members.mkString(", ")}); cannot attribute signature unambiguously"
-                      ).invalid
-                    case None =>
-                      // Should not happen since verifySignatureInternal already validated the key,
-                      // but handle defensively.
-                      SignatureWithWrongKey(
-                        s"Key $fp used to sign is not associated with any member in $groupName"
-                      ).invalid
-                  }
-                } else {
-                  keyMembers(signature.authorizingLongTermKey).valid[SignatureCheckError]
+                val fp = signature.authorizingLongTermKey
+                keyMembers.get(fp) match {
+                  case Some(Seq(singleMember)) =>
+                    singleMember.valid[SignatureCheckError]
+                  case Some(members) =>
+                    // The key fingerprint is shared by multiple members in the group.
+                    // We cannot reliably attribute the signature to a specific member,
+                    // so we reject it to prevent threshold bypass via misattribution.
+                    SignatureWithWrongKey(
+                      s"Key $fp is shared by multiple group members " +
+                        s"(${members.mkString(", ")}); cannot attribute signature unambiguously"
+                    ).invalid
+                  case None =>
+                    // Should not happen since verifySignatureInternal already validated the key,
+                    // but handle defensively.
+                    SignatureWithWrongKey(
+                      s"Key $fp used to sign is not associated with any member in $groupName"
+                    ).invalid
                 }
+
               },
             )
         }

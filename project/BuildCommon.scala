@@ -2,6 +2,7 @@ import java.io.File
 import BufPlugin.autoImport.bufLintCheck
 import DamlPlugin.autoImport.*
 import Dependencies.*
+import SharedDependencies.*
 import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
 import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
@@ -48,7 +49,7 @@ object BuildCommon {
       addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")),
       addCommandAlias(
         "lint",
-        "; scalafmtCantonCheck; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
+        "; scalafmtCantonCheck; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck; checkSharedDependenciesUpToDate",
       ),
       addCommandAlias("scalafixCheck", s"${alsoTest("scalafix --check")}"),
       addCommandAlias(
@@ -520,8 +521,8 @@ object BuildCommon {
     Compile / scalacOptions ++= Seq("--release", "17"),
     Compile / javacOptions ++= Seq("--release", "17"),
     Compile / compile / javacOptions += "-proc:full",
-    // Make sure that shared dependencies with Daml repo force their version
-    dependencyOverrides ++= Dependencies.resolveDependency.sharedDependencyMap.values.toSeq,
+    // Make sure that shared dependencies with the Daml repo force their version
+    dependencyOverrides ++= SharedDependencies.allModuleIds,
     publish / skip := true,
   )
 
@@ -1213,7 +1214,7 @@ object BuildCommon {
           dropwizard_metrics_core % Test,
           logback_classic % Runtime,
           logback_core % Runtime,
-          scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
+          scalapb_runtime_protobuf, // not sufficient to include only through the `common` dependency - race conditions ensue
           scaffeine,
         ),
         Compile / PB.targets := Seq(
@@ -1258,7 +1259,7 @@ object BuildCommon {
           pekko_stream_testkit % Test,
           scala_logging,
           scalacheck % Test,
-          scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
+          scalapb_runtime_protobuf, // not sufficient to include only through the `common` dependency - race conditions ensue
           scalatest % Test,
           scalatestScalacheck % Test,
         ),
@@ -1317,7 +1318,7 @@ object BuildCommon {
         sharedCantonCommunitySettings,
         enablePublishLibrary,
         libraryDependencies ++= Seq(
-          scalapb_runtime // not sufficient to include only through the `common` dependency - race conditions ensue
+          scalapb_runtime_protobuf // not sufficient to include only through the `common` dependency - race conditions ensue
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -1435,8 +1436,8 @@ object BuildCommon {
         )),
       )
       .dependsOn(
-        `community-app` % "compile->test",
-        `community-synchronizer` % "compile->test",
+        `community-app`,
+        `community-synchronizer`,
         `community-testing`,
         `ledger-api-core`,
       )
@@ -2110,7 +2111,7 @@ object BuildCommon {
             pekko_stream_testkit % Test,
             protostuff_parser,
             scalapb_json4s,
-            scalapb_runtime,
+            scalapb_runtime_protobuf,
             scalapb_runtime_grpc,
             sttp_apiscpec_asyncapi_circe_yaml,
             sttp_apiscpec_openapi_circe_yaml,
@@ -2647,7 +2648,7 @@ object BuildCommon {
             )
             .value,
           libraryDependencies ++= Seq(
-            scalapb_runtime,
+            scalapb_runtime_protobuf,
             scalapb_runtime_grpc,
           ),
           addProtobufFilesToHeaderCheck(Compile),
@@ -2694,7 +2695,7 @@ object BuildCommon {
             pekko_slf4j % "compile->compile;test->test",
             pureconfig_core,
             pureconfig_generic,
-            scalapb_runtime,
+            scalapb_runtime_protobuf,
             scalapb_runtime_grpc,
             logback_classic % Runtime,
             scalatest % Test,
@@ -3001,7 +3002,7 @@ object BuildCommon {
           pekko_actor,
           pekko_stream,
           reactivestreams,
-          scalapb_runtime,
+          scalapb_runtime_protobuf,
           scalatest,
           slf4j_api,
           typesafe_config,
@@ -3228,7 +3229,7 @@ object BuildCommon {
         headerSources / excludeFilter := HiddenFileFilter || "*",
         headerResources / excludeFilter := HiddenFileFilter || "*",
         libraryDependencies ++= Seq(
-          scalapb_runtime,
+          scalapb_runtime_protobuf,
           scalapb_runtime_grpc,
           // the grpc services is necessary so we can build the
           // scala version of the health services, without
@@ -4256,7 +4257,7 @@ object BuildCommon {
         ),
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          scalapb_runtime,
+          scalapb_runtime_protobuf,
           scalapb_runtime_grpc,
         ),
         headerResources / excludeFilter := "*.proto",

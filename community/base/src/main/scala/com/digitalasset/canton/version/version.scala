@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import cats.Id
 import com.digitalasset.canton.util.ReassignmentTag
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.google.protobuf.ByteString
 
 package object version {
@@ -156,4 +157,28 @@ package object version {
       Context,
       Dependency,
   ] = VersioningCompanionContextMemoization2F[Id, ValueClass, Context, ValueClass, Dependency]
+}
+
+object Errors {
+  def raiseCannotSerialize(name: String, pv: ProtocolVersion): Nothing =
+    raiseCannotSerialize(name, "protocol version", pv.toString, None)
+
+  def raiseCannotSerialize(
+      name: String,
+      rpv: RepresentativeProtocolVersion[?],
+      details: Option[String] = None,
+  ): Nothing =
+    raiseCannotSerialize(name, "representative protocol version", rpv.toString, details)
+
+  private def raiseCannotSerialize(
+      name: String,
+      versionKind: String,
+      version: String,
+      details: Option[String],
+  ): Nothing =
+    throw new IllegalStateException(
+      s"Cannot serialize instance of $name with $versionKind $version" + details.fold("")(str =>
+        s": $str"
+      )
+    )
 }

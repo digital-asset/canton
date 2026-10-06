@@ -842,6 +842,7 @@ trait IndexComponentTest
                 -1, // will be filled when contracts are stored in the participant contract store
               inst = contracts.head.inst,
             ),
+            representativePackageId = contracts.head.templateId.packageId,
           ),
           contracts.tail.map(contract =>
             Reassignment.Assign(
@@ -852,6 +853,7 @@ trait IndexComponentTest
                 internalContractId = -1,
                 inst = contract.inst,
               ),
+              representativePackageId = contracts.head.templateId.packageId,
             )
           )*
         ),
@@ -881,6 +883,7 @@ trait IndexComponentTest
               internalContractId = -1,
               inst = contracts.head.inst,
             ),
+            representativePackageId = contracts.head.templateId.packageId,
           ),
           contracts.tail.map(contract =>
             Reassignment.Assign(
@@ -891,6 +894,7 @@ trait IndexComponentTest
                 internalContractId = -1,
                 inst = contract.inst,
               ),
+              representativePackageId = contracts.head.templateId.packageId,
             )
           )*
         ),
@@ -953,6 +957,7 @@ trait IndexComponentTest
             internalContractId = -1, // filled when stored in the participant contract store
             inst = contract.inst,
           ),
+          representativePackageId = contract.templateId.packageId,
         )
       ),
       recordTime = recordTime,

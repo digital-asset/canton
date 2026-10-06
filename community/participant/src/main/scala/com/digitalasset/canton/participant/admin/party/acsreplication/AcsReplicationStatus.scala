@@ -9,10 +9,12 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
+  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
   AcsReplicationError,
   AcsReplicationFailed,
@@ -21,7 +23,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
   AgreementStatus,
   Disconnected,
   EphemeralSequencerChannelProgress,
-  PartyReplicationAuthorization,
+  PartyToParticipantTopologyTransaction,
 }
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationFileImporter
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationProcessor
@@ -40,12 +42,14 @@ import io.scalaland.chimney.dsl.*
 
 /** Internal state representation of the ACS replication process. Refer to acs_replication.proto
   * AcsReplicationStatus for the semantics.
+  *
+  * @param partyToParticipantTopologyTransaction
+  *   used only for status reporting
   */
 final case class AcsReplicationStatus(
     params: AcsReplicationParameters,
     agreementStatus: AgreementStatus,
-    // TODO (#35267) remove once authorization is no longer used in AcsReplicator
-    authorizationO: Option[PartyReplicationAuthorization],
+    partyToParticipantTopologyTransaction: Option[PartyToParticipantTopologyTransaction],
     replicationO: Option[AcsReplicationProgress],
     hasCompleted: Boolean,
     errorO: Option[AcsReplicationError],
@@ -74,8 +78,12 @@ final case class AcsReplicationStatus(
 
   def setAgreementStatus(newAgreementStatus: AgreementStatus): AcsReplicationStatus =
     copy(agreementStatus = newAgreementStatus)(representativeProtocolVersion)
-  def setAuthorization(newAuthorization: PartyReplicationAuthorization): AcsReplicationStatus =
-    copy(authorizationO = Some(newAuthorization))(representativeProtocolVersion)
+  def setTopologyTransaction(
+      newTopologyTransaction: PartyToParticipantTopologyTransaction
+  ): AcsReplicationStatus =
+    copy(partyToParticipantTopologyTransaction = Some(newTopologyTransaction))(
+      representativeProtocolVersion
+    )
   def modifyReplication(
       modify: Option[AcsReplicationProgress] => AcsReplicationProgress
   ): AcsReplicationStatus =
@@ -87,8 +95,6 @@ final case class AcsReplicationStatus(
   def modifyErrorO(
       modify: Option[AcsReplicationError] => Option[AcsReplicationError]
   ): AcsReplicationStatus = copy(errorO = modify(errorO))(representativeProtocolVersion)
-  def setTopologySerial(serial: PositiveInt): AcsReplicationStatus =
-    copy(params = params.copy(serial = serial))(representativeProtocolVersion)
 
   def ensureCanSetAgreement(paramsReceived: AcsReplicationParameters): Either[String, Unit] = for {
     _ <- Either.cond(
@@ -115,7 +121,7 @@ final case class AcsReplicationStatus(
   def toProtoV30: v30.AcsReplicationStatus = v30.AcsReplicationStatus(
     Some(params.toProtoV30),
     agreementStatus.toProtoV30,
-    authorizationO.map(_.toProtoV30),
+    partyToParticipantTopologyTransaction.map(_.toProtoV30),
     replicationO.map(_.toProtoV30),
     hasCompleted = hasCompleted,
     errorO.map(_.toProtoV30),
@@ -146,7 +152,7 @@ object AcsReplicationStatus
     prettyOfClass(
       param("params", _.params),
       param("agreement", _.agreementStatus),
-      paramIfDefined("authorization", _.authorizationO),
+      paramIfDefined("topology transaction", _.partyToParticipantTopologyTransaction),
       paramIfDefined("replication", _.replicationO),
       paramIfDefined("error", _.errorO),
       paramIfTrue("complete", _.hasCompleted),
@@ -160,14 +166,16 @@ object AcsReplicationStatus
     parametersP <- ProtoConverter.required("parameters", proto.parameters)
     parameters <- AcsReplicationParameters.fromProtoV30(parametersP)
     agreement <- AgreementStatus.fromProtoV30(proto.agreementStatus)
-    authorizationO <- proto.authorization.traverse(PartyReplicationAuthorization.fromProtoV30)
+    ptpTopologyTransaction <- proto.ptpTopologyTransaction.traverse(
+      PartyToParticipantTopologyTransaction.fromProtoV30
+    )
     replicationO <- proto.replication.traverse(AcsReplicationProgress.fromProtoV30)
     hasCompleted = proto.hasCompleted
     errorO <- proto.errorMessage.traverse(AcsReplicationError.fromProtoV30)
   } yield AcsReplicationStatus(
     parameters,
     agreement,
-    authorizationO,
+    ptpTopologyTransaction,
     replicationO,
     hasCompleted,
     errorO,
@@ -177,7 +185,7 @@ object AcsReplicationStatus
       params: AcsReplicationParameters,
       pv: ProtocolVersion,
       agreementStatus: AgreementStatus = AgreementStatus.NotProposed,
-      authorizationO: Option[PartyReplicationAuthorization] = None,
+      authorizationO: Option[PartyToParticipantTopologyTransaction] = None,
       replicationO: Option[AcsReplicationProgress] = None,
       hasCompleted: Boolean = false,
       errorO: Option[AcsReplicationError] = None,
@@ -198,8 +206,11 @@ object AcsReplicationStatus
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       targetParticipantId: ParticipantId,
-      serial: PositiveInt,
+      timestamp: CantonTimestamp,
       participantPermission: ParticipantPermission,
+      // Only needed on TP side but there it's required
+      // because TP needs to know how to process the replicated contracts.
+      acsReplicationDestination: AcsReplicationDestination = AcsReplicationDestination.Persistence,
   ) extends PrettyPrintingFromCompanion {
     def toProtoV30: v30.AcsReplicationStatus.AcsReplicationParameters =
       v30.AcsReplicationStatus.AcsReplicationParameters(
@@ -208,8 +219,9 @@ object AcsReplicationStatus
         synchronizerId.uid.toProtoPrimitive,
         sourceParticipantId.uid.toProtoPrimitive,
         targetParticipantId.uid.toProtoPrimitive,
-        serial.unwrap,
+        Some(timestamp.toProtoPrimitive),
         toPartyReplicationPermissionProtoV30(participantPermission),
+        acsReplicationDestination.toProtoV30,
       )
 
     private def toPartyReplicationPermissionProtoV30(
@@ -256,19 +268,21 @@ object AcsReplicationStatus
           "target_participant_uid",
         )
         .map(ParticipantId(_))
-      topologySerial <- ProtoConverter.parsePositiveInt(
-        "topology_serial",
-        proto.topologySerial,
-      )
+      timestampProto <- ProtoConverter.required("timestamp", proto.timestamp)
+      timestamp <- CantonTimestamp.fromProtoPrimitive(timestampProto)
       participantPermission <- fromParticipantPermissionProtoV30(proto.participantPermission)
+      acsReplicationDestination <- AcsReplicationDestination.fromProtoV30(
+        proto.acsReplicationDestination
+      )
     } yield AcsReplicationParameters(
       requestId,
       partyId,
       synchronizerId,
       sourceParticipantId,
       targetParticipantId,
-      topologySerial,
+      timestamp,
       participantPermission,
+      acsReplicationDestination,
     )
 
     private def fromParticipantPermissionProtoV30(
@@ -292,7 +306,13 @@ object AcsReplicationStatus
       )
 
     def fromAgreementParams(agreement: AcsReplicationAgreementParams): AcsReplicationParameters =
-      agreement.transformInto[AcsReplicationParameters]
+      agreement
+        .into[AcsReplicationParameters]
+        // Agreement parameters don't contain the replication destination because it's TP-specific property
+        // therefore a random value is set. It should NOT be used in the SP-specific logic
+        // TODO (#36508) separate SP/TP-specific ACS replication status data
+        .withFieldConst(_.acsReplicationDestination, AcsReplicationDestination.Persistence)
+        .transform
 
     override protected val pretty: Pretty[AcsReplicationParameters] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*
@@ -302,9 +322,69 @@ object AcsReplicationStatus
         param("synchronizer", _.synchronizerId),
         param("source participant", _.sourceParticipantId),
         param("target participant", _.targetParticipantId),
-        param("serial", _.serial),
+        param("timestamp", _.timestamp),
         param("permission", _.participantPermission.showType),
+        param("acs replication destination", _.acsReplicationDestination),
       )
+    }
+
+    /** Determines where the replicated contracts are stored on target participant.
+      *
+      * Also plays a role in deciding whether the [[AcsReplicationStatus]] is persisted in pending
+      * operations store in
+      * [[com.digitalasset.canton.participant.store.AcsReplicationStateManager]].
+      */
+    sealed trait AcsReplicationDestination extends PrettyPrinting with Product with Serializable {
+      def toProtoV30: v30.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
+    }
+
+    object AcsReplicationDestination {
+
+      import v30.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination as ReplicationDestinationProto
+
+      /** Replicated contracts are persisted to DB and the ACS replication can be resumed after TP
+        * restart.
+        *
+        * Contract handler is created by the ACS replication component.
+        */
+      case object Persistence extends AcsReplicationDestination {
+        override def toProtoV30: ReplicationDestinationProto =
+          ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE
+
+        override protected val pretty: Pretty[Persistence.type] = prettyOfObject[Persistence.type]
+      }
+
+      /** Replicated contracts are sent to an output stream. ACS replication cannot be resumed after
+        * TP restart but has to be started from scratch.
+        *
+        * Contract handler is created by the ACS replication component.
+        */
+      case object OutputStream extends AcsReplicationDestination {
+        override def toProtoV30: ReplicationDestinationProto =
+          ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM
+
+        override protected val pretty: Pretty[OutputStream.type] = prettyOfObject[OutputStream.type]
+      }
+
+      def fromProtoV30(
+          proto: ReplicationDestinationProto
+      ): ParsingResult[AcsReplicationDestination] =
+        ProtoConverter.parseEnum[AcsReplicationDestination, ReplicationDestinationProto](
+          {
+            case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_PERSISTENCE =>
+              Right(Some(Persistence))
+            case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_OUTPUT_STREAM =>
+              Right(Some(OutputStream))
+            case ReplicationDestinationProto.ACS_REPLICATION_DESTINATION_UNSPECIFIED =>
+              Left(ProtoDeserializationError.FieldNotSet("acs_replication_destination"))
+            case ReplicationDestinationProto.Unrecognized(unknown) =>
+              Left(
+                ProtoDeserializationError.UnrecognizedEnum("acs_replication_destination", unknown)
+              )
+          },
+          "acs_replication_destination",
+          proto,
+        )
     }
   }
 
@@ -357,7 +437,7 @@ object AcsReplicationStatus
         v30.AcsReplicationStatus.AgreementStatus.Exists(
           v30.AcsReplicationStatus.AgreementExists(
             damlAgreementContractId.coid,
-            Some(agreedAt.toProtoTimestamp),
+            Some(agreedAt.toProtoPrimitive),
             sequencerId.uid.toProtoPrimitive,
           )
         )
@@ -407,7 +487,7 @@ object AcsReplicationStatus
           for {
             contractId <- ProtoConverter.parseLfContractId(exists.contractId)
             agreedAt <- ProtoConverter.parseRequired(
-              CantonTimestamp.fromProtoTimestamp,
+              CantonTimestamp.fromProtoPrimitive,
               "agreed_at",
               exists.agreedAt,
             )
@@ -423,38 +503,43 @@ object AcsReplicationStatus
 
   }
 
-  final case class PartyReplicationAuthorization(
-      onboardingAt: EffectiveTime,
-      isOnboardingFlagCleared: Boolean,
+  final case class PartyToParticipantTopologyTransaction(
+      validFrom: EffectiveTime,
+      isOnboarding: Boolean,
+      topologySerial: PositiveInt,
   ) extends PrettyPrintingFromCompanion {
-    def toProtoV30: v30.AcsReplicationStatus.PartyReplicationAuthorization =
-      v30.AcsReplicationStatus.PartyReplicationAuthorization(
-        Some(onboardingAt.value.toProtoTimestamp),
-        isOnboardingFlagCleared,
+    def toProtoV30: v30.AcsReplicationStatus.PartyToParticipantTopologyTransaction =
+      v30.AcsReplicationStatus.PartyToParticipantTopologyTransaction(
+        Some(validFrom.value.toProtoPrimitive),
+        isOnboarding,
+        topologySerial.value,
       )
 
-    override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationAuthorization] =
-      PartyReplicationAuthorization
+    override def prettyCompanion: PrettyPrintingCompanion[PartyToParticipantTopologyTransaction] =
+      PartyToParticipantTopologyTransaction
   }
 
-  object PartyReplicationAuthorization
-      extends PrettyPrintingCompanion[PartyReplicationAuthorization] {
+  object PartyToParticipantTopologyTransaction
+      extends PrettyPrintingCompanion[PartyToParticipantTopologyTransaction] {
     def fromProtoV30(
-        proto: v30.AcsReplicationStatus.PartyReplicationAuthorization
-    ): ParsingResult[PartyReplicationAuthorization] =
+        proto: v30.AcsReplicationStatus.PartyToParticipantTopologyTransaction
+    ): ParsingResult[PartyToParticipantTopologyTransaction] =
       for {
-        onboardingAtP <- ProtoConverter.required("onboarding_at", proto.onboardingAt)
-        onboardingAt <- CantonTimestamp.fromProtoTimestamp(onboardingAtP)
-      } yield PartyReplicationAuthorization(
-        EffectiveTime(onboardingAt),
-        proto.isOnboardingFlagCleared,
+        onboardingAtP <- ProtoConverter.required("valid_from", proto.validFrom)
+        validFrom <- CantonTimestamp.fromProtoPrimitive(onboardingAtP)
+        serial <- ProtoConverter.parsePositiveInt("topology_serial", proto.topologySerial)
+      } yield PartyToParticipantTopologyTransaction(
+        EffectiveTime(validFrom),
+        proto.isOnboarding,
+        serial,
       )
 
-    override protected val pretty: Pretty[PartyReplicationAuthorization] = {
+    override protected val pretty: Pretty[PartyToParticipantTopologyTransaction] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*
       prettyOfClass(
-        param("onboarding at", _.onboardingAt.value),
-        paramIfTrue("onboarding cleared", _.isOnboardingFlagCleared),
+        param("valid from", _.validFrom.value),
+        paramIfTrue("is onboarding", _.isOnboarding),
+        param("topology serial", _.topologySerial),
       )
     }
   }

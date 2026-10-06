@@ -14,7 +14,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
-import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
+import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.store.AcsReplicationProgress
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -99,7 +99,7 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
       def createImporter(source: Source[ActiveContract, NotUsed]) = {
         // Because of SyncEphemeralStateFactory.cleanupPersistentState, the importer starts from zero on every invocation
         var runningTotal = 0L
-        val acsContractHandler = new AcsTransferContractHandler {
+        val acsContractHandler = new AcsReplicationContractHandler {
           override def handleContracts(
               contracts: NonEmpty[Seq[ActiveContract]],
               checkpoint: AcsTransferCheckpoint,

@@ -100,8 +100,21 @@ final class GeneratorsTransaction(
     for {
       pid <- Arbitrary.arbitrary[ParticipantId]
       permission <- Arbitrary.arbitrary[ParticipantPermission]
-      onboarding <- Arbitrary.arbBool.arbitrary
-    } yield HostingParticipant(pid, permission, onboarding)
+      // NOMINATED and FREEZING are only representable in proto v31 or higher
+      state <-
+        if (TopologyTransaction.protoVersionFor(protocolVersion).value.v >= 31)
+          Gen.oneOf[HostingParticipant.HostingState](
+            HostingParticipant.HostingState.Nominated,
+            HostingParticipant.HostingState.Freezing,
+            HostingParticipant.HostingState.Onboarding,
+            HostingParticipant.HostingState.Active,
+          )
+        else
+          Gen.oneOf[HostingParticipant.HostingState](
+            HostingParticipant.HostingState.Onboarding,
+            HostingParticipant.HostingState.Active,
+          )
+    } yield HostingParticipant(pid, permission, state)
   )
 
   implicit val synchronizerUpgradeAnnouncementArb: Arbitrary[LsuAnnouncement] =
@@ -195,15 +208,8 @@ final class GeneratorsTransaction(
         .choose(1, participants.count(_.permission >= ParticipantPermission.Confirmation).max(1))
         .map(PositiveInt.tryCreate)
       signingKeysWithThreshold <- Gen.option(Arbitrary.arbitrary[SigningKeysWithThreshold])
-      // Only allow isOffline = true if the protocol version supports proto v31 or higher.
-      // (v30 throws a serialization error when isOffline = true).
-      isOffline <-
-        if (TopologyTransaction.protoVersionFor(protocolVersion).v >= 31)
-          Arbitrary.arbBool.arbitrary
-        else
-          Gen.const(false)
     } yield PartyToParticipant
-      .create(partyId, threshold, participants, signingKeysWithThreshold, isOffline = isOffline)
+      .create(partyId, threshold, participants, signingKeysWithThreshold)
       .value
   )
 

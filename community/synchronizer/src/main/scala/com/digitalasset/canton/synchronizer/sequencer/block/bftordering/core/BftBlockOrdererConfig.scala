@@ -382,6 +382,8 @@ object BftBlockOrdererConfig {
     *   set of peers that the local node expects to connect to on startup
     * @param overwriteStoredEndpoints
     *   whether the peers in storage should be replaced by this config's peers endpoint on startup
+    * @param transportMetrics
+    *   HTTP/2- and TCP-level transport metrics for P2P gRPC connections (enabled by default)
     */
   final case class P2PNetworkConfig(
       serverEndpoint: P2PServerConfig,
@@ -389,6 +391,33 @@ object BftBlockOrdererConfig {
       connectionManagementConfig: P2PConnectionManagementConfig = P2PConnectionManagementConfig(),
       peerEndpoints: Seq[P2PEndpointConfig] = Seq.empty,
       overwriteStoredEndpoints: Boolean = false,
+      transportMetrics: P2PTransportMetricsConfig = P2PTransportMetricsConfig(),
+  )
+
+  /** HTTP/2- and TCP-level transport metrics for P2P gRPC connections.
+    *
+    * These metrics are meant to troubleshoot latency of gRPC bidirectional streaming with
+    * third-party peers by leveraging gRPC `Channelz`, Netty epoll (when available) and a Netty
+    * channel customizer. They are all labeled by peer node ID and connection direction. Sampling is
+    * periodic and kept proportional to the number of P2P connections, so the overhead is low;
+    * TCP-level details additionally require the Linux-only epoll transport (a graceful fallback to
+    * NIO is used otherwise, in which case TCP-level metrics are simply not reported).
+    *
+    * @param enabled
+    *   Whether to collect and publish P2P transport metrics (enabled by default).
+    * @param pollInterval
+    *   How often the transport of each live P2P connection is sampled (Channelz and epoll
+    *   `TcpInfo`).
+    * @param preferEpoll
+    *   Whether to use the Netty epoll transport (when available on the platform) so that TCP-level
+    *   `TcpInfo` (round-trip time, retransmissions, window scale) becomes observable. When epoll is
+    *   not available, or this is `false`, the default NIO transport is used and TCP-level metrics
+    *   are not reported.
+    */
+  final case class P2PTransportMetricsConfig(
+      enabled: Boolean = true,
+      pollInterval: config.PositiveFiniteDuration = config.PositiveFiniteDuration.ofSeconds(5),
+      preferEpoll: Boolean = true,
   )
 
   /** Configuration for peer-to-peer authentication
@@ -431,6 +460,12 @@ object BftBlockOrdererConfig {
     * @param flowControlReadyAllowance
     *   If `flowControlBuffer` is set, a "ready to send" signal will be valid for the specified
     *   number of messages without further checks.
+    * @param rttProbeInterval
+    *   The interval at which each outgoing (dialer) connection sends a low-frequency
+    *   application-level `ConnectionOpened` "echo" probe to the peer, which the peer reflects back,
+    *   so that the connection-direction-independent application-level round-trip time to the peer
+    *   can be measured and reported as a metric. Each interval is jittered by +/-50% to avoid
+    *   synchronized probe bursts across peers. Set to zero to disable RTT probing.
     */
   final case class P2PConnectionManagementConfig(
       // The maximum number of connection attempts before we log a warning.
@@ -451,6 +486,8 @@ object BftBlockOrdererConfig {
       flowControlBuffer: PositiveInt = PositiveInt.tryCreate(2048),
       flowControlBufferDropNewest: Boolean = false,
       flowControlReadyAllowance: PositiveInt = PositiveInt.one,
+      rttProbeInterval: config.NonNegativeFiniteDuration =
+        config.NonNegativeFiniteDuration.ofMinutes(3),
   )
 
   /** Configuration for the peer-to-peer server that accepts incoming connections

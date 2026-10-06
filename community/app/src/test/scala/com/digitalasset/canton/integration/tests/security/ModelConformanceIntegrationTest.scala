@@ -30,7 +30,6 @@ import com.digitalasset.canton.protocol.{LfContractId, LfSubmittedTransaction}
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -55,8 +54,7 @@ trait ModelConformanceIntegrationTest
       import env.*
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)
-      if (testedProtocolVersion >= ProtocolVersion.v35)
-        participant1.dars.upload(CantonTestsLF23Path)
+      participant1.dars.upload(CantonTestsLF23Path)
       participant1.dars.upload(CantonTestsPath)
 
       maliciousP1 = MaliciousParticipantNode(
@@ -182,7 +180,7 @@ trait ModelConformanceIntegrationTest
       assertPingSucceeds(participant1, participant1)
     }
 
-    "validate LookupByKey call" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "validate LookupByKey call" in { implicit env =>
       import env.*
 
       val alice = allocateUniqueParty

@@ -3,26 +3,36 @@
 
 package com.digitalasset.canton.admin.api.client.data.crypto
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.nonempty.NonEmpty
 
 final case class RequiredSigningSpecs(
     algorithms: NonEmpty[Set[SigningAlgorithmSpec]],
     keys: NonEmpty[Set[SigningKeySpec]],
-) extends PrettyPrinting {
-  override protected val pretty: Pretty[this.type] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[RequiredSigningSpecs] =
+    RequiredSigningSpecs
+}
+
+object RequiredSigningSpecs extends PrettyPrintingCompanion[RequiredSigningSpecs] {
+  override protected val pretty: Pretty[RequiredSigningSpecs] = prettyOfClass(
     param("algorithms", _.algorithms),
     param("keys", _.keys),
   )
 }
 
 /** Schemes for signature keys. */
-sealed trait SigningKeySpec extends Product with Serializable with PrettyPrinting {
+sealed trait SigningKeySpec extends Product with Serializable with PrettyPrintingFromCompanion {
   def name: String
-  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[SigningKeySpec] = SigningKeySpec
 }
 
-object SigningKeySpec {
+object SigningKeySpec extends PrettyPrintingCompanion[SigningKeySpec] {
+  override protected val pretty: Pretty[SigningKeySpec] = prettyOfString(_.name)
   case object EcCurve25519 extends SigningKeySpec {
     override val name: String = "EC-Curve25519"
   }
@@ -45,12 +55,17 @@ object SigningKeySpec {
 }
 
 /** Algorithm schemes for signing. */
-sealed trait SigningAlgorithmSpec extends Product with Serializable with PrettyPrinting {
+sealed trait SigningAlgorithmSpec
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
   def name: String
-  override protected val pretty: Pretty[this.type] = prettyOfString(_.name)
+  override def prettyCompanion: PrettyPrintingCompanion[SigningAlgorithmSpec] =
+    SigningAlgorithmSpec
 }
 
-object SigningAlgorithmSpec {
+object SigningAlgorithmSpec extends PrettyPrintingCompanion[SigningAlgorithmSpec] {
+  override protected val pretty: Pretty[SigningAlgorithmSpec] = prettyOfString(_.name)
   case object Ed25519 extends SigningAlgorithmSpec {
     override val name: String = "Ed25519"
   }

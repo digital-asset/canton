@@ -3203,6 +3203,7 @@ class ParallelIndexerSubscriptionSpec
                 internalContractId = internalContractId,
                 inst = contract.inst,
               ),
+              representativePackageId = contract.templateId.packageId,
             )
           }
         )

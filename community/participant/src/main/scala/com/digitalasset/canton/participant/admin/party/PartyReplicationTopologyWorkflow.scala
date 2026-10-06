@@ -275,7 +275,6 @@ class PartyReplicationTopologyWorkflow(
               onboarding = true,
             ),
             partySigningKeysWithThreshold = ptpPrevious.partySigningKeysWithThreshold,
-            isOffline = false,
           )
       )
       existingProposalO <- EitherT.right[String](
@@ -285,8 +284,7 @@ class PartyReplicationTopologyWorkflow(
           proposal = true,
         ).map(_.filter { proposal =>
           proposal.serial == serial && (proposal.mapping match {
-            // TODO(#35664): Possibly consider _isOffline flag
-            case PartyToParticipant(partyId, _thresholdMayDiffer, participants, _, _isOffline) =>
+            case PartyToParticipant(partyId, _thresholdMayDiffer, participants, _) =>
               partyId == ptpProposal.partyId && participants == ptpProposal.participants
           })
         })
@@ -511,12 +509,15 @@ class PartyReplicationTopologyWorkflow(
                     ptpHeadTxn.mapping.partyId,
                     ptpHeadTxn.mapping.threshold,
                     ptpHeadTxn.mapping.participants.map {
-                      case HostingParticipant(`targetParticipantId`, permission, true) =>
+                      case HostingParticipant(
+                            `targetParticipantId`,
+                            permission,
+                            HostingParticipant.HostingState.Onboarding,
+                          ) =>
                         HostingParticipant(targetParticipantId, permission, onboarding = false)
                       case otherParticipant => otherParticipant
                     },
                     ptpHeadTxn.mapping.partySigningKeysWithThreshold,
-                    isOffline = false,
                   )
                   .map(ptp => Some(ptp -> nextSerial))
               }

@@ -99,7 +99,7 @@ object AcsReplicationSourceParticipantMessage
       v30.GetAcsArguments(
         partyId.toProtoPrimitive,
         synchronizerId.toProtoPrimitive,
-        Some(asOf.toProtoTimestamp),
+        Some(asOf.toProtoPrimitive),
         excludedStakeholders.map(_.toProtoPrimitive).toSeq,
       )
 
@@ -112,7 +112,7 @@ object AcsReplicationSourceParticipantMessage
       partyId <- PartyId.fromProtoPrimitive(proto.partyId, "party_id")
       synchronizerId <- SynchronizerId.fromProtoPrimitive(proto.synchronizerId, "synchronizer_id")
       asOf <- ProtoConverter
-        .parseRequired(CantonTimestamp.fromProtoTimestamp, "as_of", proto.asOf)
+        .parseRequired(CantonTimestamp.fromProtoPrimitive, "as_of", proto.asOf)
       excludedStakeholders <- proto.excludedStakeholders.traverse(
         PartyId.fromProtoPrimitive(_, "excluded_stakeholders")
       )
@@ -137,7 +137,7 @@ object AcsReplicationSourceParticipantMessage
         acsHash,
         Some(getAcsArgs.toProtoV30),
         sourceParticipantUid.toProtoPrimitive,
-        Some(agreedAt.toProtoTimestamp),
+        Some(agreedAt.toProtoPrimitive),
       )
   }
 
@@ -169,7 +169,7 @@ object AcsReplicationSourceParticipantMessage
         "source_participant_uid",
       )
       agreedAt <- ProtoConverter.parseRequired(
-        CantonTimestamp.fromProtoTimestamp,
+        CantonTimestamp.fromProtoPrimitive,
         "request_made_at",
         proto.agreedAt,
       )

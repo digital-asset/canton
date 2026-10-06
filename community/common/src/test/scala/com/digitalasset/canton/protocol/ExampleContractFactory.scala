@@ -51,6 +51,7 @@ object ExampleContractFactory extends EitherValues {
       keyOpt: Option[GlobalKeyWithMaintainers] = None,
       cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
       overrideContractId: Option[ContractId] = None,
+      overrideSerializationVersion: Option[SerializationVersion] = None,
   ): GenContractInstance { type InstCreatedAtTime <: Time } = {
 
     val discriminator = lfHash()
@@ -66,7 +67,9 @@ object ExampleContractFactory extends EitherValues {
       signatories = signatories,
       stakeholders = stakeholders,
       keyOpt = keyOpt,
-      version = if (keyOpt.isDefined) SerializationVersion.V2 else SerializationVersion.V1,
+      version = overrideSerializationVersion.getOrElse(
+        if (keyOpt.isDefined) SerializationVersion.V2 else SerializationVersion.V1
+      ),
     )
     fromCreateInternal[Time](create, createdAt, salt, cantonContractIdVersion, overrideContractId)
   }
@@ -149,6 +152,7 @@ object ExampleContractFactory extends EitherValues {
       packageName: Option[PackageName] = None,
       authenticationData: Option[Bytes] = None,
       createdAt: Option[Time] = None,
+      version: Option[LfSerializationVersion] = None,
   ): GenContractInstance { type InstCreatedAtTime <: Time } = {
     val create = base.toLf
     val inst = FatContractInstance.fromCreateNode(
@@ -160,6 +164,7 @@ object ExampleContractFactory extends EitherValues {
         stakeholders = metadata.map(_.stakeholders).getOrElse(create.stakeholders),
         keyOpt = metadata.map(_.maybeKeyWithMaintainers).getOrElse(create.keyOpt),
         packageName = packageName.getOrElse(create.packageName),
+        version = version.getOrElse(create.version),
       ),
       createTime = createdAt.getOrElse(base.inst.createdAt),
       authenticationData = authenticationData.getOrElse(base.inst.authenticationData),

@@ -5,19 +5,24 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
-final case class AggregationId(id: Hash) extends PrettyPrinting {
-  override protected def pretty: Pretty[AggregationId] = prettyOfParam(_.id)
+final case class AggregationId(id: Hash) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[AggregationId] = AggregationId
 
   def toProtoPrimitive: ByteString = id.getCryptographicEvidence
 }
 
-object AggregationId {
+object AggregationId extends PrettyPrintingCompanion[AggregationId] {
+  override protected val pretty: Pretty[AggregationId] = prettyOfParam(_.id)
   // We serialize/deserialize aggregation IDs as hex strings rather than bytestrings so that they can be used as primary keys in all DBs
   implicit val setParameterAggregationId: SetParameter[AggregationId] = (v, pp) =>
     pp.>>(v.id.toLengthLimitedHexString)

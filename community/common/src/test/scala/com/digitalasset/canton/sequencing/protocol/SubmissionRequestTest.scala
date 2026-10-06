@@ -9,17 +9,11 @@ import com.digitalasset.canton.crypto.{Signature, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
-import java.time.Duration
 import java.util.UUID
 
 final class SubmissionRequestTest extends BaseTestWordSpec {
-
-  private lazy val defaultTopologyTimestamp = Some(
-    CantonTimestamp.Epoch.add(Duration.ofSeconds(1))
-  )
 
   private lazy val defaultSubmissionRequest =
     SubmissionRequest.tryCreate(
@@ -27,7 +21,6 @@ final class SubmissionRequestTest extends BaseTestWordSpec {
       MessageId.fromUuid(new UUID(1L, 1L)),
       Batch.empty(testedProtocolVersion),
       maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = defaultTopologyTimestamp,
       Some(AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)),
       Option.empty[SequencingSubmissionCost],
       testedProtocolVersion,
@@ -68,9 +61,6 @@ final class SubmissionRequestTest extends BaseTestWordSpec {
           )
         ),
         defaultSubmissionRequest.copy(maxSequencingTime = CantonTimestamp.Epoch),
-        defaultSubmissionRequest.copy(topologyTimestamp = Some(CantonTimestamp.MinValue)),
-        defaultSubmissionRequest.copy(topologyTimestamp = Some(CantonTimestamp.MaxValue)),
-        defaultSubmissionRequest.copy(topologyTimestamp = Some(CantonTimestamp.Epoch)),
         defaultSubmissionRequest.copy(aggregationRule =
           Some(AggregationRule.senderDedup(testedProtocolVersion))
         ),
@@ -80,15 +70,7 @@ final class SubmissionRequestTest extends BaseTestWordSpec {
       )
 
       val aggregationIds = differentRequests.map(_.aggregationId(TestHash))
-
-      val expectedAggregationIdsCount =
-        if (testedProtocolVersion == ProtocolVersion.v35)
-          differentRequests.size
-        else
-          // In pv 36 and above, the topology timestamp (that should be empty) is not part of the hash
-          differentRequests.size - 3
-
-      aggregationIds.distinct.size shouldBe expectedAggregationIdsCount
+      aggregationIds.distinct.size shouldBe differentRequests.size
 
     }
 

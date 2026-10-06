@@ -154,11 +154,14 @@ stability_crash_recovery_test:
 
 stability_crash_recovery_test_alerting:
   executor: canton-small-docker
+  parameters:
+    stability_crash_recovery_test_name:
+      type: string
   steps:
     - checkout
     - check_number_of_successes:
         min_successes: 8 # Low threshold, since test failures are reported to datadog anyway
-        job_name: "stability_crash_recovery_test"
+        job_name: << parameters.stability_crash_recovery_test_name >>
     - slack_red_main_with_volunteer
 
 benchmark:
@@ -305,6 +308,7 @@ nightly_cn_topology_snapshot_test_only:
   executor: canton-xlarge-docker-with-postgres
   parallelism: 4 # One node per environment (cilr, dev, test, main)
   steps:
+    - allow_automatic_protocol_version
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.topology"
@@ -369,7 +373,7 @@ model_based_external_parties_test:
   steps:
     - set_external_parties
     - set_canton_protocol_version:
-      protocol_version: << parameters.protocol_version >>
+        protocol_version: << parameters.protocol_version >>
     - run_tests:
         command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
         filter: "cat" # cat acts as identity filter

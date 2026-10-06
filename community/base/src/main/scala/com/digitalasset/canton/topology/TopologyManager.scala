@@ -72,7 +72,7 @@ import com.digitalasset.canton.topology.transaction.checks.{
 import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.nonempty.NonEmpty
@@ -978,13 +978,11 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         keys,
       )
 
-    // TODO(#35664): Add version specific behaviour for _isOffline
     case PartyToParticipant(
           partyId,
           threshold,
           participants,
           signingKeysWithThresholdO,
-          _isOffline,
         ) =>
       checkPartyToParticipantIsNotDangerous(
         partyId,
@@ -1113,14 +1111,25 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     EitherT.fromEither(store.storeId.forSynchronizer match {
       case Some(psid) =>
-        Either.cond(
-          upgradeAnnouncement.successorSynchronizerId >= psid.opaque,
-          (),
-          InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPsid(
-            successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
-            currentSynchronizerId = psid,
-          ),
-        )
+        for {
+          _ <- EitherUtil.condUnit(
+            upgradeAnnouncement.successorSynchronizerId >= psid.opaque,
+            InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPsid(
+              successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
+              currentSynchronizerId = psid,
+            ),
+          )
+          _ <- EitherUtil.condUnit(
+            !LsuAnnouncement.isForbiddenProtocolVersionDowngrade(
+              current = psid,
+              successor = upgradeAnnouncement.successorSynchronizerId,
+            ),
+            InvalidSynchronizerSuccessor.Reject.protocolVersionDowngrade(
+              currentSynchronizerId = psid,
+              successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
+            ),
+          )
+        } yield ()
       case None => Right(())
     })
 
@@ -1159,13 +1168,11 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         .map {
           _.collectOfMapping[PartyToParticipant].collectLatestByUniqueKey.toTopologyState
             .collectFirst {
-              // TODO(#35664): Possibly consider _isOffline flag
               case PartyToParticipant(
                     _,
                     currentThreshold,
                     currentHostingParticipants,
                     _,
-                    _isOffline,
                   ) =>
                 Some(currentThreshold) -> currentHostingParticipants
             }

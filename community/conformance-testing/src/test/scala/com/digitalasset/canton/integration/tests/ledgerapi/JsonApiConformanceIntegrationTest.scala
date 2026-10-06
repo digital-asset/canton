@@ -181,8 +181,6 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
     val numShards: Int,
 ) extends JsonApiConformanceBase {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   // Multi-domain, multi-participant environment for full test coverage
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
@@ -236,7 +234,6 @@ private[ledgerapi] trait NonSharded {
 }
 
 final class JsonApiOffsetCheckpointsConformanceTest extends JsonApiConformanceBase with NonSharded {
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransforms(

@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import com.daml.ledger.javaapi.data.Command
 import com.daml.ledger.javaapi.data.codegen.{Created, Update}
-import com.digitalasset.canton.BaseTest.{getResourcePath, testedProtocolVersion}
+import com.digitalasset.canton.BaseTest.getResourcePath
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.TestSalt
@@ -984,10 +984,7 @@ object ModelConformanceCheckerTest extends OptionValues {
       contracts: Map[LfContractId, GenContractInstance],
   ) {
     lazy val requiredVettedPackages: Set[LfPackageId] =
-      if (testedProtocolVersion >= ProtocolVersion.v35) {
-        // Vetting checks in PV 35 only apply to packages of action nodes
-        tx.nodes.values.collect { case action: LfActionNode => action.packageIds }.flatten.toSet
-      } else metadata.usedPackages
+      tx.nodes.values.collect { case action: LfActionNode => action.packageIds }.flatten.toSet
   }
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {

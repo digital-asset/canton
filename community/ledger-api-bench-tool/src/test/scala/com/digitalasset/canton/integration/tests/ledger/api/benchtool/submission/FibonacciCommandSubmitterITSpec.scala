@@ -11,7 +11,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   EventsObserver,
   FibonacciCommandGenerator,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.AppendedClues
 
 class FibonacciCommandSubmitterITSpec extends BenchtoolSandboxFixture with AppendedClues {
@@ -20,7 +19,7 @@ class FibonacciCommandSubmitterITSpec extends BenchtoolSandboxFixture with Appen
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "FibonacciCommandSubmitterIT" should {
-    "populate create fibonacci contracts" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
+    "populate create fibonacci contracts" in { env =>
       import env.*
 
       val config = WorkflowConfig.FibonacciSubmissionConfig(

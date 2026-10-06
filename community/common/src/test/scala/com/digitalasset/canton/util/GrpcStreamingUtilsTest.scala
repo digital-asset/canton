@@ -7,6 +7,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
 import com.google.protobuf.{ByteString, StringValue}
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -236,6 +237,55 @@ final class GrpcStreamingUtilsTest
       requestObserver.onCompleted()
 
       response.future.futureValue shouldBe messages
+    }
+  }
+
+  "streamFromClient" should {
+    "report an error to the response observer immediately" in {
+      val messages = Seq("first", "second", "third")
+      val out = new ByteArrayOutputStream()
+      messages.foreach(StringValue.of(_).writeDelimitedTo(out))
+      // chunk boundaries fall in the middle of the messages
+      val chunks = out.toByteArray.grouped(3).map(ByteString.copyFrom).toSeq
+
+      val expectedException = new RuntimeException("failure in the middle of streaming requests")
+      val onErrorCounts = new AtomicInteger(0)
+      val responseObserver = new StreamObserver[Seq[String]] {
+        override def onNext(value: Seq[String]): Unit =
+          fail("processing the requests should not succeed")
+        override def onError(t: Throwable): Unit =
+          if (onErrorCounts.incrementAndGet() == 1) {
+            t shouldBe a[StatusRuntimeException]
+            val status = t.asInstanceOf[StatusRuntimeException].getStatus
+            status.getCode shouldBe Status.INVALID_ARGUMENT.getCode
+            status.getCause shouldBe expectedException
+          } else {
+            fail("called onError twice")
+          }
+        override def onCompleted(): Unit = ()
+      }
+      val counter = new AtomicInteger(0)
+
+      val requestObserver =
+        GrpcStreamingUtils.streamFromClient[ByteString, Seq[String], Unit](
+          responseObserver = responseObserver,
+          extractChunkBytes = bytes => {
+            if (counter.incrementAndGet() >= 2)
+              throw expectedException
+            else bytes
+          },
+          extractContext = _ => (),
+          processFullRequest = (_, _) => {
+            fail(
+              "the input shouldn't get fully consumed to the point where the entire input has been processed"
+            )
+          },
+        )
+
+      chunks.foreach(requestObserver.onNext)
+      eventually() {
+        onErrorCounts.get() shouldBe 1
+      }
     }
   }
 

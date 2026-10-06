@@ -4,6 +4,7 @@
 package com.daml.ledger.api.testtool.infrastructure.participant
 
 import com.daml.grpc.test.StreamConsumer
+import com.daml.ledger.api.testtool.infrastructure.Assertions.futureAssertions
 import com.daml.ledger.api.testtool.infrastructure.ChannelEndpoint.JsonApiEndpoint
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.ProtobufConverters.*
@@ -1764,15 +1765,33 @@ final class SingleParticipantTestContext private[participant] (
     new StreamConsumer[HealthCheckResponse](services.health.watch(HealthCheckRequest(), _))
       .within(1.second)
 
-  override def prune(
+  private def prune(
       pruneUpTo: Long,
-      attempts: Int = 10,
+      attempts: Int,
   ): Future[PruneResponse] =
     // Distributed ledger participants need to reach global consensus prior to pruning. Hence the "eventually" here:
     eventually(assertionName = "Prune", attempts = attempts) {
       services.participantPruning
         .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
     }
+
+  def pruneWithAcsCheck(
+      parties: Option[Seq[Party]],
+      pruneUpTo: Long,
+      attempts: Int = 10,
+      activeAtOffset0: Option[Long] = None,
+  )(implicit ec: ExecutionContext): Future[Unit] = for {
+    acsBefore <- activeContracts(parties, activeAtOffset0, verbose = false)
+    _ <- prune(pruneUpTo, attempts)
+    acsAfter <- activeContracts(parties, activeAtOffset0, verbose = false)
+  } yield assert(acsBefore == acsAfter, "Active contract set changed unexpectedly during pruning")
+
+  override def pruneMustFail(
+      pruneUpTo: Long,
+      message: String,
+  ): Future[Throwable] = services.participantPruning
+    .prune(PruneRequest(pruneUpTo, nextSubmissionId(), pruneAllDivulgedContracts = true))
+    .mustFail(message)
 
   override def pruneCantonSafe(
       pruneUpTo: Long,
@@ -1787,7 +1806,8 @@ final class SingleParticipantTestContext private[participant] (
     ) {
       for {
         _ <- submitAndWait(submitAndWaitRequest(party, dummyCommand(party)))
-        _ <- prune(
+        _ <- pruneWithAcsCheck(
+          parties = Some(Seq(party)),
           pruneUpTo = pruneUpTo,
           attempts = 1,
         )

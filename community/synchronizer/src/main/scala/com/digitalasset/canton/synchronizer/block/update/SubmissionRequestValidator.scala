@@ -120,8 +120,6 @@ private[update] final class SubmissionRequestValidator(
       sequencingTimestamp: CantonTimestamp,
       signedSubmissionRequest: TracedPossiblyPrevalidated[SignedContent[SubmissionRequest]],
       snapshotToValidateSubmissionRequest: SyncCryptoApi,
-      topologySnapshotFromRequestO: Option[SyncCryptoApi],
-      topologyTimestampError: Option[SequencerDeliverError],
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -196,26 +194,9 @@ private[update] final class SubmissionRequestValidator(
         submissionRequest,
         sequencingTimestamp,
       ).mapK(validationFUSK)
-      _ <- EitherT.fromEither[SequencedEventValidationF](
-        validateTopologyTimestamp(
-          sequencingTimestamp,
-          submissionRequest,
-          topologyTimestampError,
-        )
-      )
-      topologyOrSequencingSnapshot = topologySnapshotFromRequestO.getOrElse(
-        snapshotToValidateSubmissionRequest
-      )
-      // Preserve the old behavior to avoid ledger forks for older protocols.
-      _ <- (if (protocolVersion <= ProtocolVersion.v34)
-              inFlightAggregationHandler.validateMaxSequencingTimeForAggregationRule(
-                submissionRequest,
-                topologyOrSequencingSnapshot,
-                sequencingTimestamp,
-              )
-            else EitherTUtil.unitUS).mapK(validationFUSK)
+
       _ <- checkClosedEnvelopesSignatures(
-        topologyOrSequencingSnapshot,
+        snapshotToValidateSubmissionRequest,
         signedSubmissionRequest.map(_.content),
         sequencingTimestamp,
       ).mapK(validationFUSK)
@@ -223,7 +204,7 @@ private[update] final class SubmissionRequestValidator(
         resolveSubmissionRequestRecipients(
           submissionRequest,
           sequencingTimestamp,
-          topologyOrSequencingSnapshot,
+          snapshotToValidateSubmissionRequest,
         ).mapK(validationFUSK)
       // compute the aggregation id last (we keep this here as the old code computed
       // the aggregation id as first step in the sequential stage. we now do this in the
@@ -232,7 +213,6 @@ private[update] final class SubmissionRequestValidator(
         .computeAggregationIdAndValidateAggregationRule(
           sequencingTimestamp,
           snapshotToValidateSubmissionRequest,
-          topologyOrSequencingSnapshot,
           submissionRequest,
         )
         .mapK(validationFUSK)
@@ -486,24 +466,6 @@ private[update] final class SubmissionRequestValidator(
       SubmissionOutcome.Discard // must discard as the sender is not verified so cannot be charged for traffic
     }
   }
-
-  private def validateTopologyTimestamp(
-      sequencingTimestamp: CantonTimestamp,
-      submissionRequest: SubmissionRequest,
-      topologyTimestampError: Option[SequencerDeliverError],
-  )(implicit
-      traceContext: TraceContext
-  ): Either[SubmissionOutcome, Unit] =
-    topologyTimestampError
-      .map(
-        SubmissionOutcome.Reject.logAndCreate(
-          submissionRequest,
-          sequencingTimestamp,
-          _,
-        )
-      )
-      .toLeft(())
-
 }
 
 private[update] object SubmissionRequestValidator {

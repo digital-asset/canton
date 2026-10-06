@@ -138,19 +138,58 @@ class SyncCryptoWithSessionKeysTest
 
   "A SyncCrypto with session keys" must {
 
-    if (testedProtocolVersion >= ProtocolVersion.v35) {
-      behave like syncCryptoSignerTest()
-    }
+    behave like syncCryptoSignerTest()
 
-    "use correct sync crypto signer with session keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "use correct sync crypto signer with session keys" in {
       syncCryptoSignerP1 shouldBe a[SyncCryptoSignerWithSessionKeys]
       cleanCache(p1)
     }
 
-    "correctly produce a signature delegation when signing a single message" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
+    "correctly produce a signature delegation when signing a single message" in {
 
-        val signature = syncCryptoSignerP1
+      val signature = syncCryptoSignerP1
+        .sign(
+          testSnapshot,
+          None,
+          hash,
+          defaultUsage,
+        )
+        .valueOrFail("sign failed")
+        .futureValueUS
+
+      val signatureDelegation = checkSignatureDelegation(testSnapshot, signature)
+
+      syncCryptoVerifierP1
+        .verifySignature(
+          testSnapshot,
+          hash,
+          participant1.member,
+          signature,
+          defaultUsage,
+        )
+        .valueOrFail("verification failed")
+        .futureValueUS
+
+      val (_, sDSigningCached) = sessionKeysCache(p1).loneElement
+      val (_, sDVerificationCached) = sessionKeysVerificationCache(p1).loneElement
+
+      // make sure that nothing changed with the session key and signature delegation
+      sDSigningCached.signatureDelegation shouldBe signatureDelegation
+      sDSigningCached.signatureDelegation shouldBe sDVerificationCached
+
+    }
+
+    "sign and verify message with different synchronizers uses different session keys" in {
+
+      ResourceUtil.withResource(
+        testingTopology.forOwnerAndSynchronizer(
+          owner = participant1,
+          synchronizerId = otherSynchronizerId,
+        )
+      ) { p1OtherSynchronizer =>
+        val syncCryptoSignerP1Other = p1OtherSynchronizer.syncCryptoSigner
+
+        val signature = syncCryptoSignerP1Other
           .sign(
             testSnapshot,
             None,
@@ -160,63 +199,20 @@ class SyncCryptoWithSessionKeysTest
           .valueOrFail("sign failed")
           .futureValueUS
 
-        val signatureDelegation = checkSignatureDelegation(testSnapshot, signature)
+        val signatureDelegationOther =
+          checkSignatureDelegation(testSnapshot, signature, p1OtherSynchronizer)
 
-        syncCryptoVerifierP1
-          .verifySignature(
-            testSnapshot,
-            hash,
-            participant1.member,
-            signature,
-            defaultUsage,
-          )
-          .valueOrFail("verification failed")
-          .futureValueUS
+        sessionKeysCache(p1OtherSynchronizer).loneElement
 
-        val (_, sDSigningCached) = sessionKeysCache(p1).loneElement
-        val (_, sDVerificationCached) = sessionKeysVerificationCache(p1).loneElement
-
-        // make sure that nothing changed with the session key and signature delegation
-        sDSigningCached.signatureDelegation shouldBe signatureDelegation
-        sDSigningCached.signatureDelegation shouldBe sDVerificationCached
-
+        // it's different from the signature delegation for the other synchronizer
+        val (_, signatureDelegation) = sessionKeysCache(p1).loneElement
+        signatureDelegationOther.validityPeriod shouldBe signatureDelegation.signatureDelegation.validityPeriod
+        signatureDelegationOther.sessionKey should not be signatureDelegation.signatureDelegation.sessionKey
+        signatureDelegationOther.signature should not be signatureDelegation.signatureDelegation.signature
       }
+    }
 
-    "sign and verify message with different synchronizers uses different session keys" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
-
-        ResourceUtil.withResource(
-          testingTopology.forOwnerAndSynchronizer(
-            owner = participant1,
-            synchronizerId = otherSynchronizerId,
-          )
-        ) { p1OtherSynchronizer =>
-          val syncCryptoSignerP1Other = p1OtherSynchronizer.syncCryptoSigner
-
-          val signature = syncCryptoSignerP1Other
-            .sign(
-              testSnapshot,
-              None,
-              hash,
-              defaultUsage,
-            )
-            .valueOrFail("sign failed")
-            .futureValueUS
-
-          val signatureDelegationOther =
-            checkSignatureDelegation(testSnapshot, signature, p1OtherSynchronizer)
-
-          sessionKeysCache(p1OtherSynchronizer).loneElement
-
-          // it's different from the signature delegation for the other synchronizer
-          val (_, signatureDelegation) = sessionKeysCache(p1).loneElement
-          signatureDelegationOther.validityPeriod shouldBe signatureDelegation.signatureDelegation.validityPeriod
-          signatureDelegationOther.sessionKey should not be signatureDelegation.signatureDelegation.sessionKey
-          signatureDelegationOther.signature should not be signatureDelegation.signatureDelegation.signature
-        }
-      }
-
-    "reuse session key when exact timestamp and past cut-off" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "reuse session key when exact timestamp and past cut-off" in {
 
       val (_, currentSessionKey) = sessionKeysCache(p1).loneElement
 
@@ -248,7 +244,7 @@ class SyncCryptoWithSessionKeysTest
 
     }
 
-    "use new session key when approximate timestamp and past cut-off" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "use new session key when approximate timestamp and past cut-off" in {
 
       val (_, currentSessionKey) = sessionKeysCache(p1).loneElement
       // select a timestamp that is after the "end" cut-off period
@@ -329,7 +325,7 @@ class SyncCryptoWithSessionKeysTest
 
     }
 
-    "use a new session key if the long-term key is no longer active" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "use a new session key if the long-term key is no longer active" in {
 
       val oldLongTermKeyId = testSnapshot
         .signingKeys(participant1.member, defaultUsage)
@@ -374,36 +370,35 @@ class SyncCryptoWithSessionKeysTest
 
     }
 
-    "session signing key is removed from the cache after the eviction period" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
+    "session signing key is removed from the cache after the eviction period" in {
 
-        cleanUpSessionKeysCache(p1)
+      cleanUpSessionKeysCache(p1)
 
-        val newEvictionPeriod = PositiveSeconds.tryOfSeconds(5).toFiniteDuration
+      val newEvictionPeriod = PositiveSeconds.tryOfSeconds(5).toFiniteDuration
 
-        setSessionKeyEvictionPeriod(p1, newEvictionPeriod)
-        sessionKeysCache(p1) shouldBe empty
+      setSessionKeyEvictionPeriod(p1, newEvictionPeriod)
+      sessionKeysCache(p1) shouldBe empty
 
-        val signature = syncCryptoSignerP1
-          .sign(
-            testSnapshot,
-            None,
-            hash,
-            defaultUsage,
-          )
-          .valueOrFail("sign failed")
-          .futureValueUS
+      val signature = syncCryptoSignerP1
+        .sign(
+          testSnapshot,
+          None,
+          hash,
+          defaultUsage,
+        )
+        .valueOrFail("sign failed")
+        .futureValueUS
 
-        checkSignatureDelegation(testSnapshot, signature)
+      checkSignatureDelegation(testSnapshot, signature)
 
-        Threading.sleep(newEvictionPeriod.toMillis + 100L)
+      Threading.sleep(newEvictionPeriod.toMillis + 100L)
 
-        eventually() {
-          sessionKeysCache(p1).toSeq shouldBe empty
-        }
+      eventually() {
+        sessionKeysCache(p1).toSeq shouldBe empty
       }
+    }
 
-    "with decreasing timestamps we still use one session signing key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "with decreasing timestamps we still use one session signing key" in {
 
       cleanCache(p1)
       testingTopology.getTopology().freshKeys.set(false)
@@ -530,7 +525,7 @@ class SyncCryptoWithSessionKeysTest
     }
 
     "correctly produces a signature delegation with a key validity " +
-      "that covers both timestamp and validity period end" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "that covers both timestamp and validity period end" in {
 
         cleanCache(p1)
 
@@ -543,48 +538,45 @@ class SyncCryptoWithSessionKeysTest
 
       }
 
-    "uses a different session key when previous one doesn’t cover the validity period end" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
+    "uses a different session key when previous one doesn’t cover the validity period end" in {
 
-        val (_, currentSessionKey) = sessionKeysCache(p1).loneElement
+      val (_, currentSessionKey) = sessionKeysCache(p1).loneElement
 
-        signWithValidityPeriodEnd(
-          // The previous session signing key can cover [timestamp - cutOff, (timestamp - cutOff) + keyValidityDuration[
-          // so we use the excluded end as our validity period end. However, we use the immediate successor as
-          // our signing timestamp due to the constraint that keyValidity - cutOff > maxSequencingTimeOffset.
-          testSnapshot.timestamp.immediateSuccessor,
-          currentSessionKey.signatureDelegation.validityPeriod.toExclusive,
-          expectSignatureDelegation = true,
-        )
+      signWithValidityPeriodEnd(
+        // The previous session signing key can cover [timestamp - cutOff, (timestamp - cutOff) + keyValidityDuration[
+        // so we use the excluded end as our validity period end. However, we use the immediate successor as
+        // our signing timestamp due to the constraint that keyValidity - cutOff > maxSequencingTimeOffset.
+        testSnapshot.timestamp.immediateSuccessor,
+        currentSessionKey.signatureDelegation.validityPeriod.toExclusive,
+        expectSignatureDelegation = true,
+      )
 
-        sessionKeysCache(p1).size shouldBe 2
+      sessionKeysCache(p1).size shouldBe 2
 
-      }
+    }
 
-    "revert to signing with long-term key if the validity period end cannot be covered" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
+    "revert to signing with long-term key if the validity period end cannot be covered" in {
 
-        signWithValidityPeriodEnd(
-          testSnapshot.timestamp,
-          testSnapshot.timestamp
-            .add(
-              sessionSigningKeysConfig.keyValidityDuration.asJava
-            ),
-          expectSignatureDelegation = false,
-        )
+      signWithValidityPeriodEnd(
+        testSnapshot.timestamp,
+        testSnapshot.timestamp
+          .add(
+            sessionSigningKeysConfig.keyValidityDuration.asJava
+          ),
+        expectSignatureDelegation = false,
+      )
 
-      }
+    }
 
-    "uses a session signing key even if the validity period end is in the past" onlyRunWithOrGreaterThan
-      ProtocolVersion.v35 in {
+    "uses a session signing key even if the validity period end is in the past" in {
 
-        cleanCache(p1)
+      cleanCache(p1)
 
-        signWithValidityPeriodEnd(
-          testSnapshot.timestamp.immediateSuccessor,
-          testSnapshot.timestamp,
-          expectSignatureDelegation = true,
-        )
-      }
+      signWithValidityPeriodEnd(
+        testSnapshot.timestamp.immediateSuccessor,
+        testSnapshot.timestamp,
+        expectSignatureDelegation = true,
+      )
+    }
   }
 }

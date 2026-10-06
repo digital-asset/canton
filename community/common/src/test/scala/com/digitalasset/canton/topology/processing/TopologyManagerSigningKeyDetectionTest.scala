@@ -151,7 +151,6 @@ class TopologyManagerSigningKeyDetectionTest
           HostingParticipant(ParticipantId(UniqueIdentifier.tryCreate("p2", ns2)), Submission),
           HostingParticipant(ParticipantId(UniqueIdentifier.tryCreate("p3", ns3)), Submission),
         ),
-        isOffline = false,
       )
 
       detector

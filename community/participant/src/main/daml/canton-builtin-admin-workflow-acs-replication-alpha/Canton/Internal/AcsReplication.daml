@@ -14,8 +14,7 @@ template AcsReplicationProposal
     sourceParticipant : Party -- participant admin party
     targetParticipant : Party -- participant admin party
     sequencerUids : [Text]
-    -- TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
-    topologySerial : Int
+    timestamp : Time
     participantPermission : ParticipantPermission
     operationName : Text
   where
@@ -53,8 +52,7 @@ template AcsReplicationAgreement
     sourceParticipant : Party -- participant admin party
     targetParticipant : Party -- participant admin party
     sequencerUid : Text
-    -- TODO(#35267): doesn't apply to other use cases without onboarding topology tx, should be replaced with a timestamp
-    topologySerial : Int
+    timestamp : Time
     participantPermission : ParticipantPermission
     operationName : Text
   where

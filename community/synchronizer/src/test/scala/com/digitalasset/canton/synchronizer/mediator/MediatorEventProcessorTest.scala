@@ -91,7 +91,6 @@ final class MediatorEventProcessorTest
           synchronizerId = physicalSynchronizerId,
           messageIdO = None, // not relevant
           batch = Batch(envelopes.toList, testedProtocolVersion),
-          topologyTimestampO = None, // not relevant
           trafficReceipt = None, // not relevant
         )
       )(TraceContext.createNew("test")),

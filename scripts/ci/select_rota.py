@@ -274,6 +274,59 @@ def send_dm(token: str, user_id: str, text: str) -> None:
     slack_post(SLACK_POST_MESSAGE_URL, token, {"channel": channel, "text": text})
 
 
+def notify_tooling_failure(
+    message: str,
+    roster: dict[str, Any],
+    token: str | None,
+    rotation: str | None = None,
+    monday: dt.date | None = None,
+    values: list[list[Any]] | None = None,
+) -> None:
+    """Best-effort: DM whoever is on the CI rota about some CI/tooling failure.
+
+    A broken tool is a CI/tooling problem, which is the CI rota's job to look into, not
+    whichever shift it happened to break under. Reuses ``values``/``monday`` (sheet
+    rows already fetched elsewhere, if any) to resolve the CI rota without a second
+    network round-trip, otherwise fetches them fresh. Falls back to the roster's
+    ``fallback_pool`` when the CI rota can't be resolved either, or when ``rotation``
+    (the rotation the *original* failure happened under, if any) already IS "ci", to
+    avoid paging a broken thing about itself. Never raises: a failure here must not
+    affect the caller's own handling of the original failure.
+    """
+    if not token:
+        log("warning: no Slack token in the environment, cannot report the tooling failure")
+        return
+    try:
+        targets: list[str] = []
+        if rotation != "ci":
+            try:
+                week = monday or current_monday(dt.datetime.now(dt.timezone.utc).date())
+                sheet_values = values
+                if sheet_values is None:
+                    sheet_id = os.environ.get("ROTA_SHEET_ID", DEFAULT_SHEET_ID)
+                    sheet_values = fetch_week_values(week, sheet_id)
+                header_row, cols = find_header_columns(
+                    sheet_values,
+                    ROTATION_HEADERS["ci"],
+                    ROTATION_COLUMNS.get("ci", DEFAULT_ROTATION_COLUMNS),
+                )
+                names = names_for_week(sheet_values, header_row, cols, week)
+                targets = resolve_slack_ids(names, roster["slack_id_by_name"])
+            except Exception as ci_exc:
+                log(
+                    f"warning: could not resolve the CI rota for a tooling-failure notice ({ci_exc!r})"
+                )
+        if not targets:
+            targets = resolve_slack_ids(roster["fallback_pool"], roster["slack_id_by_name"])
+        for uid in targets:
+            try:
+                send_dm(token, uid, message)
+            except Exception as dm_exc:
+                log(f"warning: failed to DM {uid} about the tooling failure ({dm_exc!r})")
+    except Exception as notify_exc:
+        log(f"warning: could not report the tooling failure ({notify_exc!r})")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Print Slack ID(s) for the current rota shift.")
     target = parser.add_mutually_exclusive_group(required=True)
@@ -289,19 +342,21 @@ def main() -> int:
     try:
         roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
     except Exception as exc:
-        # The roster is the fallback's only source, so if it is unreadable there is no
-        # safe degrade: emit nothing and let the caller send an unmentioned alert. Exit 0
-        # so the notification step itself still runs (never break CI notifications).
+        # The roster is the sole source of every Slack id (CI rota, fallback pool,
+        # everyone), so if it is unreadable there is truly nobody left to notify: exit
+        # non-zero so this at least surfaces as a failed step, instead of a silent,
+        # unnoticed "nobody will be pinged".
         log(
             f"ERROR: roster {ROSTER_PATH} unreadable ({exc!r}); NO responder emitted, nobody will be pinged"
         )
-        return 0
+        return 1
     today = (
         dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(dt.timezone.utc).date()
     )
     monday = current_monday(today)
     headers = ROTATION_HEADERS[rotation]
 
+    values: list[list[Any]] | None = None
     try:
         if args.values_file:
             values = json.loads(Path(args.values_file).read_text())
@@ -326,6 +381,16 @@ def main() -> int:
         Exception
     ) as exc:  # any failure must degrade to the fallback (never break CI notifications)
         log(f"warning: rota lookup failed ({exc!r}), using fallback pool")
+        notify_tooling_failure(
+            f":warning: select_rota.py failed to resolve the `{rotation}` rotation for "
+            f"the week of {monday.isoformat()}: {exc!r}. It fell back to the fallback "
+            "pool for the actual ping, can someone check the rota sheet / select_rota.py?",
+            roster,
+            os.environ.get(SLACK_TOKEN_ENV),
+            rotation,
+            monday,
+            values,
+        )
 
     # Last resort: a deterministic pick from the roster pool. This must never raise,
     # an unhandled error here would fail the CI notification step it feeds.
@@ -444,7 +509,7 @@ def self_test() -> None:
 
     # send_dm: opens the 1:1 first, then posts to the returned conversation id (never the
     # user id). Fake slack_post so the two-call contract is checked without any network.
-    global slack_post
+    global slack_post, send_dm
     real_slack_post = slack_post
     calls: list[tuple[str, dict[str, str]]] = []
 
@@ -462,6 +527,68 @@ def self_test() -> None:
         (SLACK_POST_MESSAGE_URL, {"channel": "D123", "text": "hi there"}),
     ], calls
 
+    # notify_tooling_failure: prefers paging the CI rota (a broken tool is a CI/tooling
+    # problem), falling back to fallback_pool when the CI rota can't be resolved either,
+    # when the original failure's rotation already IS "ci", or when there is no sheet
+    # data to reuse and no sheet credentials to fetch fresh. fallback_pool is
+    # deliberately a different person than the CI column here so the two paths are
+    # distinguishable in the assertions.
+    real_send_dm = send_dm
+    dmed: list[str] = []
+
+    def fake_send_dm(token: str, user_id: str, text: str) -> None:
+        dmed.append(user_id)
+
+    notify_roster = {
+        "slack_id_by_name": {"Ada": "UCI", "Bjarne": "UB", "Carla": "UC"},
+        "fallback_pool": ["Carla"],
+    }
+    ci_sheet = [
+        ["Week", "CI", "Flaky Canton", "Flaky Canton", "Flaky Canton"],
+        [serial, "Ada", "Bjarne", "Bjarne", "Bjarne"],
+    ]
+    no_ci_sheet = [["Week", "Flaky Canton"], [serial, "Bjarne"]]
+    week = dt.date(2025, 6, 30)
+    saved_sa_key = os.environ.pop("GCLOUD_SHEETS_SA_KEY", None)
+    try:
+        send_dm = fake_send_dm
+
+        # no token: no-op, nobody DMed
+        notify_tooling_failure("boom", notify_roster, None, "flaky-canton", week, ci_sheet)
+        assert dmed == []
+
+        # resolvable CI column in the reused sheet values: pages the CI rota
+        notify_tooling_failure("boom", notify_roster, "xoxb-test", "flaky-canton", week, ci_sheet)
+        assert dmed == ["UCI"], dmed
+        dmed.clear()
+
+        # the original failure's rotation already IS "ci": must not page "ci" about itself
+        notify_tooling_failure("boom", notify_roster, "xoxb-test", "ci", week, ci_sheet)
+        assert dmed == ["UC"], dmed
+        dmed.clear()
+
+        # no sheet values to reuse and no GCLOUD_SHEETS_SA_KEY to fetch fresh: falls back
+        notify_tooling_failure("boom", notify_roster, "xoxb-test", "flaky-canton", week, None)
+        assert dmed == ["UC"], dmed
+        dmed.clear()
+
+        # sheet values present but no "CI" column in them: falls back
+        notify_tooling_failure(
+            "boom", notify_roster, "xoxb-test", "flaky-canton", week, no_ci_sheet
+        )
+        assert dmed == ["UC"], dmed
+        dmed.clear()
+
+        # no rotation given (a failure unrelated to any specific rotation, e.g. a Slack
+        # post itself failing): still resolves and pages the CI rota like the default case
+        notify_tooling_failure("boom", notify_roster, "xoxb-test", None, week, ci_sheet)
+        assert dmed == ["UCI"], dmed
+        dmed.clear()
+    finally:
+        send_dm = real_send_dm
+        if saved_sa_key is not None:
+            os.environ["GCLOUD_SHEETS_SA_KEY"] = saved_sa_key
+
     print("select_rota self-checks passed")
 
 
@@ -475,6 +602,12 @@ def _run_self_test() -> None:
     finally:
         if dict(os.environ) != before:
             raise RuntimeError("self_test() polluted os.environ")
+
+
+def test_self_test() -> None:
+    """Pytest entry point so lint_and_test_py_scripts.yml's plain `pytest` run exercises
+    these self-checks too, not just `--self-test` (which nothing else invokes in CI)."""
+    _run_self_test()
 
 
 if __name__ == "__main__":

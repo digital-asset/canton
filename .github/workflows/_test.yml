@@ -41,6 +41,13 @@ permissions:
   contents: read
   issues: write
 
+# Experiment (PR #35868): enable the Datadog Test Optimization JUnit upload in the
+# cleanup_test_job composite. Scoped here to the main integration suite only to
+# sample Datadog cost and flaky-detection value. Set to any other value or remove
+# to turn it off.
+env:
+  DATADOG_TEST_OPTIMIZATION: "true"
+
 jobs:
   resolve_timings:
     name: Resolve Timings Artifact Run
@@ -158,3 +165,7 @@ jobs:
       job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
+      # Experiment (PR #35868): this workflow enables the Datadog Test Optimization
+      # upload via the DATADOG_TEST_OPTIMIZATION env above, so also surface the
+      # results link on the run summary. Keep this in sync with that env var.
+      datadog_test_optimization: true

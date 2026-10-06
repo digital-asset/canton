@@ -9,11 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
-import com.digitalasset.canton.ProtoDeserializationError.{
-  FieldNotSet,
-  ProtoDeserializationFailure,
-  ValueConversionError,
-}
+import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ProtoDeserializationFailure}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -25,6 +21,7 @@ import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopol
 import com.digitalasset.canton.topology.admin.v30
 import com.digitalasset.canton.topology.admin.v30.*
 import com.digitalasset.canton.topology.admin.v30.AuthorizeRequest.{Proposal, Type}
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.TopologyStoreId.TemporaryStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
@@ -42,8 +39,11 @@ import com.digitalasset.canton.{ProtoDeserializationError, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.duration.Duration
 import io.grpc.stub.StreamObserver
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Sink
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 final case class BaseWriteRequest(
     clientVersion: Option[ReleaseVersion]
@@ -69,7 +69,7 @@ class GrpcTopologyManagerWriteService(
     physicalSynchronizerIdLookup: PsidLookup,
     temporaryStoreRegistry: TemporaryStoreRegistry,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit val ec: ExecutionContext)
+)(implicit val ec: ExecutionContext, materializer: Materializer)
     extends v30.TopologyManagerWriteServiceGrpc.TopologyManagerWriteService
     with NamedLogging {
 
@@ -359,46 +359,54 @@ class GrpcTopologyManagerWriteService(
   ): StreamObserver[ImportTopologySnapshotV2Request] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils
-      .streamFromClient[
+      .streamChunkedFromClient[
         ImportTopologySnapshotV2Request,
         ImportTopologySnapshotV2Response,
-        (Option[v30.StoreId], Option[Duration]),
+        (Option[Duration], Option[v30.StoreId]),
+        StoredTopologyTransaction[TopologyChangeOp, TopologyMapping],
       ](
-        _.topologySnapshot,
-        req => (req.store, req.waitToBecomeEffective),
-        { case (topologySnapshot, (waitToBecomeEffective, store)) =>
-          doImportTopologySnapshotV2(topologySnapshot, store, waitToBecomeEffective)
-        },
-        responseObserver,
-      )
+        responseObserver = responseObserver,
+        responseIfNoRequests = Failure(
+          ProtoDeserializationFailure
+            .Wrap(ProtoDeserializationError.OtherError("No elements were received in stream"))
+            .asGrpcError
+        ),
+        getBytes = _.topologySnapshot,
+        parseMessage = in => StoredTopologyTransaction.parseDelimitedFromTrusted(in),
+      )(req => Success((req.waitToBecomeEffective, req.store))) {
+        case ((waitToBecomeEffective, store), source) =>
+          FutureUnlessShutdown.outcomeF(
+            source
+              .runWith(Sink.seq)
+              .flatMap(topologySnapshot =>
+                doImportTopologySnapshotV2(topologySnapshot, waitToBecomeEffective, store)
+              )
+          )
+      }
   }
 
   private def doImportTopologySnapshotV2(
-      topologySnapshot: ByteString,
+      storedTxs: Seq[GenericStoredTopologyTransaction],
       waitToBecomeEffectiveP: Option[Duration],
       store: Option[v30.StoreId],
   )(implicit traceContext: TraceContext): Future[ImportTopologySnapshotV2Response] = {
-    val res: EitherT[FutureUnlessShutdown, RpcError, ImportTopologySnapshotV2Response] = for {
-      storedTxs <- EitherT.fromEither[FutureUnlessShutdown](
-        GrpcStreamingUtils
-          .parseDelimitedFromTrusted(topologySnapshot.newInput(), StoredTopologyTransaction)
-          .leftMap(err =>
-            ProtoDeserializationFailure.Wrap(
-              ValueConversionError("topology_snapshot", err)
-            ): RpcError
+    val res: EitherT[FutureUnlessShutdown, RpcError, ImportTopologySnapshotV2Response] =
+      for {
+        waitToBecomeEffectiveO <- EitherT
+          .fromEither[FutureUnlessShutdown](
+            waitToBecomeEffectiveP
+              .traverse(
+                config.NonNegativeFiniteDuration.fromProtoPrimitive("wait_to_become_effective")
+              )
+              .leftMap(ProtoDeserializationFailure.Wrap(_))
           )
-      )
-      signedTxs = storedTxs.map(_.transaction)
-      waitToBecomeEffectiveO <- EitherT
-        .fromEither[FutureUnlessShutdown](
-          waitToBecomeEffectiveP
-            .traverse(
-              config.NonNegativeFiniteDuration.fromProtoPrimitive("wait_to_become_effective")
-            )
-            .leftMap(ProtoDeserializationFailure.Wrap(_))
+        _ <- addTransactions(
+          storedTxs.map(_.transaction),
+          store,
+          ForceFlags.all,
+          waitToBecomeEffectiveO,
         )
-      _ <- addTransactions(signedTxs, store, ForceFlags.all, waitToBecomeEffectiveO)
-    } yield v30.ImportTopologySnapshotV2Response()
+      } yield v30.ImportTopologySnapshotV2Response()
     CantonGrpcUtil.mapErrNewEUS(res)
   }
 

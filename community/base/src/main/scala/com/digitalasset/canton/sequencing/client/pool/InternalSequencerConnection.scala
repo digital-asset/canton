@@ -12,7 +12,12 @@ import com.digitalasset.canton.health.{
   ToComponentHealthState,
 }
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasRunOnClosing, OnShutdownRunner}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
@@ -238,8 +243,13 @@ object InternalSequencerConnection {
       physicalSynchronizerId: PhysicalSynchronizerId,
       sequencerId: SequencerId,
       staticParameters: StaticSynchronizerParameters,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ConnectionAttributes] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ConnectionAttributes] =
+      ConnectionAttributes
+  }
+
+  object ConnectionAttributes extends PrettyPrintingCompanion[ConnectionAttributes] {
+    override protected val pretty: Pretty[ConnectionAttributes] = prettyOfClass(
       param("physical synchronizer id", _.physicalSynchronizerId),
       param("sequencer", _.sequencerId),
       param("static parameters", _.staticParameters),

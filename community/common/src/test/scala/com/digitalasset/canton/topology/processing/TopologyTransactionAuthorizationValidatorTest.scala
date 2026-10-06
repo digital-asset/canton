@@ -509,7 +509,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
             partyId,
             PositiveInt.one,
             Seq(HostingParticipant(participantId, ParticipantPermission.Submission)),
-            isOffline = false,
           ),
           SynchronizerParametersState(
             synchronizerId,
@@ -961,7 +960,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
             Seq(
               HostingParticipant(participant6, ParticipantPermission.Observation)
             ),
-            isOffline = false,
           ),
           // both the party's owner and the participant sign
           NonEmpty(Set, SigningKeys.key1, SigningKeys.key6),
@@ -974,7 +972,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           Seq(
             HostingParticipant(participant6, ParticipantPermission.Submission)
           ),
-          isOffline = false,
         )
 
         val upgradeTx_k1 = mkAdd(
@@ -1056,7 +1053,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
               HostingParticipant(pid2, ParticipantPermission.Submission),
               HostingParticipant(participant6, ParticipantPermission.Submission),
             ),
-            isOffline = false,
           ),
           // both the party's owner and the participant sign
           NonEmpty(Set, SigningKeys.key1, SigningKeys.key2, SigningKeys.key6),
@@ -1070,7 +1066,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
             HostingParticipant(participant1, ParticipantPermission.Submission),
             HostingParticipant(participant6, ParticipantPermission.Submission),
           ),
-          isOffline = false,
         )
         val unhostingMappingAndThresholdChange = PartyToParticipant.tryCreate(
           party1b,
@@ -1079,7 +1074,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
             HostingParticipant(participant1, ParticipantPermission.Submission),
             HostingParticipant(participant6, ParticipantPermission.Submission),
           ),
-          isOffline = false,
         )
         val multipleUnhostingMappingAndThresholdChange = PartyToParticipant.tryCreate(
           party1b,
@@ -1087,7 +1081,6 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           Seq(
             HostingParticipant(participant1, ParticipantPermission.Submission)
           ),
-          isOffline = false,
         )
 
         val participant2RemovesItselfUnilaterally = mkAdd(
