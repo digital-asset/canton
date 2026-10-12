@@ -220,6 +220,14 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
         description = "Records the rate and duration of gRPC flow control not being ready.",
         qualification = MetricQualification.Latency,
       )
+
+      private[metrics] val messageSize: Item = Item(
+        prefix :+ "sent-message-size",
+        summary = "Sent message size",
+        description =
+          "Records the distribution of serialized gRPC message sizes (in bytes) sent to each peer.",
+        qualification = MetricQualification.Traffic,
+      )
     }
     private[metrics] val send = new SendMetrics
 
@@ -233,8 +241,34 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
         description = "Records the rate and latency when processing incoming P2P network messages.",
         qualification = MetricQualification.Latency,
       )
+
+      private[metrics] val messageSize: Item = Item(
+        prefix :+ "received-message-size",
+        summary = "Received message size",
+        description =
+          "Records the distribution of serialized gRPC message sizes (in bytes) received from each peer.",
+        qualification = MetricQualification.Traffic,
+      )
     }
     private[metrics] val receive = new ReceiveMetrics
+
+    // Private constructor to avoid being instantiated multiple times by accident
+    private[metrics] final class StreamMetrics private[P2PHistograms] {
+      val prefix: MetricName = p2pPrefix :+ "stream"
+
+      private[metrics] val roundTripLatency: Item = Item(
+        prefix :+ "round-trip-latency",
+        summary = "P2P application-level round-trip time",
+        description =
+          "Records the distribution of the application-level round-trip time to each peer, measured " +
+            "by periodically sending a low-frequency `ConnectionOpened` echo probe that the peer reflects " +
+            "back. Unlike the TCP-level RTT (see the transport metrics), this is connection-direction- and " +
+            "transport-independent, so it is always available, but it also includes application-level queuing " +
+            "and processing time.",
+        qualification = MetricQualification.Latency,
+      )
+    }
+    private[metrics] val stream = new StreamMetrics
   }
   private[metrics] val p2p = new P2PHistograms
 }
@@ -337,6 +371,10 @@ class BftOrderingMetrics private[metrics] (
               val PostponedViewMessagesQueueLatency =
                 "consensus-postponed-view-messages-queue-latency"
 
+              // Time waited for the first relative block number of each segment in an epoch to
+              // be ordered, associated to the original segment leader of that block.
+              val FirstSegmentBlockOrderingLatency = "consensus-first-segment-block-order-latency"
+
               object stateTransfer {
                 // Time spent by consensus messages in the postponed queue during state transfer
                 val PostponedMessagesQueueLatency =
@@ -350,8 +388,30 @@ class BftOrderingMetrics private[metrics] (
               val Inspection = "output-block-inspection"
               val Backpressure = "output-backpressure"
               val OutputStageDuration = "output-stage-duration"
+
+              // Time a block spends waiting in the output Peano queue for lower-numbered blocks
+              //  ("holes") to be ordered and fetched before it can be extracted. Emitted once per
+              //  extracted block whose delivery to post-ordering actually had to wait, split
+              //  into one sample per leader that ordered a delaying hole (tagged with the `leader` label).
+              val InterleavingWait = "output-block-interleaving-wait"
+
+              // Similar to `interleaving-wait`, but emitted once per extracted block and also considering those whose
+              //  delivery to post-ordering _didn't_ have to wait behind a lower-numbered block.
+              //  Also, a single observation is emitted for each block that is equal to that block's total wait
+              //  summed over all delaying leaders (there's no `leader` label).
+              //  The per-leader `interleaving-wait` averages are not additive for comparison with the output stage
+              //  duration's average; that is due to the sample population being different.
+              //  By contrast, the average of this metric highlights the portion of the output stage duration's
+              //  average that is due to blocks' delivery to post-ordering waiting behind lowered-numbered "holes".
+              val InterleavingTotalWait = "output-block-interleaving-total-wait"
             }
           }
+        }
+
+        // Assigned segment leader to which a latency sample is attributed (e.g., interleaving wait
+        //  or first segment block ordering latency).
+        object leader {
+          val Key: String = "leader"
         }
       }
 
@@ -969,8 +1029,8 @@ class BftOrderingMetrics private[metrics] (
 
       def cleanupVoteGauges(keepOnly: Set[BftNodeId]): Unit =
         lock.exclusive {
-          keepOnlyGaugesFor(prepareGauges, keepOnly)
-          keepOnlyGaugesFor(commitGauges, keepOnly)
+          cleanupGauges(prepareGauges, keepOnly)
+          cleanupGauges(commitGauges, keepOnly)
         }
 
       private def getOrElseUpdateGauge(
@@ -979,36 +1039,15 @@ class BftOrderingMetrics private[metrics] (
           name: String,
           summary: String,
           description: String,
-      ): Gauge[Double] = {
-        val mc1 = metricsContext.withExtraLabels(labels.VotingSequencer -> node)
-
-        lock.exclusive {
-          locally {
-            implicit val metricsContext: MetricsContext = mc1
-            gauges.getOrElseUpdate(
-              node,
-              openTelemetryMetricsFactory.gauge(
-                MetricInfo(
-                  prefix :+ name,
-                  summary,
-                  MetricQualification.Traffic,
-                  description,
-                ),
-                0.0d,
-              ),
-            )
-          }
-        }
-      }
-
-      private def keepOnlyGaugesFor[T](
-          gaugesMap: mutable.Map[BftNodeId, Gauge[T]],
-          keepOnly: Set[BftNodeId],
-      ): Unit =
-        gaugesMap.view.filterKeys(!keepOnly.contains(_)).foreach { case (id, gauge) =>
-          gauge.close()
-          gaugesMap.remove(id).discard
-        }
+      ): Gauge[Double] =
+        getOrCreateGauge(
+          gauges,
+          lock,
+          node,
+          metricsContext.withExtraLabels(labels.VotingSequencer -> node),
+          MetricInfo(prefix :+ name, summary, MetricQualification.Traffic, description),
+          0.0d,
+        )
     }
 
     // Private constructor to avoid being instantiated multiple times by accident
@@ -1226,33 +1265,24 @@ class BftOrderingMetrics private[metrics] (
 
     private val blacklistGauges = mutable.Map[BftNodeId, Gauge[Long]]()
     private val lock = new Mutex()
-    def blacklist(node: BftNodeId): Gauge[Long] = {
-      val mc1 = metricsContext.withExtraLabels(labels.blacklistNode -> node)
-      lock.exclusive {
-        locally {
-          implicit val metricsContext: MetricsContext = mc1
-          blacklistGauges.getOrElseUpdate(
-            node,
-            openTelemetryMetricsFactory.gauge(
-              MetricInfo(
-                prefix :+ "blacklist-sequencer",
-                "Amount of epochs the node is blacklisted for",
-                MetricQualification.Traffic,
-                "The amount of epochs an BFT sequencer is blacklisted from being a leader",
-              ),
-              0,
-            ),
-          )
-        }
-      }
-    }
+    def blacklist(node: BftNodeId): Gauge[Long] =
+      getOrCreateGauge(
+        blacklistGauges,
+        lock,
+        node,
+        metricsContext.withExtraLabels(labels.blacklistNode -> node),
+        MetricInfo(
+          prefix :+ "blacklist-sequencer",
+          "Amount of epochs the node is blacklisted for",
+          MetricQualification.Traffic,
+          "The amount of epochs an BFT sequencer is blacklisted from being a leader",
+        ),
+        0L,
+      )
 
     def cleanupBlacklistGauges(keepOnly: Set[BftNodeId]): Unit =
       lock.exclusive {
-        blacklistGauges.view.filterKeys(!keepOnly.contains(_)).foreach { case (id, gauge) =>
-          gauge.close()
-          blacklistGauges.remove(id).discard
-        }
+        cleanupGauges(blacklistGauges, keepOnly)
       }
   }
   val blacklistLeaderSelectionPolicyMetrics = new BlacklistLeaderSelectionPolicyMetrics
@@ -1467,6 +1497,9 @@ class BftOrderingMetrics private[metrics] (
 
       val grpcFlowControlNotReadyLatency: Timer =
         openTelemetryMetricsFactory.timer(histograms.p2p.send.grpcFlowControlNotReadyLatency.info)
+
+      val messageSize: Histogram =
+        openTelemetryMetricsFactory.histogram(histograms.p2p.send.messageSize.info)
     }
     val send = new SendMetrics
 
@@ -1513,18 +1546,333 @@ class BftOrderingMetrics private[metrics] (
 
       val processingLatency: Timer =
         openTelemetryMetricsFactory.timer(histograms.p2p.receive.processingLatency.info)
+
+      val messageSize: Histogram =
+        openTelemetryMetricsFactory.histogram(histograms.p2p.receive.messageSize.info)
     }
     val receive = new ReceiveMetrics
+
+    /** gRPC/networking-level P2P stream metrics. Unlike the [[TransportMetrics]], these are a plain
+      * gRPC networking signal rather than a transport-level one, so they are always emitted,
+      * independently of whether the optional (conditionally enabled) transport metrics are active.
+      */
+    // Private constructor to avoid being instantiated multiple times by accident
+    final class StreamMetrics private[P2PMetrics] {
+      private val prefix = p2pPrefix
+
+      object labels {
+        val Peer: String = "peer"
+
+        /** Connection direction from this node's point of view: `outgoing` for connections this
+          * node dialed and `incoming` for connections a peer dialed to this node.
+          */
+        val Direction: String = "direction"
+
+        object direction {
+          val Outgoing: String = "outgoing"
+          val Incoming: String = "incoming"
+        }
+
+        /** The gRPC status code observed when a P2P stream is torn down as an error. */
+        val GrpcStatus: String = "grpc-status"
+      }
+
+      val teardowns: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "stream-teardowns",
+          summary = "P2P stream teardowns",
+          description =
+            "Count of P2P gRPC stream teardowns observed as errors, labeled by peer, connection direction and gRPC status code. Useful to diagnose remote- or infrastructure-initiated resets (e.g. a proxy GOAWAY/RST_STREAM surfaced as UNAVAILABLE). This is a gRPC/networking-level signal, always emitted regardless of whether transport metrics are enabled.",
+          qualification = MetricQualification.Errors,
+        )
+      )
+
+      /** Application-level round-trip time to a peer, labeled by peer. Measured by the dialer
+        * (outgoing) side, which periodically sends a low-frequency `ConnectionOpened` echo probe
+        * that the peer's acceptor (incoming) side reflects back. Only the dialer measures, so there
+        * is no meaningful connection-direction label. Unlike the TCP-level RTT (see
+        * [[TransportMetrics.tcpRttMicros]]), this is connection-direction- and
+        * transport-independent, so it is always available.
+        */
+      val roundTripLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.stream.roundTripLatency.info)
+    }
+    val stream = new StreamMetrics
+
+    /** HTTP/2- and TCP-level transport metrics for P2P gRPC connections, all labeled by peer node
+      * ID and connection direction. They are populated by a periodic sampler (see the P2P transport
+      * metrics publisher) that reads gRPC Channelz and, when the Netty epoll transport is in use,
+      * per-socket `TcpInfo`.
+      *
+      * These metrics are meant to troubleshoot latency of gRPC bidirectional streaming with
+      * (possibly third-party) peers.
+      */
+    // Private constructor to avoid being instantiated multiple times by accident
+    final class TransportMetrics private[P2PMetrics] {
+      private val prefix = p2pPrefix :+ "transport"
+
+      object labels {
+        val Peer: String = "peer"
+
+        val Direction: String = "direction"
+        object direction {
+          val Outgoing: String = "outgoing"
+          val Incoming: String = "incoming"
+        }
+      }
+
+      // --- HTTP/2 stream lifecycle -------------------------------------------------------------
+
+      val http2StreamsOpened: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "http2-streams-opened",
+          summary = "HTTP/2 streams opened",
+          description = "Rate at which HTTP/2 streams are opened on the P2P connection to a peer.",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val http2StreamsClosed: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "http2-streams-closed",
+          summary = "HTTP/2 streams closed",
+          description =
+            "Rate at which HTTP/2 streams are closed (succeeded or failed) on the P2P connection to a peer.",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      // --- gRPC messages -----------------------------------------------------------------------
+
+      val grpcMessagesSent: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "grpc-messages-sent",
+          summary = "gRPC messages sent",
+          description =
+            "Count of gRPC messages sent to a peer on the P2P connection (from Channelz message counts). Note that a single gRPC message may be split across multiple HTTP/2 DATA frames, so this is not a raw frame count.",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val grpcMessagesReceived: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "grpc-messages-received",
+          summary = "gRPC messages received",
+          description =
+            "Count of gRPC messages received from a peer on the P2P connection (from Channelz message counts). Note that a single gRPC message may be split across multiple HTTP/2 DATA frames, so this is not a raw frame count.",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val http2KeepAlivePings: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "http2-keepalive-pings",
+          summary = "HTTP/2 keepalive pings",
+          description =
+            "Count of HTTP/2 keepalive PING frames sent on the P2P connection to a peer.",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      // --- HTTP/2 flow control -----------------------------------------------------------------
+
+      val http2FlowControlStalls: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "http2-flow-control-stalls",
+          summary = "HTTP/2 flow control stalls",
+          description =
+            "Count of samples where the HTTP/2 flow control window to a peer was observed to be exhausted (zero or negative).",
+          qualification = MetricQualification.Saturation,
+        )
+      )
+
+      // --- TCP wire-level bytes and retransmissions --------------------------------------------
+
+      val tcpWireBytesSent: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "tcp-wire-bytes-sent",
+          summary = "TCP wire bytes sent",
+          description =
+            "Total wire-level bytes sent on the P2P TCP connection to a peer (including TLS and framing overhead). Wire-byte counting only works on the client (dialer/outgoing) side, so this is labeled by peer only (no connection-direction label).",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val tcpWireBytesReceived: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "tcp-wire-bytes-received",
+          summary = "TCP wire bytes received",
+          description =
+            "Total wire-level bytes received on the P2P TCP connection from a peer (including TLS and framing overhead). Wire-byte counting only works on the client (dialer/outgoing) side, so this is labeled by peer only (no connection-direction label).",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      // TCP retransmitted segments are published as a per-peer gauge (see `tcpRetransmittedSegments`
+      //  below), because the underlying `tcpi_retrans` is an instantaneous count of outstanding
+      //  retransmissions, not a monotonic lifetime total.
+
+      // --- Per-peer sampled gauges -------------------------------------------------------------
+
+      // Gauges are keyed by (peer, direction) so that outgoing (client-side) and incoming
+      //  (server-side) connections to the same peer are tracked and cleaned up independently.
+      private val http2ActiveStreamsGauges = mutable.Map[(BftNodeId, String), Gauge[Int]]()
+      private val http2LocalWindowGauges = mutable.Map[(BftNodeId, String), Gauge[Long]]()
+      private val http2RemoteWindowGauges = mutable.Map[(BftNodeId, String), Gauge[Long]]()
+      private val tcpSendWindowScaleGauges = mutable.Map[(BftNodeId, String), Gauge[Int]]()
+      private val tcpReceiveWindowScaleGauges = mutable.Map[(BftNodeId, String), Gauge[Int]]()
+      private val tcpRttMicrosGauges = mutable.Map[(BftNodeId, String), Gauge[Long]]()
+      private val tcpRetransmittedSegmentsGauges = mutable.Map[(BftNodeId, String), Gauge[Long]]()
+      private val lock = new Mutex()
+
+      def http2ActiveStreams(peer: BftNodeId, direction: String): Gauge[Int] =
+        intGauge(
+          http2ActiveStreamsGauges,
+          peer,
+          direction,
+          "http2-active-streams",
+          "Active concurrent HTTP/2 streams",
+          "Number of concurrently active HTTP/2 streams on the P2P connection to a peer.",
+        )
+
+      def http2LocalWindowBytes(peer: BftNodeId, direction: String): Gauge[Long] =
+        longGauge(
+          http2LocalWindowGauges,
+          peer,
+          direction,
+          "http2-flow-control-local-window-bytes",
+          "HTTP/2 local flow control window (bytes)",
+          "Local HTTP/2 flow control window (in bytes) for the P2P connection to a peer.",
+        )
+
+      def http2RemoteWindowBytes(peer: BftNodeId, direction: String): Gauge[Long] =
+        longGauge(
+          http2RemoteWindowGauges,
+          peer,
+          direction,
+          "http2-flow-control-remote-window-bytes",
+          "HTTP/2 remote flow control window (bytes)",
+          "Remote HTTP/2 flow control window (in bytes) for the P2P connection to a peer.",
+        )
+
+      def tcpSendWindowScale(peer: BftNodeId, direction: String): Gauge[Int] =
+        intGauge(
+          tcpSendWindowScaleGauges,
+          peer,
+          direction,
+          "tcp-send-window-scale",
+          "TCP send window scale",
+          "TCP send window scaling factor for the P2P connection to a peer (requires the Netty epoll transport).",
+        )
+
+      def tcpReceiveWindowScale(peer: BftNodeId, direction: String): Gauge[Int] =
+        intGauge(
+          tcpReceiveWindowScaleGauges,
+          peer,
+          direction,
+          "tcp-receive-window-scale",
+          "TCP receive window scale",
+          "TCP receive window scaling factor for the P2P connection to a peer (requires the Netty epoll transport).",
+        )
+
+      def tcpRttMicros(peer: BftNodeId, direction: String): Gauge[Long] =
+        longGauge(
+          tcpRttMicrosGauges,
+          peer,
+          direction,
+          "tcp-rtt-micros",
+          "TCP round-trip time (us)",
+          "TCP-level smoothed round-trip time (in microseconds) to a peer (requires the Netty epoll transport).",
+        )
+
+      def tcpRetransmittedSegments(peer: BftNodeId, direction: String): Gauge[Long] =
+        longGauge(
+          tcpRetransmittedSegmentsGauges,
+          peer,
+          direction,
+          "tcp-retransmitted-segments",
+          "TCP retransmitted segments (current)",
+          "Current number of outstanding (unacknowledged) retransmitted TCP segments on the P2P connection to a peer, sampled from `tcpi_retrans` (requires the Netty epoll transport). This is an instantaneous value, not a cumulative count.",
+        )
+
+      /** Close and drop all per-peer transport gauges for (peer, direction) pairs no longer
+        * present.
+        */
+      def cleanupTransportGauges(keepOnly: Set[(BftNodeId, String)]): Unit =
+        lock.exclusive {
+          cleanupGauges(http2ActiveStreamsGauges, keepOnly)
+          cleanupGauges(http2LocalWindowGauges, keepOnly)
+          cleanupGauges(http2RemoteWindowGauges, keepOnly)
+          cleanupGauges(tcpSendWindowScaleGauges, keepOnly)
+          cleanupGauges(tcpReceiveWindowScaleGauges, keepOnly)
+          cleanupGauges(tcpRttMicrosGauges, keepOnly)
+          cleanupGauges(tcpRetransmittedSegmentsGauges, keepOnly)
+        }
+
+      private def intGauge(
+          gauges: mutable.Map[(BftNodeId, String), Gauge[Int]],
+          peer: BftNodeId,
+          direction: String,
+          name: String,
+          summary: String,
+          description: String,
+      ): Gauge[Int] =
+        getOrCreateGauge(
+          gauges,
+          lock,
+          (peer, direction),
+          metricsContext.withExtraLabels(labels.Peer -> peer, labels.Direction -> direction),
+          MetricInfo(prefix :+ name, summary, MetricQualification.Traffic, description),
+          0,
+        )
+
+      private def longGauge(
+          gauges: mutable.Map[(BftNodeId, String), Gauge[Long]],
+          peer: BftNodeId,
+          direction: String,
+          name: String,
+          summary: String,
+          description: String,
+      ): Gauge[Long] =
+        getOrCreateGauge(
+          gauges,
+          lock,
+          (peer, direction),
+          metricsContext.withExtraLabels(labels.Peer -> peer, labels.Direction -> direction),
+          MetricInfo(prefix :+ name, summary, MetricQualification.Traffic, description),
+          0L,
+        )
+    }
+    val transport = new TransportMetrics
   }
   val p2p = new P2PMetrics
 
-  private def cleanupGauges[T <: String](
-      nodeGauges: mutable.Map[T, Gauge[Int]],
-      keepOnlyNodes: Set[T],
+  private def cleanupGauges[K, T](
+      gauges: mutable.Map[K, Gauge[T]],
+      keepOnly: Set[K],
   ): Unit =
-    nodeGauges.view.filterKeys(!keepOnlyNodes.contains(_)).foreach { case (id, gauge) =>
+    gauges.view.filterKeys(!keepOnly.contains(_)).foreach { case (id, gauge) =>
       gauge.close()
-      nodeGauges.remove(id).discard
+      gauges.remove(id).discard
+    }
+
+  /** Returns the gauge registered under `key`, creating and registering it (with the given metrics
+    * context, info and initial value) if absent. Registration happens under `lock` to keep the map
+    * and the metrics factory consistent for concurrent callers.
+    */
+  private def getOrCreateGauge[K, T](
+      gauges: mutable.Map[K, Gauge[T]],
+      lock: Mutex,
+      key: K,
+      context: MetricsContext,
+      info: MetricInfo,
+      initial: T,
+  ): Gauge[T] =
+    lock.exclusive {
+      locally {
+        implicit val metricsContext: MetricsContext = context
+        gauges.getOrElseUpdate(key, openTelemetryMetricsFactory.gauge(info, initial))
+      }
     }
 
   private def updateMetrics[N <: String](

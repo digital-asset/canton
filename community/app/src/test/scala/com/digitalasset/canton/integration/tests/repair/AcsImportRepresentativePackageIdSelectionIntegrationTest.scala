@@ -63,8 +63,6 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
     with PekkoBeforeAndAfterAll
     with SharedEnvironment {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   private val FooV1PkgId = upgrades.v1.java.foo.Foo.PACKAGE_ID
   private val FooV2PkgId = upgrades.v2.java.foo.Foo.PACKAGE_ID
   private val FooV3PkgId = upgrades.v3.java.foo.Foo.PACKAGE_ID

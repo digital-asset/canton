@@ -42,7 +42,11 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
@@ -2685,14 +2689,16 @@ object ParticipantAdminCommands {
     final case class NoWaitCommitments(
         counterParticipant: ParticipantId,
         synchronizers: Seq[SynchronizerId],
-    ) extends PrettyPrinting {
-      override protected def pretty: Pretty[NoWaitCommitments] = prettyOfClass(
+    ) extends PrettyPrintingFromCompanion {
+      override def prettyCompanion: PrettyPrintingCompanion[NoWaitCommitments] = NoWaitCommitments
+    }
+
+    object NoWaitCommitments extends PrettyPrintingCompanion[NoWaitCommitments] {
+      override protected val pretty: Pretty[NoWaitCommitments] = prettyOfClass(
         param("no-wait counter-participant", _.counterParticipant),
         param("synchronizers", _.synchronizers),
       )
-    }
 
-    object NoWaitCommitments {
       def fromSetup(setup: Seq[WaitCommitmentsSetup]): Either[String, Seq[NoWaitCommitments]] = {
         val s = setup.map(setup =>
           for {
@@ -2754,14 +2760,16 @@ object ParticipantAdminCommands {
     final case class WaitCommitments(
         counterParticipant: ParticipantId,
         synchronizers: Seq[SynchronizerId],
-    ) extends PrettyPrinting {
-      override protected def pretty: Pretty[WaitCommitments] = prettyOfClass(
+    ) extends PrettyPrintingFromCompanion {
+      override def prettyCompanion: PrettyPrintingCompanion[WaitCommitments] = WaitCommitments
+    }
+
+    object WaitCommitments extends PrettyPrintingCompanion[WaitCommitments] {
+      override protected val pretty: Pretty[WaitCommitments] = prettyOfClass(
         param("wait counter-participant", _.counterParticipant),
         param("synchronizers", _.synchronizers),
       )
-    }
 
-    object WaitCommitments {
       def fromSetup(setup: Seq[WaitCommitmentsSetup]): Either[String, Seq[WaitCommitments]] = {
         val s = setup.map(setup =>
           for {

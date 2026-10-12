@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.platform.store.testing.postgresql
 
+import com.digitalasset.canton.logging.NamedLogging
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
 trait PostgresAroundAll extends PostgresAroundSuite with BeforeAndAfterAll {
-  self: Suite =>
+  self: Suite & NamedLogging =>
 
   override protected def beforeAll(): Unit = {
     // We start PostgreSQL before calling `super` because _generally_ the database needs to be up

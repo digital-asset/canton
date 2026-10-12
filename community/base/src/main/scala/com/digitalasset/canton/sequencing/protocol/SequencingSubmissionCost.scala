@@ -4,7 +4,11 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -20,7 +24,7 @@ final case class SequencingSubmissionCost(
       SequencingSubmissionCost.type
     ]
 ) extends HasProtocolVersionedWrapper[SequencingSubmissionCost]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   @transient override protected lazy val companionObj: SequencingSubmissionCost.type =
     SequencingSubmissionCost
 
@@ -28,9 +32,8 @@ final case class SequencingSubmissionCost(
     cost = cost.value
   )
 
-  override protected def pretty: Pretty[this.type] = prettyOfClass(
-    param("sequencing submission cost", _.cost)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencingSubmissionCost] =
+    SequencingSubmissionCost
 
   def copy(
       cost: NonNegativeLong
@@ -40,7 +43,11 @@ final case class SequencingSubmissionCost(
 
 object SequencingSubmissionCost
     extends VersioningCompanion[SequencingSubmissionCost]
-    with ProtocolVersionedCompanionDbHelpers[SequencingSubmissionCost] {
+    with ProtocolVersionedCompanionDbHelpers[SequencingSubmissionCost]
+    with PrettyPrintingCompanion[SequencingSubmissionCost] {
+  override protected val pretty: Pretty[SequencingSubmissionCost] = prettyOfClass(
+    param("sequencing submission cost", _.cost)
+  )
 
   def apply(
       cost: NonNegativeLong,

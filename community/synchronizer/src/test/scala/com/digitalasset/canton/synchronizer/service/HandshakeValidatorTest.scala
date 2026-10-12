@@ -11,7 +11,7 @@ import io.grpc.Status
 import io.grpc.Status.Code
 import org.scalatest.wordspec.AsyncWordSpec
 
-class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
+final class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
   "HandshakeValidator" should {
     "happy path" in {
 
@@ -111,17 +111,6 @@ class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
         Seq(35),
         minClientVersionP = Some(34),
         Some("Not the same binary but is okay"),
-        disableReleaseVersionHandshakeCheck = false,
-      )
-      .valueOrFail("Handshake should have succeeded")
-
-    // old clients should connect to pv34
-    HandshakeValidator
-      .clientIsCompatible(
-        serverProtocolVersion = ProtocolVersion.v34,
-        Seq(34),
-        minClientVersionP = Some(34),
-        None,
         disableReleaseVersionHandshakeCheck = false,
       )
       .valueOrFail("Handshake should have succeeded")

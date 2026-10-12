@@ -187,7 +187,6 @@ class ProtocolProcessorTest
                 psid,
                 Some(messageId),
                 Batch.filterOpenEnvelopesFor(batch, participant, Set.empty),
-                None,
                 Option.empty[TrafficReceipt],
               )
             )

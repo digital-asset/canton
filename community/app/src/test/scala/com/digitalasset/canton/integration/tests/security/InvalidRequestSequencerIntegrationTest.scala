@@ -23,7 +23,6 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerS
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.{ByteString, UnsafeByteOperations}
 import io.grpc.{ConnectivityState, ManagedChannel, StatusRuntimeException}
 import monocle.macros.syntax.lens.*
@@ -171,10 +170,7 @@ trait InvalidRequestSequencerIntegrationTest
         .replace(List(bigEnvelope))
 
     val alarmMsg =
-      if (testedProtocolVersion >= ProtocolVersion.v35)
-        s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
-      else
-        s"Max bytes to decompress is exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
+      s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
 
     val responseF = loggerFactory.assertLogs(
       SequencerTestHelper.sendSubmissionRequest(sequencerServiceStub, requestThatCanBeCompressed),

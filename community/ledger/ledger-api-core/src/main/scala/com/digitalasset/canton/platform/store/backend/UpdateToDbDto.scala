@@ -625,7 +625,7 @@ object UpdateToDbDto {
       source_synchronizer_id = reassignmentAccepted.reassignmentInfo.sourceSynchronizer.unwrap,
       reassignment_counter = assign.reassignmentCounter,
       reassignment_id = reassignmentAccepted.reassignmentInfo.reassignmentId.toBytes.toByteArray,
-      representative_package_id = assign.createNode.templateId.packageId,
+      representative_package_id = assign.representativePackageId,
       notPersistedContractId = assign.createNode.coid,
       internal_contract_id = assign.internalContractId,
       create_key_hash = assign.createNode.keyOpt.map(_.globalKey.hash.bytes.toHexString),

@@ -70,6 +70,11 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
 
   override def firstBlockWeNeedToAdd: Option[BlockNumber] = Some(state.startBlock)
 
+  override def assignedSegmentLeaderInCurrentEpochFromBlock(
+      blockNumber: BlockNumber
+  ): Option[BftNodeId] =
+    blockToLeader.get(blockNumber)
+
   override def currentEpoch: Option[EpochNumber] = Some(state.epochNumber)
 
   override def getLeaders(

@@ -152,7 +152,7 @@ class BatchingAcsDigestJournal[K](
   ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K]]] =
     lookupAggregator.run(key -> toInclusive)
 
-  override def bulkLookup(keysUpToInclusive: immutable.Iterable[(K, Offset)])(implicit
+  override def bulkLookup(keysUpToInclusive: Seq[(K, Offset)])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestStore.AcsDigestUpdate[K]]] =
     NonEmpty.from(keysUpToInclusive) match {

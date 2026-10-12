@@ -25,7 +25,6 @@ object SynchronizerSequencingTestUtils {
   def mockDeliverStoreEvent(
       sender: SequencerMemberId = SequencerMemberId(0),
       payloadId: PayloadId = PayloadId(CantonTimestamp.Epoch),
-      signingTs: Option[CantonTimestamp] = None,
       traceContext: TraceContext = TraceContext.empty,
       trafficReceiptO: Option[TrafficReceipt] = None,
   )(
@@ -37,7 +36,6 @@ object SynchronizerSequencingTestUtils {
       messageId,
       recipients,
       payloadId,
-      signingTs,
       traceContext,
       trafficReceiptO,
     )
@@ -49,7 +47,6 @@ object SynchronizerSequencingTestUtils {
         PayloadId(CantonTimestamp.Epoch),
         Batch.empty(BaseTest.testedProtocolVersion).toByteString,
       ),
-      signingTs: Option[CantonTimestamp] = None,
       traceContext: TraceContext = TraceContext.empty,
       trafficReceiptO: Option[TrafficReceipt] = None,
   )(
@@ -61,7 +58,6 @@ object SynchronizerSequencingTestUtils {
       messageId,
       recipients,
       payload,
-      signingTs,
       traceContext,
       trafficReceiptO,
     )

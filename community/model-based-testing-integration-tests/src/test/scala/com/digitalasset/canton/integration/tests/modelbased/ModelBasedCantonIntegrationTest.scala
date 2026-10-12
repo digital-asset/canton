@@ -20,7 +20,6 @@ import com.digitalasset.canton.testing.modelbased.projections.Projections
 import com.digitalasset.canton.testing.modelbased.runner.{CantonInterpreter, ReferenceInterpreter}
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.canton.topology.PartyKind
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.duration.DurationInt
 
@@ -67,49 +66,48 @@ abstract class ModelBasedCantonIntegrationTest
     )
 
   "The canton interpreter" should {
-    "produce projections consistent with the reference interpreter" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        import env.*
+    "produce projections consistent with the reference interpreter" in { implicit env =>
+      import env.*
 
-        val cantonInterpreter = CantonInterpreter.initializeAndUpload(
-          participants = participants.all.toIndexedSeq,
-          synchronizerId = daId,
-          allocateParties = (ps, newParties, targetTopology) =>
-            PartiesAllocator(ps, enableExternalParties = true)(newParties, targetTopology),
+      val cantonInterpreter = CantonInterpreter.initializeAndUpload(
+        participants = participants.all.toIndexedSeq,
+        synchronizerId = daId,
+        allocateParties = (ps, newParties, targetTopology) =>
+          PartiesAllocator(ps, enableExternalParties = true)(newParties, targetTopology),
+      )
+
+      // TODO(i29530): Remove when multi-node submissions are supported
+      val numCommands = Option.when(externalPartyTesting)(1)
+
+      val generator =
+        generators.validScenarioGenerator(
+          numParties,
+          numPackages,
+          numParticipants,
+          numCommands = numCommands,
+          singletonCommands = externalPartyTesting,
         )
 
-        // TODO(i29530): Remove when multi-node submissions are supported
-        val numCommands = Option.when(externalPartyTesting)(1)
-
-        val generator =
-          generators.validScenarioGenerator(
-            numParties,
-            numPackages,
-            numParticipants,
-            numCommands = numCommands,
-            singletonCommands = externalPartyTesting,
-          )
-
-        val result = PropertyChecker
-          .checkProperty(
-            generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
-            shrink = Shrinker.shrinkScenario,
-            property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
-              runAndCompare(cantonInterpreter, scenario, cancelled),
-            // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
-            // be on the safe side.
-            timeout = 20.minutes,
-            // We evaluate as many samples as possible within the allotted time.
-            maxSamples = Int.MaxValue,
-            // scenarios of size 50 take long to generate so we generate them in parallel
-            // but only use two cores as we want to leave some CPU to the property evaluation.
-            sampleBufferSize = 100,
-            generatorParallelism = 3,
-            evaluatorParallelism = 5,
-            cacheSuccesses = true,
-          )
-        logger.info(result.summary)
-        result.assertPassed(Pretty.prettyScenario)
+      val result = PropertyChecker
+        .checkProperty(
+          generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
+          shrink = Shrinker.shrinkScenario,
+          property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
+            runAndCompare(cantonInterpreter, scenario, cancelled),
+          // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
+          // be on the safe side.
+          timeout = 20.minutes,
+          // We evaluate as many samples as possible within the allotted time.
+          maxSamples = Int.MaxValue,
+          // scenarios of size 50 take long to generate so we generate them in parallel
+          // but only use two cores as we want to leave some CPU to the property evaluation.
+          sampleBufferSize = 100,
+          generatorParallelism = 3,
+          evaluatorParallelism = 5,
+          cacheSuccesses = true,
+        )
+      logger.info(result.summary)
+      result.assertPassed(Pretty.prettyScenario)
     }
   }
 }

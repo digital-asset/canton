@@ -5,7 +5,11 @@ package com.digitalasset.canton.integration.tests.security
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
-import com.digitalasset.canton.data.{ContractsReassignmentBatch, UnassignmentData}
+import com.digitalasset.canton.data.{
+  ContractReassignment,
+  ContractsReassignmentBatch,
+  UnassignmentData,
+}
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
@@ -142,7 +146,7 @@ final class InvalidAssignmentRequestIntegrationTest
       unassignmentData.contractsBatch.contracts.map { reassign =>
         val CreationTime.CreatedAt(t0) = reassign.contract.inst.createdAt
         val t1 = CreationTime.CreatedAt(t0.addMicros(1))
-        (
+        ContractReassignment(
           ExampleContractFactory.modify(reassign.contract, createdAt = Some(t1)),
           reassign.sourceValidationPackageId,
           reassign.targetValidationPackageId,
@@ -150,7 +154,6 @@ final class InvalidAssignmentRequestIntegrationTest
         )
       }
     }.value
-
     unassignmentData.copy(contractsBatch = contractsUpdatedCreatedAt)
   }
 

@@ -122,6 +122,7 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
                   internalContractId = -1,
                   inst = contract.inst,
                 ),
+                representativePackageId = contract.templateId.packageId,
               )
             }.toSeq)
             .value

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import anorm.SqlParser.scalar
+import anorm.SqlParser.{long, scalar}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
@@ -18,6 +18,7 @@ import com.digitalasset.canton.platform.store.backend.DbDto.{
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import org.scalatest.flatspec.AnyFlatSpec
@@ -923,6 +924,53 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     failure.getMessage should include(
       "some events in deactivate have not been pruned, offsets (first 10 shown) [2]"
     )
+  }
+
+  it should "report leftover contracts after pruning" in {
+    // insert the related contracts and some
+    executeSql(
+      SQL"""
+        INSERT INTO par_contracts (contract_id, instance, package_id, template_id) VALUES
+        (${"c".getBytes}, ${"d".getBytes}, 'pid', 'tid'),
+        (${"d".getBytes}, ${"d".getBytes}, 'pid', 'tid'),
+        (${"e".getBytes}, ${"d".getBytes}, 'pid', 'tid'),
+        (${"f".getBytes}, ${"d".getBytes}, 'pid', 'tid')
+      """.execute()(_)
+    )
+    executeSql(
+      SQL"""
+        SELECT internal_contract_id FROM par_contracts
+      """.asVectorOf(long("internal_contract_id"))(_)
+    ) match {
+      case Vector(notPruned1, notPruned2, referenced1, referenced2) =>
+        val updates = Vector(
+          dtosCreate(
+            event_offset = 100,
+            event_sequential_id = 100L,
+            internal_contract_id = referenced1,
+          )(),
+          dtosCreate(
+            event_offset = 101,
+            event_sequential_id = 101L,
+            internal_contract_id = referenced2,
+          )(),
+        ).flatten
+
+        executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+        executeSql(backend.parameter.updatePrunedUptoInclusive(offset(10)))
+        executeSql(ingest(updates, _))
+        executeSql(updateLedgerEnd(offset(101), 1001L))
+
+        val failure = intercept[RuntimeException](
+          executeSql(backend.integrity.verifyIntegrity(inMemoryCantonStore = false))
+        )
+
+        failure.getMessage should include(
+          s"some contracts should have been pruned, as they have no reference in event tables. Internal contract IDs (firs 10 shown) [$notPruned1, $notPruned2]"
+        )
+
+      case unexpected => fail(s"4 contracts expected here but found $unexpected")
+    }
   }
 
   it should "report leftover ACHS filter entries after pruning" in {

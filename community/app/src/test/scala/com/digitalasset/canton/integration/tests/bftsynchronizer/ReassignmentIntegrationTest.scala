@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.bftsynchronizer
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.console.LocalParticipantReference
+import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -49,7 +49,7 @@ final class ReassignmentIntegrationTest
 
   private var synchronizerId1: PhysicalSynchronizerId = _
   private var synchronizerId2: PhysicalSynchronizerId = _
-  private var synchronizerOwnersD2: NonEmpty[Seq[LocalParticipantReference]] = _
+  private var synchronizerOwnersD2: NonEmpty[Seq[InstanceReference]] = _
 
   private var alice: Party = _
   private var bob: Party = _
@@ -77,26 +77,14 @@ final class ReassignmentIntegrationTest
     val sequencersD2 = NonEmpty(Seq, sequencer3, sequencer4)
     val mediatorsD2a = Seq(mediator3)
 
-    val seqIdentitiesD1 = sequencersD1
-      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
-    val medIdentitiesD1 = mediatorsD1
-      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
-
     synchronizerId1 = bootstrap.synchronizer(
       "bft-synchronizer1",
       sequencers = sequencersD1,
       mediators = mediatorsD1,
       synchronizerOwners = sequencersD1,
       synchronizerThreshold = PositiveInt.one,
-      identityTransactions = Some(seqIdentitiesD1 ++ medIdentitiesD1),
+      staticSynchronizerParameters = EnvironmentDefinition.defaultStaticSynchronizerParameters,
     )
-
-    val seqIdentitiesD2 = sequencersD2
-      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
-    val medIdentitiesD2 = mediatorsD2a
-      .flatMap(_.topology.transactions.generate_onboarding_transactions(testedProtocolVersion))
-    val parIdentitiesD2 = synchronizerOwnersD2
-      .flatMap(p => onboardingTransactionsOf(p, testedProtocolVersion))
 
     synchronizerId2 = bootstrap.synchronizer(
       "bft-synchronizer2",
@@ -104,7 +92,7 @@ final class ReassignmentIntegrationTest
       mediators = mediatorsD2a,
       synchronizerOwners = synchronizerOwnersD2,
       synchronizerThreshold = PositiveInt.one,
-      identityTransactions = Some(seqIdentitiesD2 ++ medIdentitiesD2 ++ parIdentitiesD2),
+      staticSynchronizerParameters = EnvironmentDefinition.defaultStaticSynchronizerParameters,
     )
   }
 

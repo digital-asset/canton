@@ -108,6 +108,7 @@ private class JdbcLedgerWriteDao(
     contractPruningMaxRetries = IndexServiceConfig.DefaultContractPruningMaxRetries,
     pruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
     contractPruningDbLockMeta = StorageBackendTestValues.testDbLockMeta,
+    contractPruningBatchSize = IndexServiceConfig.DefaultContractPruningBatchSize,
   )
 
   override def currentHealth(): HealthStatus = dbDispatcher.currentHealth()

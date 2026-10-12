@@ -44,6 +44,7 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.validation.Validation
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value, ValueCoder}
+import com.google.common.annotations.VisibleForTesting
 
 import java.nio.file.{Files, StandardOpenOption}
 import scala.collection.immutable.ArraySeq
@@ -219,6 +220,7 @@ class Engine(
       (tx, meta, _) = result
     } yield (tx, meta)
 
+  @VisibleForTesting
   def replay(
       submitters: Set[Party],
       tx: SubmittedTransaction,
@@ -290,6 +292,7 @@ class Engine(
     * @param ledgerEffectiveTime
     *   time when the transaction is claimed to be submitted
     */
+  @VisibleForTesting
   def validate(
       submitters: Set[Party],
       tx: SubmittedTransaction,
@@ -519,16 +522,18 @@ class Engine(
       metricPlugins = metricPlugins,
     )
 
-    def loop[X](upd: Upd.Step[X]): Result[X] =
+    def error(err: Error.Interpretation.Error): Result[Nothing] = {
+      val trace = conductor.transactionTrace(config.transactionTraceMaxLength)
+      Result.error(err, Option.when(trace.nonEmpty)(trace))
+    }
+
+    // The call by-name is needed to ensure te `im.resume` are called inside the `try` block.
+    def loop[X](upd: => Upd.Step[X]): Result[X] = try
       upd match {
         case Upd.Step.Pure(value) =>
           Result.done(value)
         case Upd.Step.Error(e) =>
-          val trace = conductor.transactionTrace(config.transactionTraceMaxLength)
-          Result.error(
-            Error.Interpretation.DamlException(e),
-            Option.when(trace.nonEmpty)(trace),
-          )
+          error(Error.Interpretation.DamlException(e))
         case im: Upd.Step.Impure[x, X] =>
           im.fx match {
             case Upd.NeedPackage(pkgId, context) =>
@@ -569,6 +574,22 @@ class Engine(
               } yield result
           }
       }
+    catch {
+      // Any exception thrown by the conductor is a bug, so report it as an internal error.
+      case scala.util.control.NonFatal(e) =>
+        val internalError = e match {
+          case SError.Crash(location, msg) =>
+            // special case the format of Crash, as its message is often useful during interpreter refactoring.
+            Error.Interpretation.Internal(location, msg, None)
+          case e =>
+            Error.Interpretation.Internal(
+              "Engine#executeCommandsWithConductor",
+              s"unexpected exception $e",
+              Some(e),
+            )
+        }
+        error(internalError)
+    }
 
     for {
       _ <- runCompilerSafely(

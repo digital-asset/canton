@@ -1,0 +1,27 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module TransactionLimitTests where
+
+template T
+  with
+    owner : Party
+    watcher : Party
+    value : Int
+  where
+    signatory owner
+    observer watcher
+
+    nonconsuming choice SingleRootAndView : ()
+      controller owner
+      do
+        _ <- create this with value = 42
+        return ()
+
+    nonconsuming choice TwoViews : ()
+      with
+        party : Party
+      controller owner
+      do
+        _ <- create this with watcher = party
+        return ()

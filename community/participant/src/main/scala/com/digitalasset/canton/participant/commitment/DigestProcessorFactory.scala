@@ -12,7 +12,7 @@ import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
-import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
@@ -235,7 +235,7 @@ class DigestProcessorFactoryImpl(
           digestLoadParallelism = acsCommitmentConfig.digestLoadParallelism.unwrap,
           digestComputeParallelism = acsCommitmentConfig.digestComputeParallelism.unwrap,
           bufferSize = acsCommitmentConfig.digestPipelineBufferSize.unwrap,
-          tracingMode = AcsDigestTracingMode.Disabled,
+          tracingMode = acsCommitmentConfig.tracing,
           enableConsistencyChecks = enableAdditionalConsistencyChecks,
           metrics = metrics,
         )
@@ -270,7 +270,7 @@ object DigestProcessorFactoryImpl {
       ledgerApiStore: LedgerApiStore,
       synchronizerId: SynchronizerId,
   ): Option[Timepoint] =
-    // TODO(#33422) - Once the Github issue 27992 is solved, switch to new method
+    // TODO(#36393) - Once the Github issue 27992 is solved, switch to new method
     for {
       end <- ledgerApiStore.ledgerEnd
       index <- end.synchronizerIndices.get(synchronizerId)

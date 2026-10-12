@@ -8,24 +8,20 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.{Participant, *}
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{FutureAssertions, LedgerTestSuite, Party}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdRequest
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.test.java.model
 import com.daml.ledger.test.java.semantic.divulgencetests.Dummy
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 
 import java.util.regex.Pattern
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
   import testDars.companionImplicits.*
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   // One point of populating the ledger with a lot of events is to help advance canton's safe-pruning offsets
   private val batchesToPopulate = 74
@@ -39,11 +35,10 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
   )(implicit ec => { case Participants(Participant(participant, Seq())) =>
     for {
       failure <- participant
-        .prune(
+        .pruneMustFail(
           0,
-          attempts = 1,
+          message = "pruning without specifying an offset",
         )
-        .mustFail("pruning without specifying an offset")
     } yield {
       assertGrpcError(
         failure,
@@ -139,11 +134,10 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
     val negativeOffset: Long = -134134134L
     for {
       cannotPruneNegativeOffset <- participant
-        .prune(
+        .pruneMustFail(
           negativeOffset,
-          attempts = 1,
+          message = "pruning, specifying a negative offset",
         )
-        .mustFail("pruning, specifying a negative offset")
     } yield {
       assertGrpcError(
         cannotPruneNegativeOffset,
@@ -164,8 +158,10 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       for {
         endBefore <- participant.currentEnd()
         cannotPruneOffsetBeyondEnd <- participant
-          .prune(endBefore, attempts = 1)
-          .mustFail("pruning, specifying an offset after the ledger end")
+          .pruneMustFail(
+            endBefore,
+            "pruning, specifying an offset after the ledger end",
+          )
         endAfter <- participant.currentEnd()
       } yield {
         // participant end should not have been increased after we have retrieved it since it can lead to a different error
@@ -193,7 +189,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(
@@ -263,8 +259,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ) // This offset is the largest exclusive offset we can no longer read from after
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
 
-      _ <- participant.prune(offsetToPruneUpTo)
-
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
       txReqAfterPrune <- participant
         .getTransactionsRequest(
           transactionFormat = participant.transactionFormat(parties = Some(Seq(submitter))),
@@ -334,7 +329,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         )
         .map(_.headOption.value)
 
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       firstCheckpointsAfterPrune <- participant
         .offsets(
@@ -397,15 +392,10 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
     for {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
-      createdBefore <- participant.activeContracts(Some(Seq(submitter)))
+    } yield ()
 
-      _ <- participant.prune(offsetToPruneUpTo)
-
-      createdAfter <- participant.activeContracts(Some(Seq(submitter)))
-    } yield {
-      assert(createdBefore == createdAfter, "Pruning should not alter the set of active contracts")
-    }
   })
 
   test(
@@ -431,7 +421,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsetAndUpdateIdEntries(_)._2)
 
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       prunedTransactions <- Future.sequence(
         prunedUpdateIds.map(
@@ -475,7 +465,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       ).toVector
         .map(offsets(_))
 
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       prunedFlatTransactions <- Future.sequence(
         prunedTransactionOffsets.map(
@@ -509,8 +499,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
       offsetOfFirstSurvivingTransaction = offsets(lastItemToPruneIndex + 1)
-
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       txReqAfterPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -523,7 +512,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
 
       offsetAlreadyPruned = offsets(lastItemToPruneIndex / 2)
 
-      _ <- participant.prune(offsetAlreadyPruned)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       txReqAfterRedundantPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -540,7 +529,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       // Add more events before second prune too to advance canton's safe pruning offset
       offsetsFollowingSecondRealPrune <- populateLedgerAndGetOffsets(participant, submitter)
 
-      _ <- participant.prune(offsetToPruneUpToInSecondRealPrune)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpToInSecondRealPrune)
 
       txReqAfterSecondPrune <- participant
         .getTransactionsRequest(participant.transactionFormat(parties = Some(Seq(submitter))))
@@ -591,7 +580,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
 
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       _ <- participant.exercise(submitter, createdBeforePrune.exerciseDummyChoice1())
     } yield ()
@@ -610,8 +599,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       offsets <- populateLedgerAndGetOffsets(participant, submitter)
       offsetInPrunedRange = offsets(lastItemToPruneIndex / 2)
       offsetToPruneUpTo = offsets(lastItemToPruneIndex)
-
-      _ <- participant.prune(offsetToPruneUpTo)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(submitter)), offsetToPruneUpTo)
 
       emptyRangeBeforePruning <- participant
         .getTransactionsRequest(
@@ -681,7 +669,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
       )
       _ <- participant.submitAndWait(exerciseCmd)
       events2 <- getEvents(dummyCid)
-      _ <- participant.prune(end1)
+      _ <- participant.pruneWithAcsCheck(Some(Seq(party)), end1)
       events3 <- getEvents(dummyCid)
       _ <- pruneToCurrentEnd(participant, party) // TODO(#16361) - This line causes the problem
       events4 <- getEvents(dummyCid)
@@ -794,36 +782,12 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
   /** Note that the ledger end returned will be that prior to the dummy contract creation/prune
     * calls so will not represent the ledger end post pruning
     */
-  private def pruneToCurrentEnd(participant: ParticipantTestContext, party: Party)(implicit
+  def pruneToCurrentEnd(participant: ParticipantTestContext, party: Party)(implicit
       ec: ExecutionContext
   ): Future[Long] =
     for {
       end <- participant.currentEnd()
-      _ <- pruneCantonSafe(participant, end, party)
+      _ <- participant.pruneCantonSafe(end, party, new Dummy(_).create.commands)
     } yield end
-
-  /** We are retrying a command submission + pruning to make this test compatible with Canton.
-    * That's because in Canton pruning will fail unless ACS commitments have been exchanged between
-    * participants. To this end, repeatedly submitting commands is prompting Canton to exchange ACS
-    * commitments and allows the pruning call to eventually succeed.
-    */
-  private def pruneCantonSafe(
-      ledger: ParticipantTestContext,
-      pruneUpTo: Long,
-      party: Party,
-  )(implicit ec: ExecutionContext): Future[Unit] =
-    FutureAssertions.succeedsEventually(
-      retryDelay = 100.millis,
-      maxRetryDuration = 10.seconds,
-      ledger.delayMechanism,
-      "Pruning",
-    ) {
-      for {
-        _ <- ledger.submitAndWait(
-          ledger.submitAndWaitRequest(party, new Dummy(party).create.commands)
-        )
-        _ <- ledger.prune(pruneUpTo = pruneUpTo, attempts = 1)
-      } yield ()
-    }
 
 }

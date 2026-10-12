@@ -3,6 +3,7 @@
 
 import io.circe.Encoder
 import io.circe.syntax._
+import cats.syntax.either._
 import com.digitalasset.canton.CantonCommunityApp
 import com.digitalasset.canton.console.{ConsoleEnvironment, Help, ParticipantReferencesExtensions}
 import com.digitalasset.canton.metrics.MetricDoc
@@ -95,9 +96,13 @@ val releaseVersionsToProtocolVersions: List[(String, List[String])] = stableAndB
   }
   .filter { case (_, protocolVersions) => protocolVersions.nonEmpty }
 
-val topologyTransactionProtocolVersionToProtobufVersions: List[(String, List[String])] = ProtocolVersion.supported.filterNot(_.isDev).map(pv =>
-  pv.v.toString -> List(TopologyTransaction.protoVersionFor(pv).v.toString)
-)
+val topologyTransactionProtocolVersionToProtobufVersions: List[(String, List[String])] = ProtocolVersion.supported.filterNot(_.isDev).map { pv =>
+  val pvStr = TopologyTransaction.protoVersionFor(pv)
+    .valueOr(err => throw new IllegalStateException("Cannot find proto version for $pv: $err"))
+    .v.toString
+
+  pv.v.toString -> List(pvStr)
+}
 
 import io.circe.generic.auto._
 case class MetricsOutput(sequencer: Seq[MetricDoc.Item], mediator: Seq[MetricDoc.Item], participant: Seq[MetricDoc.Item])

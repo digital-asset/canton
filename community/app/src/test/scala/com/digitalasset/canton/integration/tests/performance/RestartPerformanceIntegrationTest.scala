@@ -16,8 +16,6 @@ import scala.concurrent.duration.*
 abstract class RestartPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   import BasePerformanceIntegrationTest.*
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   "restart performance test" in { implicit env =>
     import env.*
 

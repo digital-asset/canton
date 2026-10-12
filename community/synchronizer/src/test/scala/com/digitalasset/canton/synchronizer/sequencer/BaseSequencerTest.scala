@@ -81,7 +81,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
       CantonTimestamp.MaxValue,
       None,
       None,
-      None,
       testedProtocolVersion,
     )
 

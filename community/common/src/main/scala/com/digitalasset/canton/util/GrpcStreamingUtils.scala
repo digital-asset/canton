@@ -5,8 +5,8 @@ package com.digitalasset.canton.util
 
 import better.files.*
 import better.files.File.newTemporaryFile
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserverWithContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -27,7 +27,7 @@ import com.digitalasset.canton.version.{
 }
 import com.google.protobuf.ByteString
 import io.grpc.stub.{CallStreamObserver, ServerCallStreamObserver, StreamObserver}
-import io.grpc.{Context, Status}
+import io.grpc.{Context, Status, StatusRuntimeException}
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Source, Source as PekkoSource}
@@ -51,27 +51,29 @@ object GrpcStreamingUtils {
       extractContext: Req => C,
       processFullRequest: (ByteString, C) => Future[Resp],
       responseObserver: StreamObserver[Resp],
-      processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
   )(implicit ec: ExecutionContext): StreamObserver[Req] = {
 
     val observer =
-      new ByteStringStreamObserverWithContext[Req, C](extractChunkBytes, extractContext) {
-        override def onCompleted(): Unit = {
-          super.onCompleted()
-          val responseF = this.result.flatMap {
-            case Some((byteString, context)) =>
-              processFullRequest(byteString, context)
-            case None =>
-              Future.failed(new NoSuchElementException("No elements were received in stream"))
-          }
+      new ByteStringStreamObserverWithContext[Req, C](extractChunkBytes, extractContext)
 
-          Try(Await.result(responseF, processingTimeout)) match {
-            case Failure(exception) => responseObserver.onError(exception)
-            case Success(response) =>
-              responseObserver.onNext(response)
-              responseObserver.onCompleted()
-          }
-        }
+    observer.result
+      .flatMap(_.traverse { case (byteString, context) =>
+        processFullRequest(byteString, context)
+      })
+      .onComplete {
+        case Failure(exception: StatusRuntimeException) =>
+          responseObserver.onError(exception)
+        case Failure(exception) =>
+          responseObserver.onError(Status.INTERNAL.withCause(exception).asRuntimeException())
+        case Success(None) =>
+          responseObserver.onError(
+            Status.INVALID_ARGUMENT
+              .withDescription("No elements were received in stream")
+              .asRuntimeException()
+          )
+        case Success(Some(response)) =>
+          responseObserver.onNext(response)
+          responseObserver.onCompleted()
       }
 
     observer

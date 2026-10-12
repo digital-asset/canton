@@ -44,7 +44,7 @@ class TopologyStoreTestData(
       op,
       serial,
       mapping,
-      ProtocolVersion.v34,
+      testedProtocolVersion,
     )
     val signingKeyIdsNE = NonEmptyUtil.fromUnsafe(signingKeys).map(_.id).toSet
     val keysWithUsage = TopologyManager
@@ -71,7 +71,7 @@ class TopologyStoreTestData(
       tx,
       signatures = signatures,
       isProposal = isProposal,
-      ProtocolVersion.v34,
+      testedProtocolVersion,
     )
   }
 
@@ -211,7 +211,6 @@ class TopologyStoreTestData(
       partyId = `fred::p2Namepsace`,
       threshold = PositiveInt.one,
       participants = Seq(HostingParticipant(p1Id, ParticipantPermission.Submission)),
-      isOffline = false,
     ),
     isProposal = true,
   )(p1Key)
@@ -246,7 +245,6 @@ class TopologyStoreTestData(
       partyId = `fred::p2Namepsace`,
       threshold = PositiveInt.one,
       participants = Seq(HostingParticipant(p1Id, ParticipantPermission.Confirmation)),
-      isOffline = false,
     )
   )(p1Key, p2Key)
   val dtc_p2_synchronizer1 = makeSignedTx(

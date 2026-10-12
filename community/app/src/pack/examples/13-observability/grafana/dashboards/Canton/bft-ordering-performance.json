@@ -1263,6 +1263,99 @@
           ],
           "title": "P2P receive processing latency",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate of P2P gRPC stream teardowns observed as errors, per peer, connection direction and gRPC status code. This is a gRPC/networking-level signal (always emitted, independent of whether transport metrics are enabled), useful to diagnose remote- or infrastructure-initiated resets (e.g. a proxy GOAWAY/RST_STREAM surfaced as UNAVAILABLE).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "cps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 79
+          },
+          "id": 135,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction, grpc_status) (rate(daml_sequencer_bftordering_p2p_stream_teardowns{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}], {{grpc_status}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "P2P stream teardowns (per peer)",
+          "type": "timeseries"
         }
       ],
       "title": "Networking",
@@ -5360,6 +5453,99 @@
           ],
           "title": "Segment Flush Block Rate",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Time elapsed between the start of an epoch's segments and the ordering of the first block (relative block number 0) of each segment, attributed to the original leader of the segment",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 99
+          },
+          "id": 128,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, leader) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"consensus-first-segment-block-order-latency\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{leader}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Consensus first segment block ordering latency (per leader)",
+          "type": "timeseries"
         }
       ],
       "title": "Consensus - main protocol",
@@ -7843,8 +8029,374 @@
               "refId": "A"
             }
           ],
-          "title": "Output stage duration",
+          "title": "Output stage duration (quantile)",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "custom.stacking",
+                    "value": {
+                      "group": "B",
+                      "mode": "none"
+                    }
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 45
+          },
+          "id": 125,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, leader) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-interleaving-wait\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{leader}} (p$percentile / block)",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-interleaving-total-wait\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) total (p$percentile / block)",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Output block interleaving wait \u2014 quantile (per leader and total)",
+          "type": "timeseries",
+          "description": "For each block extracted from the output Peano queue, the time it waited for lower-numbered blocks (\"holes\") that delayed its extraction. The total line is a true per-block quantile (selected by $percentile) of each block's total interleaving wait, recorded once for every extracted block (including a zero for in-order blocks that never waited), so it covers the same per-block population as the output-stage duration panel and is directly comparable to it, showing how much of that latency is due to ISS segment interleaving. The per-leader series are the same quantile of the individual per-block contributions attributed to the assigned segment leader responsible for each delaying hole; because quantiles are not additive they do not sum to the total line, but they show the typical delay contributed by each leader/segment. See the companion average panel below for an additive per-leader/total breakdown."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 52
+          },
+          "id": 126,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node) (histogram_sum(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-stage-duration\"}[$__rate_interval]))) / sum by (namespace, job, node) (histogram_count(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-stage-duration\"}[$__rate_interval])))",
+              "legendFormat": "{{namespace}}.{{node}} (mean)",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Output stage duration (average)",
+          "type": "timeseries",
+          "description": "Mean per-block output stage duration (total accrued duration divided by the number of blocks emitted). Companion to the quantile panel above; the mean is additive, so it is directly comparable to the per-leader interleaving-wait averages."
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "custom.stacking",
+                    "value": {
+                      "group": "B",
+                      "mode": "none"
+                    }
+                  },
+                  {
+                    "id": "custom.fillOpacity",
+                    "value": 0
+                  },
+                  {
+                    "id": "custom.lineWidth",
+                    "value": 2
+                  },
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 59
+          },
+          "id": 127,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, leader) (histogram_sum(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-interleaving-wait\"}[$__rate_interval]))) / on (namespace, job, node) group_left sum by (namespace, job, node) (histogram_count(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-stage-duration\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{leader}} (mean / block)",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node) (histogram_sum(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-block-interleaving-wait\"}[$__rate_interval]))) / sum by (namespace, job, node) (histogram_count(rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\",ordering_stage=~\"output-stage-duration\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) total (mean / block)",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "Output block interleaving wait \u2014 average (per leader and total)",
+          "type": "timeseries",
+          "description": "Mean per-block interleaving wait: total accrued wait-seconds divided by the number of blocks emitted (the output-stage-duration block rate). Unlike the quantile panel, means are additive, so the per-leader series sum exactly to the total line and break the average interleaving wait down by the assigned segment leader responsible for each delaying hole. The total line is derived from the same per-leader output-block-interleaving-wait series (summed over all leaders), so it works on historical data without the output-block-interleaving-total-wait stage that only the quantile panel requires. Compare the total line with the output-stage-duration average panel to see the mean share of output-stage latency due to ISS segment interleaving."
         },
         {
           "datasource": {
@@ -7908,7 +8460,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 45
+            "y": 66
           },
           "id": 55,
           "options": {
@@ -7999,7 +8551,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 45
+            "y": 66
           },
           "id": 106,
           "options": {
@@ -8092,7 +8644,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 52
+            "y": 73
           },
           "id": 36,
           "options": {
@@ -8184,7 +8736,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 52
+            "y": 73
           },
           "id": 30,
           "options": {
@@ -8276,7 +8828,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 59
+            "y": 80
           },
           "id": 37,
           "options": {
@@ -8368,7 +8920,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 59
+            "y": 80
           },
           "id": 34,
           "options": {
@@ -8460,7 +9012,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 66
+            "y": 87
           },
           "id": 31,
           "options": {
@@ -8552,7 +9104,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 66
+            "y": 87
           },
           "id": 32,
           "options": {
@@ -8644,7 +9196,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 73
+            "y": 94
           },
           "id": 113,
           "options": {
@@ -9354,6 +9906,1402 @@
         }
       ],
       "title": "Pruning",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 134,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Number of concurrently active HTTP/2 streams on the P2P connection to each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 103
+          },
+          "id": 123,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_http2_active_streams{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}]",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP/2 active concurrent streams (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate at which HTTP/2 streams are opened and closed on the P2P connection to each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "cps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 111
+          },
+          "id": 124,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_http2_streams_opened_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] opened",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_http2_streams_closed_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] closed",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "HTTP/2 stream open/close rate (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate of gRPC messages sent and received per peer on the P2P connection (from Channelz message counts). Note that a single gRPC message may span multiple HTTP/2 DATA frames, so this is not a raw frame count.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "cps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 119
+          },
+          "id": 125,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_grpc_messages_sent_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}], sent",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_grpc_messages_received_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}], received",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "gRPC messages sent/received (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate of HTTP/2 keepalive PING frames sent on the P2P connection to each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "cps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 127
+          },
+          "id": 126,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_http2_keepalive_pings{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}]",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP/2 keepalive pings (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Local and remote HTTP/2 flow control window sizes for the P2P connection to each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 135
+          },
+          "id": 127,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_http2_flow_control_local_window_bytes{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] local",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_http2_flow_control_remote_window_bytes{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] remote",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "HTTP/2 flow control window (bytes, per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate of samples where the HTTP/2 flow control window to a peer was observed exhausted.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "cps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 143
+          },
+          "id": 128,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer, direction) (rate(daml_sequencer_bftordering_p2p_transport_http2_flow_control_stalls_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}]",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "HTTP/2 flow control stalls (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "TCP send and receive window scaling factors for the P2P connection to each peer (requires the Netty epoll transport).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 159
+          },
+          "id": 130,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_tcp_send_window_scale{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] send",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_tcp_receive_window_scale{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}] receive",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "TCP window scale (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Rate of raw TCP wire-level bytes (including TLS and framing overhead) sent and received per peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "binBps"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 167
+          },
+          "id": 131,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer) (rate(daml_sequencer_bftordering_p2p_transport_tcp_wire_bytes_sent_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} sent",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, peer) (rate(daml_sequencer_bftordering_p2p_transport_tcp_wire_bytes_received_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m]))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} received",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "TCP wire-level bytes (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Current number of outstanding (unacknowledged) retransmitted TCP segments on the P2P connection to each peer, sampled from tcpi_retrans (requires the Netty epoll transport). This is an instantaneous value, not a cumulative count.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 175
+          },
+          "id": 132,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_tcp_retransmitted_segments{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}]",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "TCP retransmitted segments (current, per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "TCP-level smoothed round-trip time to each peer (requires the Netty epoll transport).",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "µs"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 183
+          },
+          "id": 133,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "max by (namespace, job, node, peer, direction) (daml_sequencer_bftordering_p2p_transport_tcp_rtt_micros{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}} [{{direction}}]",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "TCP round-trip time (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Distribution ($percentile quantile) of the application-level round-trip time to each peer, measured by periodically sending a low-frequency `ConnectionOpened` echo probe that the peer reflects back. Unlike the TCP-level RTT, this is connection-direction- and transport-independent, so it is always available, but it also includes application-level queuing and processing time.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 191
+          },
+          "id": 136,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, peer) (rate(daml_sequencer_bftordering_p2p_stream_round_trip_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{peer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Application-level round-trip time (per peer)",
+          "type": "timeseries"
+        }
+      ],
+      "title": "P2P transport (HTTP/2 & TCP)",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 300
+      },
+      "id": 20000,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Distribution ($percentile quantile) of serialized gRPC message sizes sent to each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "decbytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 301
+          },
+          "id": 20001,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, target_sequencer) (rate(daml_sequencer_bftordering_p2p_send_sent_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{target_sequencer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "P2P gRPC sent message size (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Distribution ($percentile quantile) of serialized gRPC message sizes received from each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "decbytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 309
+          },
+          "id": 20002,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, source_sequencer) (rate(daml_sequencer_bftordering_p2p_receive_received_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) peer {{source_sequencer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "P2P gRPC received message size (per peer)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Average serialized gRPC message size, sent to and received from each peer.",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "decbytes"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 317
+          },
+          "id": 20003,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_sum(sum by (namespace, job, node, target_sequencer) (rate(daml_sequencer_bftordering_p2p_send_sent_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))) / histogram_count(sum by (namespace, job, node, target_sequencer) (rate(daml_sequencer_bftordering_p2p_send_sent_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) sent to peer {{target_sequencer}}",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_sum(sum by (namespace, job, node, source_sequencer) (rate(daml_sequencer_bftordering_p2p_receive_received_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))) / histogram_count(sum by (namespace, job, node, source_sequencer) (rate(daml_sequencer_bftordering_p2p_receive_received_message_size{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) received from peer {{source_sequencer}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "title": "P2P gRPC average message size (per peer)",
+          "type": "timeseries"
+        }
+      ],
+      "title": "P2P gRPC message size",
       "type": "row"
     }
   ],

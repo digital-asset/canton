@@ -129,18 +129,15 @@ object SignatureVerifier {
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, Unit] = {
-      val (timestamp, useSnapshotApproximation) = timestampToVerify match {
-        // we set `isSubmissionRequest` to true to ensure the same behavior as PV34 and earlier.
-        case Some(timestamp) if protocolVersion < ProtocolVersion.v35 => (timestamp, true)
-        case _ => (signedAcknowledgeRequest.content.timestamp, false)
-      }
+      val timestamp = signedAcknowledgeRequest.content.timestamp
+
       verifySignatureInternal(
         signedAcknowledgeRequest,
         hashPurpose,
         signedAcknowledgeRequest.content.member,
         timestamp,
         "AcknowledgeRequest",
-        useSnapshotApproximation,
+        useSnapshotApproximation = false,
       )
     }
 

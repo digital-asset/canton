@@ -16,7 +16,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisconnect,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
@@ -42,8 +41,6 @@ import scala.jdk.CollectionConverters.CollectionHasAsScala
   */
 sealed trait PreventDuplicateContractsIntegrationTest
     extends OfflinePartyReplicationIntegrationTestBase {
-
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   protected var ledgerEndP1: Long = _
   protected var activationOffset: Long = _
@@ -93,7 +90,7 @@ sealed trait PreventDuplicateContractsIntegrationTest
         synchronizerId = daId,
         beginOffsetExclusive = ledgerEndP1,
         completeAfter = PositiveInt.one,
-        onboarding = testedProtocolVersion >= ProtocolVersion.v35,
+        onboarding = true,
       )
     }
 

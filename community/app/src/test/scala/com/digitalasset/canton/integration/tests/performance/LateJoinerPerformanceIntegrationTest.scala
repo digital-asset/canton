@@ -11,8 +11,6 @@ import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 trait LateJoinerPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   import BasePerformanceIntegrationTest.*
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   "run a normal performance test with late joiners" in { implicit env =>
     import env.*
 

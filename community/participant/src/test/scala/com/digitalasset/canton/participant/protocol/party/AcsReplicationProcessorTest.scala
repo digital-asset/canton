@@ -37,7 +37,6 @@ import com.digitalasset.canton.participant.util.{CreatesActiveContracts, TimeOfC
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ReassignmentTag}
@@ -130,8 +129,9 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
           psid.logical,
           sourceParticipantId,
           targetParticipantId,
-          PositiveInt.one,
+          CantonTimestamp.ofEpochSecond(10),
           ParticipantPermission.Submission,
+          AcsReplicationParameters.AcsReplicationDestination.Persistence,
         ),
         testedProtocolVersion,
         replicationO = Some(
@@ -177,7 +177,7 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
       val acsTransferContractHandler = new TargetParticipantAcsPersistence(
         requestId = addPartyRequestId,
         psid = psid,
-        partyOnboardingAt = EffectiveTime(CantonTimestamp.ofEpochSecond(10)),
+        partyOnboardingAt = CantonTimestamp.ofEpochSecond(10),
         persistsContracts = persistsContracts,
         requestTracker = requestTracker,
         indexingStore = indexingStore,
@@ -188,14 +188,14 @@ sealed trait AcsReplicationProcessorTestBaseWithFixture
         psid = psid,
         partyId = alice,
         requestId = addPartyRequestId,
-        partyOnboardingAt = EffectiveTime(CantonTimestamp.ofEpochSecond(10)),
+        partyOnboardingAt = CantonTimestamp.ofEpochSecond(10),
         excludedStakeholders = Set.empty,
         sourceParticipantId = sourceParticipantId,
         agreedAt = CantonTimestamp.Epoch,
         replicationProgressState = replicationProgressState,
         onError = logger.info(_),
         onDisconnect = logger.info(_)(_),
-        acsTransferContractHandler = acsTransferContractHandler,
+        acsReplicationContractHandler = acsTransferContractHandler,
         config = OnlinePartyReplicationTargetConfig(disableAcsDigestSourceSignatureValidation =
           cryptoClientO.isEmpty
         ),

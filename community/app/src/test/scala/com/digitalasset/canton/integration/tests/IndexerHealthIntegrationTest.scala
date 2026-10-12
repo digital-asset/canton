@@ -94,34 +94,28 @@ class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedE
     )(
       participant1.repair.purge(daName, List(contract.id.toLf), true),
       logEntries =>
-        { // All states checked below are short-lived and it's impossible to catch them reliably with health status endpoint
-          logEntries
-            .exists(e =>
-              e.level == Level.INFO && e.message.contains(
-                "'ledger api indexer' is now in state Failed(Initializing repair indexer)." // Not checking on previous state, because it might be either OK or component is closed depending on how fast normal indexer closes.
-              )
-            ) should be(true)
+        withClue(logEntries) { // All states checked below are short-lived and it's impossible to catch them reliably with health status endpoint
+          val infoEntries = logEntries.filter(_.level == Level.INFO).map(_.message)
+          def stateChange(change: String) = s"'ledger api indexer' is now in state $change"
 
-          logEntries
-            .exists(e =>
-              e.level == Level.INFO && e.message.contains(
-                "'ledger api indexer' is now in state Degraded(Repair indexer is running). Previous state was Failed(Initializing repair indexer)."
-              )
-            ) should be(true)
+          // Not checking on previous state, because it might be either OK or component is closed depending on how fast normal indexer closes.
+          forExactly(1, infoEntries)(
+            _ should include(stateChange("Failed(Initializing repair indexer)."))
+          )
 
-          logEntries
-            .exists(e =>
-              e.level == Level.INFO && e.message.contains(
-                "'ledger api indexer' is now in state Failed(Initializing indexer). Previous state was Degraded(Repair indexer is running)."
-              )
-            ) should be(true)
+          infoEntries should contain(
+            stateChange(
+              "Degraded(Repair indexer is running). Previous state was Failed(Initializing repair indexer)."
+            )
+          )
 
-          logEntries
-            .exists(e =>
-              e.level == Level.INFO && e.message.contains(
-                "'ledger api indexer' is now in state Ok(). Previous state was Failed(Initializing indexer)."
-              )
-            ) should be(true)
+          // There are two possible outcomes: either repair indexer -> starting regular -> ok or regular indexer was started fast enough, so we didn't observe the starting phase an we jumped directly into OK
+          infoEntries should (contain allOf (stateChange(
+            "Failed(Initializing indexer). Previous state was Degraded(Repair indexer is running)."
+          ), stateChange("Ok(). Previous state was Failed(Initializing indexer).")))
+            .or(
+              contain(stateChange("Ok(). Previous state was Degraded(Repair indexer is running)."))
+            )
         },
     )
   }
@@ -176,5 +170,4 @@ class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedE
     )
 
   }
-
 }

@@ -10,7 +10,12 @@ import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
-import com.digitalasset.canton.data.{CantonTimestamp, ContractsReassignmentBatch, UnassignmentData}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  ContractReassignment,
+  ContractsReassignmentBatch,
+  UnassignmentData,
+}
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -325,7 +330,7 @@ private final class ChangeAssignation(
               val sourcePkg = Source(contract.templateId.packageId)
               val targetPkg = Target(contract.templateId.packageId)
 
-              (contract, sourcePkg, targetPkg, cidWithCounter.counter)
+              ContractReassignment(contract, sourcePkg, targetPkg, cidWithCounter.counter)
             }
           }
 
@@ -495,6 +500,7 @@ private final class ChangeAssignation(
               },
               inst = reassign.contract.inst,
             ),
+            representativePackageId = reassign.targetValidationPackageId.unwrap,
           )
         }),
         repairCounter = targetTor.repairCounter,

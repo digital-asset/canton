@@ -4,7 +4,11 @@
 package com.digitalasset.canton.sequencing.traffic
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.{
@@ -33,9 +37,13 @@ object EventCostCalculator {
       readCost: Long,
       finalCost: Long,
       recipients: NonEmpty[Seq[Recipient]],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[EnvelopeCostDetails] =
+      EnvelopeCostDetails
+  }
 
-    override protected def pretty: Pretty[EnvelopeCostDetails] = prettyOfClass(
+  object EnvelopeCostDetails extends PrettyPrintingCompanion[EnvelopeCostDetails] {
+    override protected val pretty: Pretty[EnvelopeCostDetails] = prettyOfClass(
       param("write cost", _.writeCost),
       param("read cost", _.readCost),
       param("final cost", _.finalCost),
@@ -58,9 +66,12 @@ object EventCostCalculator {
       groupToMembersSize: Map[GroupRecipient, Int],
       envelopes: Map[ClosedEnvelope, EnvelopeCostDetails],
       eventCost: NonNegativeLong,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[EventCostDetails] = EventCostDetails
+  }
 
-    override protected def pretty: Pretty[EventCostDetails] = prettyOfClass(
+  object EventCostDetails extends PrettyPrintingCompanion[EventCostDetails] {
+    override protected val pretty: Pretty[EventCostDetails] = prettyOfClass(
       param("event cost", _.eventCost),
       param("cost multiplier", _.costMultiplier),
       param("group to members size", _.groupToMembersSize),

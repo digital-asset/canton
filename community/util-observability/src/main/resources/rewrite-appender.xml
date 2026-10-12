@@ -380,7 +380,7 @@
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
-       
+
         <!-- TeaProjectionTest feeds the projection a delta it cannot apply, so pekko-projection reports the
              rejection on its own logger, which canton's log suppression does not reach. The in-memory backend
              fails immediately and attaches the cause, the slick backend retries first and inlines it instead. -->
@@ -404,7 +404,7 @@
         </rewrite>
 
         <!-- Can be removed once the TEA projection writes through DbStorage. If the write pool is briefly full,
-             the retry succeeds a second later, but pekko-projection logs the first failure itself, outside Canton's 
+             the retry succeeds a second later, but pekko-projection logs the first failure itself, outside Canton's
              log suppression. -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>org.apache.pekko.projection.slick.internal.SlickProjectionImpl$SlickInternalProjectionState</logger>
@@ -413,5 +413,13 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- TODO(#27260) Remove this rewrite rule when SequencerAggregatorPekko is removed or cleaned up
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.canton.sequencing.SequencerAggregatorPekko</logger>
+            <contains>Sequencer subscriptions have diverged and cannot reach the threshold</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
    </appender>
 </included>

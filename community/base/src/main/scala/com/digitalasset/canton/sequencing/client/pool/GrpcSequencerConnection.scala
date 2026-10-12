@@ -10,7 +10,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.grpc.GrpcError.{
   GrpcClientError,
   GrpcRequestRefusedByServer,
@@ -65,7 +69,7 @@ class GrpcSequencerConnection(
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
     extends SequencerConnection
-    with PrettyPrinting
+    with PrettyPrintingFromCompanion
     with GrpcClientTransportHelpers {
 
   override val health: SequencerConnectionHealth = underlying.health
@@ -276,11 +280,8 @@ class GrpcSequencerConnection(
   ): Either[String, SequencerSubscription[E]] =
     stub.subscribe(request, handler, timeout).leftMap(_.toString)
 
-  override protected def pretty: Pretty[GrpcSequencerConnection] =
-    prettyOfClass(
-      param("name", _.name.singleQuoted),
-      param("underlying", _.underlying),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[GrpcSequencerConnection] =
+    GrpcSequencerConnection
 
   override val subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
     new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
@@ -299,4 +300,12 @@ class GrpcSequencerConnection(
       )
     } yield result
   }
+}
+
+object GrpcSequencerConnection extends PrettyPrintingCompanion[GrpcSequencerConnection] {
+  override protected val pretty: Pretty[GrpcSequencerConnection] =
+    prettyOfClass(
+      param("name", _.name.singleQuoted),
+      param("underlying", _.underlying),
+    )
 }

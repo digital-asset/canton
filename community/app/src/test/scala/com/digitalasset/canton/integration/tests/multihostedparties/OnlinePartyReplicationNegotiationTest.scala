@@ -13,15 +13,7 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SH
 import com.daml.ledger.api.v2.value.Value.Sum.Party
 import com.daml.ledger.api.v2.value.{RecordField, Value}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
-import com.digitalasset.canton.admin.api.client.data.{
-  SequencerConnectionPoolDelays,
-  SequencerConnectionValidation,
-  SequencerConnections,
-  SubmissionRequestAmplification,
-  SubscriptionLivenessLimits,
-  SynchronizerConnectionConfig,
-  TemplateId,
-}
+import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
@@ -32,20 +24,15 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
 }
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.ledger.client.LedgerClientUtils
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
@@ -128,7 +115,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
     .finish()
     .toHexString
 
-  private val dummyTopologySerial = 1L
+  private val dummyTimestamp = CantonTimestamp.now().minusSeconds(60)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
@@ -468,7 +455,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
           targetParticipant: LocalParticipantReference = participantWithoutParty,
           sequencerStringUids: Seq[String] = Seq(sequencer2.id.uid.toProtoPrimitive),
           partyIdString: String = alice.toProtoPrimitive,
-          serial: Long = dummyTopologySerial,
+          timestamp: CantonTimestamp = dummyTimestamp,
           partyReplicationIdS: String = validOnPRIdS,
       ): Unit =
         clue(log)(
@@ -480,7 +467,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
                 sourceParticipant.adminParty.toProtoPrimitive,
                 targetParticipant.adminParty.toProtoPrimitive,
                 sequencerStringUids.asJava,
-                serial,
+                timestamp.toInstant,
                 M.acsreplication.ParticipantPermission.CONFIRMATION,
                 "online-party-replication",
               )
@@ -508,7 +495,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
                 participantWithParty.adminParty.toProtoPrimitive,
                 participantWithParty2.adminParty.toProtoPrimitive,
                 Seq.empty.asJava,
-                dummyTopologySerial,
+                dummyTimestamp.toInstant,
                 M.acsreplication.ParticipantPermission.CONFIRMATION,
                 "online-party-replication",
               )
@@ -534,14 +521,16 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
         )
 
-      def findLatestPtpTopologySerial(participant: LocalParticipantReference): Long =
-        participant.topology.party_to_participant_mappings
-          .list(synchronizerId, filterParty = aliceName)
-          .head
-          .context
-          .serial
+      def findLatestPtpTopologyTimestamp(participant: LocalParticipantReference): CantonTimestamp =
+        CantonTimestamp
+          .fromInstant(
+            participant.topology.party_to_participant_mappings
+              .list(synchronizerId, filterParty = aliceName)
+              .head
+              .context
+              .validFrom
+          )
           .value
-          .toLong
 
       testAgreementError(
         "bad-party-id-format",
@@ -580,7 +569,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
         "PartyToParticipant mapping for party .* doesn't exist for either source or target participant",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
-        serial = findLatestPtpTopologySerial(participantWithParty),
+        timestamp = findLatestPtpTopologyTimestamp(participantWithParty),
       )
 
       testAgreementError(
@@ -588,18 +577,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
         "Source and target participants .* cannot match",
         sourceParticipant = participantWithParty,
         targetParticipant = participantWithParty,
-      )
-
-      testAgreementError(
-        "unexpected-topology-serial",
-        "Specified party .* serial .* does not match the encountered head serial",
-        serial = 1000L,
-      )
-
-      testAgreementError(
-        "out-of-bounds-topology-serial",
-        "Non-integer serial",
-        serial = Long.MaxValue,
       )
 
       // Check that all proposals have been archived, i.e. rejected

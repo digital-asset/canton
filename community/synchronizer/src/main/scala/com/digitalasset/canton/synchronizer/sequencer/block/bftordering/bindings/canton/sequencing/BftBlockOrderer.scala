@@ -52,6 +52,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication.P2PAddAuthTokenHeaderGrpcServerInterceptor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.standalone.P2PGrpcStandaloneBftOrderingService
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.transport.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
   PekkoEnv,
   PekkoFutureUnlessShutdown,
@@ -64,6 +65,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   DefaultAuthenticationTokenManagerConfig,
   P2PConnectionManagementConfig,
+  P2PTransportMetricsConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.OrderingTopologyProvider
@@ -125,9 +127,10 @@ import com.digitalasset.canton.util.{DelayUtil, MaxBytesToDecompress, PekkoUtil,
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
 import io.grpc.stub.StreamObserver
-import io.grpc.{ServerInterceptors, ServerServiceDefinition}
+import io.grpc.{ServerInterceptor, ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
@@ -233,6 +236,18 @@ final class BftBlockOrderer(
       noTracingLogger,
       executorServiceMetrics = executorServiceMetrics,
     )
+
+  // Optional server-side HTTP/2- and TCP-level transport instrumentation for incoming P2P connections.
+  private val transportMetricsConfig =
+    config.initialNetwork.map(_.transportMetrics).getOrElse(P2PTransportMetricsConfig())
+
+  private val serverTransportInstrumentationO: Option[P2PNettyServerInstrumentation] =
+    Option.when(transportMetricsConfig.enabled)(
+      new P2PNettyServerInstrumentation(transportMetricsConfig.preferEpoll, loggerFactory)
+    )
+
+  private val transportMetricsServerInterceptorO: Option[ServerInterceptor] =
+    Option.when(transportMetricsConfig.enabled)(new P2PTransportMetricsServerInterceptor)
 
   // Standalone mode doesn't support authentication
   private val maybeAuthenticationServices =
@@ -591,6 +606,10 @@ final class BftBlockOrderer(
       p2pConnectionEventListener,
       p2pNetworkIn,
       metrics,
+      clock,
+      config.initialNetwork
+        .map(_.transportMetrics)
+        .getOrElse(P2PTransportMetricsConfig()),
       longRunningExecutor,
       timeouts,
       loggerFactory,
@@ -624,6 +643,11 @@ final class BftBlockOrderer(
             apiLoggingConfig = nodeParameters.loggingConfig.api,
             tracing = nodeParameters.tracing,
             grpcMetrics = metrics.grpcMetrics,
+            nettyServerBuilderCustomizer = serverTransportInstrumentationO
+              .map(instrumentation =>
+                (builder: NettyServerBuilder) => instrumentation.customize(builder).discard
+              )
+              .getOrElse((_: NettyServerBuilder) => ()),
           )
           .addService(
             ServerInterceptors.intercept(
@@ -640,6 +664,7 @@ final class BftBlockOrderer(
               List( // Filters are applied in reverse order
                 p2pAddAuthTokenHeaderGrpcServerInterceptorO,
                 maybeAuthenticationServices.map(_.authenticationServerInterceptor),
+                transportMetricsServerInterceptorO,
               ).flatten.asJava,
             ),
             withLogging = false,
@@ -794,6 +819,10 @@ final class BftBlockOrderer(
           SyncCloseable(
             "p2pGrpcServerManager.close()",
             p2pGrpcServerManager.close(),
+          ),
+          SyncCloseable(
+            "serverTransportInstrumentation.close()",
+            serverTransportInstrumentationO.foreach(_.close()),
           ),
           SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
         ) ++

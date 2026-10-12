@@ -110,7 +110,6 @@ class MaliciousParticipantNode(
       batch: Batch[DefaultOpenEnvelope],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
-      topologyTimestamp: Option[CantonTimestamp] = None,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = {
@@ -121,7 +120,6 @@ class MaliciousParticipantNode(
         .send(
           batch,
           timestamps = SendRequestTimestamps(
-            topologyTimestamp = topologyTimestamp,
             approximateTimestampForSigning = approximateTimestampForSigning,
             maxSequencingTime = maxSequencingTime,
           ),
@@ -401,7 +399,6 @@ class MaliciousParticipantNode(
       signedTopologyTransaction: SignedTopologyTransaction[Op, M],
       psid: PhysicalSynchronizerId = defaultPsid,
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
-      topologyTimestamp: Option[CantonTimestamp] = None,
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
   )(implicit
       traceContext: TraceContext
@@ -424,7 +421,6 @@ class MaliciousParticipantNode(
       Batch.of(protocolVersion, broadcast -> recipients),
       approximateTimestampForSigning = now,
       maxSequencingTime = maxSequencingTime,
-      topologyTimestamp = topologyTimestamp,
     )
   }
 
@@ -432,7 +428,6 @@ class MaliciousParticipantNode(
       topologyBroadcasts: Seq[TopologyTransactionsBroadcast],
       psid: PhysicalSynchronizerId = defaultPsid,
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
-      topologyTimestamp: Option[CantonTimestamp] = None,
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
   )(implicit
       traceContext: TraceContext
@@ -449,7 +444,6 @@ class MaliciousParticipantNode(
       Batch.of(protocolVersion, topologyBroadcasts.map(_ -> recipients)*),
       approximateTimestampForSigning = now,
       maxSequencingTime = maxSequencingTime,
-      topologyTimestamp = topologyTimestamp,
     )
   }
 

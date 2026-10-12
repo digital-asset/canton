@@ -146,7 +146,6 @@ trait SequencerStoreTest
             messageId,
             NonEmpty(SortedSet, registeredSender.memberId, recipientIds.toSeq*),
             payload,
-            None,
             traceContext,
             trafficReceiptO,
           ),
@@ -156,7 +155,6 @@ trait SequencerStoreTest
           ts: CantonTimestamp,
           sender: Member,
           messageId: MessageId,
-          topologyTimestamp: CantonTimestamp,
           trafficReceiptO: Option[TrafficReceipt] = None,
       ): FutureUnlessShutdown[Sequenced[BytesPayload]] =
         for {
@@ -166,7 +164,6 @@ trait SequencerStoreTest
           ReceiptStoreEvent(
             registeredSender.memberId,
             messageId,
-            topologyTimestampO = Some(topologyTimestamp),
             traceContext,
             trafficReceiptO,
           ),
@@ -230,7 +227,6 @@ trait SequencerStoreTest
           expectedMessageId: MessageId,
           expectedRecipients: Set[Member],
           expectedPayload: BytesPayload,
-          expectedTopologyTimestamp: Option[CantonTimestamp] = None,
       ): FutureUnlessShutdown[Unit] =
         for {
           (senderId, _) <- lookupRegisteredMember(expectedSender)
@@ -245,7 +241,6 @@ trait SequencerStoreTest
                   messageId,
                   recipients,
                   payload,
-                  topologyTimestampO,
                   traceContext,
                   _trafficReceiptO,
                 ) =>
@@ -253,7 +248,6 @@ trait SequencerStoreTest
               messageId shouldBe expectedMessageId
               recipients.forgetNE should contain.only(recipientIds.toSeq*)
               payload shouldBe expectedPayload
-              topologyTimestampO shouldBe expectedTopologyTimestamp
             case other =>
               fail(s"Expected deliver event but got $other")
           }
@@ -265,7 +259,6 @@ trait SequencerStoreTest
           expectedTimestamp: CantonTimestamp,
           expectedSender: Member,
           expectedMessageId: MessageId,
-          expectedTopologyTimestamp: Option[CantonTimestamp],
       ): FutureUnlessShutdown[Unit] =
         for {
           (senderId, _) <- lookupRegisteredMember(expectedSender)
@@ -275,7 +268,6 @@ trait SequencerStoreTest
             case ReceiptStoreEvent(
                   sender,
                   messageId,
-                  topologyTimestampO,
                   _traceContext,
                   _trafficReceiptO,
                 ) =>
@@ -283,7 +275,6 @@ trait SequencerStoreTest
               messageId shouldBe expectedMessageId
               event.event.members shouldBe Set(senderId)
               event.event.payloadO shouldBe None
-              topologyTimestampO shouldBe expectedTopologyTimestamp
             case other =>
               fail(s"Expected deliver receipt but got $other")
           }
@@ -434,7 +425,7 @@ trait SequencerStoreTest
               payload2,
               recipients = Set(alice, bob, sequencerMember),
             )
-          receiptAlice <- env.deliverReceipt(ts4, alice, messageId4, ts3)
+          receiptAlice <- env.deliverReceipt(ts4, alice, messageId4)
           deliverEventBob <- env.deliverEvent(ts3, bob, messageId3, payload3)
           _ <- env
             .saveEventsAndBuffer(
@@ -463,7 +454,6 @@ trait SequencerStoreTest
             ts4,
             alice,
             messageId4,
-            ts3.some,
           )
           _ <- env.assertDeliverEvent(
             bobEvents(0),
@@ -823,7 +813,6 @@ trait SequencerStoreTest
                   messageId1,
                   NonEmpty(SortedSet, aliceId, bobId),
                   payload1,
-                  None,
                   traceContext,
                   None,
                 ),
@@ -905,7 +894,6 @@ trait SequencerStoreTest
                   messageId1,
                   NonEmpty(SortedSet, aliceId, bobId),
                   payload1,
-                  None,
                   traceContext,
                   None,
                 ),
@@ -1048,7 +1036,6 @@ trait SequencerStoreTest
                     messageId1,
                     NonEmpty(SortedSet, aliceId, bobId, sequencerId),
                     payload1,
-                    None,
                     traceContext,
                     None,
                   ),

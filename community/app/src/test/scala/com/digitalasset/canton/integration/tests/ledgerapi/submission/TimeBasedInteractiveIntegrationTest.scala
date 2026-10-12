@@ -18,7 +18,6 @@ import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFor
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.{ExternalParty, ForceFlags}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, config}
 import com.digitalasset.daml.lf.data.Time
 import io.grpc.Status
@@ -173,7 +172,7 @@ final class TimeBasedInteractiveIntegrationTest
       execAndWait(prepared, signatures).discard
     }
 
-    "enforce max record time" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "enforce max record time" in { implicit env =>
       import env.*
       // Use another party so there's no concurrent updates of its acs with previous tests
       val johnE = participant3.parties.testing.external.enable("John")

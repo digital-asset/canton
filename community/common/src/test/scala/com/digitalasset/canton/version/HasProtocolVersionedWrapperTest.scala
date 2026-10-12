@@ -9,6 +9,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ProtoDeserializationError.{OtherError, UnknownProtoVersion}
 import com.digitalasset.canton.protobuf.{VersionedMessageV0, VersionedMessageV1, VersionedMessageV2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology.transaction.TopologyTransaction
 import com.digitalasset.canton.version.ProtocolVersion.ProtocolVersionWithStatus
 import com.google.protobuf.ByteString
@@ -16,6 +17,7 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
+import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.{nowarn, unused}
 
 /*
@@ -80,8 +82,10 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
       protocolVersionRepresentative(basePV + 5).representative shouldBe basePV + 3
     }
 
-    "return the highest inclusive protocol representative for an unknown protocol version" in {
-      protocolVersionRepresentative(ProtocolVersion(-1)).representative shouldBe basePV + 3
+    "throw when computing the rpv for an unknown protocol version" in {
+      intercept[IllegalStateException](
+        protocolVersionRepresentative(ProtocolVersion(-1))
+      ).getMessage should include("Cannot serialize instance of Message with protocol version -1")
     }
 
     "rpv computation fails for an unknown proto version" in {
@@ -324,6 +328,26 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         }
       }
     }
+
+    "use the memoized bytestring when serializing a ProtocolVersionedMemoizedEvidence" in {
+
+      val count1 = new AtomicLong(0)
+      val m1 =
+        Message("Hey", 1, 2.0)(Message.protocolVersionRepresentativeFor(basePV), None, Some(count1))
+
+      val bs1 = m1.toByteString
+      count1.get() shouldBe 1
+
+      val count2 = new AtomicLong(0)
+      val m2 = Message("Hey", 1, 2.0)(
+        Message.protocolVersionRepresentativeFor(basePV),
+        Some(bs1),
+        Some(count2),
+      )
+      val bs2 = m2.toByteString
+      count2.get() shouldBe 0 // no call to toProtoV0
+      bs1 shouldBe bs2
+    }
   }
 
   "HasProtocolVersionWrapperE" should {
@@ -354,18 +378,29 @@ object HasProtocolVersionedWrapperTest {
   ): RepresentativeProtocolVersion[Message.type] =
     Message.protocolVersionRepresentativeFor(pv)
 
+  /** @param toProtoV0Count
+    *   If defined, incremented every time that toProtoV0 is called
+    */
   final case class Message(
       msg: String,
       iValue: Int,
       dValue: Double,
   )(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[Message.type],
-      val deserializedFrom: Option[ByteString] = None,
-  ) extends HasProtocolVersionedWrapper[Message] {
+      override val deserializedFrom: Option[ByteString] = None,
+      toProtoV0Count: Option[AtomicLong] = None,
+  ) extends HasProtocolVersionedWrapper[Message]
+      with ProtocolVersionedMemoizedEvidence {
 
     @transient override protected lazy val companionObj: Message.type = Message
 
-    def toProtoV0 = VersionedMessageV0(msg)
+    override protected[this] def toByteStringUnmemoized: ByteString =
+      super[HasProtocolVersionedWrapper].toByteString
+
+    def toProtoV0 = {
+      toProtoV0Count.foreach(_.incrementAndGet())
+      VersionedMessageV0(msg)
+    }
     def toProtoV1 = VersionedMessageV1(msg, iValue)
     def toProtoV2 = VersionedMessageV2(msg, iValue, dValue)
   }

@@ -805,7 +805,6 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
           synchronizerId = psid,
           messageIdO = None,
           batch = request.batch,
-          topologyTimestampO = None,
           trafficReceipt = None,
         )
       )

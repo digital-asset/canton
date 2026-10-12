@@ -33,7 +33,6 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
   Sequenced,
   SequencerMemberId,
   SequencerWriterStore,
-  StoreEvent,
 }
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId, SequencerId, UniqueIdentifier}
@@ -251,7 +250,6 @@ final class SequencerWriterSourceTest
           Set.empty,
           payload1,
           None,
-          None,
         )
         _ <- loggerFactory.assertLogs(
           {
@@ -292,14 +290,12 @@ final class SequencerWriterSourceTest
           Set.empty,
           payload1,
           None,
-          None,
         )
         deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
           registeredAlice.memberId,
           messageId2,
           Set.empty,
           payload2,
-          None,
           None,
         )
         _ <- {
@@ -324,91 +320,7 @@ final class SequencerWriterSourceTest
       } yield {
         events.events should have size 1
         events.events.headOption.map(_.event).value should matchPattern {
-          case DeliverStoreEvent(_, `messageId2`, _, _, _, _, _) =>
-        }
-      }
-    }
-  }
-
-  "topology timestamp tolerance" should {
-    def sendWithTopologyTimestamp(
-        nowish: CantonTimestamp,
-        validTopologyTimestamp: CantonTimestamp,
-        invalidTopologyTimestamp: CantonTimestamp,
-    )(implicit
-        env: Env
-    ): Future[Seq[StoreEvent[?]]] = {
-      import env.*
-
-      clock.advanceTo(nowish)
-
-      for {
-        registeredAlice <- store.registerMember(alice, CantonTimestamp.Epoch).failOnShutdown
-        _ <- store.registerMember(sequencerMember, CantonTimestamp.Epoch).failOnShutdown
-        deliver1 = DeliverStoreEvent.ensureSenderReceivesEvent(
-          registeredAlice.memberId,
-          messageId1,
-          Set.empty,
-          payload1,
-          Some(validTopologyTimestamp),
-          None,
-        )
-        deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
-          registeredAlice.memberId,
-          messageId2,
-          Set.empty,
-          payload1,
-          Some(invalidTopologyTimestamp),
-          None,
-        )
-        _ = offerDeliverOrFail(
-          Presequenced.alwaysValid(deliver1, Some(nowish))
-        )
-        _ = offerDeliverOrFail(
-          Presequenced.alwaysValid(
-            deliver2,
-            Some(nowish.immediateSuccessor),
-          )
-        )
-        _ <- completeFlow()
-        events <- store
-          .readEvents(registeredAlice.memberId, alice, registeredAlice.registeredFrom)
-          .failOnShutdown
-      } yield {
-        events.events should have size 2
-        events.events.map(_.event)
-      }
-    }
-
-    /*
-      Since ordering of the events is not guaranteed, we sort them to ease
-      the test.
-     */
-    def sortByMessageId[P](events: Seq[StoreEvent[P]]): Seq[StoreEvent[P]] =
-      events.sortBy(_.messageId.unwrap)
-
-    "cause errors if way ahead of valid signing window" in withEnv() { implicit env =>
-      val nowish = CantonTimestamp.Epoch.plusSeconds(10)
-
-      // upper bound is inclusive
-      val margin = NonNegativeFiniteDuration.tryOfMillis(1)
-      val validTopologyTimestamp = nowish
-
-      for {
-        events <- sendWithTopologyTimestamp(
-          nowish,
-          validTopologyTimestamp = validTopologyTimestamp,
-          invalidTopologyTimestamp = validTopologyTimestamp + margin,
-        )
-        sortedEvents = sortByMessageId(events)
-      } yield {
-        inside(sortedEvents.head) { case event: DeliverStoreEvent[?] =>
-          event.messageId shouldBe messageId1
-        }
-
-        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, _, errorO, _, _) =>
-          getErrorMessage(errorO) should (include("Invalid topology timestamp")
-            and include("The topology timestamp must be before or at "))
+          case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
         }
       }
     }
@@ -439,7 +351,6 @@ final class SequencerWriterSourceTest
                   MessageId.tryCreate("test-unknown-recipients"),
                   batch = batch,
                   maxSequencingTime = CantonTimestamp.MaxValue,
-                  topologyTimestamp = None,
                   aggregationRule = None,
                   submissionCost = None,
                   protocolVersion = testedProtocolVersion,
@@ -489,7 +400,6 @@ final class SequencerWriterSourceTest
             messageId1,
             Set.empty,
             generatePayload(),
-            None,
             None,
           ),
           Some(CantonTimestamp.assertFromLong(runningSequencingTimestamp.incrementAndGet())),

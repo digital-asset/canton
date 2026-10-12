@@ -964,6 +964,7 @@ object InMemoryStateUpdaterSpec {
             packageName = someContract.inst.packageName,
             stakeholders = someContract.inst.stakeholders,
             createdContractInstance = someContract.inst,
+            representativePackageId = representativePackageId,
           )
         ),
         synchronizerId = synchronizerId2.toProtoPrimitive,
@@ -1623,6 +1624,7 @@ object InMemoryStateUpdaterSpec {
             inst = someContract.inst,
             internalContractId = 1,
           ),
+          representativePackageId = representativePackageId,
         )
       ),
       recordTime = CantonTimestamp(Timestamp(t)),

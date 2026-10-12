@@ -7,7 +7,11 @@ import cats.implicits.catsSyntaxEitherId
 import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.health.v30 as proto
 import com.digitalasset.canton.health.ComponentHealthState.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import io.circe.Encoder
 import io.circe.generic.semiauto.deriveEncoder
@@ -27,7 +31,7 @@ final case class ComponentStatus(
     name: String,
     state: ComponentHealthState,
     labels: Map[String, String],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def toProtoV30: proto.ComponentStatus =
     proto.ComponentStatus(
       name = name,
@@ -35,10 +39,13 @@ final case class ComponentStatus(
       labels = labels,
     )
 
-  override protected val pretty: Pretty[ComponentStatus] = ComponentStatus.componentStatusPretty
+  override def prettyCompanion: PrettyPrintingCompanion[ComponentStatus.this.type] = ComponentStatus
 }
 
-object ComponentStatus {
+object ComponentStatus extends PrettyPrintingCompanion[ComponentStatus] {
+
+  override protected val pretty: Pretty[ComponentStatus] =
+    prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
 
   /** Label key holding the full physical synchronizer id for components that exist once per
     * connected synchronizer. Used to group per-synchronizer components in status reports.
@@ -147,9 +154,4 @@ object ComponentStatus {
     }
 
   implicit val componentStatusEncoder: Encoder[ComponentStatus] = deriveEncoder[ComponentStatus]
-
-  implicit val componentStatusPretty: Pretty[ComponentStatus] = {
-    import Pretty.*
-    prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
-  }
 }

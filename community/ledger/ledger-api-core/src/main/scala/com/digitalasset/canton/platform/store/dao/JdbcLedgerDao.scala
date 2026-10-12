@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.CantonRequireTypes.String185
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
@@ -63,6 +64,7 @@ private[platform] class JdbcLedgerDao(
     lfValueTranslation: LfValueTranslation,
     contractStore: LedgerApiContractStore,
     achsStateCache: AchsStateCache,
+    contractPruningBatchSize: PositiveInt,
     contractPruningMaxRetries: Int,
     contractPruningDelayBeforeRetry: FiniteDuration,
     scheduler: Scheduler,
@@ -136,116 +138,128 @@ private[platform] class JdbcLedgerDao(
     // The pruning offset cache's disable/re-enable cycle requires that pruning requests
     // do not run concurrently.
     ensurePruningIsNotInProgress {
-      logger.info(s"Pruning the ledger api server index db up to ${pruneUpToInclusive.unwrap}.")
+      logger.info(s"Pruning the Ledger API Server Index DB up to ${pruneUpToInclusive.unwrap}.")
 
       implicit val ec: ExecutionContext = commandExecutionContext
 
-      dbDispatcher
-        .executeSql(metrics.index.db.pruneDbMetrics) { conn =>
-          // verifying pruning is continuous
-          val prunedUpToInDb = parameterStorageBackend.prunedUpToInclusive(conn)
-          if (prunedUpToInDb != previousPruneUpToInclusive) {
-            throw new IllegalStateException(
-              s"Previous pruned up to ($previousPruneUpToInclusive) is different from the current pruning offset in DB ($prunedUpToInDb)"
-            )
-          }
-
-          readStorageBackend.eventStorageBackend.pruneEvents(
-            previousPruneUpToInclusive = previousPruneUpToInclusive,
-            previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
-            pruneUpToInclusive = pruneUpToInclusive,
-            incompleteReassignmentOffsets = incompleteReassignmentOffsets,
-            pruningDbLockMeta = pruningDbLockMeta,
-            contractPruningDbLockMeta = contractPruningDbLockMeta,
-          )(
-            conn,
-            loggingContext.traceContext,
-          )
-
-          readStorageBackend.completionStorageBackend.pruneCompletions(pruneUpToInclusive)(
-            conn,
-            loggingContext.traceContext,
-          )
-          parameterStorageBackend.updatePrunedUptoInclusive(
-            pruneUpToInclusive
-          )(conn)
-          // Disable the cache before the transaction is committed to avoid fetching stale values.
-          pruningOffsetService.disableCache()
-        }
-        .thereafter { _ =>
-          pruningOffsetService.reEnableCache()
-        }
-        .flatMap(_ =>
-          dbDispatcher.executeSql(metrics.index.db.vacuumAndReindexPruningTableDbMetrics) {
-            implicit conn =>
-              readStorageBackend.eventStorageBackend.vacuumAndReindexPruningTable()
-          }
+      val indexDbPruningF = if (previousPruneUpToInclusive.exists(_ >= pruneUpToInclusive)) {
+        logger.info(
+          s"Already at $previousPruneUpToInclusive, nothing to prune in Ledger API Server Index DB."
         )
-        .thereafter {
-          case Success(_) =>
-            logger.info(
-              s"Completed pruning of the ledger api server index db"
-            )
-          case Failure(ex) =>
-            logger.warn("Pruning failed", ex)
-        }
-        .flatMap(_ =>
-          pattern
-            .retry(
-              attempt = () => pruneContracts(),
-              shouldRetry = (_: Unit, t: Throwable) =>
-                t match {
-                  case _: PruningContractsBlockedException => true
-                  case _ => false
-                },
-              attempts = contractPruningMaxRetries + 1,
-              delayFunction = attempt => {
-                // recording the retry count of this pruning operation
-                metrics.services.pruning.contractPruningRetried
-                  .update(attempt.toLong)(MetricsContext.Empty)
-                // fix delay between retries
-                Some(contractPruningDelayBeforeRetry)
-              },
-            )(commandExecutionContext, scheduler)
-            .transform {
-              case Success(()) =>
-                logger.info(s"Completed pruning of contracts")
-                Success(())
-              case Failure(_: PruningContractsBlockedException) =>
-                metrics.services.pruning.contractPruningBlocked.inc()
-                Failure(
-                  LedgerApiErrors.ParticipantContractPruningBlocked
-                    .Reject(
-                      retries = contractPruningMaxRetries,
-                      delay = contractPruningDelayBeforeRetry,
-                    )
-                    .asGrpcError
-                )
-              case Failure(t) =>
-                logger.warn("Pruning of contracts failed", t)
-                Failure(t)
+        Future.unit
+      } else {
+        dbDispatcher
+          .executeSql(metrics.index.db.pruneDbMetrics) { conn =>
+            // verifying pruning is continuous
+            val prunedUpToInDb = parameterStorageBackend.prunedUpToInclusive(conn)
+            if (prunedUpToInDb != previousPruneUpToInclusive) {
+              throw new IllegalStateException(
+                s"Previous pruned up to ($previousPruneUpToInclusive) is different from the current pruning offset in DB ($prunedUpToInDb)"
+              )
             }
-        )
+
+            readStorageBackend.eventStorageBackend.pruneEvents(
+              previousPruneUpToInclusive = previousPruneUpToInclusive,
+              previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
+              pruneUpToInclusive = pruneUpToInclusive,
+              incompleteReassignmentOffsets = incompleteReassignmentOffsets,
+              pruningDbLockMeta = pruningDbLockMeta,
+              contractPruningDbLockMeta = contractPruningDbLockMeta,
+            )(
+              conn,
+              loggingContext.traceContext,
+            )
+
+            readStorageBackend.completionStorageBackend.pruneCompletions(pruneUpToInclusive)(
+              conn,
+              loggingContext.traceContext,
+            )
+            parameterStorageBackend.updatePrunedUptoInclusive(
+              pruneUpToInclusive
+            )(conn)
+            // Disable the cache before the transaction is committed to avoid fetching stale values.
+            pruningOffsetService.disableCache()
+          }
+          .thereafter { _ =>
+            pruningOffsetService.reEnableCache()
+          }
+          .flatMap(_ =>
+            dbDispatcher.executeSql(metrics.index.db.vacuumAndReindexPruningTableDbMetrics) {
+              implicit conn =>
+                readStorageBackend.eventStorageBackend.vacuumAndReindexPruningTable()
+            }
+          )
+          .thereafter {
+            case Success(_) =>
+              logger.info(
+                s"Completed pruning of the ledger api server index db"
+              )
+            case Failure(ex) =>
+              logger.warn("Pruning failed", ex)
+          }
+      }
+
+      indexDbPruningF.flatMap(_ =>
+        pattern
+          .retry(
+            attempt = () => pruneContracts(),
+            shouldRetry = (_: Unit, t: Throwable) =>
+              t match {
+                case _: PruningContractsBlockedException => true
+                case _ => false
+              },
+            attempts = contractPruningMaxRetries + 1,
+            delayFunction = attempt => {
+              // recording the retry count of this pruning operation
+              metrics.services.pruning.contractPruningRetried
+                .update(attempt.toLong)(MetricsContext.Empty)
+              // fix delay between retries
+              Some(contractPruningDelayBeforeRetry)
+            },
+          )(commandExecutionContext, scheduler)
+          .transform {
+            case Success(()) =>
+              logger.info(s"Completed pruning of contracts")
+              Success(())
+            case Failure(_: PruningContractsBlockedException) =>
+              metrics.services.pruning.contractPruningBlocked.inc()
+              Failure(
+                LedgerApiErrors.ParticipantContractPruningBlocked
+                  .Reject(
+                    retries = contractPruningMaxRetries,
+                    delay = contractPruningDelayBeforeRetry,
+                  )
+                  .asGrpcError
+              )
+            case Failure(t) =>
+              logger.warn("Pruning of contracts failed", t)
+              Failure(t)
+          }
+      )
     }
 
   private def pruneContracts()(implicit loggingContext: LoggingContextWithTrace): Future[Unit] =
-    for {
-      _ <- dbDispatcher.executeSql(
-        metrics.index.db.cleanPruningCandidateContractsDbMetrics
-      )(implicit conn =>
-        readStorageBackend.eventStorageBackend.cleanPruningCandidates(contractPruningDbLockMeta)
-      )
-      prunedInternalContractIds <- dbDispatcher.executeSql(
+    dbDispatcher
+      .executeSql(
         metrics.index.db.pruneContractsDbMetrics
       )(implicit conn =>
-        readStorageBackend.eventStorageBackend.pruneContracts(contractPruningDbLockMeta)
+        readStorageBackend.eventStorageBackend.pruneContracts(
+          contractPruningBatchSize = contractPruningBatchSize,
+          contractPruningDbLockMeta = contractPruningDbLockMeta,
+        )
       )
-      _ <- dbDispatcher.executeSql(
-        metrics.index.db.vacuumAndReindexContractPruningTableDbMetrics
-      )(implicit conn =>
-        readStorageBackend.eventStorageBackend.vacuumAndReindexContractPruningTable()
-      )
-    } yield contractStore.contractsPruned(prunedInternalContractIds)
+      .flatMap { case (prunedInternalContractIds, thereIsMoreToPrune) =>
+        contractStore.contractsPruned(prunedInternalContractIds)
+        if (thereIsMoreToPrune) {
+          pruneContracts()
+        } else {
+          dbDispatcher.executeSql(
+            metrics.index.db.vacuumAndReindexContractPruningTableDbMetrics
+          )(implicit conn =>
+            readStorageBackend.eventStorageBackend.vacuumAndReindexContractPruningTable()
+          )
+        }
+      }
 
   override def indexDbPrunedUpTo(implicit
       loggingContext: LoggingContextWithTrace

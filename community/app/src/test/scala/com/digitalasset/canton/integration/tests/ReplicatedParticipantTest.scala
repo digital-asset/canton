@@ -52,18 +52,22 @@ import scala.util.{Success, Try}
 trait ReplicatedNodeHelper { self: CommunityIntegrationTest =>
   protected lazy val timeout: FiniteDuration = 180.seconds
 
+  /** Queries the node's current activeness once, failing if the status is unavailable. */
+  private def currentStatusActive(node: InstanceReference, allowNonInit: Boolean): Boolean =
+    node.health.status match {
+      case NodeStatus.Success(nodeStatus) => nodeStatus.active
+      case NodeStatus.Failure(msg) => fail(s"Node ${node.name} status unavailable: $msg")
+      case NodeStatus.NotInitialized(active, _, _) =>
+        if (allowNonInit) active else fail(s"Node ${node.name} not initialized.")
+    }
+
   private def checkStatusActive[A](
       node: InstanceReference,
       checkFn: Boolean => A,
       allowNonInit: Boolean,
   ): A =
     eventually(timeout) {
-      node.health.status match {
-        case NodeStatus.Success(nodeStatus) => checkFn(nodeStatus.active)
-        case NodeStatus.Failure(msg) => fail(s"Node ${node.name} status unavailable: $msg")
-        case NodeStatus.NotInitialized(active, _, _) =>
-          if (allowNonInit) checkFn(active) else fail(s"Node ${node.name} not initialized.")
-      }
+      checkFn(currentStatusActive(node, allowNonInit))
     }
 
   protected def getActiveAndPassive[I <: InstanceReference](
@@ -96,23 +100,23 @@ trait ReplicatedNodeHelper { self: CommunityIntegrationTest =>
       node2: I,
       allowNonInit: Boolean = false,
   ): I =
-    checkStatusActive(
-      node1,
-      active =>
-        if (active) node1
-        else
-          checkStatusActive(
-            node2,
-            active =>
-              if (active) node2
-              else
-                fail(
-                  s"Neither node ${node1.name} nor node ${node2.name} is active"
-                ),
-            allowNonInit,
-          ),
-      allowNonInit,
-    )
+    // Poll both nodes in every iteration: whichever of them wins the lock may only become active
+    // after the first poll, so we must not keep waiting on just one of them.
+    eventually(timeout) {
+      val node1Active = Try(currentStatusActive(node1, allowNonInit))
+      val node2Active = Try(currentStatusActive(node2, allowNonInit))
+      (node1Active, node2Active) match {
+        case (Success(true), _) => node1
+        case (_, Success(true)) => node2
+        case _ =>
+          def describe(node: I, status: Try[Boolean]): String =
+            status.fold(err => err.getMessage, active => s"${node.name} active=$active")
+          fail(
+            s"Neither node ${node1.name} nor node ${node2.name} is active " +
+              s"(${describe(node1, node1Active)}; ${describe(node2, node2Active)})"
+          )
+      }
+    }
 }
 
 trait ReplicatedParticipantTestSetup extends ReplicatedNodeHelper {

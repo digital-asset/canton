@@ -13,7 +13,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
 }
-import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId
 import com.digitalasset.daml.lf.data.Ref
 import monocle.macros.syntax.lens.*
 import org.scalatest.BeforeAndAfterEach
@@ -28,8 +28,6 @@ abstract class ExtractSnapshotChoicesITBase
     with EntitySyntax
     with BeforeAndAfterEach {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   private val participantId = Ref.ParticipantId.assertFromString("participant1")
   private val snapshotDir = Files.createTempDirectory("ReplayBenchmarkTest")
   private val snapshotFileMatcher =
@@ -40,7 +38,8 @@ abstract class ExtractSnapshotChoicesITBase
     Option(getClass.getClassLoader.getResource(darFile))
       .map(path => Path.of(path.getPath))
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $darFile"))
-  private val ReplayBenchmarkPkgId: LfPackageId = getPkgId(darPath)
+  private val ReplayBenchmarkPkgId: LfPackageId =
+    DarMainPackageId.tryFromDarPath(darPath).toLfPackageId
   private val AddChoiceName = s"$ReplayBenchmarkPkgId:ReplayBenchmark:T:Add"
   private val SubChoiceName = s"$ReplayBenchmarkPkgId:ReplayBenchmark:T:Sub"
   private val GetAndSetTimeChoiceName = s"$ReplayBenchmarkPkgId:GetAndSetTime:T:Add"
@@ -97,9 +96,6 @@ abstract class ExtractSnapshotChoicesITBase
         txNodeCountFilter = Some(3),
       ) should equal(Set(AddChoiceName, GetAndSetTimeChoiceName))
   }
-
-  private def getPkgId(darPath: Path): LfPackageId =
-    DarDecoder.assertReadArchiveFromFile(darPath.toFile).main._1
 
   private def getEnv(name: String, default: String): String =
     sys.props.get(name) match {

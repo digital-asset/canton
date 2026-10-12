@@ -4,7 +4,11 @@
 package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.admin.sequencer.v30
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -26,7 +30,7 @@ final case class SequencerConnectionPoolDelays(
     maxRestartDelay: NonNegativeFiniteDuration,
     warnValidationDelay: NonNegativeFiniteDuration,
     subscriptionRequestDelay: NonNegativeFiniteDuration,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   private[sequencing] def toProtoV30: v30.SequencerConnectionPoolDelays =
     v30.SequencerConnectionPoolDelays(
       minRestartDelay = Some(minRestartDelay.toProtoPrimitive),
@@ -35,15 +39,19 @@ final case class SequencerConnectionPoolDelays(
       warnValidationDelay = Some(warnValidationDelay.toProtoPrimitive),
     )
 
-  override protected def pretty: Pretty[SequencerConnectionPoolDelays] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerConnectionPoolDelays] =
+    SequencerConnectionPoolDelays
+}
+
+object SequencerConnectionPoolDelays
+    extends PrettyPrintingCompanion[SequencerConnectionPoolDelays] {
+  override protected val pretty: Pretty[SequencerConnectionPoolDelays] = prettyOfClass(
     param("minRestartDelay", _.minRestartDelay),
     param("maxRestartDelay", _.maxRestartDelay),
     param("warnValidationDelay", _.warnValidationDelay),
     param("subscriptionRequestDelay", _.subscriptionRequestDelay),
   )
-}
 
-object SequencerConnectionPoolDelays {
   val default: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays(
     minRestartDelay = NonNegativeFiniteDuration.tryOfMillis(10),
     maxRestartDelay = NonNegativeFiniteDuration.tryOfSeconds(10),

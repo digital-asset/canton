@@ -63,8 +63,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.{BinaryFileUtil, ResourceUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{config, networking}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -72,7 +72,7 @@ import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Context
 
-import java.io.ByteArrayOutputStream
+import java.io.{BufferedInputStream, ByteArrayOutputStream, FileInputStream, IOException}
 import java.net.URI
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -447,14 +447,34 @@ class TopologyAdministrationGroup(
 
     @Help.Summary("Loads topology transactions from a file into the specified topology store")
     @Help.Description("The file must contain data serialized by TopologyTransactions.")
-    def import_topology_snapshot_fromV2(file: String, store: TopologyStoreId): Unit =
-      BinaryFileUtil
-        .readByteStringFromFile(file)
-        .map(import_topology_snapshotV2(_, store))
+    def import_topology_snapshot_fromV2(file: String, store: TopologyStoreId): Unit = {
+      val topologyTransactions = Either
+        .catchOnly[IOException](new BufferedInputStream(new FileInputStream(file)))
         .valueOr { err =>
-          throw new IllegalArgumentException(s"import_topology_snapshot failed: $err")
+          throw new IllegalArgumentException(s"import_topology_snapshot failed: ${err.getMessage}")
         }
+      ResourceUtil.withResource(topologyTransactions) { inputStream =>
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write
+              .ImportTopologySnapshotV2(
+                inputStream,
+                store,
+                Some(consoleEnvironment.commandTimeouts.unbounded),
+              )
+          )
+        }
+      }
+    }
 
+    @Help.Summary("Loads topology transactions into the specified topology store")
+    @Help.Description(
+      """The byte string must contain data serialized by TopologyTransactions.
+        |
+        |A byte string cannot exceed 2 GB. For larger topology snapshots, use
+        |import_topology_snapshot_fromV2, which streams the snapshot from a file.
+        """
+    )
     def import_topology_snapshotV2(
         topologyTransactions: ByteString,
         store: TopologyStoreId,
@@ -795,9 +815,27 @@ class TopologyAdministrationGroup(
         }
     }
 
+    private def excludedMappingCodes(
+        filterMappings: Seq[TopologyMapping.Code],
+        excludeMappings: Seq[TopologyMapping.Code],
+    ): Seq[String] = {
+      if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
+        consoleEnvironment.run(
+          CommandErrors
+            .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
+        )
+      }
+      if (filterMappings.nonEmpty) {
+        TopologyMapping.Code.all.diff(filterMappings).map(_.code)
+      } else excludeMappings.map(_.code)
+    }
+
     @Help.Summary("Export topology snapshot")
     @Help.Description(
       """This command export the node's topology transactions as byte string.
+        |
+        |A byte string cannot exceed 2 GB. For larger topology snapshots, use
+        |export_topology_snapshot_to_file, which streams the snapshot to a file.
         |
         |Parameters:
         |- excludeMappings: A list of topology mapping codes to exclude from the export. If not
@@ -819,15 +857,7 @@ class TopologyAdministrationGroup(
         filterNamespace: String = "",
         timeout: NonNegativeDuration = timeouts.unbounded,
     ): ByteString = {
-      if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
-        consoleEnvironment.run(
-          CommandErrors
-            .GenericCommandError("Cannot specify both filterMappings and excludeMappings")
-        )
-      }
-      val excludeMappingsCodes = if (filterMappings.nonEmpty) {
-        TopologyMapping.Code.all.diff(filterMappings).map(_.code)
-      } else excludeMappings.map(_.code)
+      val excludeMappingsCodes = excludedMappingCodes(filterMappings, excludeMappings)
 
       consoleEnvironment
         .run {
@@ -855,6 +885,68 @@ class TopologyAdministrationGroup(
             responseObserver.resultBytes,
             timeout,
             s"Exporting the topology state from store $store",
+          )
+        }
+    }
+
+    @Help.Summary("Export topology snapshot to a file")
+    @Help.Description(
+      """This command streams the node's topology transactions to a file.
+        |
+        |Parameters:
+        |- outputFile: The file to write the topology transactions to.
+        |- excludeMappings: A list of topology mapping codes to exclude from the export. If not
+        |  provided, all mappings are included.
+        |- filterNamespace: The namespace to filter the transactions by.
+        |- protocolVersion: The protocol version used to serialize the topology transactions. If
+        |  not provided, the latest protocol version is used.
+        """
+    )
+    def export_topology_snapshot_to_file(
+        outputFile: String,
+        store: TopologyStoreId = TopologyStoreId.Authorized,
+        proposals: Boolean = false,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterMappings: Seq[TopologyMapping.Code] = Nil,
+        excludeMappings: Seq[TopologyMapping.Code] = Nil,
+        filterAuthorizedKey: Option[Fingerprint] = None,
+        protocolVersion: Option[String] = None,
+        filterNamespace: String = "",
+        timeout: NonNegativeDuration = timeouts.unbounded,
+    ): Unit = {
+      val excludeMappingsCodes = excludedMappingCodes(filterMappings, excludeMappings)
+
+      consoleEnvironment
+        .run {
+          val file = better.files.File(outputFile)
+          val fileStreamObserver = new OutputFileStreamObserver[ExportTopologySnapshotV2Response](
+            file,
+            _.chunk,
+          )
+
+          def call: ConsoleCommandResult[Context.CancellableContext] =
+            adminCommand(
+              TopologyAdminCommands.Read.ExportTopologySnapshotV2(
+                fileStreamObserver,
+                BaseQuery(
+                  store,
+                  proposals,
+                  timeQuery,
+                  operation,
+                  filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
+                  protocolVersion.map(ProtocolVersion.tryCreate),
+                ),
+                excludeMappings = excludeMappingsCodes,
+                filterNamespace = filterNamespace,
+              )
+            )
+          processResult(
+            call,
+            fileStreamObserver.result,
+            timeout,
+            s"Exporting the topology state from store $store to a file",
+            cleanupOnError = () => file.delete(),
           )
         }
     }
@@ -906,6 +998,9 @@ class TopologyAdministrationGroup(
         |to initialize a sequencer for a major synchronizer upgrades. The `validFrom` and
         |`validUntil` are set to `SignedTopologyTransaction.InitialTopologySequencingTime`.
         |
+        |A byte string cannot exceed 2 GB. For larger genesis states, use export_genesis_state,
+        |which streams the genesis state to a file.
+        |
         |Parameters:
         |- filterSynchronizerStore: Must be specified if the genesis state is requested from a
         |  participant node.
@@ -934,6 +1029,53 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary(
+      "Stream the genesis state for a sequencer (intended for performing a major synchronizer upgrade) to a file"
+    )
+    @Help.Description(
+      """Download the topology snapshot which includes the entire history of topology transactions
+        |to initialize a sequencer for a major synchronizer upgrades. The `validFrom` and
+        |`validUntil` are set to `SignedTopologyTransaction.InitialTopologySequencingTime`.
+        |
+        |Parameters:
+        |- outputFile: The file to write the genesis state to.
+        |- filterSynchronizerStore: Must be specified if the genesis state is requested from a
+        |  participant node.
+        |- timestamp: If not specified, the max effective time of the latest topology transaction
+        |  is used. Otherwise, the given timestamp is used.
+        """
+    )
+    def export_genesis_state(
+        outputFile: String,
+        filterSynchronizerStore: Option[TopologyStoreId.Synchronizer] = None,
+        timestamp: Option[CantonTimestamp] = None,
+        timeout: NonNegativeDuration = timeouts.unbounded,
+    ): Unit =
+      consoleEnvironment.run {
+        val file = better.files.File(outputFile)
+        val fileStreamObserver = new OutputFileStreamObserver[GenesisStateV2Response](
+          file,
+          _.chunk,
+        )
+
+        def call: ConsoleCommandResult[Context.CancellableContext] =
+          adminCommand(
+            TopologyAdminCommands.Read.GenesisStateV2(
+              fileStreamObserver,
+              synchronizerStore = filterSynchronizerStore,
+              timestamp = timestamp,
+            )
+          )
+
+        processResult(
+          call,
+          fileStreamObserver.result,
+          timeout,
+          "Downloading the genesis state to a file",
+          cleanupOnError = () => file.delete(),
+        )
+      }
+
+    @Help.Summary(
       "Stream the topology upgrade state for a sequencer (intended for logical synchronizer upgrade) to a file"
     )
     @Help.Description(
@@ -959,8 +1101,9 @@ class TopologyAdministrationGroup(
         timeout: NonNegativeDuration = timeouts.unbounded,
     ): Unit =
       consoleEnvironment.run {
+        val file = better.files.File(outputFile)
         val fileStreamObserver = new OutputFileStreamObserver[SequencerLsuStateResponse](
-          better.files.File(outputFile),
+          file,
           _.chunk,
         )
 
@@ -975,6 +1118,7 @@ class TopologyAdministrationGroup(
           fileStreamObserver.result,
           timeout,
           "Downloading the genesis state for logical upgrade to a file",
+          cleanupOnError = () => file.delete(),
         )
       }
 
@@ -2001,7 +2145,7 @@ class TopologyAdministrationGroup(
         serial: Option[PositiveInt] = None,
     ) = {
       val currentO = findCurrent(party, store)
-      val (existingPermissions, nextSerial, threshold, partySigningKeys, isOffline) =
+      val (existingPermissions, nextSerial, threshold, partySigningKeys) =
         currentO match {
           case Some(current) if current.context.operation == TopologyChangeOp.Remove =>
             (
@@ -2010,7 +2154,6 @@ class TopologyAdministrationGroup(
               Some(current.context.serial.increment),
               current.item.threshold,
               None,
-              false,
             )
           case Some(current) =>
             (
@@ -2018,7 +2161,6 @@ class TopologyAdministrationGroup(
               Some(current.context.serial.increment),
               current.item.threshold,
               current.item.partySigningKeysWithThreshold,
-              current.item.isOffline,
             )
           case None =>
             (
@@ -2026,7 +2168,6 @@ class TopologyAdministrationGroup(
               Some(Right(PositiveInt.one)),
               PositiveInt.one,
               None,
-              false,
             )
         }
       val newSerial =
@@ -2046,9 +2187,42 @@ class TopologyAdministrationGroup(
         )
         .valueOr(err => consoleEnvironment.raiseError(s"Unable to compute new permissions: $err"))
 
-      (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys, isOffline)
+      (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys)
     }
 
+    private[canton] def hostingParticipants(
+        newParticipants: Seq[(ParticipantId, ParticipantPermission)],
+        participantsRequiringPartyToBeOnboarded: Seq[ParticipantId],
+        participantStates: Map[ParticipantId, HostingParticipant.HostingState],
+    ): Seq[HostingParticipant] = {
+      val unknownParticipants = participantStates.keySet -- newParticipants.map(_._1)
+      if (unknownParticipants.nonEmpty)
+        consoleEnvironment.raiseError(
+          s"Hosting states specified for participants that do not host the party: ${unknownParticipants
+              .mkString(", ")}"
+        )
+      val conflictingParticipants = participantsRequiringPartyToBeOnboarded.filter(pid =>
+        participantStates.get(pid).exists(_ != HostingParticipant.HostingState.Onboarding)
+      )
+      if (conflictingParticipants.nonEmpty)
+        consoleEnvironment.raiseError(
+          s"Participants required to onboard the party have a hosting state other than ONBOARDING: ${conflictingParticipants
+              .mkString(", ")}"
+        )
+      newParticipants.map { case (pid, permission) =>
+        participantStates.get(pid) match {
+          case Some(state) => HostingParticipant(pid, permission, state)
+          case None =>
+            HostingParticipant(
+              pid,
+              permission,
+              onboarding = participantsRequiringPartyToBeOnboarded.contains(pid),
+            )
+        }
+      }
+    }
+
+    // TODO(#35499): Revise description for participantStates when switching from dev to 37
     @Help.Summary("Change party to participant mapping")
     @Help.Description(
       """Change the association of a party to hosting participants.
@@ -2086,7 +2260,10 @@ class TopologyAdministrationGroup(
         |- requiresPartyToBeOnboarded: When set to true, indicate that the added participants need
         |  to first onboard the party independently from this call before the added participants
         |  fully host the party.
-        |- freezeParty: Boolean flag without any business behaviour; only for internal testing.
+        |- participantStates: The hosting states (Nominated, Freezing, Onboarding, Active) of the
+        |  participants hosting the party after this change. Participants not listed are Active,
+        |  or Onboarding if added with requiresPartyToBeOnboarded. Nominated and Freezing require
+        |  the dev protocol version and have no effect yet; only for internal testing.
         """
     )
     def propose_delta(
@@ -2102,18 +2279,11 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         requiresPartyToBeOnboarded: Boolean = false,
-        // TODO(#35664): Revise command description once implemented
-        //  Option captures the user intent!
-        //   freezeParty = None: The user didn't specify the flag. We should fetch the current state from the database and keep it the same.
-        //   freezeParty = Some(true / false): The user explicitly wants to change the state.
-        freezeParty: Option[Boolean] = None,
+        participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
 
-      val (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys, isOffline) =
+      val (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys) =
         computeDelta(party, adds, removes, store, serial)
-
-      // Bridge: If the user provided a flag, use it. Otherwise, carry over current boolean state.
-      val finalIsOffline: Boolean = freezeParty.getOrElse(isOffline)
 
       if (newPermissions.nonEmpty) {
         // issue a REPLACE
@@ -2131,7 +2301,7 @@ class TopologyAdministrationGroup(
           participantsRequiringPartyToBeOnboarded =
             if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
           partySigningKeys = partySigningKeys,
-          freezeParty = finalIsOffline,
+          participantStates = participantStates,
         )
       } else {
         // we would remove the last participant, therefore we issue a REMOVE
@@ -2148,12 +2318,13 @@ class TopologyAdministrationGroup(
           store = store,
           forceFlags = forceFlags,
           partySigningKeys = partySigningKeys,
-          freezeParty = finalIsOffline,
+          participantStates = participantStates,
         )
 
       }
     }
 
+    // TODO(#35499): Revise description for participantStates when switching from dev to 37
     @Help.Summary("Replace party to participant mapping")
     @Help.Description(
       """Replace the association of a party to hosting participants.
@@ -2198,7 +2369,10 @@ class TopologyAdministrationGroup(
       |  - "<synchronizer id>": The topology transaction will be directly submitted to the
       |  specified synchronizer without storing it locally first. This also means it will _not_
       |  be synchronized to other synchronizers automatically.
-      |- freezeParty: Boolean flag without any business behaviour; only for internal testing.
+      |- participantStates: The hosting states (Nominated, Freezing, Onboarding, Active) of the
+      |  participants. Participants not listed are Active, or Onboarding if listed in
+      |  participantsRequiringPartyToBeOnboarded. Nominated and Freezing require the
+      |  dev protocol version and have no effect yet; only for internal testing.
       """
     )
     def propose(
@@ -2216,8 +2390,7 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
-        // TODO(#35664): Revise command description once implemented
-        freezeParty: Boolean = false,
+        participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
       val nodeStatus = instance.health.status
       val command = TopologyAdminCommands.Write.Propose(
@@ -2227,15 +2400,12 @@ class TopologyAdministrationGroup(
         mapping = PartyToParticipant.create(
           partyId = party,
           threshold = threshold,
-          participants = newParticipants.map { case (pid, permission) =>
-            HostingParticipant(
-              pid,
-              permission,
-              onboarding = participantsRequiringPartyToBeOnboarded.contains(pid),
-            )
-          },
+          participants = hostingParticipants(
+            newParticipants,
+            participantsRequiringPartyToBeOnboarded,
+            participantStates,
+          ),
           partySigningKeysWithThreshold = partySigningKeys,
-          isOffline = freezeParty,
         ),
         signedBy = signedBy,
         serial = serial,

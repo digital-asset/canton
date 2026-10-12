@@ -11,16 +11,18 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
 
+import scala.annotation.nowarn
+
 object CantonContractIdVersion {
   val versionPrefixBytesSize = 2
 
   /** Maximum contract-id-version supported in protocol-version */
+  @nowarn("msg=parameter protocolVersion in method maximumSupportedVersion is never used")
   def maximumSupportedVersion(
       protocolVersion: ProtocolVersion
   ): Either[String, CantonContractIdVersion] =
     // TODO(#23971) Use V2 by default in dev
-    if (protocolVersion >= ProtocolVersion.v34) Right(AuthenticatedContractIdVersionV12)
-    else Left(s"No contract ID scheme found for ${protocolVersion.v}")
+    Right(AuthenticatedContractIdVersionV12)
 
   def extractCantonContractIdVersion(
       contractId: LfContractId

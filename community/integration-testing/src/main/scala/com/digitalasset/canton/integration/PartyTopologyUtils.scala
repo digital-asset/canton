@@ -71,7 +71,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
             store: TopologyStoreId = TopologyStoreId.Authorized,
             forceFlags: ForceFlags = ForceFlags.none,
             participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
-            freezeParty: Boolean = false,
+            participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
         ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
           val env = node.consoleEnvironment
           val synchronize = Some(env.commandTimeouts.bounded)
@@ -88,15 +88,12 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
               val updatedMapping = PartyToParticipant.tryCreate(
                 partyId = party.partyId,
                 threshold = threshold,
-                participants = newParticipants.map { case (pid, permission) =>
-                  HostingParticipant(
-                    pid,
-                    permission,
-                    onboarding = participantsRequiringPartyToBeOnboarded.contains(pid),
-                  )
-                },
+                participants = node.topology.party_to_participant_mappings.hostingParticipants(
+                  newParticipants,
+                  participantsRequiringPartyToBeOnboarded,
+                  participantStates,
+                ),
                 partySigningKeysWithThreshold = partySigningKeys,
-                isOffline = freezeParty,
               )
               // In the test we could easily build the transaction directly, but external parties will likely
               // use the generate endpoint, so let's use it too
@@ -165,7 +162,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
                 store,
                 forceFlags,
                 participantsRequiringPartyToBeOnboarded,
-                freezeParty = freezeParty,
+                participantStates = participantStates,
               )
           }
         }
@@ -191,7 +188,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
             signingKeysAdds: Set[SigningPublicKey] = Set.empty,
             signingKeysRemoves: Set[Fingerprint] = Set.empty,
             newSigningThreshold: Option[PositiveInt] = None,
-            freezeParty: Option[Boolean] = None,
+            participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
         ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
           val env = node.consoleEnvironment
           val synchronize = Some(env.commandTimeouts.bounded)
@@ -202,7 +199,6 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
             newSerial,
             threshold,
             partySigningKeys,
-            isOffline,
           ) =
             node.topology.party_to_participant_mappings.computeDelta(
               party.partyId,
@@ -211,8 +207,6 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
               store,
               serial,
             )
-
-          val finalIsOffline = freezeParty.getOrElse(isOffline)
 
           val newSigningKeys =
             partySigningKeys.map { case SigningKeysWithThreshold(keys, threshold) =>
@@ -245,7 +239,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
                 store = store,
                 forceFlags = forceFlags,
                 requiresPartyToBeOnboarded = requiresPartyToBeOnboarded,
-                freezeParty = freezeParty,
+                participantStates = participantStates,
               )
             case _: ExternalParty if newPermissions.nonEmpty =>
               propose(
@@ -260,7 +254,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
                 participantsRequiringPartyToBeOnboarded =
                   if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
                 partySigningKeys = newSigningKeys,
-                freezeParty = finalIsOffline,
+                participantStates = participantStates,
               )
             case _: ExternalParty =>
               propose(
@@ -273,7 +267,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
                 store = store,
                 forceFlags = forceFlags,
                 partySigningKeys = newSigningKeys,
-                freezeParty = finalIsOffline,
+                participantStates = participantStates,
               )
           }
         }

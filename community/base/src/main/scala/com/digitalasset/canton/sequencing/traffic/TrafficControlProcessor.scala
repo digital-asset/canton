@@ -22,10 +22,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{
-  InvalidTrafficPurchasedMessage,
-  TrafficControlError,
-}
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.sequencing.traffic.TrafficControlProcessor.TrafficControlSubscriber
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -86,7 +83,7 @@ class TrafficControlProcessor(
       implicit val tracContext: TraceContext = tracedEvent.traceContext
 
       tracedEvent.value match {
-        case Deliver(_, ts, _, _, batch, topologyTimestampO, _) =>
+        case Deliver(_, ts, _, _, batch, _) =>
           logger.debug(s"Processing sequenced event with timestamp $ts")
 
           val synchronizerEnvelopes =
@@ -99,7 +96,7 @@ class TrafficControlProcessor(
             }
 
           HandlerResult.synchronousUnit(
-            processSetTrafficPurchasedEnvelopes(ts, topologyTimestampO, synchronizerEnvelopes)
+            processSetTrafficPurchasedEnvelopes(ts, synchronizerEnvelopes)
           )
 
         case DeliverError(
@@ -134,7 +131,6 @@ class TrafficControlProcessor(
 
   def processSetTrafficPurchasedEnvelopes(
       ts: CantonTimestamp,
-      topologyTimestampO: Option[CantonTimestamp],
       envelopes: Seq[OpenEnvelope[ProtocolMessage]],
   )(implicit
       traceContext: TraceContext
@@ -144,38 +140,22 @@ class TrafficControlProcessor(
 
     val listenersNotifiedF = NonEmpty.from(trafficEnvelopes) match {
       case Some(trafficEnvelopesNE) =>
-        // To ensure the recipient resolution is correct, the `topologyTimestamp`, if provided,
-        // must be equal to the sequencing time of the event.
-        // TODO(i13883): refactor and centralize topology timestamp checks
-        val topologyTimestampIsValid = topologyTimestampO.fold(true)(_ == ts)
+        // Used to combine the `FutureUnlessShutdown[Boolean]` below by disjunction
+        implicit def disjunctionBoolean: Monoid[Boolean] =
+          new Monoid[Boolean] {
+            override def empty: Boolean = false
+            override def combine(a: Boolean, b: Boolean): Boolean = a || b
+          }
 
-        if (topologyTimestampIsValid) {
-          // Used to combine the `FutureUnlessShutdown[Boolean]` below by disjunction
-          implicit def disjunctionBoolean: Monoid[Boolean] =
-            new Monoid[Boolean] {
-              override def empty: Boolean = false
-              override def combine(a: Boolean, b: Boolean): Boolean = a || b
-            }
+        for {
+          // We use the topology snapshot at the time of event sequencing to check
+          // the eligible members and signatures.
+          snapshot <- cryptoApi.awaitSnapshot(ts)
 
-          for {
-            // We use the topology snapshot at the time of event sequencing to check
-            // the eligible members and signatures.
-            snapshot <- cryptoApi.awaitSnapshot(ts)
-
-            listenersNotified <- MonadUtil.sequentialTraverseMonoid(trafficEnvelopesNE) { env =>
-              processSetTrafficPurchased(env, snapshot, ts)
-            }
-          } yield listenersNotified
-        } else {
-          InvalidTrafficPurchasedMessage
-            .Error(
-              s"Discarding traffic control event because the timestamp of the topology ($topologyTimestampO) " +
-                s"is not set to the event timestamp ($ts)"
-            )
-            .report()
-
-          FutureUnlessShutdown.pure(false)
-        }
+          listenersNotified <- MonadUtil.sequentialTraverseMonoid(trafficEnvelopesNE) { env =>
+            processSetTrafficPurchased(env, snapshot, ts)
+          }
+        } yield listenersNotified
 
       case None =>
         FutureUnlessShutdown.pure(false)

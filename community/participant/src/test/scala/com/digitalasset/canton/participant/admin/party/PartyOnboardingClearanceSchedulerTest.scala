@@ -31,7 +31,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreTestData}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
+import com.digitalasset.canton.version.ProtoVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -235,7 +235,7 @@ class PartyOnboardingClearanceSchedulerTest
         }
       }
 
-      "abort clearance and remove task if no pending clearance record is found (PV >= 35)" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "abort clearance and remove task if no pending clearance record is found" in {
         createFixture().flatMap { fixture =>
           // Clear the fake store to simulate a missing record in the DB
           fixture.inMemoryStore
@@ -700,7 +700,7 @@ class PartyOnboardingClearanceSchedulerTest
         }
       }
 
-      "abort the trigger retry loop and remove task if no pending clearance record is found" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+      "abort the trigger retry loop and remove task if no pending clearance record is found" in {
         createFixture().flatMap { fixture =>
           val tickPromise = Promise[Unit]()
 
@@ -935,7 +935,6 @@ class PartyOnboardingClearanceSchedulerTest
             threshold = PositiveInt.one,
             participants =
               Seq(HostingParticipant(participant, ParticipantPermission.Submission, onboarding)),
-            isOffline = false,
           )
         testData.makeSignedTx(mapping, isProposal = false)(testData.p1Key, testData.p2Key)
       }
@@ -952,7 +951,6 @@ class PartyOnboardingClearanceSchedulerTest
             participants = Seq(
               HostingParticipant(participant, ParticipantPermission.Submission, onboarding = false)
             ),
-            isOffline = false,
           )
         // Create a Remove transaction
         testData.makeSignedTx(mapping, TopologyChangeOp.Remove, isProposal = false)(
@@ -973,7 +971,6 @@ class PartyOnboardingClearanceSchedulerTest
             participants = Seq(
               HostingParticipant(participant, ParticipantPermission.Submission, onboarding = false)
             ),
-            isOffline = false,
           )
         testData.makeSignedTx(mapping, isProposal = true)(testData.p1Key, testData.p2Key)
       }

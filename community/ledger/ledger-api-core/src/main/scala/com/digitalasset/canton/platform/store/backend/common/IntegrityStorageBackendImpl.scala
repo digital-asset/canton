@@ -589,6 +589,33 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
             .take(10)
             .mkString("[", ", ", "]")}"
       )
+
+    if (!inMemoryCantonStore) {
+      val contractsShouldHavePruned =
+        SQL"""
+          SELECT internal_contract_id
+          FROM par_contracts
+          WHERE
+            NOT EXISTS (
+              SELECT 1
+              FROM lapi_events_activate_contract
+              WHERE lapi_events_activate_contract.internal_contract_id = par_contracts.internal_contract_id
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM lapi_events_various_witnessed
+              WHERE lapi_events_various_witnessed.internal_contract_id = par_contracts.internal_contract_id
+            )
+        """
+          .asVectorOf(long("internal_contract_id"))(connection)
+
+      if (contractsShouldHavePruned.nonEmpty)
+        throw new RuntimeException(
+          s"some contracts should have been pruned, as they have no reference in event tables. Internal contract IDs (firs 10 shown) ${contractsShouldHavePruned
+              .take(10)
+              .mkString("[", ", ", "]")}"
+        )
+    }
   } catch {
     case t: Throwable if !failForEmptyDB =>
       val failure = t.getMessage

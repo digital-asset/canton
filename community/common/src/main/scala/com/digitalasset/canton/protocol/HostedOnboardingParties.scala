@@ -4,7 +4,11 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.nonempty.NonEmpty
 
 /** Tracks hosted parties broken up by onboarding and non-onboarding parties on behalf of a
@@ -19,7 +23,7 @@ import com.digitalasset.nonempty.NonEmpty
 final case class HostedOnboardingParties(
     hostedOnboardingParties: NonEmpty[Set[LfPartyId]],
     hostedParties: NonEmpty[Set[LfPartyId]],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   private val violations = hostedOnboardingParties.diff(hostedParties)
   require(
     violations.isEmpty,
@@ -29,10 +33,8 @@ final case class HostedOnboardingParties(
   private lazy val hostedNonOnboardingParties: Set[LfPartyId] =
     hostedParties.forgetNE -- hostedOnboardingParties.forgetNE
 
-  override protected def pretty: Pretty[HostedOnboardingParties] = prettyOfClass(
-    param("onboarding", _.hostedOnboardingParties),
-    param("hosted", _.hostedParties),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[HostedOnboardingParties] =
+    HostedOnboardingParties
 
   /** Return subset of onboarding parties if the provided set of parties contains at least one
     * hosted onboarding party and no non-onboarding party. When this function returns a non-empty
@@ -51,7 +53,12 @@ final case class HostedOnboardingParties(
     parties.exists(hostedNonOnboardingParties.contains)
 }
 
-object HostedOnboardingParties {
+object HostedOnboardingParties extends PrettyPrintingCompanion[HostedOnboardingParties] {
+  override protected val pretty: Pretty[HostedOnboardingParties] = prettyOfClass(
+    param("onboarding", _.hostedOnboardingParties),
+    param("hosted", _.hostedParties),
+  )
+
   def apply(
       hostedOnboardingParties: Set[LfPartyId],
       hostedParties: Set[LfPartyId],

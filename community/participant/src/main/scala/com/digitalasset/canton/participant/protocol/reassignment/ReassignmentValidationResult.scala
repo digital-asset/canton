@@ -44,6 +44,7 @@ private[reassignment] trait ReassignmentValidationResult {
     } yield activenessResultIsSuccessful &&
       commonValidationResult.participantSignatureVerificationResult.isEmpty &&
       commonValidationResult.packageVettingResult.isEmpty &&
+      commonValidationResult.contractSerializationResult.isEmpty &&
       reassigningParticipantValidationResult.errors.isEmpty &&
       commonContractAuthenticationResult.isRight &&
       reassignmentContractAuthenticationResult.isRight &&
@@ -69,6 +70,7 @@ private[reassignment] object ReassignmentValidationResult {
     def contractAuthenticationResultF
         : EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit]
     def packageVettingResult: Option[ReassignmentValidationError]
+    def contractSerializationResult: Option[ReassignmentValidationError]
     def submitterCheckResult: Option[ReassignmentValidationError]
     def reassignmentIdResult: Option[ReassignmentValidationError]
     def multiSynchronizerFeatureFlagCheckResult: Option[ReassignmentValidationError]

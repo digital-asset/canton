@@ -6,11 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.OptionT
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  ContractReassignment,
-  ContractsReassignmentBatch,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
@@ -31,7 +27,7 @@ import com.digitalasset.canton.{
   ProtocolVersionChecksAsyncWordSpec,
   ReassignmentCounter,
 }
-import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpecLike
 
@@ -56,17 +52,14 @@ trait PartyReplicationIndexingStoreTest
   private def generateReassignments(
       howManyReassignments: NonNegativeLong
   ): NonEmpty[Seq[ContractReassignment]] =
-    ContractsReassignmentBatch
-      .create((0L until howManyReassignments.unwrap).map { ctr =>
-        (
-          ExampleContractFactory.build(),
-          sourceValidationPackageId,
-          targetValidationPackageId,
-          ReassignmentCounter.apply(ctr),
-        )
-      })
-      .valueOrFail("Failed to create reassignment batch")
-      .contracts
+    NonEmptyUtil.fromUnsafe(0L until howManyReassignments.unwrap).map { ctr =>
+      ContractReassignment(
+        ExampleContractFactory.build(), // All will have same stakeholders
+        sourceValidationPackageId,
+        targetValidationPackageId,
+        ReassignmentCounter.apply(ctr),
+      )
+    }
 
   private def expectedAfterImport(
       ts: CantonTimestamp,

@@ -154,13 +154,12 @@ class UpdateStreamingQueries(
 
   private def idFilter(tableName: String)(eventTypes: Set[PersistentEventType]): CompositeSql =
     cSQL"""
-          EXISTS (
-            SELECT 1
-            FROM #$tableName data_table
-            WHERE
-              filters.event_sequential_id = data_table.event_sequential_id
-              AND data_table.event_type ${queryStrategy.anyOfSmallInts(eventTypes.map(_.asInt))}
-          )"""
+      SELECT 1
+      FROM #$tableName data_table
+      WHERE
+        filters.event_sequential_id = data_table.event_sequential_id
+        AND data_table.event_type ${queryStrategy.anyOfSmallInts(eventTypes.map(_.asInt))}
+      LIMIT 1"""
 }
 
 object UpdateStreamingQueries {
@@ -265,7 +264,7 @@ object UpdateStreamingQueries {
       filterTableClauses: FilterTableClauses,
       paginationFromTo: PaginationFromTo,
       limit: Option[Int],
-      idFilter: Option[CompositeSql],
+      idFilterO: Option[CompositeSql],
   ): CompositeSql = {
     val idBoundsSQL =
       if (paginationFromTo.descending)
@@ -273,8 +272,9 @@ object UpdateStreamingQueries {
       else
         cSQL"${paginationFromTo.eventSeqIdRange.startInclusive} <= filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.eventSeqIdRange.endInclusive}"
     val idOrderDirectionSQL = if (paginationFromTo.descending) cSQL"DESC" else cSQL"ASC"
-    cSQL"""
-            SELECT filters.event_sequential_id event_sequential_id
+    val limitSQL = limit.map(l => cSQL"LIMIT $l").getOrElse(cSQL"")
+    val baseSQL =
+      cSQL"""
             FROM
               #$tableName filters
             WHERE
@@ -282,12 +282,29 @@ object UpdateStreamingQueries {
               ${filterTableClauses.partyIdFilterClause}
               ${filterTableClauses.templateIdFilterClause}
               ${filterTableClauses.firstPerSequentialIdClause}
-              ${idFilter.map(f => cSQL"AND $f").getOrElse(cSQL"")}
             ORDER BY
               ${filterTableClauses.partyIdOrderingClause}
               ${filterTableClauses.templateIdOrderingClause}
-              filters.event_sequential_id $idOrderDirectionSQL -- deliver in index order
-            ${limit.map(l => cSQL"LIMIT $l").getOrElse(cSQL"")}"""
+              filters.event_sequential_id $idOrderDirectionSQL -- deliver in index order"""
+    idFilterO match {
+      case None =>
+        cSQL"""
+            SELECT filters.event_sequential_id event_sequential_id
+            $baseSQL
+            $limitSQL"""
+      case Some(f) =>
+        cSQL"""
+            WITH ids_with_probe AS (
+              SELECT filters.event_sequential_id event_sequential_id, (
+                $f
+              ) AS probe_result
+              $baseSQL
+            )
+            SELECT event_sequential_id FROM ids_with_probe
+            WHERE ids_with_probe.probe_result = 1
+            ORDER BY event_sequential_id $idOrderDirectionSQL
+            $limitSQL"""
+    }
   }
 
   class UpdateIdPageQueryBuilder(
@@ -322,7 +339,7 @@ object UpdateStreamingQueries {
         filterTableClauses = filterTableClauses,
         paginationFromTo = input.fromTo,
         limit = Some(input.limit + 1),
-        idFilter =
+        idFilterO =
           None, // disable regardless - this is the case where we reuse the query for a no-ID-filter population case
       )
       val ids = SQL"$sql".asVectorOf(long("event_sequential_id"))(connection)
@@ -362,7 +379,7 @@ object UpdateStreamingQueries {
         filterTableClauses = filterTableClauses,
         paginationFromTo = input.fromTo,
         limit = Some(input.limit + 1),
-        idFilter =
+        idFilterO =
           None, // disable regardless - this is the case where we reuse the query for a ID-filter population: the paginated query
       )
       val lastElement = if (input.fromTo.descending) cSQL"min" else cSQL"max"
@@ -402,7 +419,7 @@ object UpdateStreamingQueries {
         filterTableClauses = filterTableClauses,
         paginationFromTo = fromTo,
         limit = None,
-        idFilter = Some(idFilter),
+        idFilterO = Some(idFilter),
       )
       SQL"$sql".asVectorOf(long("event_sequential_id"))(connection)
     }
@@ -412,13 +429,17 @@ object UpdateStreamingQueries {
     * called "filters" in the query that will be called.
     */
   def eventNotDeactivated(activeAtEventSeqId: Long): CompositeSql =
+    // The sub-query returns 0 for the first matching deactivation, or no row at all
+    // if there is none. A scalar sub-query without a result row evaluates to NULL, so COALESCE
+    // maps that "no deactivation found" case to 1, while a found deactivation keeps the value 0.
     cSQL"""
-      NOT EXISTS (
-        SELECT 1
+      SELECT COALESCE((
+        SELECT 0
         FROM lapi_events_deactivate_contract deactivate_evs
         WHERE
           filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
           AND deactivate_evs.event_sequential_id <= $activeAtEventSeqId
-      )
+        LIMIT 1
+      ), 1)
     """
 }

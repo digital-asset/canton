@@ -116,18 +116,17 @@ def onboard_external_party(
     # This means those participants are not allowed to submit transactions on behalf of this party but will validate transactions
     # on behalf of the party by confirming or rejecting them according to the ledger model. They also records transaction for that party on the ledger.
     # It also contains the protocol signing keys and signing threshold for the party
-    # Both v30 and v31 use the exact same v30 HostingParticipant and ParticipantPermission proto definitions
-    confirming_participants_hosting = []
-    for confirming_participant_id in confirming_participant_ids:
-        confirming_participants_hosting.append(
-            topology_v30_pb2.PartyToParticipant.HostingParticipant(
-                participant_uid=confirming_participant_id,
-                permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-            )
-        )
-
+    # Both v30 and v31 use the v30 ParticipantPermission; v31 additionally sets the hosting state of each participant
     # TODO(#35499): Cannot stay on dev PV for a proper release
     if protocol_version == "dev":
+        confirming_participants_hosting = [
+            topology_v31_pb2.PartyToParticipant.HostingParticipant(
+                participant_uid=confirming_participant_id,
+                permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+                state=topology_v31_pb2.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
+            )
+            for confirming_participant_id in confirming_participant_ids
+        ]
         party_to_participant_mapping = topology_v31_pb2.TopologyMapping(
             party_to_participant=topology_v31_pb2.PartyToParticipant(
                 party=party_id,
@@ -137,10 +136,16 @@ def onboard_external_party(
                     keys = [signing_public_key],
                     threshold=1,
                 ),
-                is_offline=False
             )
         )
     else:
+        confirming_participants_hosting = [
+            topology_v30_pb2.PartyToParticipant.HostingParticipant(
+                participant_uid=confirming_participant_id,
+                permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+            )
+            for confirming_participant_id in confirming_participant_ids
+        ]
         party_to_participant_mapping = topology_v30_pb2.TopologyMapping(
             party_to_participant=topology_v30_pb2.PartyToParticipant(
                 party=party_id,

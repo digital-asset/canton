@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
@@ -131,6 +132,7 @@ object ApiServices {
       externalCallHandler: ExternalCallHandler,
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
       pureCryptoApi: CryptoPureApi,
+      maxPruningBatchOffsetSize: PositiveInt,
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -376,11 +378,12 @@ object ApiServices {
         )
 
       val participantPruningService = ApiParticipantPruningService.createApiService(
-        indexService,
-        syncService,
-        metrics,
-        safeToPruneCommitmentState,
-        loggerFactory,
+        readBackend = indexService,
+        syncService = syncService,
+        maxPruningBatchOffsetSize = maxPruningBatchOffsetSize,
+        metrics = metrics,
+        safeToPruneCommitmentState = safeToPruneCommitmentState,
+        loggerFactory = loggerFactory,
       )
 
       val apiSubmissionService = new ApiCommandSubmissionService(

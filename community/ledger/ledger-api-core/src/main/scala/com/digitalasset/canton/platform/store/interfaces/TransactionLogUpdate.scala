@@ -117,6 +117,7 @@ object TransactionLogUpdate {
       templateId: Ref.Identifier,
       packageName: Ref.PackageName,
       createdContractInstance: FatContractInstanceWithCreatedAt,
+      representativePackageId: Ref.PackageId,
   ) extends ReassignmentEvent
 
   final case class Unassign(

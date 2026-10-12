@@ -4,16 +4,24 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 
 /** Represents in-flight command submissions and transactions. */
 final case class InFlightCount(
     pendingSubmissions: NonNegativeInt,
     pendingTransactions: NonNegativeInt,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def exists: Boolean = pendingSubmissions.unwrap > 0 || pendingTransactions.unwrap > 0
 
-  override protected def pretty: Pretty[InFlightCount] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[InFlightCount] = InFlightCount
+}
+
+object InFlightCount extends PrettyPrintingCompanion[InFlightCount] {
+  override protected val pretty: Pretty[InFlightCount] = prettyOfClass(
     param("pending submissions", _.pendingSubmissions),
     param("pending transactions", _.pendingTransactions),
   )

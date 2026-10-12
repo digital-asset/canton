@@ -270,7 +270,6 @@ object SequencerWriterSource {
           lsuSequencingBounds,
           drSequencingTimeUpperBound,
           loggerFactory,
-          protocolVersion,
           blockSequencerMode,
         )
       )
@@ -409,7 +408,6 @@ class SendEventGenerator(
           submission.messageId,
           finalRecipientIds,
           payload,
-          submission.topologyTimestamp,
           trafficReceiptO,
         )
       }
@@ -441,7 +439,6 @@ class SendEventGenerator(
               ReceiptStoreEvent(
                 senderId,
                 submission.messageId,
-                submission.topologyTimestamp,
                 traceContext,
                 deliverReceipt.trafficReceiptO,
               )
@@ -519,7 +516,6 @@ object SequenceWritesFlow {
       lsuSequencingBounds: Option[LsuSequencingBounds],
       drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound],
       loggerFactory: NamedLoggerFactory,
-      protocolVersion: ProtocolVersion,
       blockSequencerMode: Boolean,
   )(implicit
       executionContext: ExecutionContext,
@@ -648,47 +644,6 @@ object SequenceWritesFlow {
           case None => ().asRight
         }
 
-      def deliverErrorForInvalidTopologyTimestamp(
-          event: Presequenced[StoreEvent[BytesPayload]]
-      ): Presequenced[StoreEvent[BytesPayload]] =
-        event.map {
-          // we only do this validation for deliver events that specify a signing timestamp
-          case deliver @ DeliverStoreEvent(
-                sender,
-                messageId,
-                _,
-                _,
-                Some(topologyTimestamp),
-                _,
-                trafficReceiptO,
-              ) =>
-            // We only check that the signing timestamp is at most the assigned timestamp.
-            // The lower bound will be checked only when reading the event
-            // because only then we know the topology state at the signing timestamp,
-            // which we need to determine the dynamic synchronizer parameter sequencerSigningTolerance.
-            //
-            // Sequencer clients should set the signing timestamp only to timestamps that they have read from the
-            // synchronizer. In a setting with multiple sequencers, the SequencerReader delivers only events up to
-            // the lowest watermark of all sequencers. So even if the sequencer client sends a follow-up submission request
-            // to a different sequencer, this sequencer will assign a higher timestamp than the requested topology timestamp.
-            // So this check should only fail if the sequencer client violates this policy.
-            if (topologyTimestamp <= timestamp) deliver
-            else {
-              val reason = SequencerErrors
-                .TopologyTimestampAfterSequencingTimestamp(topologyTimestamp, timestamp)
-
-              DeliverErrorStoreEvent(
-                sender,
-                messageId,
-                reason.rpcStatusWithoutLoggingContext(),
-                protocolVersion,
-                event.traceContext,
-                trafficReceiptO,
-              )
-            }
-          case other => other
-        }
-
       def checkPayloadToEventMargin(
           presequencedEvent: Presequenced[StoreEvent[BytesPayload]]
       ): Either[CantonBaseError, Unit] =
@@ -718,8 +673,7 @@ object SequenceWritesFlow {
         _ <- checkMaxSequencingTime(presequencedEvent)
         _ <- checkSequencingTimeLowerBound(presequencedEvent)
         _ <- checkDrSequencingTimeUpperBound(presequencedEvent)
-        checkedEvent = deliverErrorForInvalidTopologyTimestamp(presequencedEvent)
-      } yield Sequenced(timestamp, checkedEvent.event, fromStore = false)
+      } yield Sequenced(timestamp, presequencedEvent.event, fromStore = false)
 
       resultE.tapLeft { error =>
         // log here as we don't have the trace context in the error itself
@@ -819,7 +773,7 @@ object WritePayloadsFlow {
     def extractPayload(
         event: WithKillSwitch[StoreEvent[BytesPayload]]
     ): Option[WithKillSwitch[BytesPayload]] = event.value match {
-      case DeliverStoreEvent(_, _, _, payload, _, _, _) => event.map(_ => payload).some
+      case DeliverStoreEvent(_, _, _, payload, _, _) => event.map(_ => payload).some
       case _other => None
     }
 

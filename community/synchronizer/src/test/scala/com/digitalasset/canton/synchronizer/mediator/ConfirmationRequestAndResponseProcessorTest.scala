@@ -38,7 +38,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{ProtocolVersionChecksAsyncWordSpec, *}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
@@ -259,9 +259,6 @@ class ConfirmationRequestAndResponseProcessorTest
   protected lazy val requestId = RequestId(requestIdTs)
   protected lazy val participantResponseDeadline = requestIdTs.plusSeconds(60)
   protected lazy val decisionTime = requestIdTs.plusSeconds(120)
-
-  private def makeTopologyTimestamp(requestId: RequestId) =
-    if (testedProtocolVersion >= ProtocolVersion.v35) None else Some(requestId.unwrap)
 
   class Fixture(syncCryptoApi: SynchronizerCryptoClient = synchronizerSyncCryptoApi) {
     private val sequencerSend: TestSequencerClientSend = new TestSequencerClientSend(wallClock)
@@ -550,7 +547,6 @@ class ConfirmationRequestAndResponseProcessorTest
               requestTimestamp.plusSeconds(60),
               requestTimestamp.plusSeconds(120),
               signedResponse,
-              makeTopologyTimestamp(reqId),
               Recipients.cc(mediatorGroupRecipient),
             )
             .failOnShutdown,
@@ -1029,7 +1025,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ts1.plusSeconds(60),
             ts1.plusSeconds(120),
             approval,
-            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
         // records the request
@@ -1149,7 +1144,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ts2.plusSeconds(60),
             ts2.plusSeconds(120),
             approval,
-            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
         // Now the innerFuture should be completed as we get a finalized response
@@ -1297,7 +1291,6 @@ class ConfirmationRequestAndResponseProcessorTest
               ts1.plusSeconds(60),
               ts1.plusSeconds(120),
               _,
-              makeTopologyTimestamp(requestId),
               Recipients.cc(mediatorGroupRecipient),
             )
             .failOnShutdown("Unexpected shutdown.")
@@ -1400,7 +1393,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ts.plusSeconds(60),
             ts.plusSeconds(120),
             verdict,
-            makeTopologyTimestamp(requestId),
             Recipients.cc(mediatorGroupRecipient),
           )
           .failOnShutdown("Unexpected shutdown.")
@@ -1578,7 +1570,6 @@ class ConfirmationRequestAndResponseProcessorTest
                 ts1.plusSeconds(60),
                 ts1.plusSeconds(120),
                 abstain,
-                makeTopologyTimestamp(requestId),
                 Recipients.cc(mediatorGroupRecipient),
               )
               .failOnShutdown("Unexpected shutdown.")
@@ -1662,7 +1653,6 @@ class ConfirmationRequestAndResponseProcessorTest
               participantResponseDeadline,
               requestIdTs.plusSeconds(120),
               response,
-              makeTopologyTimestamp(requestId),
               Recipients.cc(mediatorGroupRecipient),
             ),
           _.warningMessage shouldBe s"Response $responseTs is too late as request RequestId($requestTs) has already exceeded the participant response deadline [$participantResponseDeadline]",
@@ -1712,38 +1702,10 @@ class ConfirmationRequestAndResponseProcessorTest
               deadline,
               requestTs.plusSeconds(120),
               unsignedResponses(lateRequestId),
-              makeTopologyTimestamp(lateRequestId),
               Recipients.cc(mediatorGroupRecipient),
             )
             .failOnShutdown,
           _.warningMessage shouldBe s"Response $responseTs is too late as request $lateRequestId has already exceeded the participant response deadline [$deadline]",
-        )
-        .map(_ => succeed)
-    }
-
-    "discard a response with an unexpected topology timestamp before querying the topology snapshot at the request timestamp" in {
-      val sut = new Fixture()
-      val ts = CantonTimestamp.Epoch.plusMillis(1)
-      // wrong for either protocol version: non-empty from v35 on, not the request id before that
-      val wrongTopologyTimestamp = Some(requestId.unwrap.immediatePredecessor)
-
-      loggerFactory
-        .assertLogs(
-          sut.processor
-            .processResponses(
-              ts,
-              notSignificantCounter,
-              ts.plusSeconds(60),
-              ts.plusSeconds(120),
-              unsignedResponses(requestId),
-              wrongTopologyTimestamp,
-              Recipients.cc(mediatorGroupRecipient),
-            )
-            .failOnShutdown,
-          _.shouldBeCantonError(
-            MediatorError.MalformedMessage,
-            _ should include("Discarding confirmation response because the topology timestamp"),
-          ),
         )
         .map(_ => succeed)
     }
@@ -1765,7 +1727,6 @@ class ConfirmationRequestAndResponseProcessorTest
               notSignificantCounter,
               sequencingTs,
               response,
-              topologyTimestamp = makeTopologyTimestamp(requestId),
               recipients = Recipients.cc(mediatorGroupRecipient),
             )
           ),
@@ -1806,7 +1767,6 @@ class ConfirmationRequestAndResponseProcessorTest
                     notSignificantCounter,
                     sequencingTs,
                     response,
-                    topologyTimestamp = makeTopologyTimestamp(ancientRequestId),
                     recipients = Recipients.cc(mediatorGroupRecipient),
                   )
                 )
@@ -2005,89 +1965,29 @@ class ConfirmationRequestAndResponseProcessorTest
           requestId = requestId,
         )
 
-        _ <-
-          if (testedProtocolVersion >= ProtocolVersion.v35) {
-            loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.INFO))(
-              sut.processor
-                .processResponses(
-                  ts.immediateSuccessor,
-                  sc + 1L,
-                  ts.plusSeconds(60),
-                  ts.plusSeconds(120),
-                  response,
-                  makeTopologyTimestamp(requestId),
-                  Recipients.cc(mediatorGroupRecipient),
-                ),
-              entries => {
-                forAtLeast(1, entries.toList) {
-                  _.infoMessage should include(expectedLogMessage)
-                }
-              },
-            )
-          } else {
-            loggerFactory.assertLogs(
-              sut.processor
-                .processResponses(
-                  ts.immediateSuccessor,
-                  sc + 1L,
-                  ts.plusSeconds(60),
-                  ts.plusSeconds(120),
-                  response,
-                  makeTopologyTimestamp(requestId),
-                  Recipients.cc(mediatorGroupRecipient),
-                ),
-              _.shouldBeCantonError(
-                MediatorError.InvalidMessage,
-                _ shouldBe expectedLogMessage,
-              ),
-            )
-          }
+        _ <- loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.INFO))(
+          sut.processor
+            .processResponses(
+              ts.immediateSuccessor,
+              sc + 1L,
+              ts.plusSeconds(60),
+              ts.plusSeconds(120),
+              response,
+              Recipients.cc(mediatorGroupRecipient),
+            ),
+          entries => {
+            forAtLeast(1, entries.toList) {
+              _.infoMessage should include(expectedLogMessage)
+            }
+          },
+        )
+
       } yield {
         succeed
       }
     }
 
-    "reject the confirmation responses with a non-empty topology timestamp in protocol version >= 35" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in {
-      val sut = new Fixture(synchronizerSyncCryptoApi2)
-
-      val requestIdTs = CantonTimestamp.Epoch
-      val requestId = RequestId(requestIdTs)
-
-      def checkUnexpectedTopologyTimestamp(logEntry: LogEntry): Assertion =
-        logEntry.shouldBeCantonError(
-          MediatorError.MalformedMessage,
-          message =>
-            message should include(
-              s"Request $requestId, sender $participant: Discarding confirmation response because the topology timestamp is non-empty."
-            ),
-        )
-
-      val ts1 = CantonTimestamp.Epoch.plusMillis(1L)
-      for {
-        someResponse <- createConfirmationResponses(
-          Some(ViewPosition.root),
-          participant,
-          Set(submitter),
-          LocalApprove(testedProtocolVersion),
-        )
-
-        _ <- loggerFactory.assertLogs(
-          sut.processor
-            .processResponses(
-              ts1,
-              notSignificantCounter,
-              ts1.plusSeconds(60),
-              ts1.plusSeconds(120),
-              someResponse,
-              Some(requestId.unwrap),
-              Recipients.cc(mediatorGroupRecipient),
-            ),
-          checkUnexpectedTopologyTimestamp,
-        )
-      } yield succeed
-    }
-
-    "fail for responses with more than 1 mediator group in the recipients in protocol version >= 35" onlyRunWithOrGreaterThan (ProtocolVersion.v35) in {
+    "fail for responses with more than 1 mediator group in the recipients in protocol version" in {
       val sut = new Fixture(synchronizerSyncCryptoApi2)
 
       val ts1 = CantonTimestamp.Epoch.plusMillis(1L)
@@ -2110,7 +2010,6 @@ class ConfirmationRequestAndResponseProcessorTest
                   ts1.plusSeconds(60),
                   ts1.plusSeconds(120),
                   someResponse,
-                  None,
                   Recipients.cc(mediatorGroupRecipient, mediatorGroupRecipient2),
                 )
                 .failed

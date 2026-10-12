@@ -45,7 +45,6 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ExternalParty, Namespace, PartyId}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status
@@ -128,9 +127,7 @@ trait InteractiveSubmissionIntegrationTestSetup
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(CantonTestsPath, synchronizerId = daId)
-        if (testedProtocolVersion >= ProtocolVersion.v35) {
-          participants.all.dars.upload(CantonTestsLF23Path, synchronizerId = daId)
-        }
+        participants.all.dars.upload(CantonTestsLF23Path, synchronizerId = daId)
 
         aliceE = cpn.parties.testing.external.enable("Alice")
       }
@@ -167,33 +164,32 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
       )
     }
 
-    "fail if providing more signatures than registered keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        import env.*
+    "fail if providing more signatures than registered keys" in { implicit env =>
+      import env.*
 
-        val command = createCycleCommand(aliceE, "a")
-        val prepared = cpn.ledger_api.interactive_submission.prepare(Seq(aliceE), Seq(command))
-        val signatures =
-          global_secret.sign(prepared.preparedTransactionHash, aliceE, useAllKeys = true) ++ Seq(
-            // Add one more
-            global_secret.sign(
-              prepared.preparedTransactionHash,
-              aliceE.fingerprint,
-              SigningKeyUsage.ProtocolOnly,
-            )
+      val command = createCycleCommand(aliceE, "a")
+      val prepared = cpn.ledger_api.interactive_submission.prepare(Seq(aliceE), Seq(command))
+      val signatures =
+        global_secret.sign(prepared.preparedTransactionHash, aliceE, useAllKeys = true) ++ Seq(
+          // Add one more
+          global_secret.sign(
+            prepared.preparedTransactionHash,
+            aliceE.fingerprint,
+            SigningKeyUsage.ProtocolOnly,
           )
-
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          cpn.ledger_api.interactive_submission.execute_and_wait(
-            prepared.getPreparedTransaction,
-            Map(aliceE.partyId -> signatures),
-            UUID.randomUUID().toString,
-            testedHashingSchemeVersion.toLedgerApiProto,
-          ),
-          _.errorMessage should include(
-            "2 external signatures were provided, which is more than the number of registered signing keys (1)"
-          ),
         )
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        cpn.ledger_api.interactive_submission.execute_and_wait(
+          prepared.getPreparedTransaction,
+          Map(aliceE.partyId -> signatures),
+          UUID.randomUUID().toString,
+          testedHashingSchemeVersion.toLedgerApiProto,
+        ),
+        _.errorMessage should include(
+          "2 external signatures were provided, which is more than the number of registered signing keys (1)"
+        ),
+      )
     }
 
     "fail preparing multiple commands" in { implicit env =>
@@ -269,7 +265,6 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
           partyId = partyId,
           threshold = PositiveInt.one,
           participants = Seq(HostingParticipant(participant1, ParticipantPermission.Confirmation)),
-          isOffline = false,
         ),
         op = TopologyChangeOp.Replace,
         serial = PositiveInt.one,
@@ -426,7 +421,6 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
                 HostingParticipant(cpn, ParticipantPermission.Observation, onboarding = false)
               ),
               partySigningKeysWithThreshold = currentP2P.partySigningKeysWithThreshold,
-              isOffline = false,
             )
             .value,
           protocolVersion = testedProtocolVersion,

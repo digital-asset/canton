@@ -19,7 +19,6 @@ import com.digitalasset.canton.testing.modelbased.universal.java.universal.{
   txaction,
 }
 import com.digitalasset.canton.topology.{Party, PartyId}
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util as ju
 import scala.jdk.CollectionConverters.*
@@ -89,7 +88,7 @@ class BasicContractKeyIntegrationTest extends CommunityIntegrationTest with Shar
 
   "End to end" when {
 
-    "Create universal" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+    "Create universal" in { implicit env =>
       import env.*
 
       val key = 1L

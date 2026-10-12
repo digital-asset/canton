@@ -9,12 +9,10 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.SynchronizerLimits
-import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.{
-  assertEnvelopeType,
-  normalizeSubmissionRequest,
-}
+import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.normalizeSubmissionRequest
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
+  ClosedCompressedEnvelope,
   ClosedEnvelope,
   ClosedUncompressedEnvelope,
   DecompressionPolicy,
@@ -46,7 +44,6 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
       testedProtocolVersion,
     ),
     maxSequencingTime = CantonTimestamp.MaxValue,
-    topologyTimestamp = None,
     aggregationRule = None,
     submissionCost = None,
     testedProtocolVersion,
@@ -100,7 +97,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
           )
       ) { case Right(send: Send) =>
         send.signedSubmissionRequest.content.batch.envelopes.headOption.foreach { envelope =>
-          assertEnvelopeType(envelope, testedProtocolVersion)
+          envelope shouldBe a[ClosedCompressedEnvelope]
         }
 
         normalizeSend(send) shouldBe LedgerBlockEvent.Send(

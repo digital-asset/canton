@@ -206,7 +206,6 @@ class TrafficPurchasedSubmissionHandler(
           batch,
           aggregationRule = Some(aggregationRule),
           timestamps = SendRequestTimestamps(
-            topologyTimestamp = None,
             approximateTimestampForSigning = approximateTimestampForSigning,
             maxSequencingTime = maxSequencingTime,
           ),

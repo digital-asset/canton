@@ -953,8 +953,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           // format (154 bytes), and earlier versions the uncompressed format (134 bytes)
           val expectedWastedSequencing =
             if (testedProtocolVersion >= ProtocolVersion.v36) 129L
-            else if (testedProtocolVersion >= ProtocolVersion.v35) 154L
-            else 134L
+            else 154L
 
           eventually() {
             assertLongValue(

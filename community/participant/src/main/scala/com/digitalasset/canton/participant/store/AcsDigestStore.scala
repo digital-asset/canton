@@ -279,7 +279,7 @@ object AcsDigestStore {
       * without entries do not appear in the map.
       */
     def bulkLookup(
-        keys: immutable.Iterable[K],
+        keys: Seq[K],
         toInclusive: Offset,
     )(implicit
         traceContext: TraceContext
@@ -288,7 +288,7 @@ object AcsDigestStore {
         key -> update
       })(executionContext)
 
-    def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, Offset)])(implicit
+    def bulkLookup(keysUptoInclusive: Seq[(K, Offset)])(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestUpdate[K]]]
 
@@ -624,8 +624,6 @@ object AcsDigestStore {
   }
 
   /** Represents a checkpoint of a certain `checkpointType` at the given `timepoint`.
-    *
-    * TODO(#34334): add index for `checkpointType` depending on the usage pattern
     */
   final case class Checkpoint(timepoint: Timepoint, checkpointType: CheckpointType)
       extends PrettyPrintingFromCompanion {

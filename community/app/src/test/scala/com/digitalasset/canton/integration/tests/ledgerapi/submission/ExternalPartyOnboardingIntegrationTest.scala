@@ -257,7 +257,6 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
                     PositiveInt.one,
                   )
                 ),
-                isOffline = false,
               ),
               testedProtocolVersion,
             ) -> Seq.empty
@@ -293,7 +292,6 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
           threshold = PositiveInt.one,
           participants = Seq(HostingParticipant(participant1, ParticipantPermission.Confirmation)),
           partySigningKeysWithThreshold = Option.empty,
-          isOffline = false,
         ),
         op = TopologyChangeOp.Replace,
         serial = PositiveInt.one,
@@ -377,7 +375,6 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
               PositiveInt.one,
             )
           ),
-          isOffline = false,
         ),
         op = TopologyChangeOp.Replace,
         serial = PositiveInt.one,

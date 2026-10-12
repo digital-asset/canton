@@ -53,6 +53,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultSendBlacklistTtl,
   P2PConnectionManagementConfig,
   P2PNetworkConfig,
+  P2PTransportMetricsConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
@@ -151,6 +152,7 @@ final class UseBftSequencer(
     p2pClientChannelParams: ClientChannelParams =
       ClientChannelParams.Default.copy(flowControlWindow = None),
     p2pConnectionManagementConfig: P2PConnectionManagementConfig = P2PConnectionManagementConfig(),
+    p2pTransportMetrics: P2PTransportMetricsConfig = P2PTransportMetricsConfig(),
 ) extends EnvironmentSetupPlugin
     with EitherValues {
 
@@ -347,6 +349,7 @@ final class UseBftSequencer(
             ),
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
             connectionManagementConfig = p2pConnectionManagementConfig,
+            transportMetrics = p2pTransportMetrics,
           )
           val standaloneOpt = createStandaloneConfig(selfInstanceName, otherInitialNames)
           val blockSequencerConfig = {

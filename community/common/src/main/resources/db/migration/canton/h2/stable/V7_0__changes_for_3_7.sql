@@ -22,3 +22,5 @@ alter table "pekko_projection_management" alter column LAST_UPDATED rename to "l
 
 -- Rename the index to exact lowercase
 alter index PROJECTION_NAME_INDEX rename to "projection_name_index";
+
+alter table sequencer_events drop column topology_timestamp;

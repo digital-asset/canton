@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.BatchingConfig
@@ -27,12 +26,13 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentData,
   IncompleteReassignmentData,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.platform.indexer.parallel.ReassignmentOffsetPersistence
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -60,13 +60,25 @@ trait ReassignmentStore extends ReassignmentLookup {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
 
-  /** Adds the given offsets to the reassignment data in the store.
+  /** Adds the given offsets to the reassignment data in the store, in order. An offset that
+    * conflicts with the stored or earlier offsets raises an alarm and is not stored.
     *
     * The same offset can be added any number of times.
     */
-  def addReassignmentsOffsets(offsets: Map[ReassignmentId, ReassignmentGlobalOffset])(implicit
+  def addReassignmentsOffsets(updates: Seq[(ReassignmentId, ReassignmentGlobalOffset)])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
+
+  final def addReassignmentsOffsets(offsets: Map[ReassignmentId, ReassignmentGlobalOffset])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
+    addReassignmentsOffsets(offsets.toSeq)
+
+  /** Conflicting global offsets for a reassignment id are caused by malicious behaviour. */
+  protected def alarmOnMergeFailure(error: ReassignmentStoreError, outcome: String)(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Unit =
+    SyncServiceAlarm.Warn(s"${error.message}. $outcome.").report()
 
   /** Handles the event offboarding parties `parties` at offset `offset`.
     * @param offset
@@ -102,23 +114,6 @@ trait ReassignmentStore extends ReassignmentLookup {
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
-
-  /** Adds the given [[com.digitalasset.canton.data.Offset]] for the reassignment events to the
-    * reassignment data in the store, provided that the reassignment data has previously been
-    * stored.
-    *
-    * The same [[com.digitalasset.canton.data.Offset]] can be added any number of times.
-    */
-  def addReassignmentsOffsets(
-      events: Seq[(ReassignmentId, ReassignmentGlobalOffset)]
-  )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
-    for {
-      preparedOffsets <- EitherT.fromEither[FutureUnlessShutdown](mergeReassignmentOffsets(events))
-      _ <- addReassignmentsOffsets(preparedOffsets)
-    } yield ()
 
   /** Marks the reassignment as completed, i.e., an assignment request was committed. If the
     * reassignment has already been completed then a
@@ -360,30 +355,49 @@ object ReassignmentStore {
       case _: Reassignment.Unassign => UnassignmentGlobalOffset(offset)
     }
 
-  /** Merge the offsets corresponding to the same reassignment id. Returns an error in case of
-    * inconsistent offsets.
+  /** Merges each part of each of `newOffsets` into `offsets` one at a time, in order, so that an
+    * offset that conflicts with the previous ones does not prevent the others from being merged.
+    * Returns the merged offsets and the conflicts.
     */
-  private def mergeReassignmentOffsets(
-      events: Seq[(ReassignmentId, ReassignmentGlobalOffset)]
-  ): Either[ConflictingGlobalOffsets, Map[ReassignmentId, ReassignmentGlobalOffset]] = {
-    type Acc = Map[ReassignmentId, ReassignmentGlobalOffset]
-    val zero: Acc = Map.empty[ReassignmentId, ReassignmentGlobalOffset]
+  private def mergeOffsetsKeepingFirst(
+      offsets: Option[ReassignmentGlobalOffset],
+      newOffsets: Seq[ReassignmentGlobalOffset],
+  ): (Option[ReassignmentGlobalOffset], Seq[String]) = {
+    val newParts = newOffsets.flatMap(offsets =>
+      offsets.unassignment.map(UnassignmentGlobalOffset(_)).toList ++
+        offsets.assignment.map(AssignmentGlobalOffset(_)).toList
+    )
 
-    MonadUtil.foldLeftM[Either[
-      ConflictingGlobalOffsets,
-      *,
-    ], Acc, (ReassignmentId, ReassignmentGlobalOffset)](
-      zero,
-      events,
-    ) { case (acc, (reassignmentId, offset)) =>
-      val newOffsetE = acc.get(reassignmentId) match {
-        case Some(value) =>
-          value.merge(offset).leftMap(ConflictingGlobalOffsets(reassignmentId, _))
-        case None => Right(offset)
-      }
-
-      newOffsetE.map(newOffset => acc + (reassignmentId -> newOffset))
+    newParts.foldLeft((offsets, Seq.empty[String])) {
+      case ((None, conflicts), part) => (Some(part), conflicts)
+      case ((Some(merged), conflicts), part) =>
+        merged.merge(part) match {
+          case Right(newMerged) => (Some(newMerged), conflicts)
+          case Left(error) => (Some(merged), conflicts :+ error)
+        }
     }
+  }
+
+  /** Merges the offsets of a batch for a reassignment id, then merges the result into the stored
+    * offsets. Returns the merged offsets, the conflicts within the batch and the conflicts with the
+    * stored offsets.
+    */
+  private[store] def mergeBatchThenStored(
+      reassignmentId: ReassignmentId,
+      storedOffsets: Option[ReassignmentGlobalOffset],
+      updates: Seq[ReassignmentGlobalOffset],
+  ): (
+      Option[ReassignmentGlobalOffset],
+      Seq[ConflictingGlobalOffsetsInBatch],
+      Seq[ConflictingGlobalOffsetsWithStored],
+  ) = {
+    val (batchMerged, batchConflicts) = mergeOffsetsKeepingFirst(None, updates)
+    val (merged, storedConflicts) = mergeOffsetsKeepingFirst(storedOffsets, batchMerged.toList)
+    (
+      merged,
+      batchConflicts.map(ConflictingGlobalOffsetsInBatch(reassignmentId, _)),
+      storedConflicts.map(ConflictingGlobalOffsetsWithStored(reassignmentId, _)),
+    )
   }
 
   sealed trait ReassignmentStoreError extends Product with Serializable {
@@ -413,17 +427,18 @@ object ReassignmentStore {
     override def cause: String = "assignment already completed before unassignment"
   }
 
-  final case class ReassignmentGlobalOffsetsMerge(
+  final case class ConflictingGlobalOffsetsWithStored(
       reassignmentId: ReassignmentId,
       error: String,
   ) extends ReassignmentStoreError {
     override def message: String =
-      s"Unable to merge global offsets for reassignment `$reassignmentId`: $error"
+      s"Conflicting global offsets with the stored offsets for reassignment `$reassignmentId`: $error"
   }
 
-  final case class ConflictingGlobalOffsets(reassignmentId: ReassignmentId, error: String)
+  final case class ConflictingGlobalOffsetsInBatch(reassignmentId: ReassignmentId, error: String)
       extends ReassignmentStoreError {
-    override def message: String = s"Conflicting global offsets for $reassignmentId: $error"
+    override def message: String =
+      s"Conflicting global offsets within the same batch of indexer updates for reassignment `$reassignmentId`: $error"
   }
 
   final case class ReassignmentAlreadyCompleted(

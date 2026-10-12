@@ -362,15 +362,12 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
           elem.toProtoNamespaceDelegationV30
             .map(ListNamespaceDelegationResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
-                  s"Cannot serialize namespace delegations using proto version $protoVersion: $err"
+                  s"Cannot serialize namespace delegations using proto version 30: $err"
                 )
             )
             .map(item =>
@@ -434,15 +431,12 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
           elem.toProtoOwnerToKeyMappingV30
             .map(ListOwnerToKeyMappingResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
-                  s"Cannot serialize owner to key mappings using proto version $protoVersion: $err"
+                  s"Cannot serialize owner to key mappings using proto version 30: $err"
                 )
             )
             .map(item =>
@@ -470,15 +464,12 @@ class GrpcTopologyManagerReadService(
       resultsE = transactions
         .collect { case (result, x: PartyToKeyMapping) => (result, x) }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
           elem.toProtoPartyToKeyMappingV30
             .map(ListPartyToKeyMappingResponse.Result.Item.V30(_))
             .leftMap[RpcError](err =>
               TopologyManagerError.InternalError
                 .Unexpected(
-                  s"Cannot serialize party to key mappings using proto version $protoVersion: $err"
+                  s"Cannot serialize party to key mappings using proto version 30: $err"
                 )
             )
             .map(item =>
@@ -618,26 +609,24 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion)
+          val resE = for {
+            protoVersion <-
+              TopologyTransaction.protoVersionFor(context.representativeProtocolVersion)
 
-          elem
-            .foldProtoVersioned(protoVersion)(
-              ListPartyToParticipantResponse.Result.Item.V30(_),
-              ListPartyToParticipantResponse.Result.Item.V31(_),
-            )
-            .leftMap[RpcError](err =>
-              TopologyManagerError.InternalError
-                .Unexpected(
-                  s"Cannot serialize party to participant mapping to proto version ${protoVersion.v}: $err"
-                )
-            )
-            .map(item =>
-              adminProto.ListPartyToParticipantResponse.Result(
-                context = Some(createBaseResult(context)),
-                item = item,
+            item <- elem
+              .foldProtoVersioned(protoVersion)(
+                ListPartyToParticipantResponse.Result.Item.V30(_),
+                ListPartyToParticipantResponse.Result.Item.V31(_),
               )
-            )
+              .leftMap(err =>
+                s"Cannot serialize party to participant mapping to proto version ${protoVersion.v}: $err"
+              )
+          } yield adminProto.ListPartyToParticipantResponse.Result(
+            context = Some(createBaseResult(context)),
+            item = item,
+          )
+
+          resE.leftMap[RpcError](TopologyManagerError.InternalError.Unexpected(_))
         }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToParticipantResponse(results = results)

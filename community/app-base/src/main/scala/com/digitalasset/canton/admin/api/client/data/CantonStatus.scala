@@ -5,7 +5,11 @@ package com.digitalasset.canton.admin.api.client.data
 
 import cats.Show
 import com.digitalasset.canton.console.{MediatorReference, ParticipantReference, SequencerReference}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.util.ShowUtil.*
 
 final case class CantonStatus(
@@ -15,7 +19,7 @@ final case class CantonStatus(
     unreachableMediators: Map[String, NodeStatus.Failure],
     participantStatus: Map[String, ParticipantStatus],
     unreachableParticipants: Map[String, NodeStatus.Failure],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   protected def descriptions[Status <: NodeStatus.Status](
       statusMap: Map[String, Status],
       failureMap: Map[String, NodeStatus.Failure],
@@ -38,28 +42,29 @@ final case class CantonStatus(
   private def sort[K: Ordering, V](status: Map[K, V]): Seq[(K, V)] =
     status.toSeq.sortBy(_._1)
 
-  override protected def pretty: Pretty[CantonStatus] = prettyOfString { status =>
-    val sequencers = descriptions(
+  override def prettyCompanion: PrettyPrintingCompanion[CantonStatus] = CantonStatus
+}
+
+object CantonStatus extends PrettyPrintingCompanion[CantonStatus] {
+  override protected val pretty: Pretty[CantonStatus] = prettyOfString { status =>
+    val sequencers = status.descriptions(
       status.sequencerStatus,
       status.unreachableSequencers,
       SequencerReference.InstanceType,
     )
-    val mediators = descriptions(
+    val mediators = status.descriptions(
       status.mediatorStatus,
       status.unreachableMediators,
       MediatorReference.InstanceType,
     )
     val participants =
-      descriptions(
+      status.descriptions(
         status.participantStatus,
         status.unreachableParticipants,
         ParticipantReference.InstanceType,
       )
     (sequencers ++ mediators ++ participants).mkString(System.lineSeparator() * 2)
   }
-}
-
-object CantonStatus {
   def splitSuccessfulAndFailedStatus[K: Show, S <: NodeStatus.Status](
       nodes: Map[K, () => NodeStatus[S]],
       instanceType: String,

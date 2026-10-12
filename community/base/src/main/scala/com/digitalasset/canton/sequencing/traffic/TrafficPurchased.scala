@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing.traffic
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30.TrafficPurchased as TrafficPurchasedP
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -30,14 +34,8 @@ final case class TrafficPurchased(
     serial: PositiveInt,
     extraTrafficPurchased: NonNegativeLong,
     sequencingTimestamp: CantonTimestamp,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[TrafficPurchased] =
-    prettyOfClass(
-      param("member", _.member),
-      param("sequencingTimestamp", _.sequencingTimestamp),
-      param("extraTrafficPurchased", _.extraTrafficPurchased),
-      param("serial", _.serial),
-    )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[TrafficPurchased] = TrafficPurchased
 
   def toProtoV30: TrafficPurchasedP =
     TrafficPurchasedP(
@@ -48,7 +46,15 @@ final case class TrafficPurchased(
     )
 }
 
-object TrafficPurchased {
+object TrafficPurchased extends PrettyPrintingCompanion[TrafficPurchased] {
+  override protected val pretty: Pretty[TrafficPurchased] =
+    prettyOfClass(
+      param("member", _.member),
+      param("sequencingTimestamp", _.sequencingTimestamp),
+      param("extraTrafficPurchased", _.extraTrafficPurchased),
+      param("serial", _.serial),
+    )
+
   import com.digitalasset.canton.store.db.RequiredTypesCodec.*
   import com.digitalasset.canton.topology.Member.DbStorageImplicits.*
 

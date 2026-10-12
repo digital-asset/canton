@@ -928,6 +928,7 @@ final class AssignmentProcessingStepsTest
           participantSignatureVerificationResult = None,
           contractAuthenticationResultF = EitherT.rightT(()),
           packageVettingResult = None,
+          contractSerializationResult = None,
           submitterCheckResult = None,
           reassignmentIdResult = None,
           multiSynchronizerFeatureFlagCheckResult = None,

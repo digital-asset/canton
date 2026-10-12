@@ -18,11 +18,10 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
 import com.digitalasset.canton.participant.protocol.party.*
-import com.digitalasset.canton.participant.protocol.party.AcsTransferContractHandler.AcsTransferCheckpoint
+import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.contractsToRequestEachTime
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationSourceParticipantMessage.GetAcsArguments
 import com.digitalasset.canton.participant.store
-import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -64,7 +63,7 @@ import scala.concurrent.ExecutionContext
   *   Callback notification that the target participant has encountered an error.
   * @param onDisconnect
   *   Callback notification that the target participant has disconnected.
-  * @param acsTransferContractHandler
+  * @param acsReplicationContractHandler
   *   Handler that validates and persists imported ACS contracts.
   * @param config
   *   Target participant configuration options.
@@ -76,14 +75,14 @@ class AcsReplicationTargetParticipantProcessor(
     protected val psid: PhysicalSynchronizerId,
     partyId: PartyId,
     requestId: AcsReplicationRequestId,
-    partyOnboardingAt: EffectiveTime,
+    partyOnboardingAt: CantonTimestamp,
     excludedStakeholders: Set[PartyId],
     sourceParticipantId: ParticipantId,
     agreedAt: CantonTimestamp,
     protected val replicationProgressState: store.AcsReplicationProgress,
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
-    acsTransferContractHandler: AcsTransferContractHandler,
+    acsReplicationContractHandler: AcsReplicationContractHandler,
     config: OnlinePartyReplicationTargetConfig,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
@@ -103,7 +102,7 @@ class AcsReplicationTargetParticipantProcessor(
     GetAcsArguments(
       partyId,
       psid.logical,
-      partyOnboardingAt.value,
+      partyOnboardingAt,
       excludedStakeholders,
     ),
     sourceParticipantId,
@@ -174,7 +173,7 @@ class AcsReplicationTargetParticipantProcessor(
             )
             deltaAcsDigest = acsDigestHelper.computeDeltaDigest(validatedContracts)
             acsDigestHashWithDelta = acsDigestHelper.computeUnionHash(deltaAcsDigest)
-            checkpoint <- acsTransferContractHandler.handleValidatedContracts(
+            checkpoint <- acsReplicationContractHandler.handleValidatedContracts(
               validatedContracts,
               AcsTransferCheckpoint(
                 replicationProgress.processedContractCount,
@@ -247,7 +246,7 @@ class AcsReplicationTargetParticipantProcessor(
         getCryptoClient.toRight(s"Need crypto client for signature verification")
       )
       // Use signing key valid at the ACS snapshot asOf timestamp.
-      snapshot <- EitherT.right[String](cryptoClient.snapshot(partyOnboardingAt.value))
+      snapshot <- EitherT.right[String](cryptoClient.snapshot(partyOnboardingAt))
       acsDigestHash = Hash
         .build(HashPurpose.AcsReplicationDigest, HashAlgorithm.Sha256)
         .addByteString(acsDigestByteString)

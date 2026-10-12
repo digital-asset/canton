@@ -119,6 +119,7 @@ import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.Materializer
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
@@ -231,7 +232,10 @@ class SequencerNodeBootstrap(
     // add initialization service
     private val (initializationServiceDef, _) = adminServerRegistry.addService(
       SequencerInitializationServiceGrpc.bindService(
-        new GrpcSequencerInitializationService(this, loggerFactory)(executionContext, actorSystem),
+        new GrpcSequencerInitializationService(this, loggerFactory)(
+          executionContext,
+          Materializer.matFromSystem(actorSystem),
+        ),
         executionContext,
       )
     )

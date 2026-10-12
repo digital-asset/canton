@@ -3,117 +3,85 @@
 
 package com.digitalasset.canton.platform.store.testing.postgresql
 
-import org.postgresql.ds.PGSimpleDataSource
-import org.slf4j.LoggerFactory
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
+import com.digitalasset.canton.store.db.{DbStorageSetup, PostgresTestDatabase}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ResourceUtil
+import com.typesafe.config.ConfigValueFactory
 import org.testcontainers.postgresql.PostgreSQLContainer
+import slick.jdbc.PostgresProfile.api.*
 
-import java.sql.Statement
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-import scala.util.Using
 
 trait PostgresAround {
+  this: NamedLogging =>
   import PostgresAround.*
 
-  private val server: AtomicReference[PostgresServer] = new AtomicReference
+  private val serverConfig: AtomicReference[DbBasicConfig] = new AtomicReference
   private val ownedServerContainer: AtomicReference[Option[PostgreSQLContainer]] =
     new AtomicReference(None)
 
   protected def connectToPostgresqlServer(): Unit = {
-    val isCI = sys.env.contains("CI")
-    val isMachine = sys.env.contains("MACHINE")
-    val forceTestContainer = sys.env.contains("DB_FORCE_TEST_CONTAINER")
-
-    if (!forceTestContainer && (isCI && !isMachine)) {
-      // using specified resource
-      val hostName = sys.env.getOrElse("POSTGRES_HOST", "localhost")
-      val port = 5432
-      server.set(
-        PostgresServer(
-          hostName = hostName,
-          port = port,
-          userName = env("POSTGRES_USER"),
-          password = env("POSTGRES_PASSWORD"),
-          baseDatabase = env("POSTGRES_DB"),
-        )
-      )
-      logger.info(s"Using PostgreSQL on $hostName:$port.")
-    } else {
-      // using own temporal resource
-      val container = new PostgreSQLContainer(s"${PostgreSQLContainer.IMAGE}:17")
-      ownedServerContainer.set(Some(container))
-      logger.info(s"Starting PostgreSQL Container...")
-      container.start()
-      logger.info(s"PostgreSQL Container started.")
-      val hostName = container.getHost
-      val port = container.getFirstMappedPort
-      server.set(
-        PostgresServer(
-          hostName = hostName,
-          port = port,
-          userName = container.getUsername,
-          password = container.getPassword,
-          baseDatabase = container.getDatabaseName,
-        )
-      )
-      logger.info(s"Using PostgreSQL Container on $hostName:$port.")
-    }
-
+    val isTestContainer = DbStorageSetup.useTestContainer()
+    val config =
+      if (isTestContainer) {
+        // using own temporal resource
+        // these tests do not analyze query statistics, so no need for the query stats image
+        val container = DbStorageSetup.newPostgresContainer(withQueryStats = false)
+        ownedServerContainer.set(Some(container))
+        noTracingLogger.info("Starting PostgreSQL Container...")
+        container.start()
+        noTracingLogger.info("PostgreSQL Container started.")
+        DbStorageSetup.containerBasicConfig(container)
+      } else {
+        // using specified resource
+        DbStorageSetup.envBasicConfig(DbStorageSetup.envDbName)
+      }
+    serverConfig.set(config)
+    val serverKind = if (isTestContainer) "PostgreSQL Container" else "PostgreSQL"
+    noTracingLogger.info(s"Using $serverKind on ${config.host}:${config.port}.")
   }
 
   protected def disconnectFromPostgresqlServer(): Unit =
     ownedServerContainer.get().foreach { container =>
-      logger.info(s"Stopping PostgreSQL Container...")
+      noTracingLogger.info("Stopping PostgreSQL Container...")
       container.close()
-      logger.info(s"PostgreSQL Container stopped.")
+      noTracingLogger.info("PostgreSQL Container stopped.")
     }
 
-  protected def createNewRandomDatabase(): PostgresDatabase = {
-    val database = executeAdminStatement(server.get()) { statement =>
-      val databaseName = UUID.randomUUID().toString
-      statement.execute(s"CREATE DATABASE \"$databaseName\"")
-      statement.execute(s"CREATE USER \"$databaseName-user\" WITH PASSWORD 'user'")
-      statement.execute(
-        s"GRANT ALL PRIVILEGES ON DATABASE \"$databaseName\" TO \"$databaseName-user\""
+  protected def createNewRandomDatabaseConfig(): DbBasicConfig = {
+    val databaseName = UUID.randomUUID().toString
+    executeAdminStatement(PostgresTestDatabase.createStatements(databaseName)*)
+    serverConfig
+      .get()
+      .copy(
+        dbName = databaseName,
+        username = PostgresTestDatabase.userName(databaseName),
+        password = PostgresTestDatabase.password,
       )
-      PostgresDatabase(server.get(), databaseName, s"$databaseName-user", "user")
-    }
-    executeAdminStatement(server.get().copy(baseDatabase = database.databaseName))(
-      _.execute(s"GRANT ALL ON SCHEMA public TO \"${database.userName}\"")
-    )
-    database
   }
 
-  protected def dropDatabase(database: PostgresDatabase): Unit =
-    executeAdminStatement(server.get()) { statement =>
-      statement.execute(s"DROP DATABASE \"${database.databaseName}\"")
-      statement.execute(s"DROP USER \"${database.databaseName}-user\"")
-    }
+  protected def dropDatabase(database: DbBasicConfig): Unit =
+    executeAdminStatement(PostgresTestDatabase.dropStatements(database.dbName)*)
 
+  private def executeAdminStatement(statements: PostgresTestDatabase.SetupStatement*): Unit =
+    TraceContext.withNewTraceContext("postgres_admin_statement") { implicit traceContext =>
+      ResourceUtil.withResource(openConnection(serverConfig.get()))(connection =>
+        DefaultProcessingTimeouts.default.await("execute admin statement")(
+          connection.run(DBIO.seq(statements*))
+        )
+      )
+    }
 }
 
 object PostgresAround {
-  private val logger = LoggerFactory.getLogger(getClass)
 
-  private def executeAdminStatement[T](
-      connectedPostgresServer: PostgresServer
-  )(body: Statement => T): T = {
-    val baseDatabase =
-      PostgresDatabase(
-        connectedPostgresServer,
-        connectedPostgresServer.baseDatabase,
-        connectedPostgresServer.userName,
-        connectedPostgresServer.password,
-      )
-    Using.resource {
-      val dataSource = new PGSimpleDataSource()
-      dataSource.setUrl(baseDatabase.url)
-      dataSource.getConnection
-    } { connection =>
-      Using.resource(connection.createStatement())(body)
-    }
-  }
-
-  private def env(name: String): String =
-    sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
+  private def openConnection(config: DbBasicConfig): Database =
+    Database.forConfig(
+      path = "",
+      config = config.toPostgresConfig.withValue("numThreads", ConfigValueFactory.fromAnyRef(1)),
+    )
 }

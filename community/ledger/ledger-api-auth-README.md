@@ -1,17 +1,20 @@
 # Ledger API authorization
 
-## General authorization in gRPC
+Ledger API request authorization is enforced at the gRPC layer. The JSON API acts as a thin wrapper that delegates
+authorization directly to the gRPC layer by forwarding tokens, performing only minimal authentication checks to mitigate
+DoS risks.
 
-An `Interceptor` reads HTTP headers, and stores relevant information (e.g., claims) in a `Context`.
+## Authorization Flow
 
-GRPC services read the stored data from the `Context` in order to validate the requests.
-
-## Authorization in the ledger API
-
-The `AuthService` defines an interface for decoding HTTP headers into `Claims`.
-
-The ledger API server takes an `AuthService` implementation as an argument.
-
-The ledger API server uses a call interceptor and the given `AuthService` implementation to to store decoded `Claims` in the gRPC `Context`.
-
-All ledger API services use the `Claims` to validate their requests.
+1. **JWT token extraction and validation**:
+   The `GrpcAuthInterceptor` intercepts incoming calls in the gRPC layer, extracts the JWT from gRPC metadata and
+   validates it (such as against a JWKS) via one of the configured `AuthService`
+   (see `canton.participants.participant.ledger-api.auth-services` configuration)
+2. **Claims resolution**:
+   The `AuthService` provides `Claims` for the token (resolving configuration-based claims if applicable). The
+   `AuthInterceptor` resolves the claims further where needed (e.g. for user-management-based claims, such as provided
+   by `AuthServiceJWT`) and then attaches these claims to the request's thread-local gRPC `Context`.
+3. **Request authorization**:
+   The Ledger API service authorization layer (e.g. `UpdateServiceAuthorization` for `UpdateService`)
+   constructs a number of `RequiredClaim`s, that are then processed by the `Authorizer` together
+   with the `Context` claims into a final decision.

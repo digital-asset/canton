@@ -158,6 +158,9 @@ final class IssConsensusModule[E <: Env[E]](
 
   private var consensusWaitingForEpochCompletionSince: Option[Instant] = None
   private var consensusWaitingForEpochStartSince: Option[Instant] = None
+  // When the segment modules of the current epoch have been started, used to measure the ordering latency
+  //  of the first block of each segment.
+  private var currentEpochSegmentsStartedAt: Option[Instant] = None
 
   // At genesis (e.g. during LSU) we start and store epoch 0, but we aren't closing a previous epoch; in this situation,
   //  if the node is slow to start, it's possible that we start state transfer for epoch -1 before epoch 0 is stored,
@@ -509,7 +512,9 @@ final class IssConsensusModule[E <: Env[E]](
           ) =>
         val epochNumber = orderedBlock.metadata.epochNumber
         val blockNumber = orderedBlock.metadata.blockNumber
-        val thisNodeEpochNumber = epochState.epoch.info.number
+        val epoch = epochState.epoch
+        val epochInfo = epoch.info
+        val thisNodeEpochNumber = epochInfo.number
 
         if (epochNumber < thisNodeEpochNumber) {
           logger.info(
@@ -520,13 +525,29 @@ final class IssConsensusModule[E <: Env[E]](
             s"Trying to complete block in future epoch $epochNumber before local epoch $thisNodeEpochNumber has caught up!"
           )
         } else {
-          // Note that (hopefully) the below message is the only block-level INFO log in the BFT Orderer.
-          //  We intend to minimize the number of logs on the hot path.
-          logger.info(s"Block ${orderedBlock.metadata} has been ordered")
+          val segments = epoch.segments
+          val (blockSegment, segmentIndex) =
+            segments.view.zipWithIndex
+              .find { case (segment, index) => segment.slotNumbers.contains(blockNumber) }
+              .getOrElse(abort(s"block $blockNumber not part of any segment in epoch $epochNumber"))
+          val blockNumberRelativeToEpochStart = blockNumber - epochInfo.startBlockNumber
+
+          val originalLeader = blockSegment.originalLeader
+          logger.info(
+            s"Ordered block $blockNumber in segment $segmentIndex in epoch $epochNumber; " +
+              s"original leader $originalLeader, " +
+              s"block's relative slot number in segment ${blockSegment.relativeBlockIndex(blockNumber)}, " +
+              s"block number relative to epoch start $blockNumberRelativeToEpochStart, " +
+              s"epoch length ${epochInfo.length}), " +
+              s"segments in epoch ${segments.length})"
+          )
           logger.debug(
             s"The newly ordered block ${orderedBlock.metadata} contains batch IDs ${orderedBlock.batchRefs.map(_.batchId).mkString(", ")}"
           )
           emitConsensusLatencyStats(metrics)
+
+          if (blockSegment.isFirstInSegment(blockNumber))
+            emitFirstSegmentBlockOrderingLatency(originalLeader)
 
           if (hasCompletedLedSegment) {
             logger.debug(s"Locally-led segment in epoch $thisNodeEpochNumber is complete")
@@ -547,16 +568,13 @@ final class IssConsensusModule[E <: Env[E]](
           }
 
           // TODO(#16761) - ensure the output module gets and processes the ordered block
-          val blockSegment = epochState.epoch.segments
-            .find(_.slotNumbers.contains(blockNumber))
-            .getOrElse(abort(s"block $blockNumber not part of any segment in epoch $epochNumber"))
           dependencies.output.asyncSend(
             Output.BlockOrdered(
               OrderedBlockForOutput(
                 orderedBlock,
                 commitCertificate.prePrepare.message.viewNumber,
-                blockSegment.originalLeader,
-                blockNumber == epochState.epoch.info.lastBlockNumber,
+                originalLeader,
+                blockNumber == epochInfo.lastBlockNumber,
                 OrderingMode.Consensus,
               )
             )
@@ -607,6 +625,7 @@ final class IssConsensusModule[E <: Env[E]](
       }
 
       epochState.close()
+      currentEpochSegmentsStartedAt = None
 
       latestCompletedEpoch = completeEpochSnapshot
 
@@ -664,6 +683,7 @@ final class IssConsensusModule[E <: Env[E]](
         s"Starting consensus for not-yet-started or in-progress epoch ${epochInfo.number} (starting segment modules)"
       )
       epochState.startSegmentModules()
+      currentEpochSegmentsStartedAt = Some(Instant.now())
       retransmissionsManager.startEpoch(epochState)
     } else {
       // The current epoch is complete: ensure the epoch completion is stored and local state is updated,
@@ -995,6 +1015,14 @@ final class IssConsensusModule[E <: Env[E]](
 
   private def resetConsensusWaitingForEpochStart(): Unit =
     consensusWaitingForEpochStartSince = None
+
+  private def emitFirstSegmentBlockOrderingLatency(originalLeader: BftNodeId): Unit = {
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.consensus.FirstSegmentBlockOrderingLatency,
+      currentEpochSegmentsStartedAt,
+    )(mc.withExtraLabels(labels.leader.Key -> originalLeader))
+  }
 
   private def cancelTopologyQueryWarnTimeout(): Unit = {
     topologyQueryWarnTimeout.foreach(_.cancel())

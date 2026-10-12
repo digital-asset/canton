@@ -68,7 +68,7 @@ final case class ClosedCompressedEnvelope(
     protoEnvelope.content,
     recipients,
     signatures,
-    ProtocolVersion.v34,
+    pvv,
   )
 
   override def forRecipient(

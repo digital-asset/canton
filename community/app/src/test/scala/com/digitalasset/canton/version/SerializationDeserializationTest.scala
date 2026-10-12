@@ -66,7 +66,7 @@ final class SerializationDeserializationTest
     with ScalaCheckPropertyChecks
     with SerializationDeserializationTestHelpers {
 
-  forAll(Table("protocol version", ProtocolVersion.supported*)) { version =>
+  forAll(Table("protocol version", ProtocolVersion.supported.forgetNE*)) { version =>
     val generators = new CommonGenerators(version)
     val pvv = ProtocolVersionValidation(version)
     val sequencerGenerators =
@@ -119,9 +119,7 @@ final class SerializationDeserializationTest
           testContext(AcsCommitmentSummaryProtocolMessage, version, version)
         }
 
-        if (version >= ProtocolVersion.v35) {
-          testContext(LegacyAcsCommitmentProtocolMessage, version, version)
-        }
+        testContext(LegacyAcsCommitmentProtocolMessage, version, version)
 
         test(LegacyAcsCommitment, version)
         testContext(LsuSequencingTestMessage, version, version)
@@ -140,9 +138,7 @@ final class SerializationDeserializationTest
         test(ConfirmationResultMessage, version)
         test(PendingLsuOperation, version)
         test(PendingOnboardingTransactions, version)
-        if (version >= ProtocolVersion.v35) {
-          test(OnboardingClearanceOperation, version)
-        }
+        test(OnboardingClearanceOperation, version)
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)
@@ -408,12 +404,7 @@ final class SerializationDeserializationTest
     val untestedClasses = requiredTests.diff(testedClasses)
     val missingTests = untestedClasses
       .diff(exceptions)
-      .diff(
-        Set(
-          // (De)serialization is not supported anymore
-          "com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope$"
-        )
-      )
+
     /*
         If this test fails, it means that one class inheriting from HasProtocolVersionWrapper in the
         package is not tested in the SerializationDeserializationTests
@@ -430,10 +421,10 @@ final class SerializationDeserializationTest
 
   // Test that it is not possible to create ViewParticipantData containing contracts
   // serialized with a LF serialization version that is not supported by the protocol version.
-  // In practice, at time of writing, this means that PV v34 should not allow V2 contracts, while PV v35 should allow them.
-  s"ViewParticipantData.tryCreate with protocol version ${ProtocolVersion.v34}" should {
+  // In practice, at time of writing, this means that pv=35 should not allow V3 contracts, while pv=36 should allow them.
+  s"ViewParticipantData.tryCreate with protocol version ${ProtocolVersion.v35}" should {
 
-    val generators = new CommonGenerators(ProtocolVersion.v34)
+    val generators = new CommonGenerators(ProtocolVersion.v35)
 
     def recreateWith(
         extraCoreInput: Option[InputContract],
@@ -449,21 +440,24 @@ final class SerializationDeserializationTest
         rollbackContext = vpd.rollbackContext,
         salt = vpd.salt,
         externalCallResults = vpd.externalCallResults,
-        protocolVersion = ProtocolVersion.v34,
+        protocolVersion = ProtocolVersion.v35,
       )
     }
 
-    val v2Contract =
-      ExampleContractFactory.build(keyOpt = Some(ExampleContractFactory.buildKeyWithMaintainers()))
-    v2Contract.inst.version shouldBe LfSerializationVersion.V2
+    val v3Contract = ExampleContractFactory.build(
+      keyOpt = Some(ExampleContractFactory.buildKeyWithMaintainers()),
+      overrideSerializationVersion = Some(LfSerializationVersion.V3),
+    )
+    v3Contract.inst.version shouldBe LfSerializationVersion.V3
 
-    s"allow ${LfSerializationVersion.V1} contracts" in {
+    s"allow ${LfSerializationVersion.V2} contracts" in {
       recreateWith(None, None).isRight shouldBe true
     }
-    s"disallow ${LfSerializationVersion.V2} input contracts" in {
+
+    s"disallow ${LfSerializationVersion.V3} input contracts" in {
       inside(
         recreateWith(
-          Some(InputContract(v2Contract, consumed = false)),
+          Some(InputContract(v3Contract, consumed = false)),
           None,
         )
       ) { case Left(err) =>
@@ -473,11 +467,11 @@ final class SerializationDeserializationTest
       }
     }
 
-    s"disallow ${LfSerializationVersion.V2} created contracts" in {
+    s"disallow ${LfSerializationVersion.V3} created contracts" in {
       inside(
         recreateWith(
           None,
-          Some(CreatedContract.tryCreate(v2Contract, consumedInCore = false, rolledBack = false)),
+          Some(CreatedContract.tryCreate(v3Contract, consumedInCore = false, rolledBack = false)),
         )
       ) { case Left(err) =>
         err should include(

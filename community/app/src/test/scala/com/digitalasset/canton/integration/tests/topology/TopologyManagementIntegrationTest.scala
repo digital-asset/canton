@@ -72,8 +72,6 @@ final class TopologyManagementIntegrationTest
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   // TODO(#16283): disable participant / roll keys while the affected nodes are busy
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -93,7 +91,7 @@ final class TopologyManagementIntegrationTest
       mappingV30: v30.TopologyMapping,
       mappingV31: v31.TopologyMapping,
   ): ByteString = {
-    val protoVersion = TopologyTransaction.protoVersionFor(testedProtocolVersion)
+    val protoVersion = TopologyTransaction.protoVersionFor(testedProtocolVersion).value
 
     val transactionBytes = if (protoVersion == ProtoVersion(31)) {
       v31
@@ -131,7 +129,6 @@ final class TopologyManagementIntegrationTest
           party,
           PositiveInt.one,
           Seq(HostingParticipant(participant1.id, ParticipantPermission.Submission)),
-          isOffline = false,
         )
 
         val ptpReplace = TopologyTransaction
@@ -596,24 +593,27 @@ final class TopologyManagementIntegrationTest
 
       val party = PartyId.tryCreate("alice", Namespace(partyKey.fingerprint))
 
-      val participantsProto = Seq(
-        // Participant 2 is listed twice with different permissions
-        v30.PartyToParticipant.HostingParticipant(
+      // Participant 2 is listed twice with different permissions
+      val permissions = Seq(
+        v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+        v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
+      )
+      val participantsProtoV30 = permissions.map(
+        v30.PartyToParticipant.HostingParticipant(participant2.toProtoPrimitive, _, None)
+      )
+      val participantsProtoV31 = permissions.map(
+        v31.PartyToParticipant.HostingParticipant(
           participant2.toProtoPrimitive,
-          v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-          None,
-        ),
-        v30.PartyToParticipant.HostingParticipant(
-          participant2.toProtoPrimitive,
-          v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
-          None,
-        ),
+          _,
+          v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
+        )
       )
 
       val originalByteString = buildMalformedTopologyTransaction(
         v30.TopologyMapping(
           v30.TopologyMapping.Mapping.PartyToParticipant(
-            v30.PartyToParticipant(party.toProtoPrimitive, threshold = 1, participantsProto, None)
+            v30
+              .PartyToParticipant(party.toProtoPrimitive, threshold = 1, participantsProtoV30, None)
           )
         ),
         v31.TopologyMapping(
@@ -621,9 +621,8 @@ final class TopologyManagementIntegrationTest
             v31.PartyToParticipant(
               party.toProtoPrimitive,
               threshold = 1,
-              participantsProto,
+              participantsProtoV31,
               None,
-              isOffline = false,
             )
           )
         ),
@@ -660,7 +659,6 @@ final class TopologyManagementIntegrationTest
           partySigningKeysWithThreshold = Some(
             SigningKeysWithThreshold(NonEmpty.mk(Set, partyKey), PositiveInt.two)
           ),
-          isOffline = false,
         ),
         testedProtocolVersion,
       )
@@ -1771,7 +1769,6 @@ final class TopologyManagementIntegrationTest
             )
           ),
           partySigningKeysWithThreshold = None,
-          isOffline = false,
         )
         .value
 
@@ -1903,7 +1900,6 @@ final class TopologyManagementIntegrationTest
             ),
           ),
           partySigningKeysWithThreshold = None,
-          isOffline = false,
         )
         .value
 

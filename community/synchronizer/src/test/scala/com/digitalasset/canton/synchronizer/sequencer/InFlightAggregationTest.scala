@@ -29,7 +29,6 @@ import com.digitalasset.canton.topology.{
   SequencerId,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -226,7 +225,7 @@ class InFlightAggregationTest
     val step2 = step1.tryAggregate(snd, cryptoApi.snapshot(tsp).futureValueUS).futureValueUS
     step2.left.value shouldBe AggregationStuffing(mediator1, tsp)
   }
-  "remove expired key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { ff =>
+  "remove expired key" in { ff =>
     val tsp = ts2.immediateSuccessor
     // key1 will expire at ts1
     val fst = AggregatedSender(mediator1, Seq(Seq(sig1)), tsp)
@@ -234,7 +233,7 @@ class InFlightAggregationTest
     val res = ff.aggregate(ff.aggregate(ff.empty, fst, tsp), snd, tsp)
     res.tryIsDeliveredAt shouldBe empty
   }
-  "remove expired member" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { ff =>
+  "remove expired member" in { ff =>
     val tsp = ts3.immediateSuccessor
     // mediator1 is gone at ts3
     val fst = AggregatedSender(mediator1, Seq(Seq(sig4)), ts2.immediateSuccessor)

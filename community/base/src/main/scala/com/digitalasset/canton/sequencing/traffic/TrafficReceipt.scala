@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing.traffic
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30.TrafficReceipt as TrafficReceiptP
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -24,14 +28,9 @@ final case class TrafficReceipt(
     consumedCost: NonNegativeLong,
     extraTrafficConsumed: NonNegativeLong,
     baseTrafficRemainder: NonNegativeLong,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[TrafficReceipt] =
-    prettyOfClass(
-      param("consumed cost", _.consumedCost),
-      param("extra traffic consumed", _.extraTrafficConsumed),
-      param("base traffic remainder", _.baseTrafficRemainder),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[TrafficReceipt] = TrafficReceipt
 
   def toProtoV30: TrafficReceiptP =
     TrafficReceiptP(
@@ -50,7 +49,14 @@ final case class TrafficReceipt(
     )
 }
 
-object TrafficReceipt {
+object TrafficReceipt extends PrettyPrintingCompanion[TrafficReceipt] {
+  override protected val pretty: Pretty[TrafficReceipt] =
+    prettyOfClass(
+      param("consumed cost", _.consumedCost),
+      param("extra traffic consumed", _.extraTrafficConsumed),
+      param("base traffic remainder", _.baseTrafficRemainder),
+    )
+
   def fromProtoV30(trafficReceiptP: TrafficReceiptP): ParsingResult[TrafficReceipt] =
     for {
       consumedCost <- ProtoConverter.parseNonNegativeLong(

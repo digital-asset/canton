@@ -51,13 +51,14 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError, config}
 import com.digitalasset.daml.lf.archive
-import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Error as LfArchiveError}
+import com.digitalasset.daml.lf.archive.{DamlLf, DarDecoder, DarParser, Error as LfArchiveError}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
+import java.nio.file.Path
 import java.util.UUID
 import java.util.zip.ZipInputStream
 import scala.concurrent.ExecutionContext
@@ -700,6 +701,7 @@ object PackageService {
     def unwrap: String = value.unwrap
     def toProtoPrimitive: String = value.toProtoPrimitive
     def str: String = value.str
+    def toLfPackageId: LfPackageId = LfPackageId.assertFromString(value.unwrap)
   }
 
   object DarMainPackageId {
@@ -720,6 +722,17 @@ object PackageService {
 
     def fromProtoPrimitive(str: String): Either[ProtoDeserializationError, DarMainPackageId] =
       create(str).leftMap(err => ProtoDeserializationError.StringConversionError(err))
+
+    def fromDarPath(darPath: Path): Either[String, DarMainPackageId] =
+      DarDecoder
+        .readArchiveFromFile(darPath.toFile)
+        .leftMap(_.msg)
+        .flatMap(dar => create(dar.main._1))
+
+    def tryFromDarPath(darPath: Path): DarMainPackageId =
+      fromDarPath(darPath)
+        .leftMap(errMsg => throw new IllegalArgumentException(errMsg))
+        .merge
   }
 
   final case class DarDescription(

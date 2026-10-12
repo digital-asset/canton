@@ -221,7 +221,7 @@ class DigestConsistencyCheckProcessorImpl(
               .runWith(Sink.ignore)
           )
           .flatMap { _ =>
-            val internedCounterparties = counterpartiesSet.map(internedPartyId)
+            val internedCounterparties = counterpartiesSet.map(internedPartyId).toSeq
             for {
               recomputed <- consistencyCheckStore.party.bulkLookup(
                 internedCounterparties,

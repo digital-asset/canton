@@ -195,7 +195,7 @@ private[reassignment] class UnassignmentProcessingSteps(
             .getOrElse(contractId, contract.templateId.packageId)
           targetValidationPackageId = targetValidationPackageIds
             .getOrElse(contractId, contract.templateId.packageId)
-        } yield (
+        } yield ContractReassignment(
           contract,
           Source(sourceValidationPackageId),
           Target(targetValidationPackageId),

@@ -20,7 +20,6 @@ import com.digitalasset.canton.sequencing.{SequencedSerializedEvent, SequencerTe
 import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, CloseableTest, FailOnShutdown, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.exceptions.TestFailedException
@@ -71,13 +70,9 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
   )
 
   private lazy val closedEnvelope: ClosedEnvelope =
-    if (testedProtocolVersion >= ProtocolVersion.v35) {
-      closedUncompressedEnvelope.toClosedCompressedEnvelope(
-        com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
-      )
-    } else {
-      closedUncompressedEnvelope
-    }
+    closedUncompressedEnvelope.toClosedCompressedEnvelope(
+      com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
+    )
 
   private def mkDeliver(ts: CantonTimestamp): SequencedSerializedEvent =
     mkSequencedSerializedEvent(
@@ -88,7 +83,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           synchronizerId,
           Some(MessageId.tryCreate("deliver")),
           mkBatch(closedEnvelope),
-          None,
           Option.empty[TrafficReceipt],
         ),
         sign("deliver signature"),
@@ -112,7 +106,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           synchronizerId,
           Some(MessageId.tryCreate("single-max-positive-deliver")),
           mkBatch(closedEnvelope),
-          Some(CantonTimestamp.MaxValue),
           Option.empty[TrafficReceipt],
         ),
         sign("single deliver signature"),
@@ -131,7 +124,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           synchronizerId,
           Some(MessageId.tryCreate("single-min-deliver")),
           mkBatch(closedEnvelope),
-          Some(CantonTimestamp.MinValue.immediateSuccessor),
           Option.empty[TrafficReceipt],
         ),
         sign("single deliver signature"),
@@ -163,7 +155,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           synchronizerId,
           Some(MessageId.tryCreate("empty-deliver")),
           mkBatch(),
-          None,
           Option.empty[TrafficReceipt],
         ),
         sign("Deliver signature"),
@@ -254,7 +245,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
         assert(found.isValid, "finding deliver events succeeds")
 
         inside(found) { case Valid(actual) =>
-          assertPossiblyIgnoredSequencedEventSeqEqual(actual, storedEvents, testedProtocolVersion)
+          assertPossiblyIgnoredSequencedEventSeqEqual(actual, storedEvents)
         }
       }
     }
@@ -651,7 +642,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               synchronizerId,
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
-              None,
               Option.empty[TrafficReceipt],
             )
           )
@@ -666,7 +656,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
             synchronizerId,
             Some(MessageId.tryCreate("deliver2")),
             emptyBatch,
-            None,
             Option.empty[TrafficReceipt],
           )
         )
@@ -754,7 +743,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               synchronizerId,
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
-              None,
               Option.empty[TrafficReceipt],
             )
           )
@@ -770,7 +758,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               synchronizerId,
               Some(MessageId.tryCreate("deliver2")),
               emptyBatch,
-              None,
               Option.empty[TrafficReceipt],
             )
           )
@@ -841,7 +828,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               synchronizerId,
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
-              None,
               Option.empty[TrafficReceipt],
             )
           )
@@ -857,7 +843,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               synchronizerId,
               Some(MessageId.tryCreate("deliver2")),
               emptyBatch,
-              None,
               Option.empty[TrafficReceipt],
             )
           )
@@ -899,7 +884,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           assertSequencedEventSeqWithTraceContextEqual(
             actual = actual.map(_.asSequencedSerializedEvent),
             expected = events,
-            testedProtocolVersion = testedProtocolVersion,
           )
         }
       }
@@ -940,7 +924,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedSecondDeliver.asIgnoredEvent,
               storedDeliverError,
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -949,19 +932,16 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedSecondDeliver.asIgnoredEvent,
               storedDeliverError,
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             byTimestamp,
             storedSecondDeliver.asIgnoredEvent,
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             latestUpTo,
             storedSecondDeliver.asIgnoredEvent,
-            testedProtocolVersion,
           )
         }
       }
@@ -995,7 +975,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1005,19 +984,16 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             ignoredEventByTimestamp,
             mkEmptyIgnoredEvent(13),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             ignoredEventLatestUpTo,
             mkEmptyIgnoredEvent(13),
-            testedProtocolVersion,
           )
         }
       }
@@ -1051,7 +1027,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1061,19 +1036,16 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedDeliverError.asIgnoredEvent,
               mkEmptyIgnoredEvent(13),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             deliverByTimestamp,
             storedDeliver,
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventEquals(
             deliverLatestUpTo,
             storedDeliver,
-            testedProtocolVersion,
           )
         }
       }
@@ -1119,7 +1091,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
         }
       }
@@ -1150,7 +1121,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               secondDeliver.asOrdinaryEvent(counter = SequencerCounter(11)),
               deliverError.asOrdinaryEvent(counter = SequencerCounter(12)),
             ),
-            testedProtocolVersion,
           )
         }
       }
@@ -1182,7 +1152,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
         }
       }
@@ -1205,7 +1174,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               secondDeliver.asOrdinaryEvent(counter = SequencerCounter(11)),
               deliverError.asOrdinaryEvent(counter = SequencerCounter(12)),
             ),
-            testedProtocolVersion,
           )
           err shouldBe Left(ChangeWouldResultInGap(SequencerCounter(13), SequencerCounter(19)))
         }
@@ -1257,7 +1225,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1269,7 +1236,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           err3 shouldBe Left(ChangeWouldResultInGap(SequencerCounter(13), SequencerCounter(13)))
@@ -1283,7 +1249,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1294,7 +1259,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedDeliverError,
               mkEmptyIgnoredEvent(13),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1304,7 +1268,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedSecondDeliver,
               storedDeliverError,
             ),
-            testedProtocolVersion,
           )
         }
       }
@@ -1340,7 +1303,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               mkEmptyIgnoredEvent(13),
               mkEmptyIgnoredEvent(14),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1351,7 +1313,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedDeliverError.asIgnoredEvent,
               mkEmptyIgnoredEvent(13),
             ),
-            testedProtocolVersion,
           )
 
           assertPossiblyIgnoredSequencedEventSeqEqual(
@@ -1360,7 +1321,6 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               storedDeliver,
               storedSecondDeliver.asIgnoredEvent,
             ),
-            testedProtocolVersion,
           )
           events4 shouldBe Seq.empty
         }

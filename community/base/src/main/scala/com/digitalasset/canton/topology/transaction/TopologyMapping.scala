@@ -1912,14 +1912,24 @@ object VettedPackages
 final case class HostingParticipant(
     participantId: ParticipantId,
     permission: ParticipantPermission,
-    onboarding: Boolean,
+    state: HostingParticipant.HostingState,
 ) {
+  def onboarding: Boolean = state == HostingParticipant.HostingState.Onboarding
   def canConfirm: Boolean = permission.canConfirm && !onboarding
-  def toProto: v30.PartyToParticipant.HostingParticipant =
+
+  // Only ONBOARDING and ACTIVE are representable in v30; PartyToParticipant.canBeSerializedTo rejects the others.
+  def toProtoV30: v30.PartyToParticipant.HostingParticipant =
     v30.PartyToParticipant.HostingParticipant(
       participantUid = participantId.uid.toProtoPrimitive,
       permission = permission.toProtoV30,
       onboarding = Option.when(onboarding)(v30.PartyToParticipant.HostingParticipant.Onboarding()),
+    )
+
+  def toProtoV31: v31.PartyToParticipant.HostingParticipant =
+    v31.PartyToParticipant.HostingParticipant(
+      participantUid = participantId.uid.toProtoPrimitive,
+      permission = permission.toProtoV30,
+      state = state.toProtoV31,
     )
 }
 
@@ -1927,7 +1937,59 @@ object HostingParticipant {
   // Helper for "normal" HostingParticipant construction (as the onboarding flag is used narrowly
   // by party replication)
   def apply(participantId: ParticipantId, permission: ParticipantPermission): HostingParticipant =
-    HostingParticipant(participantId, permission, onboarding = false)
+    HostingParticipant(participantId, permission, HostingState.Active)
+
+  def apply(
+      participantId: ParticipantId,
+      permission: ParticipantPermission,
+      onboarding: Boolean,
+  ): HostingParticipant =
+    HostingParticipant(
+      participantId,
+      permission,
+      if (onboarding) HostingState.Onboarding else HostingState.Active,
+    )
+
+  sealed trait HostingState extends Product with Serializable {
+    def toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState
+  }
+
+  object HostingState {
+    case object Nominated extends HostingState {
+      lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
+        v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED
+    }
+    case object Freezing extends HostingState {
+      lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
+        v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_FREEZING
+    }
+    case object Onboarding extends HostingState {
+      lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
+        v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ONBOARDING
+    }
+    case object Active extends HostingState {
+      lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
+        v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE
+    }
+
+    def fromProtoV31(
+        value: v31.PartyToParticipant.HostingParticipant.HostingState
+    ): ParsingResult[HostingState] =
+      value match {
+        case v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED =>
+          Left(FieldNotSet(value.name))
+        case v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED =>
+          Right(Nominated)
+        case v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_FREEZING =>
+          Right(Freezing)
+        case v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ONBOARDING =>
+          Right(Onboarding)
+        case v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE =>
+          Right(Active)
+        case v31.PartyToParticipant.HostingParticipant.HostingState.Unrecognized(x) =>
+          Left(UnrecognizedEnum(value.name, x))
+      }
+  }
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -1939,7 +2001,20 @@ object HostingParticipant {
       pvv,
     )(TopologyMapping.participantIdFromProtoPrimitive)
     permission <- ParticipantPermission.fromProtoV30(value.permission)
-  } yield HostingParticipant(participantId, permission, value.onboarding.nonEmpty)
+  } yield HostingParticipant(participantId, permission, onboarding = value.onboarding.nonEmpty)
+
+  def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      value: v31.PartyToParticipant.HostingParticipant,
+  ): ParsingResult[HostingParticipant] = for {
+    participantId <- ProtoValidation.validateThen(
+      value.participantUid,
+      "participant_uid",
+      pvv,
+    )(TopologyMapping.participantIdFromProtoPrimitive)
+    permission <- ParticipantPermission.fromProtoV30(value.permission)
+    state <- HostingState.fromProtoV31(value.state)
+  } yield HostingParticipant(participantId, permission, state)
 }
 
 /** @param partySigningKeysWithThreshold
@@ -1951,7 +2026,6 @@ final case class PartyToParticipant private (
     threshold: PositiveInt,
     participants: Seq[HostingParticipant],
     partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
-    isOffline: Boolean,
 ) extends TopologyMapping
     with KeyMapping {
 
@@ -1961,10 +2035,15 @@ final case class PartyToParticipant private (
   override def canBeSerializedTo(protoVersion: ProtoVersion): Either[String, Unit] =
     if (protoVersion.v >= 31) ().asRight
     else {
+      val notRepresentableInV30 = participants.filter(p =>
+        p.state == HostingParticipant.HostingState.Nominated ||
+          p.state == HostingParticipant.HostingState.Freezing
+      )
       Either.cond(
-        !isOffline,
+        notRepresentableInV30.isEmpty,
         (),
-        s"Unable to serialize PartyToParticipant mapping to v30 because isOffline is true",
+        "Unable to serialize PartyToParticipant mapping to v30 because of unsupported hosting states: " +
+          notRepresentableInV30.map(p => s"${p.participantId} -> ${p.state}").mkString(", "),
       )
     }
 
@@ -1975,7 +2054,7 @@ final case class PartyToParticipant private (
     } yield v30.PartyToParticipant(
       party = partyId.toProtoPrimitive,
       threshold = threshold.value,
-      participants = participants.map(_.toProto),
+      participants = participants.map(_.toProtoV30),
       partySigningKeys = partySigningKeysWithThresholdP,
     )
 
@@ -1991,9 +2070,8 @@ final case class PartyToParticipant private (
     } yield v31.PartyToParticipant(
       party = partyId.toProtoPrimitive,
       threshold = threshold.value,
-      participants = participants.map(_.toProto),
+      participants = participants.map(_.toProtoV31),
       partySigningKeys = partySigningKeysWithThresholdP,
-      isOffline = isOffline,
     )
 
   override def toProtoV31: Either[String, v31.TopologyMapping] =
@@ -2021,14 +2099,12 @@ final case class PartyToParticipant private (
       participants: Seq[HostingParticipant] = participants,
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold] =
         partySigningKeysWithThreshold,
-      isOffline: Boolean = isOffline,
   ): PartyToParticipant =
     PartyToParticipant.tryCreate(
       party,
       threshold,
       participants,
       partySigningKeysWithThreshold,
-      isOffline,
     )
 
   override def namespace: Namespace = partyId.namespace
@@ -2185,12 +2261,25 @@ object PartyToParticipant
       "participants",
       _.participants
         .map { c =>
-          (
-            c.participantId,
-            (c.permission.toString + (if (c.onboarding) "(onboarding)" else "")).unquoted,
-          )
+          val stateSuffix = c.state match {
+            case HostingParticipant.HostingState.Active => ""
+            case HostingParticipant.HostingState.Onboarding => "(onboarding)"
+            case HostingParticipant.HostingState.Nominated => "(nominated)"
+            case HostingParticipant.HostingState.Freezing => "(freezing)"
+          }
+          (c.participantId, (c.permission.toString + stateSuffix).unquoted)
         }
         .toMap,
+    ),
+    paramIfDefined(
+      "partySigningKeys",
+      _.partySigningKeysWithThreshold.map(
+        _.keys.forgetNE.map(_.fingerprint).toSeq.sortBy(_.toProtoPrimitive)
+      ),
+    ),
+    paramIfDefined(
+      "partySigningKeysThreshold",
+      _.partySigningKeysWithThreshold.map(_.threshold).filter(_ > PositiveInt.one),
     ),
   )
 
@@ -2201,7 +2290,6 @@ object PartyToParticipant
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
-      isOffline: Boolean,
   ): Either[String, PartyToParticipant] = {
 
     // If a participant is listed several times with different permissions, take the one with the higher
@@ -2234,7 +2322,6 @@ object PartyToParticipant
       threshold,
       deduplicateParticipantsWithDifferentPermissions,
       partySigningKeysWithThreshold,
-      isOffline,
     )
   }
 
@@ -2244,13 +2331,11 @@ object PartyToParticipant
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold],
-      isOffline: Boolean = false,
   ): PartyToParticipant = PartyToParticipant(
     partyId,
     threshold,
     participants,
     partySigningKeysWithThreshold,
-    isOffline,
   )
 
   def tryCreate(
@@ -2258,9 +2343,8 @@ object PartyToParticipant
       threshold: PositiveInt,
       participants: Seq[HostingParticipant],
       partySigningKeysWithThreshold: Option[SigningKeysWithThreshold] = None,
-      isOffline: Boolean,
   ): PartyToParticipant =
-    create(partyId, threshold, participants, partySigningKeysWithThreshold, isOffline = isOffline)
+    create(partyId, threshold, participants, partySigningKeysWithThreshold)
       .valueOr(err => throw new IllegalArgumentException(err))
 
   def uniqueKey(partyId: PartyId): MappingHash =
@@ -2288,7 +2372,7 @@ object PartyToParticipant
         SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
       )
       partyToParticipant <- PartyToParticipant
-        .create(partyId, threshold, participants, partySigningKeys, isOffline = false)
+        .create(partyId, threshold, participants, partySigningKeys)
         .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield partyToParticipant
 
@@ -2307,12 +2391,12 @@ object PartyToParticipant
           "participants",
           pvv,
           ProtoValidation.MaxCollectionSize,
-        )((element, _) => HostingParticipant.fromProtoV30(pvv, element))
+        )((element, _) => HostingParticipant.fromProtoV31(pvv, element))
       partySigningKeys <- value.partySigningKeys.traverse(protoValue =>
         SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
       )
       partyToParticipant <- PartyToParticipant
-        .create(partyId, threshold, participants, partySigningKeys, isOffline = value.isOffline)
+        .create(partyId, threshold, participants, partySigningKeys)
         .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield partyToParticipant
 }
@@ -2857,6 +2941,30 @@ object LsuAnnouncement
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
 
   override def code: TopologyMapping.Code = Code.LsuAnnouncement
+
+  /** Starting with this protocol version, logical synchronizer upgrades to a lower protocol version
+    * (downgrades) are forbidden.
+    */
+  // TODO(#35499): Change to v37 or whereever the new topology mapping lands
+  lazy val minimumProtocolVersionForbiddingDowngrade: ProtocolVersion = ProtocolVersion.dev
+
+  /** Returns true iff upgrading from `current` to `successor` is a protocol version downgrade that
+    * is forbidden, i.e., `successor` is a successor of `current` (higher serial), the current
+    * protocol version is at least [[minimumProtocolVersionForbiddingDowngrade]] and the protocol
+    * version of the successor is lower than the current one.
+    *
+    * Announcements whose successor serial is not greater than the current one refer to past
+    * upgrades of a predecessor synchronizer. They are part of the topology state copied to a
+    * successor during LSU and were already validated against their own synchronizer, so they must
+    * not be compared with the current protocol version.
+    */
+  def isForbiddenProtocolVersionDowngrade(
+      current: PhysicalSynchronizerId,
+      successor: OpaquePhysicalSynchronizerId,
+  ): Boolean =
+    successor.serial > current.serial &&
+      current.protocolVersion >= minimumProtocolVersionForbiddingDowngrade &&
+      successor.protocolVersionNumber < current.protocolVersion.v
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,

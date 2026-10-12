@@ -30,6 +30,7 @@ import org.scalatest.Args
 import org.scalatest.Assertions.fail
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
+import slick.sql.SqlAction
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
@@ -109,10 +110,6 @@ trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLoggin
     storage.close()
     destroyDatabase()
   }
-
-  /** Lookup environment variable and return. Throw [[java.lang.RuntimeException]] if missing. */
-  protected def env(name: String): String =
-    sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
 }
 
 sealed trait MigrationMode extends Product with Serializable
@@ -156,21 +153,13 @@ class PostgresCISetup(
 ) extends PostgresDbStorageSetup(loggerFactory) {
 
   /** name of existing database we can use (either for testing or for setting up new databases) */
-  private lazy val envDb = env("POSTGRES_DB")
+  private lazy val envDb = DbStorageSetup.envDbName
 
   /** name of db to use for the tests (avoiding flyway migration conflicts) */
   private lazy val useDb =
     useDbNameO.getOrElse(envDb) + (if (migrationMode == MigrationMode.DevVersion) "_dev" else "")
 
-  private lazy val useHost = sys.env.getOrElse("POSTGRES_HOST", "localhost")
-
-  override lazy val basicConfig: DbBasicConfig = DbBasicConfig(
-    env("POSTGRES_USER"),
-    env("POSTGRES_PASSWORD"),
-    useDb,
-    useHost,
-    5432,
-  )
+  override lazy val basicConfig: DbBasicConfig = DbStorageSetup.envBasicConfig(useDb)
 
   override protected def prepareDatabase(): Unit =
     if (useDb != envDb) { // for provided db name or dev migrations
@@ -204,27 +193,8 @@ class PostgresCISetup(
             if (res.isEmpty) {
               logger.debug(s"Creating database $useDb using connection to $envDb")
               envDbStorage
-                .update_(sqlu"CREATE DATABASE #$useDb", functionFullName)
+                .update_(PostgresTestDatabase.createDatabase(useDb), functionFullName)
                 .recover(transformQueryResult(()))
-                .flatMap(_ =>
-                  FutureUnlessShutdown
-                    .outcomeF(Future {
-                      val useDbConfig =
-                        DbConfig.Postgres(basicConfig.copy(dbName = useDb).toPostgresConfig)
-                      val useDbStorage = mkStorage(useDbConfig)
-                      try {
-                        import useDbStorage.api.*
-                        val adaptSchemaF = useDbStorage.update_(
-                          sqlu"""GRANT ALL ON SCHEMA public TO "#${env("POSTGRES_USER")}"""",
-                          functionFullName,
-                        )
-                        DefaultProcessingTimeouts.default.awaitUS_(
-                          s"granting rights on public schema for database $useDb"
-                        )(adaptSchemaF)
-                      } finally useDbStorage.close()
-                    })
-                    .recover(transformQueryResult(()))
-                )
             } else FutureUnlessShutdown.unit
           }
         DefaultProcessingTimeouts.default.awaitUS_(s"creating database $useDb")(genF)
@@ -246,59 +216,19 @@ class PostgresTestContainerSetup(
 ) extends PostgresDbStorageSetup(loggerFactory)
     with NamedLogging {
 
-  private lazy val postgresContainer =
-    // TODO(#29774): switch to always running with the published `query-stats-postgres` image when available
-    if (DbStorageSetup.collectQueryStats) {
-      new PostgreSQLContainer(
-        DockerImageName
-          .parse("digitalasset/query-stats-postgres:local")
-          .asCompatibleSubstituteFor("postgres:17")
-      )
-    } else {
-      new PostgreSQLContainer(s"${PostgreSQLContainer.IMAGE}:17")
-    }
+  private lazy val postgresContainer = DbStorageSetup.newPostgresContainer()
 
   override protected def prepareDatabase(): Unit = {
-    // up the connection limit to deal with everyone using connection pools in tests that can run concurrently.
-    // we also have a matching max connections limit set in the CircleCI postgres executor (`.circle/config.yml`)
-    val command =
-      // TODO(#29774): switch to always running with the published `query-stats-postgres` image when available
-      if (DbStorageSetup.collectQueryStats) {
-        postgresContainer.getCommandParts.toSeq ++ Seq(
-          "-c",
-          "max_connections=500",
-          "-c",
-          "shared_preload_libraries=pg_store_plans,pg_stat_statements",
-          "-c",
-          "pg_store_plans.plan_format=json",
-          "-c",
-          "pg_store_plans.max=100000",
-          "-c",
-          "pg_store_plans.max_plan_length=10240",
-          "-c",
-          "pg_stat_statements.max=100000",
-        )
-      } else {
-        postgresContainer.getCommandParts.toSeq :+ "-c" :+ "max_connections=500"
-      }
-    postgresContainer.setCommandParts(command.toArray)
-    val binds = java.util.List.of(
-      Bind.parse("/tmp/canton/data-continuity-dumps:/tmp/canton/data-continuity-dumps")
+    noTracingLogger.debug(
+      s"Starting postgres container with ${postgresContainer.getCommandParts.toSeq}"
     )
-    postgresContainer.setBinds(binds)
-    noTracingLogger.debug(s"Starting postgres container with $command")
 
     val startF = Future(postgresContainer.start())
     dbStartupTimeout.await_("startup of postgres container")(startF)
   }
 
-  override lazy val basicConfig: DbBasicConfig = DbBasicConfig(
-    postgresContainer.getUsername,
-    postgresContainer.getPassword,
-    postgresContainer.getDatabaseName,
-    postgresContainer.getHost,
-    postgresContainer.getFirstMappedPort,
-  )
+  override lazy val basicConfig: DbBasicConfig =
+    DbStorageSetup.containerBasicConfig(postgresContainer)
 
   def getContainerID: String = postgresContainer.getContainerId
 
@@ -348,12 +278,129 @@ class H2DbStorageSetup(
   override protected def destroyDatabase(): Unit = ()
 }
 
+object PostgresTestDatabase {
+
+  import slick.jdbc.PostgresProfile.api.*
+
+  type SetupStatement = SqlAction[Int, NoStream, Effect]
+
+  val password: String = "user"
+
+  def userName(dbName: String): String = s"$dbName-user"
+
+  def createDatabase(dbName: String): SetupStatement =
+    sqlu"""CREATE DATABASE "#$dbName""""
+
+  private def createUser(dbName: String): SetupStatement =
+    sqlu"""CREATE USER "#${userName(dbName)}" WITH PASSWORD '#$password'"""
+
+  private def grantUserToCurrentUser(dbName: String): SetupStatement =
+    sqlu"""GRANT "#${userName(dbName)}" TO CURRENT_USER"""
+
+  private def createDatabaseOwnedByUser(dbName: String): SetupStatement =
+    sqlu"""CREATE DATABASE "#$dbName" OWNER "#${userName(dbName)}""""
+
+  def createStatements(dbName: String): Seq[SetupStatement] = Seq(
+    createUser(dbName),
+    grantUserToCurrentUser(dbName),
+    createDatabaseOwnedByUser(dbName),
+  )
+
+  def dropStatements(dbName: String): Seq[SetupStatement] = Seq(
+    sqlu"""DROP DATABASE IF EXISTS "#$dbName"""",
+    sqlu"""DROP USER IF EXISTS "#${userName(dbName)}"""",
+  )
+}
+
 object DbStorageSetup {
 
+  val PostgresVersion: String = "17"
+
+  val PostgresImage: String = s"${PostgreSQLContainer.IMAGE}:$PostgresVersion"
+
+  def env(name: String): String =
+    sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
+
+  def envDbName: String = env("POSTGRES_DB")
+
+  def envBasicConfig(dbName: String): DbBasicConfig = DbBasicConfig(
+    username = env("POSTGRES_USER"),
+    password = env("POSTGRES_PASSWORD"),
+    dbName = dbName,
+    host = sys.env.getOrElse("POSTGRES_HOST", "localhost"),
+    port = 5432,
+  )
+
+  def containerBasicConfig(container: PostgreSQLContainer): DbBasicConfig = DbBasicConfig(
+    username = container.getUsername,
+    password = container.getPassword,
+    dbName = container.getDatabaseName,
+    host = container.getHost,
+    port = container.getFirstMappedPort,
+  )
+
+  /** Whether to use a local test container rather than the Postgres provided through the
+    * environment (`POSTGRES_*` variables), see [[postgres]] for the rules. Using a test container
+    * can be forced by setting the `DB_FORCE_TEST_CONTAINER` environment variable or through
+    * `forceTestContainer`.
+    */
+  def useTestContainer(forceTestContainer: Boolean = false): Boolean = {
+    val isCI = sys.env.contains("CI")
+    val isMachine = sys.env.contains("MACHINE")
+    val useTestContainerByForce = sys.env.contains("DB_FORCE_TEST_CONTAINER") || forceTestContainer
+
+    useTestContainerByForce || !isCI || isMachine
+  }
+
+  def newPostgresContainer(withQueryStats: Boolean = collectQueryStats): PostgreSQLContainer = {
+    // TODO(#29774): switch to always running with the published `query-stats-postgres` image when available
+    val container =
+      if (withQueryStats) {
+        new PostgreSQLContainer(
+          DockerImageName
+            .parse("digitalasset/query-stats-postgres:local")
+            .asCompatibleSubstituteFor(PostgresImage)
+        )
+      } else {
+        new PostgreSQLContainer(PostgresImage)
+      }
+
+    // up the connection limit to deal with everyone using connection pools in tests that can run concurrently.
+    // we also have a matching max connections limit set in the CircleCI postgres executor (`.circle/config.yml`)
+    val command =
+      // TODO(#29774): switch to always running with the published `query-stats-postgres` image when available
+      if (withQueryStats) {
+        container.getCommandParts.toSeq ++ Seq(
+          "-c",
+          "max_connections=500",
+          "-c",
+          "shared_preload_libraries=pg_store_plans,pg_stat_statements",
+          "-c",
+          "pg_store_plans.plan_format=json",
+          "-c",
+          "pg_store_plans.max=100000",
+          "-c",
+          "pg_store_plans.max_plan_length=10240",
+          "-c",
+          "pg_stat_statements.max=100000",
+        )
+      } else {
+        container.getCommandParts.toSeq :+ "-c" :+ "max_connections=500"
+      }
+    container.setCommandParts(command.toArray)
+    container.setBinds(
+      java.util.List.of(
+        Bind.parse("/tmp/canton/data-continuity-dumps:/tmp/canton/data-continuity-dumps")
+      )
+    )
+    container
+  }
+
   /** If we are running in CI on a docker executor opt to use a separate docker setup for testing
-    * postgres If we are running in CI on a `machine` use a local
-    * [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer] If we are running
-    * locally use a local [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer]
+    * postgres. If we are running in CI on a `machine` use a local
+    * [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer]. If we are running
+    * locally use a local [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer].
+    * See [[useTestContainer]].
     */
   def postgres(
       loggerFactory: NamedLoggerFactory,
@@ -361,16 +408,10 @@ object DbStorageSetup {
       mkDbConfig: DbBasicConfig => Postgres = _.toPostgresDbConfig,
       forceTestContainer: Boolean = false,
       useDbNameO: Option[String] = None,
-  )(implicit ec: ExecutionContext): PostgresDbStorageSetup = {
-
-    val isCI = sys.env.contains("CI")
-    val isMachine = sys.env.contains("MACHINE")
-    val useTestContainerByForce = sys.env.contains("DB_FORCE_TEST_CONTAINER") || forceTestContainer
-
-    if (!useTestContainerByForce && (isCI && !isMachine))
-      new PostgresCISetup(migrationMode, mkDbConfig, useDbNameO, loggerFactory).initialized()
-    else new PostgresTestContainerSetup(migrationMode, mkDbConfig, loggerFactory).initialized()
-  }
+  )(implicit ec: ExecutionContext): PostgresDbStorageSetup =
+    if (useTestContainer(forceTestContainer))
+      new PostgresTestContainerSetup(migrationMode, mkDbConfig, loggerFactory).initialized()
+    else new PostgresCISetup(migrationMode, mkDbConfig, useDbNameO, loggerFactory).initialized()
 
   def h2(
       loggerFactory: NamedLoggerFactory,
@@ -408,6 +449,9 @@ object DbStorageSetup {
       )
     )
 
+    def url: String =
+      s"${DbConfig.postgresUrl(host, port, dbName)}?user=$username&password=$password"
+
     def toPostgresDbConfig: Postgres = Postgres(
       toPostgresConfig,
       parameters = DbParametersConfig(unsafeCleanOnValidationError = true),
@@ -426,5 +470,5 @@ object DbStorageSetup {
   }
 
   // TODO(#29774): Remove this flag when we can always use the `query-stats-postgres` image.
-  val collectQueryStats = sys.env.contains("CANTON_COLLECT_QUERY_STATS")
+  val collectQueryStats: Boolean = sys.env.contains("CANTON_COLLECT_QUERY_STATS")
 }

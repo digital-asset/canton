@@ -18,7 +18,6 @@ import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
 trait SequencerClientSend {
@@ -123,7 +122,6 @@ trait SequencerClientSend {
   private def defaultSendRequestTimestamps: SendRequestTimestamps = {
     val now = clock.now
     SendRequestTimestamps(
-      topologyTimestamp = None,
       approximateTimestampForSigning = now,
       maxSequencingTime = generateMaxSequencingTime(now),
     )
@@ -147,8 +145,6 @@ object SequencerClientSend {
 
   /** Aggregates all the timestamps needed when sending a request.
     *
-    * @param topologyTimestamp
-    *   An optional timestamp specifying the topology state to reference for this request.
     * @param approximateTimestampForSigning
     *   Defines a timestamp used for signing a request, overriding the timestamp of the selected
     *   topology. For submission requests (e.g., encrypted view messages), the topology is not yet
@@ -158,16 +154,8 @@ object SequencerClientSend {
     * @param maxSequencingTime
     *   The max sequencing time for the request.
     */
-  @nowarn("cat=deprecation")
   final case class SendRequestTimestamps(
-      @deprecated(
-        since = "pv35",
-        message =
-          "Do not specify a topology timestamp for send requests. This field will be removed in a future version.",
-      )
-      topologyTimestamp: Option[CantonTimestamp],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )
-
 }

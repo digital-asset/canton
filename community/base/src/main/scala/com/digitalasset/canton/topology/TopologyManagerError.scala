@@ -1015,6 +1015,8 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   @Resolution("""Change the physical synchronizer id of the successor so that it satisfies:
       |- it is greater than the current physical synchronizer id
       |- it is greater than all previous synchronizer announcements
+      |- its protocol version is not lower than the current protocol version, if the current
+      |  protocol version is 37 or higher (protocol version downgrades are forbidden)
       |""")
   object InvalidSynchronizerSuccessor
       extends ErrorCode(
@@ -1039,6 +1041,17 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         Reject(
           successorSynchronizerId,
           s"successor id is not greater than current synchronizer id $currentSynchronizerId",
+        )
+
+      def protocolVersionDowngrade(
+          currentSynchronizerId: PhysicalSynchronizerId,
+          successorSynchronizerId: OpaquePhysicalSynchronizerId,
+      )(implicit loggingContext: ErrorLoggingContext): Reject =
+        Reject(
+          successorSynchronizerId,
+          s"protocol version downgrade from ${currentSynchronizerId.protocolVersion} to " +
+            s"${successorSynchronizerId.protocolVersionString} is not allowed " +
+            s"(current synchronizer id $currentSynchronizerId)",
         )
 
       def conflictWithPreviousAnnouncement(

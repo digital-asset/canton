@@ -16,7 +16,6 @@ import com.daml.ledger.api.v2.value.Identifier
 import com.daml.ledger.javaapi.data.{CreatedEvent as JavaCreatedEvent, Identifier as JavaIdentifier}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -80,7 +79,7 @@ class AcsReplicationAdminWorkflow(
       synchronizerId: SynchronizerId,
       sourceParticipantId: ParticipantId,
       sequencerCandidates: NonEmpty[Seq[SequencerId]],
-      serial: PositiveInt, // TODO(#35267) replace with CantonTimestamp
+      timestamp: CantonTimestamp,
       participantPermission: ParticipantPermission,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val partyReplicationIdS = partyReplicationId.toHexString
@@ -90,7 +89,7 @@ class AcsReplicationAdminWorkflow(
       sourceParticipantId.adminParty.toProtoPrimitive,
       participantId.adminParty.toProtoPrimitive,
       sequencerCandidates.forgetNE.map(_.uid.toProtoPrimitive).asJava,
-      serial.unwrap, // TODO(#35267) replace with CantonTimestamp
+      timestamp.toInstant,
       PartyParticipantPermission.toDaml(participantPermission),
       "acs-replication", // TODO(#35267) pass the operation name from outside
     )

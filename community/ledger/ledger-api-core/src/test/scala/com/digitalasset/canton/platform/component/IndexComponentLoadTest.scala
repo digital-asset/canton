@@ -664,6 +664,7 @@ trait IndexComponentLoadTestBase
         internalContractId = -1, // will be filled later
         inst = contract.inst,
       ),
+      representativePackageId = contract.templateId.packageId,
     ) -> contract
   }
 

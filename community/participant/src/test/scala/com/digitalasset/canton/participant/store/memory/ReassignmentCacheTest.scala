@@ -319,11 +319,11 @@ object ReassignmentCacheTest extends BaseTest {
       baseStore.addUnassignmentData(unassignmentData)
 
     override def addReassignmentsOffsets(
-        offsets: Map[ReassignmentId, UnassignmentData.ReassignmentGlobalOffset]
+        updates: Seq[(ReassignmentId, UnassignmentData.ReassignmentGlobalOffset)]
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
-      baseStore.addReassignmentsOffsets(offsets)
+      baseStore.addReassignmentsOffsets(updates)
 
     override def handlePartiesOffboarding(
         offset: Offset,

@@ -76,7 +76,7 @@ class ProtocolVettingChecksIntegrationTest
   "A submitting participant" when {
     s"connected to a PV ${ProtocolVersion.v35} or higher synchronizer" should {
       "be able to submit a command with a vetted package that has an unvetted dependency that doesn't appear in a transaction action node" taggedAs_ (ledgerIntegrity
-        .setHappyCase(_)) onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+        .setHappyCase(_)) in { implicit env =>
         import env.*
 
         // Setup vetted Main with unvetted Dep dependency

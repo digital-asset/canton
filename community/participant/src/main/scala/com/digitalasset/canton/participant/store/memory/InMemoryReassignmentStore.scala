@@ -4,14 +4,12 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
-import cats.implicits.catsSyntaxParallelTraverse_
 import cats.instances.order.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.UnassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, UnassignmentData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -120,15 +118,26 @@ class InMemoryReassignmentStore(
   }
 
   override def addReassignmentsOffsets(
-      offsets: Map[ReassignmentId, UnassignmentData.ReassignmentGlobalOffset]
+      updates: Seq[(ReassignmentId, UnassignmentData.ReassignmentGlobalOffset)]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = offsets.toList
-    .parTraverse_ { case (reassignmentId, newGlobalOffset) =>
-      editReassignmentEntry(
-        reassignmentId,
-        entry => addUnassignmentGlobalOffset(entry, newGlobalOffset),
-      )
+  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] =
+    MonadUtil.sequentialTraverse_(updates.groupBy(_._1).toList) {
+      case (reassignmentId, updatesForId) =>
+        editReassignmentEntry(
+          reassignmentId,
+          entry => {
+            val (mergedOffsets, batchConflicts, storedConflicts) =
+              ReassignmentStore.mergeBatchThenStored(
+                reassignmentId,
+                entry.reassignmentGlobalOffset,
+                updatesForId.map(_._2),
+              )
+            batchConflicts.foreach(alarmOnMergeFailure(_, "Keeping the first offsets"))
+            storedConflicts.foreach(alarmOnMergeFailure(_, "Keeping the stored offsets"))
+            Right(entry.copy(reassignmentGlobalOffset = mergedOffsets))
+          },
+        )
     }
 
   override def handlePartiesOffboarding(
@@ -247,22 +256,6 @@ class InMemoryReassignmentStore(
       case _ =>
         Checked.result(reassignmentEntry.focus(_.assignmentTs).replace(Some(ts)))
     }
-
-  private def addUnassignmentGlobalOffset(
-      entry: ReassignmentEntry,
-      offset: ReassignmentGlobalOffset,
-  ): Either[ReassignmentGlobalOffsetsMerge, ReassignmentEntry] = {
-    val newGlobalOffsetE = entry.reassignmentGlobalOffset
-      .fold[Either[ReassignmentGlobalOffsetsMerge, ReassignmentGlobalOffset]](Right(offset))(
-        _.merge(offset).leftMap(
-          ReassignmentGlobalOffsetsMerge(entry.reassignmentId, _)
-        )
-      )
-
-    newGlobalOffsetE.map(newGlobalOffset =>
-      entry.copy(reassignmentGlobalOffset = Some(newGlobalOffset))
-    )
-  }
 
   override def deleteCompletionsSince(
       criterionInclusive: CantonTimestamp

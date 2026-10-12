@@ -11,7 +11,6 @@ import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.{EventsObserver, ObservedEvents}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -27,7 +26,7 @@ class NonTransientContractsITSpec
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "benchtool" should {
-    "submit non-transient contracts" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
+    "submit non-transient contracts" in { env =>
       import env.*
 
       val totalContractsCount = 100

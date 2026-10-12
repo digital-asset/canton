@@ -28,6 +28,8 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event
 
+import scala.annotation.nowarn
+
 trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
   protected def lfVersion: LanguageVersion =
     AvailableTests.latestStableTestDars.lfVersion
@@ -110,8 +112,6 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
 class LedgerApiConformanceMultiSynchronizerTest
     extends CommunityIntegrationTest
     with IsolatedEnvironments {
-
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private val connectedSynchronizersCount: Int = 2
 
@@ -226,20 +226,15 @@ object LedgerApiConformanceBase {
     "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag"
   )
 
+  @nowarn("msg=is never used")
   def excludedTests(version: ProtocolVersion, protocolType: ProtocolType): Set[String] = {
-    val perProtocolVersionExclusions =
-      (version, protocolType) match {
-        case (version, _) if version >= ProtocolVersion.v35 => excludedTestsForPV35AndAbove
-        case _ => Seq.empty
-      }
+    val perProtocolVersionExclusions = excludedTestsForPV35AndAbove
     (disabledTests ++ perProtocolVersionExclusions).toSet
   }
 }
 
 abstract class LedgerApiShardedConformanceBase(shard: Int)
     extends SingleVersionLedgerApiConformanceBase {
-
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def connectedSynchronizersCount = 1
 
@@ -336,8 +331,6 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
 
 trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiConformanceBase {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override def connectedSynchronizersCount = 1
 
   override def environmentDefinition: EnvironmentDefinition =
@@ -385,8 +378,6 @@ class LedgerApiParticipantPruningConformanceTestPostgres
 }
 
 trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiConformanceBase {
-
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def connectedSynchronizersCount = 1
 

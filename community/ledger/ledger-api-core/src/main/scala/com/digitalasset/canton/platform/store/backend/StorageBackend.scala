@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.canton.config.CantonRequireTypes.String185
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
@@ -397,12 +398,15 @@ trait EventStorageBackend {
     * table will be emptied.
     *
     * @return
-    *   The pruned internal_contract_id-s.
+    *   The pruned internal_contract_id-s. And flag indicating if there is more to prune.
     */
-  def pruneContracts(contractPruningDbLockMeta: DbLockMeta)(implicit
+  def pruneContracts(
+      contractPruningBatchSize: PositiveInt,
+      contractPruningDbLockMeta: DbLockMeta,
+  )(implicit
       connection: Connection,
       traceContext: TraceContext,
-  ): Iterable[Long]
+  ): (Iterable[Long], Boolean)
 
   /** WARNING: This should be executed outside a transaction!
     */
@@ -414,7 +418,7 @@ trait EventStorageBackend {
   /** Removes all contract candidates from lapi_pruning_contract_candidate table which are not
     * eligible for pruning.
     */
-  def cleanPruningCandidates(contractPruningDbLockMeta: DbLockMeta)(implicit
+  def cleanPruningCandidates()(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit

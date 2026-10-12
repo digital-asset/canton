@@ -224,7 +224,7 @@ class ParallelMessageDispatcher(
       ],
   )(implicit traceContext: TraceContext): ProcessingResult =
     signedEventE.event.content match {
-      case deliver @ Deliver(_pts, ts, _, _, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
+      case deliver @ Deliver(_pts, ts, _, _, _, _) if TimeProof.isTimeProofDeliver(deliver) =>
         logTimeProof(sequencerCounter, ts)
         FutureUnlessShutdown
           .lift(
@@ -232,7 +232,7 @@ class ParallelMessageDispatcher(
           )
           .flatMap(_ => pureProcessingResult)
 
-      case Deliver(_pts, ts, _, msgId, _, _, _) =>
+      case Deliver(_pts, ts, _, msgId, _, _) =>
         // TODO(#13883) Validate the topology timestamp
         if (signedEventE.hasNoErrors) {
           logEvent(sequencerCounter, ts, msgId, signedEventE.event)
@@ -266,7 +266,7 @@ class ParallelMessageDispatcher(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     def topologyProcessorTickAsyncF(): HandlerResult =
       ticksAfter.tickTopologyProcessorAfter.flatMap((_: Unit) =>
-        topologyProcessor(sc, SequencedTime(ts), None, Traced(List.empty))
+        topologyProcessor(sc, SequencedTime(ts), Traced(List.empty))
       )
 
     def recordOrderPublisherTickF(): FutureUnlessShutdown[Unit] =

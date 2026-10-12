@@ -9,7 +9,11 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
@@ -33,7 +37,7 @@ import java.util.UUID
 final case class TimeProof private (
     private val event: OrdinarySequencedEvent[Batch[Envelope[?]]],
     private val deliver: Deliver[Nothing],
-) extends PrettyPrinting
+) extends PrettyPrintingFromCompanion
     with HasCryptographicEvidence {
 
   require(
@@ -45,14 +49,15 @@ final case class TimeProof private (
 
   def traceContext: TraceContext = event.traceContext
 
-  override protected def pretty: Pretty[TimeProof.this.type] = prettyOfClass(
-    unnamedParam(_.timestamp)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TimeProof] = TimeProof
 
   override def getCryptographicEvidence: ByteString = deliver.getCryptographicEvidence
 }
 
-object TimeProof {
+object TimeProof extends PrettyPrintingCompanion[TimeProof] {
+  override protected val pretty: Pretty[TimeProof] = prettyOfClass(
+    unnamedParam(_.timestamp)
+  )
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def fromEvent(event: OrdinarySequencedEvent[Batch[Envelope[?]]]): Either[String, TimeProof] =
@@ -108,7 +113,6 @@ object TimeProof {
       // this means we can safely share this event without mentioning other recipients.
       batch = Batch.empty(client.protocolVersion),
       timestamps = SendRequestTimestamps(
-        topologyTimestamp = None,
         approximateTimestampForSigning = client.clock.now,
         maxSequencingTime = client.clock.now.plus(timeProofRequestExpiry.unwrap),
       ),

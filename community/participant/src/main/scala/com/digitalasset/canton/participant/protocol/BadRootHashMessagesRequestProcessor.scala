@@ -37,7 +37,6 @@ class BadRootHashMessagesRequestProcessor(
       crypto,
       sequencerClient,
       clock,
-      sequencerClient.protocolVersion,
     ) {
 
   /** Sends `reject` for the given `rootHash`. Also ticks the record order publisher.

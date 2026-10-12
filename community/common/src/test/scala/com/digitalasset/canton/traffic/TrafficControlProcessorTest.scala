@@ -128,7 +128,6 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       synchronizerId,
       None,
       batch,
-      None,
       Option.empty[TrafficReceipt],
     )
 
@@ -170,7 +169,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
 
       val (tcp, observedTs, updates) = mkTrafficProcessor()
 
-      tcp.processSetTrafficPurchasedEnvelopes(ts1, None, batch.envelopes).futureValueUS
+      tcp.processSetTrafficPurchasedEnvelopes(ts1, batch.envelopes).futureValueUS
 
       observedTs.get().result() shouldBe Seq.empty
       updates.get().result() shouldBe Seq(update.message)
@@ -184,7 +183,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       val (tcp, observedTs, updates) = mkTrafficProcessor()
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        tcp.processSetTrafficPurchasedEnvelopes(ts1, None, batch.envelopes).futureValueUS,
+        tcp.processSetTrafficPurchasedEnvelopes(ts1, batch.envelopes).futureValueUS,
         LogEntry.assertLogSeq(
           Seq(
             (
@@ -210,7 +209,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       val (tcp, observedTs, updates) = mkTrafficProcessor()
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        tcp.processSetTrafficPurchasedEnvelopes(ts1, None, batch.envelopes).futureValueUS,
+        tcp.processSetTrafficPurchasedEnvelopes(ts1, batch.envelopes).futureValueUS,
         LogEntry.assertLogSeq(
           Seq(
             (
@@ -221,34 +220,6 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
                 ) and include regex raw"Key \S+ used to generate signature is not a valid key for SequencerGroup"),
               ),
               "invalid signatures",
-            )
-          )
-        ),
-      )
-
-      observedTs.get().result() shouldBe Seq(ts1)
-      updates.get().result() shouldBe Seq.empty
-    }
-
-    "drop updates with invalid timestamp of signing key" in {
-      val update = mkSetTrafficPurchased()
-      val batch =
-        Batch.of(testedProtocolVersion, update -> Recipients.cc(SequencersOfSynchronizer))
-
-      val (tcp, observedTs, updates) = mkTrafficProcessor()
-
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        tcp.processSetTrafficPurchasedEnvelopes(ts1, Some(ts2), batch.envelopes).futureValueUS,
-        LogEntry.assertLogSeq(
-          Seq(
-            (
-              _.shouldBeCantonError(
-                InvalidTrafficPurchasedMessage,
-                _ should include(
-                  s"the timestamp of the topology (Some($ts2)) is not set to the event timestamp ($ts1)"
-                ),
-              ),
-              "invalid timestamp of signing key",
             )
           )
         ),

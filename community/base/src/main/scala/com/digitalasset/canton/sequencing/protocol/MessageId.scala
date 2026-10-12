@@ -9,18 +9,26 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapperCompanion,
   String73,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 
 import java.util.UUID
 
 /** Identifier assigned by caller to a submission request. */
 final case class MessageId(override protected val str: String73)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
-  override protected def pretty: Pretty[MessageId] = prettyOfString(_.unwrap)
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[MessageId] = MessageId
 }
 
-object MessageId extends LengthLimitedStringWrapperCompanion[String73, MessageId] {
+object MessageId
+    extends LengthLimitedStringWrapperCompanion[String73, MessageId]
+    with PrettyPrintingCompanion[MessageId] {
+  override protected val pretty: Pretty[MessageId] = prettyOfString(_.unwrap)
+
   def fromUuid(uuid: UUID): MessageId = MessageId(checked(String73.tryCreate(uuid.toString)))
   def randomMessageId(): MessageId = fromUuid(UUID.randomUUID())
 

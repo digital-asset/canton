@@ -137,7 +137,7 @@ class BlockingAcsDigestJournal[K](
   ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K]]] =
     blockAndThen(delegate.lookup(key, toInclusive))
 
-  override def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, Offset)])(implicit
+  override def bulkLookup(keysUptoInclusive: Seq[(K, Offset)])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestStore.AcsDigestUpdate[K]]] =
     blockAndThen(delegate.bulkLookup(keysUptoInclusive))

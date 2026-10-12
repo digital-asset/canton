@@ -16,10 +16,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.participant.admin.PackageService.DarMainPackageId
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.SetupPackageVetting
-import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -48,7 +48,7 @@ abstract class ReplayBenchmarkITBase(
     Option(getClass.getClassLoader.getResource(darFile))
       .map(path => Path.of(path.getPath))
       .getOrElse(throw new IllegalArgumentException(s"Cannot find resource $darFile"))
-  val ReplayBenchmarkPkgId: LfPackageId = getPkgId(darPath)
+  val ReplayBenchmarkPkgId: LfPackageId = DarMainPackageId.tryFromDarPath(darPath).toLfPackageId
 
   private var alice: PartyId = _
 
@@ -226,9 +226,6 @@ abstract class ReplayBenchmarkITBase(
       }
     }
   }
-
-  private def getPkgId(darPath: Path): LfPackageId =
-    DarDecoder.assertReadArchiveFromFile(darPath.toFile).main._1
 
   private def getContractId(tx: Transaction): ContractId =
     ContractId.assertFromString(tx.events.map(_.getCreated.contractId).loneElement)

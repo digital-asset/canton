@@ -117,7 +117,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
           .send(
             createAggregationResultMessage(m1Crypto, 1, requestId),
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
@@ -139,7 +138,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
           .send(
             createAggregationResultMessage(m1Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
@@ -154,7 +152,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
           .send(
             createAggregationResultMessage(m2Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = None,
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
@@ -302,7 +299,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
           .send(
             createAggregationResultMessage(m2Crypto, 1, requestId),
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = None,
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),
@@ -322,7 +318,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
           .send(
             createAggregationResultMessage(m2Crypto, 2, requestId),
             timestamps = SendRequestTimestamps(
-              topologyTimestamp = None,
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
             ),

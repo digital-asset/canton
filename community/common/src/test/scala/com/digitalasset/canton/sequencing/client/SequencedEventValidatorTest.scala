@@ -35,7 +35,7 @@ import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Assertion, Outcome}
 
-class SequencedEventValidatorTest
+final class SequencedEventValidatorTest
     extends FixtureAnyWordSpec
     with BaseTest
     with HasExecutionContext {
@@ -302,10 +302,10 @@ class SequencedEventValidatorTest
       import fixture.*
       val syncCrypto = mock[SynchronizerCryptoClient]
       when(syncCrypto.pureCrypto).thenReturn(subscriberCryptoApi.pureCrypto)
-      when(syncCrypto.snapshot(timestamp = ts(1))(fixtureTraceContext))
+      when(syncCrypto.snapshot(timestamp = ts(2))(fixtureTraceContext))
         .thenAnswer[CantonTimestamp](tm => subscriberCryptoApi.snapshot(tm)(fixtureTraceContext))
       when(
-        syncCrypto.hypotheticalSnapshot(timestamp = ts(1), desiredTimestamp = ts(1))(
+        syncCrypto.hypotheticalSnapshot(timestamp = ts(2), desiredTimestamp = ts(2))(
           fixtureTraceContext
         )
       )
@@ -326,7 +326,6 @@ class SequencedEventValidatorTest
           previousTimestamp = Some(priorEvent.timestamp),
           timestamp = ts(2),
           counter = 42,
-          topologyTimestampO = Some(ts(1)),
         ).futureValueUS
       valueOrFail(
         validator.validate(

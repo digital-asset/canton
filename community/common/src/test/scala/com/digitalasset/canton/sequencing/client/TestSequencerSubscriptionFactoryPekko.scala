@@ -116,7 +116,6 @@ object TestSequencerSubscriptionFactoryPekko {
       DefaultTestIdentities.physicalSynchronizerId,
       None,
       Batch.empty(BaseTest.testedProtocolVersion),
-      None,
       Option.empty[TrafficReceipt],
     )
     val signedContent =

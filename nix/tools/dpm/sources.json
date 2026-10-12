@@ -1,0 +1,21 @@
+{
+  "version": "1.0.22",
+  "platforms": {
+    "x86_64-linux": {
+      "oci": "linux-amd64",
+      "sha256": "1zw8w0vgjfz1m2fpk22dchvdavss38i9n7ycyjab1r325q3v5zgb"
+    },
+    "aarch64-linux": {
+      "oci": "linux-arm64",
+      "sha256": "1sbp4smsffgm984fib4p6g4z1mgbd5652ywr1rhx9hmc2kq8lb1n"
+    },
+    "x86_64-darwin": {
+      "oci": "darwin-amd64",
+      "sha256": "0ill45s9zgxpgr7x0p16ahbf43sxx7136c0vi88msxl7ciyziljj"
+    },
+    "aarch64-darwin": {
+      "oci": "darwin-arm64",
+      "sha256": "1nq2m141nvmis1axjl1v290q17lxcmxnqv6ssmcha3p1aa2im1z6"
+    }
+  }
+}

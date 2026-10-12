@@ -23,7 +23,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   ObservedEvents,
 }
 import com.digitalasset.canton.ledger.api.benchtool.{BenchtoolSandboxFixture, ConfigEnricher}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,213 +36,210 @@ class PartySetsITSpec
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   "benchtool" should {
-    "submit a party-set and apply party-set filter on a stream" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      env =>
-        import env.*
+    "submit a party-set and apply party-set filter on a stream" in { env =>
+      import env.*
 
-        val submissionConfig = WorkflowConfig.FooSubmissionConfig(
-          numberOfInstances = 10,
-          numberOfObservers = 1,
-          uniqueParties = false,
-          instanceDistribution = List(
-            WorkflowConfig.FooSubmissionConfig.ContractDescription(
-              template = "Foo1",
-              weight = 1,
-              payloadSizeBytes = 0,
-            )
+      val submissionConfig = WorkflowConfig.FooSubmissionConfig(
+        numberOfInstances = 10,
+        numberOfObservers = 1,
+        uniqueParties = false,
+        instanceDistribution = List(
+          WorkflowConfig.FooSubmissionConfig.ContractDescription(
+            template = "Foo1",
+            weight = 1,
+            payloadSizeBytes = 0,
+          )
+        ),
+        observerPartySets = List(
+          PartySet(
+            partyNamePrefix = "FooParty",
+            count = 100,
+            visibility = 0.5,
           ),
-          observerPartySets = List(
-            PartySet(
-              partyNamePrefix = "FooParty",
-              count = 100,
-              visibility = 0.5,
-            ),
-            PartySet(
-              partyNamePrefix = "BarParty",
-              count = 20,
-              visibility = 0.05,
-            ),
+          PartySet(
+            partyNamePrefix = "BarParty",
+            count = 20,
+            visibility = 0.05,
           ),
-          consumingExercises = Some(
-            ConsumingExercises(
-              probability = 0.3,
-              payloadSizeBytes = 0,
-            )
-          ),
-          nonConsumingExercises = Some(
-            NonconsumingExercises(
-              probability = 2.0,
-              payloadSizeBytes = 0,
-            )
-          ),
+        ),
+        consumingExercises = Some(
+          ConsumingExercises(
+            probability = 0.3,
+            payloadSizeBytes = 0,
+          )
+        ),
+        nonConsumingExercises = Some(
+          NonconsumingExercises(
+            probability = 2.0,
+            payloadSizeBytes = 0,
+          )
+        ),
+      )
+      (for {
+        (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
+          submissionConfig
         )
-        (for {
-          (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
-            submissionConfig
-          )
-          configDesugaring = new ConfigEnricher(
-            allocatedParties,
-            BenchtoolTestsPackageInfo.StaticDefault,
-          )
-          _ <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
-          _ = allocatedParties.observerPartySets
-            .find(_.mainPartyNamePrefix == "FooParty")
-            .value
-            .parties(87)
-            .getValue should startWith("FooParty-87")
-          ledgerEffectsResults_fooParty87 <- observeStreams(
-            configDesugaring = configDesugaring,
-            filterByParties = List("FooParty-87"),
-            apiServices = apiServices,
-            expectedTemplateNames = Set("Foo1"),
-          )
-          ledgerEffectsResults_fooPartySet <- observeStreams(
-            configDesugaring = configDesugaring,
-            filterByPartyNamePrefixes = List("FooParty"),
-            apiServices = apiServices,
-            expectedTemplateNames = Set("Foo1"),
-          )
-          ledgerEffectsResults_fooPartyNamePrefix <- observeStreams(
-            configDesugaring = configDesugaring,
-            // matches 10 parties: {FooParty-30, FooParty-31, .., FooParty-39}
-            filterByPartyNamePrefixes = List("FooParty-3"),
-            apiServices = apiServices,
-            expectedTemplateNames = Set("Foo1"),
-          )
-          ledgerEffectsResults_barPartySet <- observeStreams(
-            configDesugaring = configDesugaring,
-            filterByPartyNamePrefixes = List("BarParty"),
-            apiServices = apiServices,
-            expectedTemplateNames = Set("Foo1"),
-          )
-          ledgerEffectsResults_barPartyNamePrefix <- observeStreams(
-            configDesugaring = configDesugaring,
-            // Matches 10 parties: {BarParty-10, BarParty-11, .., BarParty-19}
-            filterByPartyNamePrefixes = List("BarParty-1"),
-            apiServices = apiServices,
-            expectedTemplateNames = Set("Foo1"),
-          )
+        configDesugaring = new ConfigEnricher(
+          allocatedParties,
+          BenchtoolTestsPackageInfo.StaticDefault,
+        )
+        _ <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
+        _ = allocatedParties.observerPartySets
+          .find(_.mainPartyNamePrefix == "FooParty")
+          .value
+          .parties(87)
+          .getValue should startWith("FooParty-87")
+        ledgerEffectsResults_fooParty87 <- observeStreams(
+          configDesugaring = configDesugaring,
+          filterByParties = List("FooParty-87"),
+          apiServices = apiServices,
+          expectedTemplateNames = Set("Foo1"),
+        )
+        ledgerEffectsResults_fooPartySet <- observeStreams(
+          configDesugaring = configDesugaring,
+          filterByPartyNamePrefixes = List("FooParty"),
+          apiServices = apiServices,
+          expectedTemplateNames = Set("Foo1"),
+        )
+        ledgerEffectsResults_fooPartyNamePrefix <- observeStreams(
+          configDesugaring = configDesugaring,
+          // matches 10 parties: {FooParty-30, FooParty-31, .., FooParty-39}
+          filterByPartyNamePrefixes = List("FooParty-3"),
+          apiServices = apiServices,
+          expectedTemplateNames = Set("Foo1"),
+        )
+        ledgerEffectsResults_barPartySet <- observeStreams(
+          configDesugaring = configDesugaring,
+          filterByPartyNamePrefixes = List("BarParty"),
+          apiServices = apiServices,
+          expectedTemplateNames = Set("Foo1"),
+        )
+        ledgerEffectsResults_barPartyNamePrefix <- observeStreams(
+          configDesugaring = configDesugaring,
+          // Matches 10 parties: {BarParty-10, BarParty-11, .., BarParty-19}
+          filterByPartyNamePrefixes = List("BarParty-1"),
+          apiServices = apiServices,
+          expectedTemplateNames = Set("Foo1"),
+        )
 
-        } yield {
-          val cp = new Checkpoint
+      } yield {
+        val cp = new Checkpoint
 
-          { // Party from party set
-            cp(
-              discard(
-                ledgerEffectsResults_fooParty87.numberOfCreatesPerTemplateName("Foo1") shouldBe 4
-              )
+        { // Party from party set
+          cp(
+            discard(
+              ledgerEffectsResults_fooParty87.numberOfCreatesPerTemplateName("Foo1") shouldBe 4
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooParty87.numberOfNonConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 8
-              )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooParty87.numberOfNonConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 8
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooParty87.numberOfConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 1
-              )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooParty87.numberOfConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 1
             )
-          }
-          { // Foo party set
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartySet.numberOfCreatesPerTemplateName("Foo1") shouldBe 10
-              )
+          )
+        }
+        { // Foo party set
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartySet.numberOfCreatesPerTemplateName("Foo1") shouldBe 10
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartySet.numberOfNonConsumingExercisesPerTemplateName(
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartySet.numberOfNonConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 20
+            )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartySet.numberOfConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 4
+            )
+          )
+        }
+        { // Foo party set subset
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartyNamePrefix.numberOfCreatesPerTemplateName(
+                "Foo1"
+              ) shouldBe 10
+            )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartyNamePrefix
+                .numberOfNonConsumingExercisesPerTemplateName(
                   "Foo1"
                 ) shouldBe 20
-              )
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartySet.numberOfConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 4
-              )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_fooPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 4
             )
-          }
-          { // Foo party set subset
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartyNamePrefix.numberOfCreatesPerTemplateName(
+          )
+        }
+        { // Bar party set
+          cp(
+            discard(
+              ledgerEffectsResults_barPartySet.numberOfCreatesPerTemplateName("Foo1") shouldBe 5
+            )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_barPartySet.numberOfNonConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 10
+            )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_barPartySet.numberOfConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 2
+            )
+          )
+        }
+        { // Bar party set subset
+          cp(
+            discard(
+              ledgerEffectsResults_barPartyNamePrefix.numberOfCreatesPerTemplateName(
+                "Foo1"
+              ) shouldBe 5
+            )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_barPartyNamePrefix
+                .numberOfNonConsumingExercisesPerTemplateName(
                   "Foo1"
                 ) shouldBe 10
-              )
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartyNamePrefix
-                  .numberOfNonConsumingExercisesPerTemplateName(
-                    "Foo1"
-                  ) shouldBe 20
-              )
+          )
+          cp(
+            discard(
+              ledgerEffectsResults_barPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
+                "Foo1"
+              ) shouldBe 2
             )
-            cp(
-              discard(
-                ledgerEffectsResults_fooPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 4
-              )
-            )
-          }
-          { // Bar party set
-            cp(
-              discard(
-                ledgerEffectsResults_barPartySet.numberOfCreatesPerTemplateName("Foo1") shouldBe 5
-              )
-            )
-            cp(
-              discard(
-                ledgerEffectsResults_barPartySet.numberOfNonConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 10
-              )
-            )
-            cp(
-              discard(
-                ledgerEffectsResults_barPartySet.numberOfConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 2
-              )
-            )
-          }
-          { // Bar party set subset
-            cp(
-              discard(
-                ledgerEffectsResults_barPartyNamePrefix.numberOfCreatesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 5
-              )
-            )
-            cp(
-              discard(
-                ledgerEffectsResults_barPartyNamePrefix
-                  .numberOfNonConsumingExercisesPerTemplateName(
-                    "Foo1"
-                  ) shouldBe 10
-              )
-            )
-            cp(
-              discard(
-                ledgerEffectsResults_barPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
-                  "Foo1"
-                ) shouldBe 2
-              )
-            )
-          }
-          cp.reportAll()
-          succeed
-        }).futureValue
+          )
+        }
+        cp.reportAll()
+        succeed
+      }).futureValue
     }
   }
 

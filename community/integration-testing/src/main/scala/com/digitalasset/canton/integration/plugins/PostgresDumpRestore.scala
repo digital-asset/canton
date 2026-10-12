@@ -9,7 +9,7 @@ import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.CommandRunner
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
-import com.digitalasset.canton.store.db.PostgresTestContainerSetup
+import com.digitalasset.canton.store.db.{PostgresTestContainerSetup, PostgresTestDatabase}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.{TempDirectory, TempFile}
@@ -85,8 +85,8 @@ sealed trait PostgresDumpRestore extends DbDumpRestore with NamedLogging {
       dbName: String,
   ): (String, Map[String, String]) = {
     val basicConfig = dbBasicConfig
-    val dbUserName = s"$dbName-user"
-    val dbPassword = "user"
+    val dbUserName = PostgresTestDatabase.userName(dbName)
+    val dbPassword = PostgresTestDatabase.password
     val host = basicConfig.host
 
     (

@@ -67,7 +67,6 @@ trait StoreBasedTopologySnapshotTest
         party1,
         PositiveInt.one,
         Seq(HostingParticipant(participant1, Confirmation)),
-        isOffline = false,
       )
     )
     lazy val party2participant1_2 = mkAdd(
@@ -78,7 +77,6 @@ trait StoreBasedTopologySnapshotTest
           HostingParticipant(participant1, Submission),
           HostingParticipant(participant2, Submission),
         ),
-        isOffline = false,
       )
     )
 

@@ -255,7 +255,6 @@ class EventsBufferTest extends FixtureAnyWordSpec with BaseTest {
           members = NonEmpty(SortedSet, SequencerMemberId(1)),
           payload =
             BytesPayload(PayloadId(ts), ByteString.copyFrom(Random.nextBytes(payloadSize.toInt))),
-          topologyTimestampO = None,
           traceContext = TraceContext.empty,
           trafficReceiptO = None,
         ),

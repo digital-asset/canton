@@ -468,23 +468,20 @@ object ConfigTransforms {
   def setSigningKeysIfPV35OrHigher(
       sessionSigningKeysConfig: SessionSigningKeysConfig,
       nodeFilter: String => Boolean = _ => true,
-  ): ConfigTransform = {
-    val isPV35orHigher = BaseTest.testedProtocolVersion >= ProtocolVersion.v35
-
+  ): ConfigTransform =
     updateAllParticipantConfigs {
-      case (name, config) if nodeFilter(name) && isPV35orHigher =>
+      case (name, config) if nodeFilter(name) =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     } compose updateAllSequencerConfigs {
-      case (name, config) if nodeFilter(name) && isPV35orHigher =>
+      case (name, config) if nodeFilter(name) =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     } compose updateAllMediatorConfigs {
-      case (name, config) if nodeFilter(name) && isPV35orHigher =>
+      case (name, config) if nodeFilter(name) =>
         config.focus(_.crypto.sessionSigningKeys).replace(sessionSigningKeysConfig)
       case (_, config) => config
     }
-  }
 
   /** Configure the environment with static time */
   def useStaticTime: ConfigTransform = {
@@ -1037,15 +1034,20 @@ object ConfigTransforms {
       )
     )
 
-  def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform = {
-    (cantonConfig: CantonConfig) =>
-      cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
-  }.compose(
-    updateAllParticipantConfigs_(
-      _.focus(_.alphaDynamic.enableMultiSynchronizerTopologyFeatureFlag)
-        .replace(true)
-    )
-  )
+  /** Enable the multi-synchronizer topology feature flag if the testedProtocolVersion is lower than
+    * ProtocolVersion.v37.
+    */
+  def enableMultiSynchronizerTopologyFeatureFlag: ConfigTransform =
+    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) {
+      { (cantonConfig: CantonConfig) =>
+        cantonConfig.focus(_.parameters.enableAlphaStateViaConfig).replace(true)
+      }.compose(
+        updateAllParticipantConfigs_(
+          _.focus(_.alphaDynamic.enableMultiSynchronizerTopologyFeatureFlag)
+            .replace(true)
+        )
+      )
+    } else identity
 
   val disableOnboardingTopologyValidation: ConfigTransform =
     updateAllMediatorConfigs_(

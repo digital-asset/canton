@@ -68,9 +68,6 @@ import scala.concurrent.{ExecutionContext, Future}
   *      at the reinitializing [[com.digitalasset.canton.participant.commitment.Timepoint]]s
   *   1. Append a new checkpoint at the reinitializing
   *      [[com.digitalasset.canton.participant.commitment.Timepoint]]
-  *
-  * TODO(#33422) - Disaster Recovery Notes: For DR, we either need stable order of ACS stream, to
-  * continue where we left off or solve it in another way
   */
 class ReinitializingDigestProcessorImpl(
     override val thisParticipantId: ParticipantId,

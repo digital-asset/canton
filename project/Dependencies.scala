@@ -2,6 +2,8 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import sbt.{io as _, *}
 
+import SharedDependencies.*
+
 import scala.util.chaining.scalaUtilChainingOps
 
 object Dependencies {
@@ -32,15 +34,13 @@ object Dependencies {
   lazy val scala3_version = "3.3.6"
   lazy val scala_version_short = "2.13"
 
-  lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
   lazy val pekko_projection_jdbc_version = "1.1.1"
   lazy val pekko_projection_version = "1.1.0"
   lazy val pekko_persistence_version = "1.2.1"
-  lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
   lazy val ammonite_version = "3.0.9"
   lazy val apispec_version = "0.11.7"
-  lazy val awaitility_version = "4.2.0"
+  lazy val awaitility_version = "4.3.0"
   lazy val aws_version = "2.55.2"
   lazy val better_files_version = "3.9.2"
   lazy val cats_law_version = "2.9.0"
@@ -72,7 +72,7 @@ object Dependencies {
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.3.0"
   lazy val munit_version = "1.3.6"
-  lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
+  lazy val grpc_version = io_grpc_grpc_api.revision
 
   lazy val pekko_http_backend_version = "3.11.0"
   lazy val protostuff_version = "3.1.40"
@@ -82,7 +82,7 @@ object Dependencies {
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
   lazy val scaffeine_version = "5.3.0"
-  lazy val scala_collections_contrib_version = "0.2.2"
+  lazy val scala_collections_contrib_version = "0.4.0"
   lazy val scala_csv_version = "2.0.0"
   lazy val scala_logging_version = "3.9.6"
   lazy val scalacheck_version = "1.15.4"
@@ -92,7 +92,7 @@ object Dependencies {
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.13"
-  lazy val slf4j_version = resolveDependency("org.slf4j", "jul-to-slf4j").revision
+  lazy val slf4j_version = org_slf4j_jul_to_slf4j.revision
   lazy val zio_version = "2.1.7"
 
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
@@ -102,11 +102,10 @@ object Dependencies {
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
   lazy val testcontainers_version = "2.0.2"
-  lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
   lazy val upickle_version = "4.0.2"
 
-  lazy val org_apache_commons_commons_text = "org.apache.commons" % "commons-text" % "1.10.0"
+  lazy val org_apache_commons_commons_text = "org.apache.commons" % "commons-text" % "1.15.0"
   lazy val org_typelevel_paiges_core = "org.typelevel" %% "paiges-core" % "0.4.2"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
@@ -130,34 +129,18 @@ object Dependencies {
   // ammonite requires the full scala version including patch number
   lazy val ammonite = "com.lihaoyi" % "ammonite" % ammonite_version cross CrossVersion.full
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
-  lazy val lihaoyi_sourcecode_2 = resolveDependency("com.lihaoyi", "sourcecode_2.13")
 
   lazy val h2 = "com.h2database" % "h2" % h2_version
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
   lazy val flyway = "org.flywaydb" % "flyway-core" % flyway_version
   lazy val flyway_postgres = "org.flywaydb" % "flyway-database-postgresql" % flyway_version
 
-  // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
-  lazy val scalapb_lenses = resolveDependency("com.thesamet.scalapb", "lenses")
-  lazy val scalapb_runtime =
-    "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
-  lazy val scalapb_runtime_grpc =
-    "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion
-
-  lazy val bouncycastle_bcprov =
-    resolveDependency("org.bouncycastle", "bcprov-jdk18on")
-  lazy val bouncycastle_bcpkix =
-    resolveDependency("org.bouncycastle", "bcpkix-jdk18on")
+  // scalapb-runtime also ships the well-known protos, so the build takes it in the `protobuf`
+  // config; the pin itself lives in SharedDependencies.
+  lazy val scalapb_runtime_protobuf = scalapb_runtime % "protobuf"
 
   lazy val javax_annotations =
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
-
-  lazy val google_findbugs = resolveDependency("com.google.code.findbugs", "jsr305")
-  lazy val reactivestreams = resolveDependency("org.reactivestreams", "reactive-streams")
-  lazy val reactivestreams_tck = resolveDependency("org.reactivestreams", "reactive-streams-tck")
-  lazy val reactivestreams_examples =
-    resolveDependency("org.reactivestreams", "reactive-streams-examples")
-  lazy val spray_json = resolveDependency("io.spray", "spray-json")
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
 
@@ -188,17 +171,6 @@ object Dependencies {
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
 
-  lazy val pekko_actor = "org.apache.pekko" %% "pekko-actor" % pekko_version
-  lazy val pekko_actor_typed = "org.apache.pekko" %% "pekko-actor-typed" % pekko_version
-  lazy val pekko_actor_testkit_typed =
-    "org.apache.pekko" %% "pekko-actor-testkit-typed" % pekko_version
-  lazy val pekko_stream = "org.apache.pekko" %% "pekko-stream" % pekko_version
-  lazy val pekko_stream_testkit = "org.apache.pekko" %% "pekko-stream-testkit" % pekko_version
-  lazy val pekko_slf4j =
-    "org.apache.pekko" %% "pekko-slf4j" % pekko_version excludeAll (incompatibleLogging: _*)
-  lazy val pekko_http = "org.apache.pekko" %% "pekko-http" % pekko_http_version
-  lazy val pekko_http_testkit = "org.apache.pekko" %% "pekko-http-testkit" % pekko_http_version
-
   lazy val pekko_projection_core =
     "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version
   lazy val pekko_projection_jdbc =
@@ -217,7 +189,6 @@ object Dependencies {
   lazy val scalacheck = "org.scalacheck" %% "scalacheck" % scalacheck_version
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
   lazy val scalaz_core = "org.scalaz" %% "scalaz-core" % scalaz_version
-  lazy val scalaz_scalacheck_binding = resolveDependency("org.scalaz", "scalaz-scalacheck-binding")
   lazy val scalatestScalacheck =
     "org.scalatestplus" %% "scalacheck-1-18" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
@@ -246,16 +217,9 @@ object Dependencies {
 
   lazy val slf4j_api = "org.slf4j" % "slf4j-api" % slf4j_version
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
-  lazy val logback_classic = resolveDependency("ch.qos.logback", "logback-classic")
-
-  lazy val logback_core = resolveDependency("ch.qos.logback", "logback-core")
-
-  lazy val log4j_core = resolveDependency("org.apache.logging.log4j", "log4j-core")
-  lazy val log4j_api = resolveDependency("org.apache.logging.log4j", "log4j-api")
 
   // used for condition evaluation in logback
   lazy val janino = "org.codehaus.janino" % "janino" % janino_version
-  lazy val logstash = resolveDependency("net.logstash.logback", "logstash-logback-encoder")
 
   lazy val cats = "org.typelevel" %% "cats-core" % cats_version
   lazy val cats_law = "org.typelevel" %% "cats-laws" % cats_law_version
@@ -287,33 +251,8 @@ object Dependencies {
   // Update the protobuf version override in the `community-app` sbt project definition
   // to the same version used by OpenTelemetry, otherwise the protobuf version conflict could
   // break the performance runner (and possibly other stuff).
-  lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
-  lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
-  lazy val opentelemetry_context = resolveDependency("io.opentelemetry", "opentelemetry-context")
-  lazy val opentelemetry_sdk_metrics =
-    resolveDependency("io.opentelemetry", "opentelemetry-sdk-metrics")
-  lazy val opentelemetry_sdk_testing =
-    resolveDependency("io.opentelemetry", "opentelemetry-sdk-testing")
-  lazy val opentelemetry_sdk_autoconfigure =
-    resolveDependency("io.opentelemetry", "opentelemetry-sdk-extension-autoconfigure")
-  lazy val opentelemetry_exporter_zipkin =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-zipkin")
-  lazy val opentelemetry_exporter_otlp =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-otlp")
-  lazy val opentelemetry_exporter_common =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-common")
-  lazy val opentelemetry_exporter_prometheus =
-    resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   lazy val opentelemetry_proto =
     "io.opentelemetry.proto" % "opentelemetry-proto" % "1.11.0-alpha"
-
-  lazy val opentelemetry_instrumentation_grpc =
-    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
-  lazy val opentelemetry_instrumentation_runtime_metrics =
-    resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-runtime-telemetry-java8")
-  // https://github.com/open-telemetry/opentelemetry-java-instrumentation/tree/main/instrumentation/hikaricp-3.0/library
-  lazy val opentelemetry_instrumentation_hikari =
-    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % opentelemetry_instrumentation_runtime_metrics.revision
 
   lazy val dropwizard_metrics_core =
     "io.dropwizard.metrics" % "metrics-core" % dropwizard_version
@@ -324,8 +263,6 @@ object Dependencies {
   lazy val slick =
     "com.typesafe.slick" %% "slick" % slick_version excludeAll (incompatibleLogging: _*)
   lazy val slick_hikaricp = "com.typesafe.slick" %% "slick-hikaricp" % slick_version
-
-  lazy val typesafe_config = resolveDependency("com.typesafe", "config")
 
   lazy val testcontainers = "org.testcontainers" % "testcontainers" % testcontainers_version
   lazy val testcontainers_postgresql =
@@ -435,69 +372,11 @@ object Dependencies {
   lazy val icu4j_version = "com.ibm.icu" % "icu4j" % "63.1"
   lazy val protostuff_parser = "io.protostuff" % "protostuff-parser" % protostuff_version
 
-  object resolveDependency {
-
-    import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
-    import better.files.*
-
-    lazy val sharedDependencyMap = {
-      // This map is build from `maven_install_2.13.json` which is copied from the SDK repo
-      import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
-      import better.files._
-
-      val deps = decode[Map[String, String]](
-        file"shared_dependencies.json".contentAsString
-      ).valueOr { err =>
-        throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
-      }
-
-      deps.flatMap { case (coord, version) =>
-        coord.split(":") match {
-          case Array(org, artifact) =>
-            List((org, artifact) -> (org % artifact % version))
-          case _ =>
-            List.empty
-        }
-      }
-    }
-
-    def apply(organization: String, artifact: String): ModuleID =
-      sharedDependencyMap
-        .get(organization -> artifact)
-        .orElse(sharedDependencyMap.get(organization -> s"${artifact}_2.13"))
-        .getOrElse(
-          throw new RuntimeException(s"Unknown dependency: $organization, $artifact")
-        )
-
-  }
-
-  lazy val jline = resolveDependency("org.jline", "jline")
-
-  lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
-  lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
   // protoc stays on 3.x while the runtime is on 4.x: a 4.x runtime reads 3.x gencode but not the
   // reverse, so 3.x gencode keeps our published Java bindings usable on protobuf-java 3.x.
   // Keep in step with scalapb, which consumes protoc's output: no stable release targets
   // protobuf 4 yet (0.11.20 still targets 3.25.8), so only bump this once scalapb does.
   lazy val protoc_version = "3.25.9"
-  lazy val google_protobuf_java_util =
-    resolveDependency("com.google.protobuf", "protobuf-java-util")
-
-  // Version depends actually on scalapb.
-  lazy val google_common_protos =
-    resolveDependency("com.google.api.grpc", "proto-google-common-protos")
-
-  lazy val commons_io = resolveDependency("commons-io", "commons-io")
-  lazy val commons_compress = resolveDependency("org.apache.commons", "commons-compress")
-  lazy val commons_lang = resolveDependency("org.apache.commons", "commons-lang3")
-  lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
-  lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
-  lazy val guava = resolveDependency("com.google.guava", "guava")
-  // TODO(#10852) one database library, not two
-  lazy val anorm = resolveDependency("org.playframework.anorm", "anorm")
-  lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
-
-  lazy val scalameter = resolveDependency("com.storm-enroute", "scalameter")
 
   lazy val jol_core = "org.openjdk.jol" % "jol-core" % "0.17"
 

@@ -40,7 +40,6 @@ object SequencerTestUtils extends BaseTest {
       synchronizerId: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
       deserializedFrom: Option[ByteString] = None,
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
-      topologyTimestampO: Option[CantonTimestamp] = None,
       previousTimestamp: Option[CantonTimestamp] = None,
   ): Deliver[Batch[ClosedUncompressedEnvelope]] = {
     val batch = Batch.empty(testedProtocolVersion)
@@ -51,7 +50,6 @@ object SequencerTestUtils extends BaseTest {
       synchronizerId,
       messageId,
       batch,
-      topologyTimestampO,
       Option.empty[TrafficReceipt],
     )
 
@@ -79,7 +77,6 @@ object SequencerTestUtils extends BaseTest {
       previousTimestamp: Option[CantonTimestamp] = None,
       synchronizerId: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
-      topologyTimestampO: Option[CantonTimestamp] = None,
       trafficReceipt: Option[TrafficReceipt] = None,
   ): Deliver[Batch[Nothing]] = {
     val batch = Batch.empty(testedProtocolVersion)
@@ -89,7 +86,6 @@ object SequencerTestUtils extends BaseTest {
       synchronizerId,
       messageId,
       batch,
-      topologyTimestampO,
       trafficReceipt,
     )
   }

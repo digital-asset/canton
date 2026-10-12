@@ -681,6 +681,7 @@ final class RepairServiceContractsImporter(
               internalContractId = internalContractId,
               inst = c.contract.inst,
             ),
+            representativePackageId = c.representativePackageId,
           )
         }
     )

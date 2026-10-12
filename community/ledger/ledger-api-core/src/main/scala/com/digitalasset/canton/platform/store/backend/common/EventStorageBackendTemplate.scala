@@ -7,6 +7,7 @@ import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import cats.syntax.all.*
 import com.digitalasset.canton.ReassignmentCounter
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
@@ -850,57 +851,111 @@ abstract class EventStorageBackendTemplate(
   ): Unit =
     queryStrategy.vacuumAndReindexTable("lapi_pruning_candidate_deactivated")
 
-  override def pruneContracts(contractPruningDbLockMeta: DbLockMeta)(implicit
+  override def pruneContracts(
+      contractPruningBatchSize: PositiveInt,
+      contractPruningDbLockMeta: DbLockMeta,
+  )(implicit
       connection: Connection,
       traceContext: TraceContext,
-  ): Iterable[Long] = {
+  ): (Iterable[Long], Boolean) = {
     // all of these should execute in a single transaction
     assert(!connection.getAutoCommit)
     // pruning events could be a long-running operation, so we disable the network timeout
     withoutNetworkTimeout {
       lockExclusivelyContractPruningProcessingTable(contractPruningDbLockMeta)
 
-      logger.info("Lock candidate contract rows for removal")
-      try {
-        writeLockInternalContractIds(
-          cSQL"""IN (
-            SELECT internal_contract_id
-            FROM lapi_pruning_contract_candidate
-          )"""
-        )(connection)
-      } catch {
-        case _: CannotAcquireAllRowLocksException =>
-          logger.info(
-            "Unable to acquire write lock for pruning contract candidates - rolling back transaction."
-          )
-          throw new PruningContractsBlockedException
+      val contractCount =
+        SQL"""SELECT count(*) as contract_count from lapi_pruning_contract_candidate"""
+          .asSingleOpt(long("contract_count").?)
+          .flatten
+          .getOrElse(0L)
+
+      def doPrune(): Iterable[Long] = {
+        logger.info(
+          s"Copy ${contractCount min contractPruningBatchSize.value.toLong} candidates to temporary lapi_pruning_contract_candidate_temp table."
+        )
+        SQL"""
+             CREATE LOCAL TEMPORARY TABLE IF NOT EXISTS lapi_pruning_contract_candidate_temp
+             ON COMMIT DELETE ROWS
+             AS SELECT internal_contract_id
+                FROM lapi_pruning_contract_candidate
+                ORDER BY internal_contract_id ASC
+                ${QueryStrategy.limitClause(Some(contractPruningBatchSize.value))}
+           """.execute().discard
+
+        logger.info("Analyze lapi_pruning_contract_candidate_temp")
+        SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate_temp")}".execute().discard
+
+        logger.info(s"Delete copied candidates from lapi_pruning_contract_candidate table.")
+        SQL"""
+             DELETE FROM lapi_pruning_contract_candidate
+             WHERE EXISTS (
+                SELECT 1
+                FROM lapi_pruning_contract_candidate_temp
+                WHERE lapi_pruning_contract_candidate.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
+             )
+           """.execute().discard
+
+        logger.info(s"Cleaning candidate contracts (cleaning first without row-locking)")
+        cleanPruningCandidates()
+
+        logger.info("Lock candidate contract rows for removal")
+        try {
+          writeLockInternalContractIds(
+            cSQL"""IN (
+                  SELECT internal_contract_id
+                  FROM lapi_pruning_contract_candidate_temp
+                )"""
+          )(connection)
+        } catch {
+          case _: CannotAcquireAllRowLocksException =>
+            logger.info(
+              "Unable to acquire write lock for pruning contract candidates - rolling back transaction."
+            )
+            throw new PruningContractsBlockedException
+        }
+
+        logger.info(s"Cleaning candidate contracts (cleaning with row-locking)")
+        cleanPruningCandidates()
+
+        logger.info(s"Fetching to-be-pruned contract IDs")
+        val prunedContractIds =
+          SQL"""
+              SELECT internal_contract_id
+              FROM lapi_pruning_contract_candidate_temp"""
+            .asVectorOf(long("internal_contract_id"))
+
+        pruneWithLogging(s"Pruning ${prunedContractIds.size} contracts from par_contracts table") {
+          SQL"""
+              DELETE from par_contracts
+              WHERE EXISTS (
+                SELECT 1
+                FROM lapi_pruning_contract_candidate_temp
+                WHERE par_contracts.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
+              )"""
+        }
+
+        logger.info(s"Drop temporary table lapi_pruning_contract_candidate_temp")
+        SQL"DROP TABLE lapi_pruning_contract_candidate_temp".execute().discard
+
+        logger.info(s"Finished pruning of ${prunedContractIds.size} contracts.")
+        prunedContractIds
       }
 
-      // with holding the write lock, we ensure that Indexer is not inserting concurrently
-      logger.info(s"Cleaning candidate contracts")
-      cleanPruningCandidates(contractPruningDbLockMeta)
-
-      logger.info(s"Fetching to-be-pruned contract IDs")
-      val prunedContractIds =
-        SQL"""
-        SELECT internal_contract_id
-        FROM lapi_pruning_contract_candidate"""
-          .asVectorOf(long("internal_contract_id"))
-
-      pruneWithLogging(s"Pruning ${prunedContractIds.size} contracts from par_contracts table") {
-        SQL"""
-        DELETE from par_contracts
-        WHERE EXISTS (
-          SELECT 1
-          FROM lapi_pruning_contract_candidate
-          WHERE par_contracts.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
-        )"""
+      if (contractCount <= 0) {
+        logger.info(s"lapi_pruning_contract_candidate is empty, nothing to prune")
+        Nil -> false
+      } else if (contractCount > contractPruningBatchSize.value.toLong) {
+        logger.info(
+          s"lapi_pruning_contract_candidate is holding $contractCount candidates, pruning the maximum, ${contractPruningBatchSize.value} candidates"
+        )
+        doPrune() -> true
+      } else {
+        logger.info(
+          s"lapi_pruning_contract_candidate is holding $contractCount candidates, pruning all candidates"
+        )
+        doPrune() -> false
       }
-
-      logger.info("Clean table for storing candidate contracts")
-      queryStrategy.cleanTable("lapi_pruning_contract_candidate")
-      logger.info(s"Finished pruning of ${prunedContractIds.size} contracts.")
-      prunedContractIds
     }(connection, noTracingLogger)
   }
 
@@ -910,40 +965,38 @@ abstract class EventStorageBackendTemplate(
   ): Unit =
     queryStrategy.vacuumAndReindexTable("lapi_pruning_contract_candidate")
 
-  override def cleanPruningCandidates(contractPruningDbLockMeta: DbLockMeta)(implicit
+  override def cleanPruningCandidates()(implicit
       connection: Connection,
       traceContext: TraceContext,
   ): Unit = {
-    lockExclusivelyContractPruningProcessingTable(contractPruningDbLockMeta)
-
     // Please note: these queries are deliberately not constraint by the ledger end watermark, as the actively
     // inserted events must be also considered for pruning.
     logger.info(s"Start removing pruning contract candidates")
     val removedActivate = SQL"""
-    DELETE FROM lapi_pruning_contract_candidate
+    DELETE FROM lapi_pruning_contract_candidate_temp
     WHERE
       EXISTS (
         SELECT 1
         FROM lapi_events_activate_contract
         WHERE
-          lapi_events_activate_contract.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
+          lapi_events_activate_contract.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
       )""".executeUpdate()
     // Please note: deactivations do not need to be considered separately as those are not defining any further contracts
     logger.info(
       s"Removed $removedActivate contract pruning candidates used by activate/deactivate events"
     )
     val removedWitnessed = SQL"""
-    DELETE FROM lapi_pruning_contract_candidate
+    DELETE FROM lapi_pruning_contract_candidate_temp
     WHERE
       EXISTS (
         SELECT 1
         FROM lapi_events_various_witnessed
         WHERE
-          lapi_events_various_witnessed.internal_contract_id = lapi_pruning_contract_candidate.internal_contract_id
+          lapi_events_various_witnessed.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
       )""".executeUpdate()
     logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
-    logger.info("Analyze lapi_pruning_contract_candidate table")
-    SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+    logger.info("Analyze lapi_pruning_contract_candidate_temp table")
+    SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate_temp")}".execute().discard
   }
 
   override def addContractPruningCandidatesAfter(

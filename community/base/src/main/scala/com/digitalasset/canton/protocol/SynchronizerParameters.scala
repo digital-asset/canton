@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import cats.instances.option.*
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.v30 as cryptoV30
@@ -109,7 +109,11 @@ final case class StaticSynchronizerParameters private (
   ] = StaticSynchronizerParameters.protocolVersionRepresentativeFor(protocolVersion)
 
   // Ensure the invariant related to default values holds
-  validateInstance().valueOr(err => throw new InvalidStaticSynchronizerParameters(err))
+  validateInstance().valueOr(err =>
+    throw new InvalidStaticSynchronizerParameters(
+      s"Invalid static synchronizer parameters for protocol version $protocolVersion: $err"
+    )
+  )
 
   @transient override protected lazy val companionObj: StaticSynchronizerParameters.type =
     StaticSynchronizerParameters
@@ -411,13 +415,18 @@ object StaticSynchronizerParameters
   private def checkProtoVersionCompatibility(
       protocolVersion: ProtocolVersion,
       protoVersion: ProtoVersion,
-  ): ParsingResult[Unit] = EitherUtil.condUnit(
-    protoVersionFor(protocolVersion) == protoVersion,
-    InvariantViolation(
-      "protocol_version",
-      s"Synchronizer parameters with PV $protocolVersion cannot be deserialized from $protoVersion",
-    ),
-  )
+  ): ParsingResult[Unit] =
+    for {
+      expectedProtoVersion <- protoVersionFor(protocolVersion).leftMap(OtherError(_))
+
+      _ <- EitherUtil.condUnit(
+        expectedProtoVersion == protoVersion,
+        InvariantViolation(
+          "protocol_version",
+          s"Synchronizer parameters with PV $protocolVersion cannot be deserialized from $protoVersion",
+        ),
+      )
+    } yield ()
 
   class InvalidStaticSynchronizerParameters(message: String) extends RuntimeException(message) {
     lazy val toProtoDeserializationError: ProtoDeserializationError.InvariantViolation =

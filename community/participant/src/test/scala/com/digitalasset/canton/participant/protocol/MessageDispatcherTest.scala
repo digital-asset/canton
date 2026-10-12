@@ -178,7 +178,6 @@ trait MessageDispatcherTest {
         identityProcessor.apply(
           any[SequencerCounter],
           any[SequencedTime],
-          any[Option[CantonTimestamp]],
           any[Traced[List[DefaultOpenEnvelope]]],
         )
       )
@@ -188,7 +187,6 @@ trait MessageDispatcherTest {
       when(
         trafficProcessor.processSetTrafficPurchasedEnvelopes(
           any[CantonTimestamp],
-          any[Option[CantonTimestamp]],
           any[List[DefaultOpenEnvelope]],
         )(anyTraceContext)
       ).thenReturn(FutureUnlessShutdown.unit)
@@ -313,7 +311,6 @@ trait MessageDispatcherTest {
       batch: Batch[DefaultOpenEnvelope],
       ts: CantonTimestamp = CantonTimestamp.Epoch,
       messageId: Option[MessageId] = None,
-      topologyTimestampO: Option[CantonTimestamp] = None,
   ): Deliver[Batch[DefaultOpenEnvelope]] =
     Deliver.create(
       None,
@@ -321,7 +318,6 @@ trait MessageDispatcherTest {
       psid,
       messageId,
       batch,
-      topologyTimestampO,
       Option.empty[TrafficReceipt],
     )
 
@@ -486,7 +482,6 @@ trait MessageDispatcherTest {
       verify(sut.topologyProcessor, atLeastOnce).apply(
         isEq(sc),
         isEq(SequencedTime(ts)),
-        any[Option[CantonTimestamp]],
         any[Traced[List[DefaultOpenEnvelope]]],
       )
       succeed
@@ -637,7 +632,6 @@ trait MessageDispatcherTest {
         when(
           sut.trafficProcessor.processSetTrafficPurchasedEnvelopes(
             any[CantonTimestamp],
-            any[Option[CantonTimestamp]],
             any[Seq[DefaultOpenEnvelope]],
           )(anyTraceContext)
         ).thenAnswer {
@@ -648,7 +642,6 @@ trait MessageDispatcherTest {
         handle(sut, sc, event) {
           verify(sut.trafficProcessor).processSetTrafficPurchasedEnvelopes(
             isEq(ts),
-            isEq(None),
             any[Seq[DefaultOpenEnvelope]],
           )(anyTraceContext)
           succeed
@@ -721,7 +714,6 @@ trait MessageDispatcherTest {
           .apply(
             any[SequencerCounter],
             any[SequencedTime],
-            any[Option[CantonTimestamp]],
             any[Traced[List[DefaultOpenEnvelope]]],
           )
       )
@@ -762,7 +754,6 @@ trait MessageDispatcherTest {
           .apply(
             any[SequencerCounter],
             any[SequencedTime],
-            any[Option[CantonTimestamp]],
             any[Traced[List[DefaultOpenEnvelope]]],
           )
       )
@@ -887,7 +878,6 @@ trait MessageDispatcherTest {
           verify(sut.topologyProcessor, atLeastOnce).apply(
             isEq(sc),
             isEq(SequencedTime(ts)),
-            isEq(None),
             isEq(Traced(List.empty)),
           )
 

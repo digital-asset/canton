@@ -5,7 +5,11 @@ package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -30,20 +34,23 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 final case class SubscriptionLivenessLimits(
     maxTimestampDelta: NonNegativeFiniteDuration,
     maxOrdinalDelta: NonNegativeInt,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   private[sequencing] def toProtoV30: v30.SubscriptionLivenessLimits =
     v30.SubscriptionLivenessLimits(
       maxTimestampDelta = Some(maxTimestampDelta.toProtoPrimitive),
       maxOrdinalDelta = maxOrdinalDelta.unwrap,
     )
 
-  override protected def pretty: Pretty[SubscriptionLivenessLimits] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[SubscriptionLivenessLimits] =
+    SubscriptionLivenessLimits
+}
+
+object SubscriptionLivenessLimits extends PrettyPrintingCompanion[SubscriptionLivenessLimits] {
+  override protected val pretty: Pretty[SubscriptionLivenessLimits] = prettyOfClass(
     param("maxTimestampDelta", _.maxTimestampDelta),
     param("maxOrdinalDelta", _.maxOrdinalDelta),
   )
-}
 
-object SubscriptionLivenessLimits {
   val default: SubscriptionLivenessLimits = SubscriptionLivenessLimits(
     maxTimestampDelta = NonNegativeFiniteDuration.tryOfMinutes(2),
     maxOrdinalDelta = NonNegativeInt.tryCreate(50),

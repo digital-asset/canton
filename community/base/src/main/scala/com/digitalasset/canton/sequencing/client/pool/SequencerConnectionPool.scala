@@ -22,7 +22,11 @@ import com.digitalasset.canton.lifecycle.{
   HasRunOnClosing,
   OnShutdownRunner,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -196,18 +200,12 @@ object SequencerConnectionPool {
       maxRestartConnectionDelay: NonNegativeFiniteDuration,
       warnConnectionValidationDelay: NonNegativeFiniteDuration,
       expectedPsidO: Option[PhysicalSynchronizerId] = None,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     // TODO(i24780): when persisting, use com.digitalasset.canton.version.Invariant machinery for validation
     import SequencerConnectionPoolConfig.*
 
-    override protected def pretty: Pretty[SequencerConnectionPoolConfig] = prettyOfClass(
-      param("connections", _.connections),
-      param("trustThreshold", _.trustThreshold),
-      param("minRestartConnectionDelay", _.minRestartConnectionDelay),
-      param("maxRestartConnectionDelay", _.maxRestartConnectionDelay),
-      param("warnConnectionValidationDelay", _.warnConnectionValidationDelay),
-      paramIfDefined("expectedPsidO", _.expectedPsidO),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerConnectionPoolConfig] =
+      SequencerConnectionPoolConfig
 
     def validate: Either[SequencerConnectionPoolError.InvalidConfigurationError, Unit] = {
       val (names, endpoints) = connections.map(conn => conn.name -> conn.endpoint).unzip
@@ -255,12 +253,27 @@ object SequencerConnectionPool {
     }
   }
 
-  object SequencerConnectionPoolConfig {
+  object SequencerConnectionPoolConfig
+      extends PrettyPrintingCompanion[SequencerConnectionPoolConfig] {
+    override protected val pretty: Pretty[SequencerConnectionPoolConfig] = prettyOfClass(
+      param("connections", _.connections),
+      param("trustThreshold", _.trustThreshold),
+      param("minRestartConnectionDelay", _.minRestartConnectionDelay),
+      param("maxRestartConnectionDelay", _.maxRestartConnectionDelay),
+      param("warnConnectionValidationDelay", _.warnConnectionValidationDelay),
+      paramIfDefined("expectedPsidO", _.expectedPsidO),
+    )
+
     private[sequencing] final case class ChangedConnections(
         added: Set[ConnectionConfig],
         removed: Set[ConnectionConfig],
-    ) extends PrettyPrinting {
-      override protected def pretty: Pretty[ChangedConnections] = prettyOfClass(
+    ) extends PrettyPrintingFromCompanion {
+      override def prettyCompanion: PrettyPrintingCompanion[ChangedConnections] =
+        ChangedConnections
+    }
+    private[sequencing] object ChangedConnections
+        extends PrettyPrintingCompanion[ChangedConnections] {
+      override protected val pretty: Pretty[ChangedConnections] = prettyOfClass(
         param("added", _.added),
         param("removed", _.removed),
       )

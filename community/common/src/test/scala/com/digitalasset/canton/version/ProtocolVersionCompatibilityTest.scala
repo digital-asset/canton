@@ -8,12 +8,12 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.version.ProtocolVersionCompatibility.canClientConnectToServer
 import org.scalatest.wordspec.AnyWordSpec
 
-class ProtocolVersionCompatibilityTest extends AnyWordSpec with BaseTest {
+final class ProtocolVersionCompatibilityTest extends AnyWordSpec with BaseTest {
   "ProtocolVersionCompatibility" should {
     "version check" should {
       "be successful for matching versions" in {
         canClientConnectToServer(
-          clientSupportedVersions = Seq(ProtocolVersion.v34, ProtocolVersion.dev),
+          clientSupportedVersions = Seq(ProtocolVersion.v36, ProtocolVersion.dev),
           serverVersion = ProtocolVersion.dev,
           None,
         ) shouldBe Either.unit
@@ -21,13 +21,13 @@ class ProtocolVersionCompatibilityTest extends AnyWordSpec with BaseTest {
 
       "fail with a nice message if incompatible" in {
         canClientConnectToServer(
-          clientSupportedVersions = Seq(ProtocolVersion.v34),
+          clientSupportedVersions = Seq(ProtocolVersion.latest),
           serverVersion = ProtocolVersion.dev,
           None,
-        ).left.value shouldBe (VersionNotSupportedError(
+        ).left.value shouldBe VersionNotSupportedError(
           ProtocolVersion.dev,
-          Seq(ProtocolVersion.v34),
-        ))
+          Seq(ProtocolVersion.latest),
+        )
       }
     }
   }

@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from itertools import groupby
 from typing import Optional
 from unittest.mock import patch
@@ -32,6 +33,7 @@ from flaky_common import (
     check_result,
     create_issue_table_header,
     create_issue_table_row,
+    with_evidence_link,
     get_ci_commit_hash,
     get_ci_job_name,
     flaky_test_project,
@@ -52,6 +54,23 @@ from flaky_common import (
     assert_required_env_vars,
     ci_required_context_vars,
     run_guarded_self_test,
+    FAILING_TESTS_MAX,
+    is_dry_run,
+    artifact_dir,
+    is_github_actions_ci,
+    get_ci_build_url,
+    get_ci_node_index,
+    get_ci_parallel_run_url,
+    get_ci_log_url,
+    get_ci_commit_url,
+)
+from collect_flake_evidence import (
+    FLAKE_PKG_RETENTION_DAYS,
+    SHARD_BUNDLE_RETENTION_DAYS,
+    evidence_label,
+    read_evidence,
+    render_evidence_comment,
+    parse_evidence_marker,
 )
 
 
@@ -93,7 +112,7 @@ def _failed_earlier_today(body: str) -> bool:
     return any(date == today for date in _ROW_DATE_RE.findall(body))
 
 
-def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
+def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optional[str] = None):
     title = format_issue_title(issue)
     idx = None
     project_item_id = None
@@ -160,11 +179,17 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
         # decision (grace period + once-a-day cap once assigned), since it is the only
         # place that builds and writes the body a Slack-alert marker would be stamped into.
         return update_issue(
-            idx, title, body, cause, has_assignee=has_assignee, assigned_at=assigned_at
+            idx,
+            title,
+            body,
+            cause,
+            evidence_comment,
+            has_assignee=has_assignee,
+            assigned_at=assigned_at,
         )
 
     else:
-        create_issue(title, cause)
+        create_issue(title, cause, evidence_comment)
 
 
 def gh_assign_release_line(idx: str, project_item_id: str):
@@ -201,11 +226,12 @@ def gh_issue_create_cmd(title: str, body: str):
             "DACH-NY/canton",
             "--title",
             title,
-            "--body",
-            body,
+            "--body-file",
+            "-",
             "--milestone",
             milestone,
-        ]
+        ],
+        stdin=body,
     )
     check_result(result)
     return result
@@ -218,19 +244,214 @@ def gh_issue_edit_cmd(idx: str, title: str, body: str):
     if reopen_result.returncode != 0 and "already open" not in reopen_result.stderr.lower():
         check_result(reopen_result)
     result = run_gh_with_retries(
-        ["issue", "edit", idx, "--repo", "DACH-NY/canton", "--title", title, "--body", body]
+        ["issue", "edit", idx, "--repo", "DACH-NY/canton", "--title", title, "--body-file", "-"],
+        stdin=body,
     )
     check_result(result)
     return result
 
 
-def create_issue(title: str, cause: str = DEFAULT_CAUSE):
-    body = f"""This issue was created automatically by the CI system. Please fix the test before closing the issue.
-
-{create_issue_table_header()}
-{create_issue_table_row(cause)}"""
+def create_issue(
+    title: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optional[str] = None
+) -> Optional[str]:
+    row = create_issue_table_row(cause)
+    intro = "This issue was created automatically by the CI system. Please fix the test before closing the issue."
+    body = f"{intro}\n\n{create_issue_table_header()}\n{row}"
     result = gh_issue_create_cmd(title, body)
     print(f"Created issue: {result.stdout.strip()}")
+    idx = issue_number_from_url(result.stdout)
+    if idx and evidence_comment:
+        # The comment needs the issue to exist, so the first row gets its
+        # Evidence link in a second edit.
+        evidence_url = post_evidence_comment(idx, evidence_comment)
+        if evidence_url:
+            linked = (
+                f"{intro}\n\n{create_issue_table_header()}\n"
+                f"{with_evidence_link(row, evidence_url, comment_label(evidence_comment))}"
+            )
+            try:
+                gh_issue_edit_cmd(idx, title, linked)
+            except Exception as e:
+                print(f"::warning::Could not link the evidence from issue #{idx}: {e}")
+    return idx
+
+
+def issue_number_from_url(gh_output: str) -> Optional[str]:
+    """`gh issue create` prints the new issue's URL; returns its number."""
+    match = re.search(r"/issues/(\d+)\s*$", gh_output.strip())
+    return match.group(1) if match else None
+
+
+# --- evidence comments ------------------------------------------------------
+#
+# collect_flake_evidence.py writes evidence.json before this step runs; each
+# created or updated issue gets one comment with that evidence (stack traces,
+# log problems, links to the CI log and the artifacts). Comments, not the body: the
+# body table is parsed by the streak logic and close_stale_flake_issues.py.
+
+
+def evidence_artifacts(package_dirs: list[str]) -> list:
+    """The artifacts of this failure, as named and uploaded by
+    .github/actions/test/cleanup_test_job/action.yml (FLAKE_PKG_ARTIFACT_*,
+    SHARD_BUNDLE_ARTIFACT_*).
+
+    The flake-pkg artifact holds the investigation packages of all failing suites
+    of the shard, so it is only listed for an issue whose own suites have a
+    package in it, naming the directories that are its own.
+    """
+    env = os.environ.get
+    dirs = ", ".join(f"`{d}/`" for d in package_dirs)
+    packages = "packages" if len(package_dirs) > 1 else "package"
+    candidates = [
+        (
+            env("FLAKE_PKG_ARTIFACT_NAME") if package_dirs else None,
+            env("FLAKE_PKG_ARTIFACT_ID"),
+            env("FLAKE_PKG_ARTIFACT_URL"),
+            f"{dirs} in it: the investigation {packages} of this failure (README, manifest,"
+            " the suite's log, a log per failing test, JUnit reports, problem lines)",
+            FLAKE_PKG_RETENTION_DAYS,
+        ),
+        (
+            env("SHARD_BUNDLE_ARTIFACT_NAME"),
+            env("SHARD_BUNDLE_ARTIFACT_ID"),
+            env("SHARD_BUNDLE_ARTIFACT_URL"),
+            "the shard bundle: all logs, JUnit reports, debug files",
+            SHARD_BUNDLE_RETENTION_DAYS,
+        ),
+    ]
+    return [
+        {
+            "name": name,
+            "id": artifact_id or None,
+            "url": url or None,
+            "description": what,
+            "retention_days": days,
+        }
+        for name, artifact_id, url, what, days in candidates
+        if name
+    ]
+
+
+def evidence_context(title: str, cause: str, package_dirs: list[str]) -> dict:
+    sha = get_ci_commit_hash()
+    build_url = get_ci_build_url()
+    node = get_ci_node_index()
+    github = is_github_actions_ci()
+    return {
+        "title": title,
+        "sha": sha,
+        "commit_url": get_ci_commit_url(sha),
+        "job": get_ci_job_name(),
+        "shard": node,
+        "job_url": get_ci_parallel_run_url(build_url, node),
+        "log_url": get_ci_log_url(build_url, node),
+        # The artifacts list is a GHA concept; CircleCI keeps them on the job page.
+        "run_url": build_url if github else "",
+        "run_id": os.environ.get("GITHUB_RUN_ID", "") if github else "",
+        "repo": os.environ.get("GITHUB_REPOSITORY", "DACH-NY/canton"),
+        "cause": cause,
+        "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "artifacts": evidence_artifacts(package_dirs) if github else [],
+    }
+
+
+def evidence_comments_by_title(failing_tests, cause_by_title, evidence) -> dict[str, str]:
+    """{title: rendered comment} for every title with evidence for any of its variants."""
+    records: dict[str, list] = {}
+    for test_name in failing_tests:
+        record = evidence.get(test_name)
+        if record:
+            records.setdefault(format_issue_title(test_name), []).append(record)
+    return {
+        title: render_evidence_comment(
+            recs,
+            evidence_context(
+                title,
+                cause_by_title[title],
+                [r["package_dir"] for r in recs if r.get("package_dir")],
+            ),
+        )
+        for title, recs in records.items()
+    }
+
+
+def comment_label(comment: str) -> str:
+    """The text of the table's link to an evidence comment, e.g. "2 failing tests"."""
+    meta = parse_evidence_marker(comment) or {}
+    # Comments from before test_count only carry the names.
+    return evidence_label(meta.get("test_count", len(meta.get("tests") or [])))
+
+
+def _evidence_key(meta: dict) -> tuple:
+    # "node" is what the shard was called in the first PR-test comments.
+    return (meta.get("sha"), meta.get("job"), str(meta.get("shard", meta.get("node"))))
+
+
+def existing_evidence(idx: str) -> dict:
+    """{(sha, job, shard): comment URL} of the evidence comments already on the issue."""
+    result = run_gh_with_retries(
+        [
+            "api",
+            f"repos/DACH-NY/canton/issues/{idx}/comments",
+            "--paginate",
+            "--jq",
+            '.[] | select(.body | startswith("<!-- flaky-evidence v1"))'
+            ' | "\\(.html_url) \\(.body | split("\\n")[0])"',
+        ]
+    )
+    check_result(result)
+    found = {}
+    for line in result.stdout.splitlines():
+        url, _, marker = line.partition(" ")
+        meta = parse_evidence_marker(marker)
+        if meta:
+            found[_evidence_key(meta)] = url
+    return found
+
+
+def post_evidence_comment(idx: str, comment: str) -> Optional[str]:
+    """Posts the evidence once per (commit, job, shard) and returns the comment's URL,
+    also when it was already there. Never fails the pipeline: returns None instead."""
+    try:
+        key = _evidence_key(parse_evidence_marker(comment) or {})
+        existing_url = existing_evidence(idx).get(key)
+        if existing_url:
+            print(f"Issue #{idx} already has evidence for {key}, not posting it again.")
+            return existing_url
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(comment)
+            body_file = f.name
+        try:
+            result = run_gh_with_retries(
+                ["issue", "comment", str(idx), "--repo", "DACH-NY/canton", "--body-file", body_file]
+            )
+            check_result(result)
+        finally:
+            os.unlink(body_file)
+        # `gh issue comment` prints the new comment's URL.
+        url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
+        print(
+            f"Posted failure evidence: {url or f'https://github.com/DACH-NY/canton/issues/{idx}'}"
+        )
+        return url
+    except Exception as e:
+        print(f"::warning::Could not post failure evidence to #{idx}: {e}")
+        return None
+
+
+def write_dry_run_comments(comments: dict[str, str]) -> None:
+    """FLAKY_DRY_RUN: write the comments to files and the job summary, call no GitHub API."""
+    out_dir = os.path.join(artifact_dir(), "comments")
+    os.makedirs(out_dir, exist_ok=True)
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    for title, comment in comments.items():
+        path = os.path.join(out_dir, re.sub(r"[^A-Za-z0-9_.-]", "_", title)[:150] + ".md")
+        with open(path, "w") as f:
+            f.write(comment)
+        print(f"Dry run: wrote evidence comment for '{title}' to {path} ({len(comment)} chars)")
+        if summary_path:
+            with open(summary_path, "a") as f:
+                f.write(f"\n## Dry run: evidence comment for {title}\n\n{comment}\n")
 
 
 def extract_commit_hashes_from_body(body: str) -> list[str]:
@@ -369,6 +590,10 @@ def flake_predates_close(idx: str, commit_hash: str) -> bool:
             ["api", "graphql", "-f", f"query={query}", "-F", f"n={idx}", "-f", f"oid={commit_hash}"]
         )
         if result.returncode != 0:
+            print(
+                f"flake_predates_close: gh api graphql failed for #{idx}/{commit_hash[:12]}: "
+                f"{result.stderr.strip()}"
+            )
             return False
         repo = json.loads(result.stdout)["data"]["repository"]
         issue, commit = repo["issue"], repo["object"]
@@ -395,25 +620,51 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
 
 # Header rows of the pre-Cause (five-column) failure-history table. Existing
 # issues carry these verbatim, so we rewrite them in place when appending a row.
-_OLD_HEADER_LINE = "| Date | Job | Node | Build | Commit |"
-_OLD_SEPARATOR_LINE = "|---|---|---|---|---|"
-_NEW_HEADER_LINE = "| Date | Job | Node | Build | Commit | Cause |"
-_NEW_SEPARATOR_LINE = "|---|---|---|---|---|---|"
+_HEADER_5 = "| Date | Job | Node | Build | Commit |"
+_HEADER_6 = "| Date | Job | Node | Build | Commit | Cause |"
+_OLD_HEADER_LINES = (_HEADER_5, _HEADER_6)
+_OLD_SEPARATOR_LINES = ("|---|---|---|---|---|", "|---|---|---|---|---|---|")
+_NEW_HEADER_LINE, _NEW_SEPARATOR_LINE = create_issue_table_header().split("\n")
 
 
-def migrate_table_header_to_cause(body: str) -> str:
-    """Ensures the issue body has the six-column (Cause) failure-history header.
+def _migrate_row(row: str, old_header: str) -> str:
+    """Moves an existing row's cells into the current column order (Evidence before Cause)."""
+    cells = row.strip()[1:-1].split("|")
+    if old_header == _HEADER_6 and len(cells) == 6:
+        cells.insert(5, "  ")  # a Cause but no Evidence
+    else:
+        return row  # five-cell rows: no Evidence, no Cause, nothing to move
+    return "|" + "|".join(cells) + "|"
 
-    New issues get the header appended. Issues still on the old five-column
-    header get it upgraded in place so the appended Cause cells line up. Their
-    existing rows render an empty Cause cell, which GitHub tolerates.
+
+def migrate_table_header(body: str) -> str:
+    """Ensures the issue body has the current seven-column table (... | Evidence | Cause |).
+
+    New issues get the header appended. Issues with an older header get it
+    upgraded in place, and their existing rows are rewritten into the new
+    column order, so a Cause never shows under Evidence. Five-cell rows from
+    before the Cause column render their missing cells empty. Lines are
+    compared whole: each older header and separator is a prefix of the next.
     """
-    if _NEW_HEADER_LINE in body:
+    lines = body.split("\n")
+    if _NEW_HEADER_LINE in lines:
         return body
-    if _OLD_HEADER_LINE in body:
-        body = body.replace(_OLD_HEADER_LINE, _NEW_HEADER_LINE)
-        return body.replace(_OLD_SEPARATOR_LINE, _NEW_SEPARATOR_LINE)
-    return body + "\n" + create_issue_table_header()
+    if not any(line in _OLD_HEADER_LINES for line in lines):
+        return body + "\n" + create_issue_table_header()
+    migrated = []
+    old_header = None  # set while inside a table with an old header
+    for line in lines:
+        if line in _OLD_HEADER_LINES:
+            old_header = line
+            line = _NEW_HEADER_LINE
+        elif line in _OLD_SEPARATOR_LINES:
+            line = _NEW_SEPARATOR_LINE
+        elif old_header and line.startswith("|"):
+            line = _migrate_row(line, old_header)
+        else:
+            old_header = None
+        migrated.append(line)
+    return "\n".join(migrated)
 
 
 def update_issue(
@@ -421,6 +672,7 @@ def update_issue(
     title: str,
     body: str,
     cause: str = DEFAULT_CAUSE,
+    evidence_comment: Optional[str] = None,
     has_assignee: bool = False,
     assigned_at: Optional[datetime.datetime] = None,
 ) -> Optional[tuple[str, str, str]]:
@@ -431,7 +683,7 @@ def update_issue(
         else CONSECUTIVE_FAILURES_THRESHOLD
     )
 
-    body = migrate_table_header_to_cause(body)
+    body = migrate_table_header(body)
     commit_hash = get_ci_commit_hash()
 
     if commit_hash != 'unknown' and flake_predates_close(idx, commit_hash):
@@ -477,7 +729,10 @@ def update_issue(
         else:
             notify = True
 
-    new_body = f"{body}\n{create_issue_table_row(cause)}"
+    # The comment first, so the new row can link to it.
+    evidence_url = post_evidence_comment(idx, evidence_comment) if evidence_comment else None
+    label = comment_label(evidence_comment) if evidence_comment else ""
+    new_body = f"{body}\n{create_issue_table_row(cause, evidence_url, label)}"
     gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if notify:
@@ -533,7 +788,7 @@ def test_most_specific_cause_by_title():
 
 
 def self_test():
-    test_migrate_table_header_to_cause()
+    test_migrate_table_header()
     test_most_specific_cause_by_title()
     test_update_issue_old_format()
     test_update_issue_new_format()
@@ -547,7 +802,236 @@ def self_test():
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
     test_flake_predates_close()
+    test_issue_number_from_url()
+    test_package_artifact_only_for_issues_with_a_package()
+    test_post_evidence_comment_dedupes_and_never_raises()
+    test_create_issue_posts_evidence()
+    test_update_issue_links_evidence_in_new_row()
+    test_run_dry_run_writes_comments_without_github()
+    test_run_reports_issues_even_if_evidence_is_broken()
     print("manage_flaky_issues self-checks passed")
+
+
+def test_run_reports_issues_even_if_evidence_is_broken():
+    reported: list = []
+    with tempfile.TemporaryDirectory() as tmp:
+        failing, evidence, streaks = _write_pipeline_inputs(tmp)
+        with open(evidence, "w") as f:
+            f.write("{ not json")
+        env = {
+            "CIRCLECI": "true",
+            "GITHUB_ACTIONS": "false",
+            "CIRCLE_SHA1": "c" * 40,
+            "CIRCLE_JOB": "test",
+            "CIRCLE_NODE_INDEX": "0",
+            "CIRCLE_BUILD_URL": "https://circleci.com/gh/DACH-NY/canton/1",
+        }
+        with (
+            patch.dict(os.environ, env),
+            patch(f"{__name__}.should_report_issues", return_value=True),
+            patch(
+                f"{__name__}.report_issue",
+                side_effect=lambda name, cause, comment: reported.append((name, comment)),
+            ),
+        ):
+            run(failing, streaks, evidence)
+    assert reported == [("FooTest", None), ("NoEvidenceTest", None)], reported
+
+
+def test_package_artifact_only_for_issues_with_a_package():
+    env = {
+        "GITHUB_ACTIONS": "true",
+        "CIRCLECI": "false",
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_JOB": "test",
+        "MATRIX_SHARD": "0",
+        "GITHUB_RUN_ID": "7",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_REPOSITORY": "DACH-NY/canton",
+        "FLAKE_PKG_ARTIFACT_NAME": "flake-pkg-test-run-7",
+        "FLAKE_PKG_ARTIFACT_ID": "11",
+        "FLAKE_PKG_ARTIFACT_URL": "https://github.com/DACH-NY/canton/actions/runs/7/artifacts/11",
+        "SHARD_BUNDLE_ARTIFACT_NAME": "test-bundle-run-7",
+        "SHARD_BUNDLE_ARTIFACT_ID": "12",
+        "SHARD_BUNDLE_ARTIFACT_URL": "https://github.com/DACH-NY/canton/actions/runs/7/artifacts/12",
+    }
+
+    def record(suite, package_dir):
+        return {
+            "suite": suite,
+            "tests": [],
+            "problems": ["WARN x:y - z"],
+            "tids": [],
+            "package_dir": package_dir,
+        }
+
+    evidence = {
+        "FooTest": record("FooTest", "FooTest"),
+        "WARN i.g.SomeLogger": record("WARN i.g.SomeLogger", None),
+    }
+    failing = list(evidence)
+    causes = {name: DEFAULT_CAUSE for name in failing}
+    with patch.dict(os.environ, env, clear=True):
+        comments = evidence_comments_by_title(
+            failing, most_specific_cause_by_title(failing, causes), evidence
+        )
+    with_log = comments[format_issue_title("FooTest")]
+    without_log = comments[format_issue_title("WARN i.g.SomeLogger")]
+    assert "`FooTest/` in it: the investigation package of this failure" in with_log, with_log
+    # Another suite's package in the shard's artifact is no evidence for this issue.
+    assert "flake-pkg-test-run-7" not in without_log, without_log
+    # The shard bundle, with the whole log, is listed for both.
+    assert "test-bundle-run-7" in with_log and "test-bundle-run-7" in without_log
+
+
+def test_issue_number_from_url():
+    assert issue_number_from_url("https://github.com/DACH-NY/canton/issues/31337\n") == "31337"
+    assert issue_number_from_url("something else") is None
+
+
+def _evidence_comment(sha="a" * 40, job="test", shard="0") -> str:
+    record = {
+        "suite": "FooTest",
+        "tests": [{"name": "foo works", "type": "E", "text": "boom"}],
+        "problems": [],
+        "tids": [],
+        "package_dir": None,
+    }
+    ctx = {
+        "title": "[main] Flaky FooTest",
+        "sha": sha,
+        "commit_url": "u",
+        "job": job,
+        "shard": shard,
+        "job_url": "j",
+        "run_url": "",
+        "cause": DEFAULT_CAUSE,
+        "date": "d",
+        "artifacts": [],
+    }
+    return render_evidence_comment([record], ctx)
+
+
+def test_post_evidence_comment_dedupes_and_never_raises():
+    comment = _evidence_comment()
+    existing_url = "https://github.com/DACH-NY/canton/issues/42#issuecomment-1"
+    new_url = "https://github.com/DACH-NY/canton/issues/42#issuecomment-2"
+    existing_line = f"{existing_url} {comment.splitlines()[0]}"
+    calls: list = []
+
+    def fake_gh(args):
+        calls.append(args)
+        if args[0] == "api":
+            return subprocess.CompletedProcess(args, 0, existing_line + "\n", "")
+        return subprocess.CompletedProcess(args, 0, new_url + "\n", "")
+
+    # Same (sha, job, shard) already on the issue: no second comment, its URL is reused.
+    with patch(f"{__name__}.run_gh_with_retries", side_effect=fake_gh):
+        assert post_evidence_comment("42", comment) == existing_url
+    assert [c[0] for c in calls] == ["api"], calls
+
+    # A different shard is new evidence: posted from a body file, its URL returned.
+    calls.clear()
+    with patch(f"{__name__}.run_gh_with_retries", side_effect=fake_gh):
+        assert post_evidence_comment("42", _evidence_comment(shard="1")) == new_url
+    assert [c[0] for c in calls] == ["api", "issue"], calls
+    assert calls[1][:3] == ["issue", "comment", "42"] and "--body-file" in calls[1], calls
+
+    # A gh failure is only a warning.
+    with patch(
+        f"{__name__}.run_gh_with_retries",
+        return_value=subprocess.CompletedProcess([], 1, "", "HTTP 500"),
+    ):
+        assert post_evidence_comment("42", comment) is None  # must not raise
+
+
+def test_create_issue_posts_evidence():
+    comment = _evidence_comment()
+    posted: list = []
+    edits: list = []
+    url = "https://github.com/DACH-NY/canton/issues/99#issuecomment-5"
+    created = subprocess.CompletedProcess(
+        [], 0, "https://github.com/DACH-NY/canton/issues/99\n", ""
+    )
+
+    def fake_post(idx, comment):
+        posted.append((idx, comment))
+        return url
+
+    with (
+        patch(f"{__name__}.gh_issue_create_cmd", return_value=created) as create,
+        patch(f"{__name__}.create_issue_table_row", return_value="| row |  | regular |"),
+        patch(f"{__name__}.post_evidence_comment", side_effect=fake_post),
+        patch(f"{__name__}.gh_issue_edit_cmd", side_effect=lambda i, t, b: edits.append((i, b))),
+    ):
+        assert create_issue("[main] Flaky FooTest", DEFAULT_CAUSE, comment) == "99"
+        assert create.call_args[0][1].endswith("\n| row |  | regular |"), create.call_args
+        assert create_issue("[main] Flaky FooTest") == "99"
+    assert posted == [("99", comment)], posted
+    # Only the issue with evidence gets the second edit, linking the comment from its row.
+    assert len(edits) == 1 and edits[0][0] == "99", edits
+    assert edits[0][1].endswith(f"\n| row | [1 failing test]({url}) | regular |"), edits
+
+
+def test_update_issue_links_evidence_in_new_row():
+    url = "https://github.com/DACH-NY/canton/issues/42#issuecomment-7"
+    env = {
+        "CIRCLECI": "true",
+        "GITHUB_ACTIONS": "false",
+        "CIRCLE_SHA1": "unknown",
+        "CIRCLE_JOB": "test",
+        "CIRCLE_NODE_INDEX": "0",
+        "CIRCLE_BUILD_URL": "https://circleci.com/gh/DACH-NY/canton/1",
+    }
+    order: list = []
+    with (
+        patch.dict(os.environ, env),
+        patch(
+            f"{__name__}.post_evidence_comment",
+            side_effect=lambda i, c: order.append("comment") or url,
+        ),
+        patch(
+            f"{__name__}.gh_issue_edit_cmd",
+            side_effect=lambda i, t, b: order.append(("edit", b)),
+        ),
+    ):
+        update_issue("42", "Flaky FooTest", "auto-created", DEFAULT_CAUSE, _evidence_comment())
+    assert order[0] == "comment", "the comment is posted first so the row can link it"
+    assert order[1][1].rstrip().endswith(f"| [1 failing test]({url}) | {DEFAULT_CAUSE} |"), order
+
+
+def _write_pipeline_inputs(tmp: str) -> tuple:
+    from flaky_common import write_failing_tests
+
+    failing = os.path.join(tmp, "failing_tests.json")
+    write_failing_tests(failing, {"FooTest": DEFAULT_CAUSE, "NoEvidenceTest": DEFAULT_CAUSE})
+    evidence = os.path.join(tmp, "evidence.json")
+    record = {
+        "suite": "FooTest",
+        "tests": [{"name": "foo works", "type": "E", "text": "boom"}],
+        "problems": [],
+        "tids": [],
+        "package_dir": None,
+    }
+    with open(evidence, "w") as f:
+        json.dump({"version": 1, "suites": {"FooTest": record}}, f)
+    return failing, evidence, os.path.join(tmp, "streaks.json")
+
+
+def test_run_dry_run_writes_comments_without_github():
+    with tempfile.TemporaryDirectory() as tmp:
+        failing, evidence, streaks = _write_pipeline_inputs(tmp)
+        env = {"FLAKY_DRY_RUN": "1", "FLAKY_ARTIFACT_DIR": tmp, "GITHUB_ACTIONS": "false"}
+        with (
+            patch.dict(os.environ, env),
+            patch(f"{__name__}.run_gh_with_retries", side_effect=AssertionError("no gh")),
+            patch(f"{__name__}.report_issue", side_effect=AssertionError("no issues")),
+        ):
+            run(failing, streaks, evidence)
+        written = os.listdir(os.path.join(tmp, "comments"))
+        assert len(written) == 1 and "FooTest" in written[0], written
+        with open(os.path.join(tmp, "comments", written[0])) as f:
+            assert parse_evidence_marker(f.read())["tests"] == ["foo works"]
 
 
 def test_flake_predates_close():
@@ -580,6 +1064,17 @@ def test_flake_predates_close():
         return_value=resp("OPEN", None, "2026-09-07T15:02:52Z"),
     ):
         assert flake_predates_close("24208", "d85876fdd63a") is False
+    # gh api itself fails -> fails open to False, and now prints why instead of silently.
+    with (
+        patch(
+            f"{__name__}.run_gh_with_retries",
+            return_value=subprocess.CompletedProcess([], 1, "", "boom"),
+        ),
+        patch("builtins.print") as mock_print,
+    ):
+        assert flake_predates_close("24208", "d85876fdd63a") is False
+    printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
+    assert "24208" in printed and "d85876fdd63a" in printed and "boom" in printed, printed
 
 
 def _nightly_body(commits: list) -> str:
@@ -726,29 +1221,42 @@ def test_update_issue_nightly_streak_labels_and_returns():
         assert labelled == [], "Expected no label when there is no streak"
 
 
-def test_migrate_table_header_to_cause():
-    # A body with no table at all gets the six-column header appended.
+def test_migrate_table_header():
+    # A body with no table at all gets the seven-column header appended.
     plain = "auto-created"
-    migrated = migrate_table_header_to_cause(plain)
+    migrated = migrate_table_header(plain)
     assert migrated.endswith(create_issue_table_header()), migrated
     assert migrated.count(_NEW_HEADER_LINE) == 1, migrated
 
-    # An old five-column table is upgraded in place: header and separator both
-    # become six-column, existing data rows are left untouched.
+    # Five- and six-column tables are upgraded in place: header and separator both
+    # become seven-column, existing data rows are left untouched.
     old_row = "| 2026-04-14 | test | 1 | [1](url) | [a1b2c3d4](commit/x) |"
-    old_table = f"intro\n\n{_OLD_HEADER_LINE}\n{_OLD_SEPARATOR_LINE}\n{old_row}"
-    migrated = migrate_table_header_to_cause(old_table)
-    # Full-line membership, not substring: the old separator is a tail of the new
-    # one, so `old_sep in new_sep` is spuriously True as a substring.
-    lines = migrated.splitlines()
-    assert _NEW_HEADER_LINE in lines and _NEW_SEPARATOR_LINE in lines, migrated
-    assert _OLD_HEADER_LINE not in lines, "old header line must be replaced"
-    assert _OLD_SEPARATOR_LINE not in lines, "old separator must be replaced"
-    assert old_row in lines, "existing data rows must be preserved"
+    for old_header, old_separator in zip(_OLD_HEADER_LINES, _OLD_SEPARATOR_LINES):
+        old_table = f"intro\n\n{old_header}\n{old_separator}\n{old_row}"
+        migrated = migrate_table_header(old_table)
+        # Full-line membership, not substring: each old separator is a prefix of
+        # the next one, so `old_sep in new_sep` is spuriously True as a substring.
+        lines = migrated.splitlines()
+        assert _NEW_HEADER_LINE in lines and _NEW_SEPARATOR_LINE in lines, migrated
+        assert old_header not in lines, "old header line must be replaced"
+        assert old_separator not in lines, "old separator must be replaced"
+        assert old_row in lines, "existing data rows must be preserved"
+        assert migrated.count(_NEW_HEADER_LINE) == 1, migrated
+
+    # Existing rows are moved into the new column order.
+    row6 = "| 2026-04-14 | test | 1 | [1](url) | [a1b2c3d4](commit/x) | timeout |"
+    migrated = migrate_table_header(f"intro\n\n{_HEADER_6}\n|---|---|---|---|---|---|\n{row6}")
+    assert migrated.splitlines()[-1] == (
+        "| 2026-04-14 | test | 1 | [1](url) | [a1b2c3d4](commit/x) |  | timeout |"
+    ), migrated
+    migrated = migrate_table_header(
+        f"intro\n\n{_HEADER_6}\n|---|---|---|---|---|---|\n{row6}\n\ntrailing text"
+    )
+    assert migrated.endswith("\n\ntrailing text"), "text after the table is untouched"
 
     # An already-migrated body is returned unchanged (idempotent).
     already = f"intro\n\n{_NEW_HEADER_LINE}\n{_NEW_SEPARATOR_LINE}\n{old_row}"
-    assert migrate_table_header_to_cause(already) == already
+    assert migrate_table_header(already) == already
 
 
 def test_update_issue_old_format():
@@ -773,7 +1281,7 @@ def test_update_issue_old_format():
         update_issue("42", "Flaky test", old_body, "timeout")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit | Cause |"
+        header = _NEW_HEADER_LINE
         assert header in msg, f"Table header was not injected into old-format body: {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once"
         assert msg.rstrip().endswith("| timeout |"), f"Cause cell missing from appended row: {msg}"
@@ -796,7 +1304,7 @@ def test_update_issue_old_format():
         update_issue("42", "Flaky test", old_body, "timeout")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit | Cause |"
+        header = _NEW_HEADER_LINE
         assert header in msg, f"Table header was not injected into old-format body (GHA): {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once (GHA)"
         assert msg.rstrip().endswith("| timeout |"), (
@@ -827,7 +1335,7 @@ def test_update_issue_new_format():
         update_issue("42", "Flaky test", new_body, "error_other")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit | Cause |"
+        header = _NEW_HEADER_LINE
         assert msg.count(header) == 1, (
             f"Six-column header must appear exactly once in updated body: {msg}"
         )
@@ -856,7 +1364,7 @@ def test_update_issue_new_format():
         update_issue("42", "Flaky test", new_body, "error_other")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit | Cause |"
+        header = _NEW_HEADER_LINE
         assert msg.count(header) == 1, (
             f"Six-column header must appear exactly once in updated body (GHA): {msg}"
         )
@@ -1222,10 +1730,10 @@ def most_specific_cause_by_title(failing_tests, causes) -> dict[str, str]:
     return best
 
 
-def run(failing_tests_json=None, streaks_json=None):
+def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
     out_path = streaks_json or streaks_path()
 
-    if not should_report_issues():
+    if not (should_report_issues() or is_dry_run()):
         print(f"Skipping GitHub issue updates: branch '{branch}' is not a tracked branch.")
         write_streaks(out_path, [])
         return
@@ -1238,10 +1746,29 @@ def run(failing_tests_json=None, streaks_json=None):
         write_streaks(out_path, [])
         return
 
+    cause_by_title = most_specific_cause_by_title(failing_tests, causes)
+    try:
+        comments = evidence_comments_by_title(
+            failing_tests, cause_by_title, read_evidence(evidence_json)
+        )
+        print(
+            f"Found failure evidence for {len(comments)} of {len(cause_by_title)} issue title(s)."
+        )
+    except Exception as e:
+        # The evidence is an add-on: a broken evidence.json must never stop the
+        # issues and their tables from being updated.
+        print(f"::warning::Could not render failure evidence, posting none: {e}")
+        comments = {}
+
+    if is_dry_run():
+        write_dry_run_comments(comments)
+        write_streaks(out_path, [])
+        return
+
     assert_required_env_vars(ci_required_context_vars())
 
     # sometimes a fundamental problem would lead to a large number of issues being reported, in that case we limit
-    failing_tests_max = 20
+    failing_tests_max = FAILING_TESTS_MAX
     num = len(failing_tests)
     if num > failing_tests_max:
         print(f"Found too many failed tests {num}, only report {failing_tests_max}")
@@ -1251,9 +1778,8 @@ def run(failing_tests_json=None, streaks_json=None):
     # Deduplicate by formatted name to avoid updating the same issue multiple times
     # when variants of the same test fail (e.g. SomeTest/param=a and SomeTest/param=b
     # both map to the same issue title after format_test_name strips the slash suffix).
-    # Resolve the cause per title first so the most specific one across the variants
-    # is recorded, not just the cause of the alphabetically first variant.
-    cause_by_title = most_specific_cause_by_title(failing_tests, causes)
+    # The cause per title was resolved above so the most specific one across the
+    # variants is recorded, not just the cause of the alphabetically first variant.
     seen_titles: set = set()
     duplicates = []
     for test_name in failing_tests[:failing_tests_max]:
@@ -1262,7 +1788,7 @@ def run(failing_tests_json=None, streaks_json=None):
             print(f"Skipping duplicate issue title: {title}")
             continue
         seen_titles.add(title)
-        result = report_issue(test_name, cause_by_title[title])
+        result = report_issue(test_name, cause_by_title[title], comments.get(title))
         if result is not None:
             duplicates.append(result)
 

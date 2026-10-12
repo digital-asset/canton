@@ -56,7 +56,6 @@ private[mediator] object MediatorEvent {
       counter: SequencerCounter,
       sequencingTimestamp: CantonTimestamp,
       responses: SignedProtocolMessage[ConfirmationResponses],
-      topologyTimestamp: Option[CantonTimestamp],
       recipients: Recipients,
   ) extends MediatorEvent {
     override val requestId: RequestId = responses.message.requestId

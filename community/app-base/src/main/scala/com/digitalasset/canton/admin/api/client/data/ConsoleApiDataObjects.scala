@@ -8,7 +8,11 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.participant.v30 as participantAdminV30
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
@@ -94,8 +98,12 @@ object DarDescription extends LazyLogging {
 final case class DarContents(
     description: DarDescription,
     packages: Seq[PackageDescription],
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[DarContents] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[DarContents] = DarContents
+}
+
+object DarContents extends PrettyPrintingCompanion[DarContents] {
+  override protected val pretty: Pretty[DarContents] = prettyOfClass(
     param("main", _.description.mainPackageId.readableHash),
     param("name", _.description.description.unquoted),
     param("version", _.description.version.unquoted),
@@ -108,9 +116,6 @@ final case class DarContents(
           .map(_.packageId.readableHash),
     ),
   )
-}
-
-object DarContents {
 
   def fromProtoV30(
       value: participantAdminV30.GetDarContentsResponse
@@ -133,17 +138,18 @@ final case class PackageDescription(
     version: String,
     uploadedAt: CantonTimestamp,
     packageSize: Int,
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[PackageDescription] = prettyOfClass(
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[PackageDescription] = PackageDescription
+}
+
+object PackageDescription extends PrettyPrintingCompanion[PackageDescription] {
+  override protected val pretty: Pretty[PackageDescription] = prettyOfClass(
     param("packageId", _.packageId.readableHash),
     param("name", _.name.unquoted),
     param("version", _.version.unquoted),
     param("uploadedAt", _.uploadedAt),
     param("size", _.packageSize),
   )
-}
-
-object PackageDescription {
   def fromProto(
       proto: participantAdminV30.PackageDescription
   ): ParsingResult[PackageDescription] = {

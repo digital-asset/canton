@@ -77,7 +77,6 @@ trait PartyToParticipantAuthIntegrationTest
               threshold = signingThreshold,
             )
             .some,
-          isOffline = false,
         ),
       serial = serial,
       topologyChangeOp = topologyChangeOp,
@@ -407,7 +406,6 @@ trait PartyToParticipantAuthIntegrationTest
                 threshold = PositiveInt.one,
               )
               .some,
-            isOffline = false,
           ),
           store = synchronizer1Id,
           signedBy = Seq.empty,
@@ -525,7 +523,6 @@ trait PartyToParticipantAuthIntegrationTest
               threshold = PositiveInt.one,
             )
             .some,
-          isOffline = false,
         ),
         store = synchronizer1Id,
         signedBy = Seq(participant2.fingerprint),
@@ -554,7 +551,6 @@ trait PartyToParticipantAuthIntegrationTest
                   threshold = PositiveInt.one,
                 )
                 .some,
-              isOffline = false,
             ),
             store = synchronizer1Id,
             signedBy = Seq(participant2.fingerprint),

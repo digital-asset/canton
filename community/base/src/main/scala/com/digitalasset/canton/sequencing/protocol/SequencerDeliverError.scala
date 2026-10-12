@@ -221,7 +221,7 @@ object SequencerErrors extends SequencerErrorGroup {
 
     def apply(message: String, protocolVersion: ProtocolVersion): SequencerDeliverError =
       // for backward compatibility reasons, we need to keep the message format unchanged
-      if (protocolVersion <= ProtocolVersion.v35)
+      if (protocolVersion == ProtocolVersion.v35)
         super.apply(message)
       else
         AggregateSubmissionAlreadySentV2.apply(message)

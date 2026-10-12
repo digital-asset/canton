@@ -8,7 +8,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.Hashing
   HASHING_SCHEME_VERSION_V3,
 }
 import com.digitalasset.canton.console.CommandFailure
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.HashingSchemeVersion
 
 import java.util.UUID
 
@@ -57,7 +57,7 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
      * This means that HashingSchemeV2 keeps working on PV35 even for new transactions as long
      * as they don't contain keys (as tested above).
      */
-    "fail to prepare a transaction on LF serialization V2 and hashing scheme V2" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "fail to prepare a transaction on LF serialization V2 and hashing scheme V2" in {
       implicit env =>
         // Use a contract with key to force LFS V2
         val createBasicKeyCommand = contractWithKeyCreateCommand
@@ -75,7 +75,7 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
         )
     }
 
-    "fail to execute a transaction on LF serialization V2 and reported hashing scheme V2" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
+    "fail to execute a transaction on LF serialization V2 and reported hashing scheme V2" in {
       implicit env =>
         import env.*
         val createBasicKeyCommand = contractWithKeyCreateCommand

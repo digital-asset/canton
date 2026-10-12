@@ -544,6 +544,7 @@ private[platform] object InMemoryStateUpdater {
             packageName = assign.createNode.packageName,
             templateId = assign.createNode.templateId,
             createdContractInstance = assign.persistedContractInstance.inst,
+            representativePackageId = assign.representativePackageId,
           )
         case unassign: Reassignment.Unassign =>
           TransactionLogUpdate.Unassign(

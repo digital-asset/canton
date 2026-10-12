@@ -12,7 +12,12 @@ import com.digitalasset.canton.crypto.{HashBuilder, Signature, SigningKeyUsage, 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -51,17 +56,14 @@ import scala.concurrent.ExecutionContext
 final case class AggregationBySender(
     sequencingTimestamp: CantonTimestamp,
     signatures: Seq[Seq[Signature]],
-) extends PrettyPrinting {
-  override protected def pretty: Pretty[this.type] = AggregationBySender.prettyInstance
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[AggregationBySender] = AggregationBySender
 }
-object AggregationBySender {
-  private val prettyInstance: Pretty[AggregationBySender] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
-    prettyOfClass(
-      param("sequencing timestamp", _.sequencingTimestamp),
-      param("signatures", _.signatures),
-    )
-  }
+object AggregationBySender extends PrettyPrintingCompanion[AggregationBySender] {
+  override protected val pretty: Pretty[AggregationBySender] = prettyOfClass(
+    param("sequencing timestamp", _.sequencingTimestamp),
+    param("signatures", _.signatures),
+  )
 }
 
 /** Raw aggregation rule shipped on the wire
@@ -435,7 +437,7 @@ final case class AggregationRule(
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[AggregationRule.type]
 ) extends HasProtocolVersionedWrapper[AggregationRule]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   @transient override protected lazy val companionObj: AggregationRule.type = AggregationRule
 
   private[canton] def toProtoV30: v30.AggregationRule =
@@ -457,14 +459,16 @@ final case class AggregationRule(
         )
     }
 
-  override protected def pretty: Pretty[this.type] = prettyOfClass(
-    param("input", _.input)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[AggregationRule] = AggregationRule
 }
 
 object AggregationRule
     extends VersioningCompanion[AggregationRule]
-    with ProtocolVersionedCompanionDbHelpers[AggregationRule] {
+    with ProtocolVersionedCompanionDbHelpers[AggregationRule]
+    with PrettyPrintingCompanion[AggregationRule] {
+  override protected val pretty: Pretty[AggregationRule] = prettyOfClass(
+    param("input", _.input)
+  )
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AggregationRule)(

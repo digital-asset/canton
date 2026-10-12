@@ -226,7 +226,6 @@ abstract class SequencerApiTest
         messageId,
         Batch(envelopes, testedProtocolVersion),
         maxSequencingTime,
-        topologyTimestamp = None,
         Some(aggregationRule),
         Option.empty[SequencingSubmissionCost],
         testedProtocolVersion,
@@ -402,8 +401,7 @@ abstract class SequencerApiTest
         }
       }
 
-      def testAggregation: Boolean =
-        supportAggregation && testedProtocolVersion > ProtocolVersion.v34 // 3.7 is no longer supporting pv34, so tests won't run on it
+      def testAggregation: Boolean = supportAggregation
 
       "aggregate submission requests" onlyRunWhen testAggregation in { env =>
         import env.*
@@ -1054,7 +1052,6 @@ trait SequencerApiTestUtils
       messageId,
       batch,
       maxSequencingTime,
-      None,
       aggregationRule,
       sequencingSubmissionCost(batch),
       testedProtocolVersion,
@@ -1078,7 +1075,7 @@ trait SequencerApiTestUtils
       withClue(s"Message id is wrong") {
         expectedMessage.messageId.foreach(_ =>
           message.signedEvent.content match {
-            case Deliver(_, _, _, messageId, _, _, _) =>
+            case Deliver(_, _, _, messageId, _, _) =>
               messageId shouldBe expectedMessage.messageId
             case _ => fail(s"Expected a deliver $expectedMessage, received error $message")
           }
@@ -1088,7 +1085,7 @@ trait SequencerApiTestUtils
       val event = message.signedEvent.content
 
       event match {
-        case Deliver(_, _, _, messageIdO, batch, _, trafficReceipt) =>
+        case Deliver(_, _, _, messageIdO, batch, trafficReceipt) =>
           if (expectEnvelopes) {
             withClue(s"Received the wrong number of envelopes for recipient $member") {
               batch.envelopes.length shouldBe expectedMessage.envs.length

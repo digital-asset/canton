@@ -89,7 +89,6 @@ final class AllocateExternalPartyAuthIT
                         PositiveInt.one,
                       )
                     ),
-                    isOffline = false,
                   ),
                   testedProtocolVersion,
                 )

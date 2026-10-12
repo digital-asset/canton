@@ -52,7 +52,7 @@ class JsonUserApiTest
       super.beforeAll()
     }
 
-  val scopeBaseToken: StandardJWTPayload = StandardJWTPayload(
+  def generateScopeBaseToken: StandardJWTPayload = StandardJWTPayload(
     issuer = None,
     participantId = None,
     userId = "",
@@ -171,7 +171,7 @@ class JsonUserApiTest
   )(test: (String, List[HttpHeader]) => Future[Assertion]) = {
 
     val randomUser: String = "randomUser-" + UUID.randomUUID.toString
-    val userToken = scopeBaseToken.copy(userId = randomUser)
+    val userToken = generateScopeBaseToken.copy(userId = randomUser)
     val userHeaders = HttpServiceTestFixture.authorizationHeader(
       Jwt(toScopeContext(userToken).token.getOrElse(""))
     )

@@ -1,0 +1,51 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v31;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/participant_reassignment.proto";
+import "google/protobuf/timestamp.proto";
+import "scalapb/scalapb.proto";
+
+// Compared with v30, uses v31.ActiveContract
+message UnassignmentView {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  string target_physical_synchronizer_id = 2;
+  int64 target_timestamp = 3;
+  repeated ActiveContract contracts = 4;
+}
+
+// Compared with v30, uses v31.ActiveContract
+message UnassignmentData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
+  com.digitalasset.canton.protocol.v30.ReassignmentSubmitterMetadata submitter_metadata = 1;
+  repeated ActiveContract contracts = 2;
+  repeated string reassigning_participant_uids = 3;
+  string source_physical_synchronizer_id = 4;
+  string target_physical_synchronizer_id = 5;
+  google.protobuf.Timestamp target_timestamp = 6;
+  google.protobuf.Timestamp unassignment_ts = 7;
+}
+
+// Compared with v30, uses v31.ActiveContract
+message AssignmentView {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  repeated ActiveContract contracts = 2;
+  com.digitalasset.canton.protocol.v30.ReassignmentId reassignment_id = 3;
+}
+
+// Compared with v30, source/target validation package ids
+message ActiveContract {
+  bytes contract = 1; // Encoded ContractInstance
+  string source_validation_package_id = 2;
+  string target_validation_package_id = 3;
+  int64 reassignment_counter = 4;
+}

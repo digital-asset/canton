@@ -256,7 +256,7 @@ trait MessageDispatcher { this: NamedLogging =>
     val deliver = eventE.event.content
     // TODO(#13883) Validate the topology timestamp
     // TODO(#13883) Centralize the topology timestamp constraints in a single place so that they are well-documented
-    val Deliver(_pts, ts, _, _, batch, topologyTimestampO, _) = deliver
+    val Deliver(_pts, ts, _, _, batch, _) = deliver
 
     val envelopesWithCorrectSynchronizerId =
       filterBatchForSynchronizerId(batch, sequencerCounter, ts)
@@ -273,10 +273,9 @@ trait MessageDispatcher { this: NamedLogging =>
       identityResult <- processTopologyTransactions(
         sequencerCounter,
         SequencedTime(ts),
-        deliver.topologyTimestampO,
         envelopesWithCorrectSynchronizerId,
       )
-      trafficResult <- processTraffic(ts, topologyTimestampO, envelopesWithCorrectSynchronizerId)
+      trafficResult <- processTraffic(ts, envelopesWithCorrectSynchronizerId)
       legacyAcsCommitmentResult <- processLegacyAcsCommitmentEnvelope(
         envelopesWithCorrectSynchronizerId,
         sequencerCounter,
@@ -303,23 +302,21 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def processTopologyTransactions(
       sc: SequencerCounter,
       ts: SequencedTime,
-      topologyTimestampO: Option[CantonTimestamp],
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit traceContext: TraceContext): ProcessingResult =
     doProcess(
-      TopologyTransaction(() => topologyProcessor(sc, ts, topologyTimestampO, Traced(envelopes)))
+      TopologyTransaction(() => topologyProcessor(sc, ts, Traced(envelopes)))
     )
 
   protected def processTraffic(
       ts: CantonTimestamp,
-      timestampOfSigningKeyO: Option[CantonTimestamp],
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit
       traceContext: TraceContext
   ): ProcessingResult =
     doProcess(
       TrafficControlTransaction(() =>
-        trafficProcessor.processSetTrafficPurchasedEnvelopes(ts, timestampOfSigningKeyO, envelopes)
+        trafficProcessor.processSetTrafficPurchasedEnvelopes(ts, envelopes)
       )
     )
 
@@ -370,8 +367,7 @@ trait MessageDispatcher { this: NamedLogging =>
           .foreach(alarmIfNonEmptySigned.tupled)
 
         val containsTopologyTransactions = DefaultOpenEnvelopesFilter.containsTopology(
-          envelopes = envelopes,
-          withExplicitTopologyTimestamp = event.event.content.topologyTimestampO.isDefined,
+          envelopes = envelopes
         )
 
         val isReceipt = event.event.content.messageIdO.isDefined
@@ -672,7 +668,6 @@ trait MessageDispatcher { this: NamedLogging =>
             _synchronizerId,
             messageIdO,
             _batch,
-            _,
             _,
           ) =>
         // The event was submitted by the current participant iff the message ID is set.
@@ -1040,7 +1035,6 @@ private[participant] object MessageDispatcher {
   type ParticipantTopologyProcessor = (
       SequencerCounter,
       SequencedTime,
-      Option[CantonTimestamp],
       Traced[Seq[DefaultOpenEnvelope]],
   ) => HandlerResult
 

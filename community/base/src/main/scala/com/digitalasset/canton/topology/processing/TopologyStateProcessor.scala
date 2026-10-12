@@ -225,8 +225,7 @@ class TopologyStateProcessorImpl private[processing] (
     // prefetching optimization for mapping checks
     // the prefetches here are not required but make things more efficient
     def prefetchDependencies(item: TopologyMapping): Set[StateKeyTuple] = item match {
-      // TODO(#35664): Possibly consider _isOffline flag
-      case PartyToParticipant(pid, _, participants, _, _isOffline) =>
+      case PartyToParticipant(pid, _, participants, _) =>
         (pid.uid +: participants.map(_.participantId.uid))
           .flatMap(uid =>
             Set(

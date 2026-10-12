@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import anorm.SqlParser.{long, scalar}
 import com.daml.scalautil.Statement
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
@@ -985,16 +986,95 @@ private[backend] trait StorageBackendTestsPruning
 
   it should "remove contract candidates correctly" in {
     val contractIds = pruningFixture()
-    executeSqlInTx(backend.event.cleanPruningCandidates(testDbLockMeta)(_, implicitly))
-    contractCandidates shouldBe List(2, 6, 8, 9).map(contractIds)
+    executeSqlInTx { c =>
+      SQL"""
+             CREATE LOCAL TEMPORARY TABLE lapi_pruning_contract_candidate_temp
+             ON COMMIT DELETE ROWS
+             AS SELECT internal_contract_id
+                FROM lapi_pruning_contract_candidate
+           """.execute()(c)
+      backend.event.cleanPruningCandidates()(c, implicitly)
+      SQL"""
+            SELECT internal_contract_id
+            FROM lapi_pruning_contract_candidate_temp
+            ORDER BY internal_contract_id"""
+        .asVectorOf(long("internal_contract_id"))(c) shouldBe List(2, 6, 8, 9).map(contractIds)
+    }
     contracts shouldBe contractIds
   }
 
-  it should "prune contract correctly after cleaning candidates" in {
+  it should "prune contract correctly in one iteration" in {
     val contractIds = pruningFixture()
-    executeSqlInTx(backend.event.pruneContracts(testDbLockMeta)(_, implicitly))
+    val (prunedContractIds, thereIsMoreToPrune) = executeSqlInTx(
+      backend.event.pruneContracts(
+        contractPruningBatchSize = PositiveInt.tryCreate(1000),
+        contractPruningDbLockMeta = testDbLockMeta,
+      )(_, implicitly)
+    )
     contractCandidates shouldBe Vector.empty
     contracts shouldBe (0 to 11).filterNot(Set(2, 6, 8, 9)).map(contractIds)
+    prunedContractIds shouldBe List(2, 6, 8, 9).map(contractIds)
+    thereIsMoreToPrune shouldBe false
+  }
+
+  it should "prune contract correctly in multiple iterations" in {
+    val contractIds = pruningFixture()
+
+    // first iteration
+    {
+      val (prunedContractIds, thereIsMoreToPrune) = executeSqlInTx(
+        backend.event.pruneContracts(
+          contractPruningBatchSize = PositiveInt.tryCreate(3),
+          contractPruningDbLockMeta = testDbLockMeta,
+        )(_, implicitly)
+      )
+      contractCandidates shouldBe (3 to 9).map(contractIds).toVector
+      contracts shouldBe (0 to 11).filterNot(Set(2)).map(contractIds)
+      prunedContractIds shouldBe List(2).map(contractIds)
+      thereIsMoreToPrune shouldBe true
+    }
+
+    // second iteration
+    {
+      val (prunedContractIds, thereIsMoreToPrune) = executeSqlInTx(
+        backend.event.pruneContracts(
+          contractPruningBatchSize = PositiveInt.tryCreate(3),
+          contractPruningDbLockMeta = testDbLockMeta,
+        )(_, implicitly)
+      )
+      contractCandidates shouldBe (6 to 9).map(contractIds).toVector
+      contracts shouldBe (0 to 11).filterNot(Set(2)).map(contractIds)
+      prunedContractIds shouldBe Nil
+      thereIsMoreToPrune shouldBe true
+    }
+
+    // third iteration
+    {
+      val (prunedContractIds, thereIsMoreToPrune) = executeSqlInTx(
+        backend.event.pruneContracts(
+          contractPruningBatchSize = PositiveInt.tryCreate(3),
+          contractPruningDbLockMeta = testDbLockMeta,
+        )(_, implicitly)
+      )
+      contractCandidates shouldBe (9 to 9).map(contractIds).toVector
+      contracts shouldBe (0 to 11).filterNot(Set(2, 6, 8)).map(contractIds)
+      prunedContractIds shouldBe List(6, 8).map(contractIds)
+      thereIsMoreToPrune shouldBe true
+    }
+
+    // fourth iteration
+    {
+      val (prunedContractIds, thereIsMoreToPrune) = executeSqlInTx(
+        backend.event.pruneContracts(
+          contractPruningBatchSize = PositiveInt.tryCreate(3),
+          contractPruningDbLockMeta = testDbLockMeta,
+        )(_, implicitly)
+      )
+      contractCandidates shouldBe Nil
+      contracts shouldBe (0 to 11).filterNot(Set(2, 6, 8, 9)).map(contractIds)
+      prunedContractIds shouldBe List(9).map(contractIds)
+      thereIsMoreToPrune shouldBe false
+    }
   }
 
   // TODO(i21351) Implement pruning tests for topology events

@@ -178,7 +178,6 @@ class SequencerWriterTest extends AsyncWordSpec with BaseTest {
         MessageId.fromUuid(new UUID(1L, 1L)),
         Batch.empty(testedProtocolVersion),
         maxSequencingTime = CantonTimestamp.MaxValue,
-        topologyTimestamp = None,
         aggregationRule = None,
         submissionCost = None,
         testedProtocolVersion,

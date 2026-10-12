@@ -16,6 +16,7 @@ import com.digitalasset.canton.data.{
   ContractsReassignmentBatch,
   ReassignmentSubmitterMetadata,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
@@ -131,6 +132,9 @@ class AssignmentProcessor private (
   /** Builds a submission batch for cost estimation.
     *
     * Note: This method is intended for cost estimation purposes only
+    *
+    * @param contracts
+    *   A collection of contracts with common stakeholders.
     */
   def buildSubmissionBatchForCostEstimation(
       submitterMetadata: ReassignmentSubmitterMetadata,
@@ -144,49 +148,48 @@ class AssignmentProcessor private (
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Batch[DefaultOpenEnvelope]] =
-    contracts.map { contract =>
-      ContractReassignment(
-        contract,
-        Source(contract.templateId.packageId),
-        Target(contract.templateId.packageId),
-        counter,
+    for {
+      batch <- EitherT
+        .fromEither(ContractsReassignmentBatch.create(contracts.map { contract =>
+          ContractReassignment(
+            contract,
+            // As this is not using source/target validation package ids it must only be used for cost estimation.
+            Source(contract.templateId.packageId),
+            Target(contract.templateId.packageId),
+            counter,
+          )
+        }))
+        .leftMap(err =>
+          UnassignmentProcessorError.AutomaticAssignmentError(s"Failed to build assignment: $err")
+        )
+
+      reassignmentId = ReassignmentId(
+        Source(sourceSynchronizer.unwrap.logical),
+        Target(assignmentSteps.psid.unwrap.logical),
+        unassignmentTs,
+        batch.contractIdCounters.toMap.forgetNE,
       )
-    } match {
-      case head +: tail =>
-        val batch = ContractsReassignmentBatch.create(head, tail)
 
-        val reassignmentId = ReassignmentId(
-          Source(sourceSynchronizer.unwrap.logical),
-          Target(assignmentSteps.psid.unwrap.logical),
-          unassignmentTs,
-          batch.contractIdCounters.toMap.forgetNE,
-        )
+      reassigningParticipants <- new ReassigningParticipantsComputation(
+        stakeholders = batch.stakeholders,
+        sourceTopology = sourceSnapshot,
+        targetTopology = Target(recentSnapshot.ipsSnapshot),
+      ).compute.leftMap(_.toSubmissionValidationError)
 
-        for {
-          reassigningParticipants <- new ReassigningParticipantsComputation(
-            stakeholders = batch.stakeholders,
-            sourceTopology = sourceSnapshot,
-            targetTopology = Target(recentSnapshot.ipsSnapshot),
-          ).compute.leftMap(_.toSubmissionValidationError)
-          data <- assignmentSteps.buildSubmissionData(
-            reassignmentId,
-            submitterMetadata,
-            batch,
-            sourceSynchronizer,
-            mediator,
-            reassigningParticipants,
-            unassignmentTs,
-            batch.stakeholders,
-            recentSnapshot,
-            ephemeral.sessionKeyStore,
-            sequencerClient.generateMaxSequencingTime,
-          )
-        } yield Batch.of(assignmentSteps.protocolVersion.unwrap, data.messages*)
-      case _ =>
-        EitherT.leftT[FutureUnlessShutdown, Batch[DefaultOpenEnvelope]](
-          UnassignmentProcessorError.AutomaticAssignmentError(
-            "Cannot build assignment batch for cost estimation with empty contract list"
-          )
-        )
-    }
+      data <- assignmentSteps.buildSubmissionData(
+        reassignmentId,
+        submitterMetadata,
+        batch,
+        sourceSynchronizer,
+        mediator,
+        reassigningParticipants,
+        unassignmentTs,
+        batch.stakeholders,
+        recentSnapshot,
+        ephemeral.sessionKeyStore,
+        sequencerClient.generateMaxSequencingTime,
+      )
+
+    } yield Batch.of(assignmentSteps.protocolVersion.unwrap, data.messages*)
+
 }

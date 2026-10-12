@@ -17,7 +17,6 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   SharedEnvironment,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.Monocle.toAppliedFocusOps
 
 trait SessionSigningKeysLifecycleIntegrationTest
@@ -58,67 +57,66 @@ trait SessionSigningKeysLifecycleIntegrationTest
     ),
   )
 
-  "verify correct session key lifecycle with clock advances" onlyRunWhen
-    testedProtocolVersion >= ProtocolVersion.v35 in { implicit env =>
-      import env.*
+  "verify correct session key lifecycle with clock advances" in { implicit env =>
+    import env.*
 
-      // adjust timeouts to ensure requests and responses fit within the very short validity
-      // periods of session signing keys.
-      sequencer1.topology.synchronizer_parameters.propose_update(
-        synchronizerId = daId,
-        _.update(
-          confirmationResponseTimeout = shortDuration,
-          mediatorReactionTimeout = shortDuration,
-          ledgerTimeRecordTimeTolerance = sessionSigningKeysConfig.cutOffDuration,
-        ),
-      )
+    // adjust timeouts to ensure requests and responses fit within the very short validity
+    // periods of session signing keys.
+    sequencer1.topology.synchronizer_parameters.propose_update(
+      synchronizerId = daId,
+      _.update(
+        confirmationResponseTimeout = shortDuration,
+        mediatorReactionTimeout = shortDuration,
+        ledgerTimeRecordTimeTolerance = sessionSigningKeysConfig.cutOffDuration,
+      ),
+    )
 
-      // ensure that all participants have observed the updated synchronizer parameters
-      // before starting to record the use of session signing keys
-      eventually() {
-        participants.local.foreach { participant =>
-          val syncParameters = participant.topology.synchronizer_parameters.latest(daId)
+    // ensure that all participants have observed the updated synchronizer parameters
+    // before starting to record the use of session signing keys
+    eventually() {
+      participants.local.foreach { participant =>
+        val syncParameters = participant.topology.synchronizer_parameters.latest(daId)
 
-          syncParameters.confirmationResponseTimeout shouldBe shortDuration
-          syncParameters.mediatorReactionTimeout shouldBe shortDuration
-          syncParameters.ledgerTimeRecordTimeTolerance shouldBe sessionSigningKeysConfig.cutOffDuration
-        }
+        syncParameters.confirmationResponseTimeout shouldBe shortDuration
+        syncParameters.mediatorReactionTimeout shouldBe shortDuration
+        syncParameters.ledgerTimeRecordTimeTolerance shouldBe sessionSigningKeysConfig.cutOffDuration
       }
-
-      // record initial metrics to establish a baseline, as a fallback to the long-term key
-      // may have occurred during bootstrap.
-      val participantKmsMetrics = Seq(participant1, participant2).map(
-        _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
-          .valueOrFail("no KMS metrics")
-          .sessionSigningKeysFallback
-          .valuesWithContext
-      )
-
-      env.nodes.local.foreach { node =>
-        node.config.crypto.sessionSigningKeys shouldBe sessionSigningKeysConfig
-      }
-
-      assertPingSucceeds(participant1, participant2)
-
-      // session signing keys created are still valid
-      Threading.sleep(sessionSigningKeysConfig.cutOffDuration.duration.div(2.0).toMillis)
-
-      assertPingSucceeds(participant1, participant2)
-
-      // session signing keys have expired; new keys will be generated
-      Threading.sleep(sessionSigningKeysConfig.keyValidityDuration.duration.toMillis)
-
-      assertPingSucceeds(participant1, participant2)
-
-      // we expect that no fallback has been triggered for the ping requests and that
-      // session signing keys have been used and rotated successfully.
-      Seq(participant1, participant2).map(
-        _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
-          .valueOrFail("no KMS metrics")
-          .sessionSigningKeysFallback
-          .valuesWithContext
-      ) shouldBe participantKmsMetrics
     }
+
+    // record initial metrics to establish a baseline, as a fallback to the long-term key
+    // may have occurred during bootstrap.
+    val participantKmsMetrics = Seq(participant1, participant2).map(
+      _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+        .valueOrFail("no KMS metrics")
+        .sessionSigningKeysFallback
+        .valuesWithContext
+    )
+
+    env.nodes.local.foreach { node =>
+      node.config.crypto.sessionSigningKeys shouldBe sessionSigningKeysConfig
+    }
+
+    assertPingSucceeds(participant1, participant2)
+
+    // session signing keys created are still valid
+    Threading.sleep(sessionSigningKeysConfig.cutOffDuration.duration.div(2.0).toMillis)
+
+    assertPingSucceeds(participant1, participant2)
+
+    // session signing keys have expired; new keys will be generated
+    Threading.sleep(sessionSigningKeysConfig.keyValidityDuration.duration.toMillis)
+
+    assertPingSucceeds(participant1, participant2)
+
+    // we expect that no fallback has been triggered for the ping requests and that
+    // session signing keys have been used and rotated successfully.
+    Seq(participant1, participant2).map(
+      _.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+        .valueOrFail("no KMS metrics")
+        .sessionSigningKeysFallback
+        .valuesWithContext
+    ) shouldBe participantKmsMetrics
+  }
 }
 
 class MockKmsDriverSessionSigningKeysLifecycleIntegrationTestPostgres

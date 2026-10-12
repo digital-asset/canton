@@ -30,7 +30,6 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.transaction.{NodeId, TransactionError}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -86,14 +85,9 @@ object InternalConsistencyChecker {
 
   def apply(
       participantId: ParticipantId,
-      protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   ): InternalConsistencyChecker =
-    if (protocolVersion >= ProtocolVersion.v35) {
-      new NextGenInternalConsistencyChecker(participantId, loggerFactory)
-    } else {
-      new LegacyInternalConsistencyChecker(participantId, loggerFactory)
-    }
+    new NextGenInternalConsistencyChecker(participantId, loggerFactory)
 
   trait Error extends PrettyPrintingFromCompanion
 

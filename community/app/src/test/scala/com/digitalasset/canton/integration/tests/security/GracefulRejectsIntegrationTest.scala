@@ -45,7 +45,6 @@ import com.digitalasset.canton.participant.pretty.Implicits.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerBackpressure
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.NotConnectedToAnySynchronizer
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{
   ContractInstanceCoder,
@@ -200,20 +199,14 @@ sealed trait GracefulRejectsIntegrationTest
               participant1.id.adminParty,
               ids = (1 to 35).map(i => s"$testId $i"),
             ),
-            (if (testedProtocolVersion >= ProtocolVersion.v35)
-               Seq[LogEntry => Assertion](
-                 { logEntry =>
-                   logEntry.commandFailureMessage should include(
-                     "Transaction confirmation request creation failed"
-                   )
-                   logEntry.commandFailureMessage should include regex s"MaxViewSizeExceeded\\(view size \\(bytes\\) = \\d+, max request size configured \\(bytes\\) = \\d+\\)"
-                 }
-               )
-             else
-               Seq[LogEntry => Assertion](
-                 _.warningMessage should include("Failed to submit transaction due to "),
-                 _.commandFailureMessage should include regex s"Batch size \\(.* bytes\\) is exceeding maximum size \\(.* bytes\\) for synchronizer ${daName.unwrap}",
-               ))*
+            Seq[LogEntry => Assertion](
+              { logEntry =>
+                logEntry.commandFailureMessage should include(
+                  "Transaction confirmation request creation failed"
+                )
+                logEntry.commandFailureMessage should include regex s"MaxViewSizeExceeded\\(view size \\(bytes\\) = \\d+, max request size configured \\(bytes\\) = \\d+\\)"
+              }
+            )*
           )
         }
 

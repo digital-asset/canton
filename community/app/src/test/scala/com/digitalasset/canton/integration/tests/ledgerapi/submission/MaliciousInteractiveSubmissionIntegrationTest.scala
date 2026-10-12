@@ -21,7 +21,6 @@ import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.Malfor
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.daml.lf.transaction.{NodeId, SubmittedTransaction}
 import io.grpc.Status
@@ -218,60 +217,57 @@ final class MaliciousInteractiveSubmissionIntegrationTest
 
   "Interactive submission in phase 3" should {
 
-    "pass for the identity mutation" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        maliciousSubmit(identity).code shouldBe Status.Code.OK.value()
+    "pass for the identity mutation" in { implicit env =>
+      maliciousSubmit(identity).code shouldBe Status.Code.OK.value()
     }
 
-    "fail if the wrong synchronizer ID format is used" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        import env.*
+    "fail if the wrong synchronizer ID format is used" in { implicit env =>
+      import env.*
 
-        val wrongSyncId = synchronizer1Id.logical
+      val wrongSyncId = synchronizer1Id.logical
 
-        val mutation = (tx: PreparedTransaction) =>
-          tx.update(_.metadata.synchronizerId := wrongSyncId.toProtoPrimitive)
+      val mutation = (tx: PreparedTransaction) =>
+        tx.update(_.metadata.synchronizerId := wrongSyncId.toProtoPrimitive)
 
-        loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
-          maliciousSubmit(mutation).code shouldBe Status.Code.INVALID_ARGUMENT.value(),
-          LogEntry.assertLogSeq(
-            malformedRequestLogAssertion ++ invalidSignaturesLogAssertion(
-              valid = 0,
-              invalid = 1,
-              expectedValid = 1,
-            )
-          ),
-        )
-    }
-
-    "fail if providing more signatures than registered keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        import env.*
-
-        val signatureMutation: Hash => Map[PartyId, Seq[Signature]] = { hash =>
-          Map(
-            aliceE.partyId -> (global_secret.sign(hash.unwrap, aliceE, useAllKeys = true) ++ Seq(
-              // Add one more
-              global_secret.sign(hash.unwrap, aliceE.fingerprint, SigningKeyUsage.ProtocolOnly)
-            ))
+      loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
+        maliciousSubmit(mutation).code shouldBe Status.Code.INVALID_ARGUMENT.value(),
+        LogEntry.assertLogSeq(
+          malformedRequestLogAssertion ++ invalidSignaturesLogAssertion(
+            valid = 0,
+            invalid = 1,
+            expectedValid = 1,
           )
-        }
+        ),
+      )
+    }
 
-        loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
-          maliciousSubmit(signatureMutation =
-            signatureMutation
-          ).code shouldBe Status.Code.INVALID_ARGUMENT.value(),
-          LogEntry.assertLogSeq(
-            malformedRequestLogAssertion ++ Seq(
-              (
-                _.warningMessage should include(
-                  "4 external signatures were provided, which is more than the number of registered signing keys (3)"
-                ),
-                "expected too many signatures error",
-              )
-            )
-          ),
+    "fail if providing more signatures than registered keys" in { implicit env =>
+      import env.*
+
+      val signatureMutation: Hash => Map[PartyId, Seq[Signature]] = { hash =>
+        Map(
+          aliceE.partyId -> (global_secret.sign(hash.unwrap, aliceE, useAllKeys = true) ++ Seq(
+            // Add one more
+            global_secret.sign(hash.unwrap, aliceE.fingerprint, SigningKeyUsage.ProtocolOnly)
+          ))
         )
+      }
+
+      loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(Level.WARN))(
+        maliciousSubmit(signatureMutation =
+          signatureMutation
+        ).code shouldBe Status.Code.INVALID_ARGUMENT.value(),
+        LogEntry.assertLogSeq(
+          malformedRequestLogAssertion ++ Seq(
+            (
+              _.warningMessage should include(
+                "4 external signatures were provided, which is more than the number of registered signing keys (3)"
+              ),
+              "expected too many signatures error",
+            )
+          )
+        ),
+      )
 
     }
 

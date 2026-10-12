@@ -178,11 +178,21 @@ private[reassignment] class AssignmentValidation(
         parsedRequest.snapshot.ipsSnapshot,
       )
 
+      contractSerializationResult <- ReassignmentValidation
+        .checkMaxSerializationVersion(
+          parsedRequest.fullViewTree.reassignmentRef,
+          parsedRequest.fullViewTree.targetSynchronizer,
+          parsedRequest.fullViewTree.contracts,
+        )
+        .value
+        .map(_.swap.toOption)
+
     } yield AssignmentValidationResult.CommonValidationResult(
       activenessResult = activenessResult,
       participantSignatureVerificationResult = participantSignatureVerificationResult,
       contractAuthenticationResultF = contractAuthenticationResultF,
       packageVettingResult = packageVettingResult,
+      contractSerializationResult = contractSerializationResult,
       submitterCheckResult = submitterCheckResult,
       reassignmentIdResult = reassignmentIdResult,
       multiSynchronizerFeatureFlagCheckResult = multiSynchronizerCheckResult,

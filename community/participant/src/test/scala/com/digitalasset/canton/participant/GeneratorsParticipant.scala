@@ -262,7 +262,7 @@ final class GeneratorsParticipant(
         params <- Arbitrary.arbitrary[AcsReplicationParameters]
         agreement <- Arbitrary.arbitrary[AgreementStatus]
         authorizationO <- Gen.option(
-          Arbitrary.arbitrary[AcsReplicationStatus.PartyReplicationAuthorization]
+          Arbitrary.arbitrary[AcsReplicationStatus.PartyToParticipantTopologyTransaction]
         )
         replicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationProgress])
         hasCompleted <- Arbitrary.arbitrary[Boolean]

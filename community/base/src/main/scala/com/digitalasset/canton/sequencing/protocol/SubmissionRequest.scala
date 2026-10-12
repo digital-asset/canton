@@ -31,16 +31,7 @@ import com.google.protobuf.ByteString
 
 import scala.math.Ordered.orderingToOrdered
 
-/** @param topologyTimestamp
-  *   The optional timestamp of the topology to use for processing this submission request. If
-  *   [[scala.None$]], the snapshot at the sequencing time of the submission request should be used
-  *   instead. The topology timestamp is used for:
-  *   - resolving group addresses to members (NOTE: we can remove it because we don't have party
-  *     group addresses)
-  *   - checking signatures on closed envelopes
-  *   - determining the signing key for the sequencer on the [[SequencedEvent]]s.
-  *
-  * @param aggregationRule
+/** @param aggregationRule
   *   If [[scala.Some$]], this submission request is aggregatable. Its envelopes will be delivered
   *   only when the rule's conditions are met. The receipt of delivery for an aggregatable
   *   submission will be delivered immediately to the sender even if the rule's conditions are not
@@ -51,7 +42,6 @@ final case class SubmissionRequest private (
     messageId: MessageId,
     batch: Batch[ClosedEnvelope],
     maxSequencingTime: CantonTimestamp,
-    topologyTimestamp: Option[CantonTimestamp],
     aggregationRule: Option[AggregationRule],
     submissionCost: Option[SequencingSubmissionCost],
 )(
@@ -82,7 +72,7 @@ final case class SubmissionRequest private (
       messageId = messageId.toProtoPrimitive,
       batch = Some(batch.toProtoV31),
       maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-      topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+      topologyTimestamp = None,
       aggregationRule = aggregationRule.map(_.toProtoV30),
       submissionCost = submissionCost.map(_.toProtoV30),
     )
@@ -93,7 +83,7 @@ final case class SubmissionRequest private (
       messageId = messageId.toProtoPrimitive,
       batch = Some(batch.toProtoV32),
       maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-      topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+      topologyTimestamp = None,
       aggregationRule = aggregationRule.map(_.toProtoV30),
       submissionCost = submissionCost.map(_.toProtoV30),
     )
@@ -112,7 +102,6 @@ final case class SubmissionRequest private (
       messageId,
       Batch.withDecompressionPolicy(batch, decompressionPolicy),
       maxSequencingTime,
-      topologyTimestamp,
       aggregationRule,
       submissionCost,
     )(representativeProtocolVersion, deserializedFrom)
@@ -123,7 +112,6 @@ final case class SubmissionRequest private (
       messageId: MessageId = this.messageId,
       batch: Batch[ClosedEnvelope] = this.batch,
       maxSequencingTime: CantonTimestamp = this.maxSequencingTime,
-      topologyTimestamp: Option[CantonTimestamp] = this.topologyTimestamp,
       aggregationRule: Option[AggregationRule] = this.aggregationRule,
       submissionCost: Option[SequencingSubmissionCost] = this.submissionCost,
   ) = SubmissionRequest
@@ -132,7 +120,6 @@ final case class SubmissionRequest private (
       messageId,
       batch,
       maxSequencingTime,
-      topologyTimestamp,
       aggregationRule,
       submissionCost,
       representativeProtocolVersion,
@@ -151,7 +138,6 @@ final case class SubmissionRequest private (
     *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.recipients]] of
     *     the [[batch]], and whether there are signatures.
     *   - The [[maxSequencingTime]]
-    *   - The [[topologyTimestamp]]
     *   - The [[aggregationRule]]
     *
     * The [[AggregationId]] does not authenticate the following pieces of a submission request:
@@ -202,12 +188,6 @@ final case class SubmissionRequest private (
       }
       builder.addLong(maxSequencingTime.underlying.micros)
 
-      // If shouldHaveEmptyTopologyTimestamp is true, then the submission request is rejected synchronously
-      if (!shouldHaveEmptyTopologyTimestamp) {
-        // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
-        builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
-      }
-
       rule.input.appendForAggregationId(builder, sender)
 
       val hash = builder.finish()
@@ -254,7 +234,6 @@ object SubmissionRequest
       messageId: MessageId,
       batch: Batch[ClosedEnvelope],
       maxSequencingTime: CantonTimestamp,
-      topologyTimestamp: Option[CantonTimestamp],
       aggregationRule: Option[AggregationRule],
       submissionCost: Option[SequencingSubmissionCost],
       representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest.type],
@@ -266,7 +245,6 @@ object SubmissionRequest
           messageId,
           batch,
           maxSequencingTime,
-          topologyTimestamp,
           aggregationRule,
           submissionCost,
         )(representativeProtocolVersion, deserializedFrom = None)
@@ -278,7 +256,6 @@ object SubmissionRequest
       messageId: MessageId,
       batch: Batch[ClosedEnvelope],
       maxSequencingTime: CantonTimestamp,
-      topologyTimestamp: Option[CantonTimestamp],
       aggregationRule: Option[AggregationRule],
       submissionCost: Option[SequencingSubmissionCost],
       protocolVersion: ProtocolVersion,
@@ -288,7 +265,6 @@ object SubmissionRequest
       messageId,
       batch,
       maxSequencingTime,
-      topologyTimestamp,
       aggregationRule,
       submissionCost,
       protocolVersionRepresentativeFor(protocolVersion),
@@ -354,7 +330,6 @@ object SubmissionRequest
       senderP,
       messageIdP,
       maxSequencingTimeP,
-      topologyTimestamp,
       aggregationRuleP,
       submissionCostP,
     ) = protoSubmissionRequest match {
@@ -363,7 +338,6 @@ object SubmissionRequest
           wrapped.sender,
           wrapped.messageId,
           wrapped.maxSequencingTime,
-          wrapped.topologyTimestamp,
           wrapped.aggregationRule.traverse(AggregationRule.fromProtoV30(pvv, _)),
           wrapped.submissionCost,
         )
@@ -372,7 +346,6 @@ object SubmissionRequest
           wrapped.sender,
           wrapped.messageId,
           wrapped.maxSequencingTime,
-          wrapped.topologyTimestamp,
           wrapped.aggregationRule.traverse(AggregationRule.fromProtoV30(pvv, _)),
           wrapped.submissionCost,
         )
@@ -396,7 +369,6 @@ object SubmissionRequest
       )
       maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
       batch <- batchFromProto
-      ts <- topologyTimestamp.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(protoVersion)
       aggregationRule <- aggregationRuleP
       submissionCost <- submissionCostP.traverse(SequencingSubmissionCost.fromProtoV30)
@@ -405,7 +377,6 @@ object SubmissionRequest
       messageId,
       batch,
       maxSequencingTime,
-      ts,
       aggregationRule,
       submissionCost,
     )(rpv, Some(bytes))

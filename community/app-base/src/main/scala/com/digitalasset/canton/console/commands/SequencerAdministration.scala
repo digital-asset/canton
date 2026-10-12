@@ -26,7 +26,7 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.grpc.ByteStringStreamObserver
+import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencer.admin.v30.{
   OnboardingStateResponse,
@@ -36,10 +36,11 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
+import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
-import java.io.BufferedInputStream
+import java.io.{BufferedInputStream, FileInputStream}
 import scala.concurrent.ExecutionContext
 
 class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGroup.Impl(node) {
@@ -109,6 +110,10 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Download the onboarding state for a given sequencer"
   )
+  @Help.Description(
+    """A byte string cannot exceed 2 GB. For larger onboarding states, use
+      |export_onboarding_state_for_sequencer, which streams the onboarding state to a file."""
+  )
   def onboarding_state_for_sequencerV2(
       sequencerId: SequencerId,
       timeout: NonNegativeDuration = timeouts.unbounded,
@@ -128,7 +133,42 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
     }
 
   @Help.Summary(
+    "Stream the onboarding state for a given sequencer to a file"
+  )
+  def export_onboarding_state_for_sequencer(
+      outputFile: String,
+      sequencerId: SequencerId,
+      timeout: NonNegativeDuration = timeouts.unbounded,
+  ): Unit =
+    consoleEnvironment.run {
+      val file = better.files.File(outputFile)
+      val fileStreamObserver = new OutputFileStreamObserver[OnboardingStateV2Response](
+        file,
+        _.onboardingStateForSequencer,
+      )
+
+      def call =
+        runner.adminCommand(
+          SequencerAdminCommands.OnboardingStateV2(
+            observer = fileStreamObserver,
+            sequencerOrTimestamp = Left(sequencerId),
+          )
+        )
+      processResult(
+        call,
+        fileStreamObserver.result,
+        timeout,
+        "Downloading onboarding state to a file",
+        cleanupOnError = () => file.delete(),
+      )
+    }
+
+  @Help.Summary(
     "Download the onboarding state at a given point in time to bootstrap another sequencer"
+  )
+  @Help.Description(
+    """A byte string cannot exceed 2 GB. For larger onboarding states, use
+      |export_onboarding_state_at_timestamp, which streams the onboarding state to a file."""
   )
   def onboarding_state_at_timestampV2(
       timestamp: CantonTimestamp,
@@ -147,6 +187,38 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
         )
 
       processResult(call, responseObserver.resultBytes, timeout, "Downloading onboarding state")
+    }
+
+  @Help.Summary(
+    "Stream the onboarding state at a given point in time to a file to bootstrap another sequencer"
+  )
+  def export_onboarding_state_at_timestamp(
+      outputFile: String,
+      timestamp: CantonTimestamp,
+      timeout: NonNegativeDuration = timeouts.unbounded,
+  ): Unit =
+    consoleEnvironment.run {
+      val file = better.files.File(outputFile)
+      val fileStreamObserver = new OutputFileStreamObserver[OnboardingStateV2Response](
+        file,
+        _.onboardingStateForSequencer,
+      )
+
+      def call =
+        runner.adminCommand(
+          SequencerAdminCommands.OnboardingStateV2(
+            observer = fileStreamObserver,
+            sequencerOrTimestamp = Right(timestamp),
+          )
+        )
+
+      processResult(
+        call,
+        fileStreamObserver.result,
+        timeout,
+        "Downloading onboarding state to a file",
+        cleanupOnError = () => file.delete(),
+      )
     }
 
   @Help.Summary(
@@ -193,6 +265,9 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       |
       |This is called as part of the synchronizer.setup.bootstrap command, so you are unlikely
       |to need to call this directly.
+      |
+      |A byte string cannot exceed 2 GB. For larger genesis states, use
+      |import_genesis_state, which streams the genesis state from a file.
       """"
   )
   def assign_from_genesis_stateV2(
@@ -212,6 +287,43 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
           serverVersion = nodeStatus.releaseVersion,
         )
       )
+    }
+  }
+
+  @Help.Summary(
+    "Initialize a sequencer from the beginning of the event stream, streaming the genesis state from a file"
+  )
+  @Help.Description(
+    """This should only be called for sequencer nodes being initialized at the same time as the
+      |corresponding synchronizer node.
+      |
+      |Parameters:
+      |- inputFile: Retrieved using sequencer.topology.transactions.export_genesis_state
+      |- synchronizerParameters: Synchronizer parameters of the node
+      |"""
+  )
+  def import_genesis_state(
+      inputFile: String,
+      synchronizerParameters: StaticSynchronizerParameters,
+      waitForReady: Boolean = true,
+  ): InitializeSequencerResponse = {
+    if (waitForReady) node.health.wait_for_ready_for_initialization()
+
+    val nodeStatus = node.health.status
+    val internalSynchronizerParameters =
+      synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError)
+
+    ResourceUtil.withResource(new BufferedInputStream(new FileInputStream(inputFile))) {
+      inputStream =>
+        consoleEnvironment.run {
+          runner.adminCommand(
+            InitializeFromGenesisStateV2(
+              inputStream,
+              internalSynchronizerParameters,
+              serverVersion = nodeStatus.releaseVersion,
+            )
+          )
+        }
     }
   }
 
@@ -242,7 +354,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       runner.adminCommand(
         InitializeFromLsuPredecessor(
           new BufferedInputStream(
-            new java.io.FileInputStream(inputFile)
+            new FileInputStream(inputFile)
           ),
           synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
           ignorePsidCheck = ignorePsidCheck,
@@ -277,6 +389,10 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Dynamically initialize a sequencer from a point later than the beginning of the event stream"
   )
+  @Help.Description(
+    """A byte string cannot exceed 2 GB. For larger onboarding states, use
+      |import_onboarding_state, which streams the onboarding state from a file."""
+  )
   def assign_from_onboarding_stateV2(
       onboardingState: ByteString,
       waitForReady: Boolean = true,
@@ -288,6 +404,30 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       runner.adminCommand(
         InitializeFromOnboardingStateV2(onboardingState.newInput())
       )
+    }
+  }
+
+  @Help.Summary(
+    "Dynamically initialize a sequencer from a point later than the beginning of the event stream, from a file"
+  )
+  @Help.Description(
+    """Parameters:
+      |- inputFile: Retrieved using sequencer.setup.export_onboarding_state_for_sequencer or
+      |  sequencer.setup.export_onboarding_state_at_timestamp
+      |"""
+  )
+  def import_onboarding_state(
+      inputFile: String,
+      waitForReady: Boolean = true,
+  ): InitializeSequencerResponse = {
+    if (waitForReady && !node.health.initialized())
+      node.health.wait_for_ready_for_initialization()
+
+    ResourceUtil.withResource(new BufferedInputStream(new FileInputStream(inputFile))) {
+      inputStream =>
+        consoleEnvironment.run {
+          runner.adminCommand(InitializeFromOnboardingStateV2(inputStream))
+        }
     }
   }
 

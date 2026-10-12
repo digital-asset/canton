@@ -20,7 +20,6 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
   UploadDarFileRequest,
   ValidateDarFileRequest,
 }
-import com.daml.ledger.api.v2.admin.participant_pruning_service.PruneResponse
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.command_completion_service.{
   CompletionStreamRequest,
@@ -892,13 +891,16 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     delegate.getConnectedSynchronizers(party, participantId, identityProviderId),
   )
 
-  override def prune(
+  override def pruneMustFail(pruneUpTo: Long, message: String): Future[Throwable] =
+    delegate.pruneMustFail(pruneUpTo, message)
+
+  override def pruneWithAcsCheck(
+      parties: Option[Seq[Party]],
       pruneUpTo: Long,
       attempts: Int,
-  ): Future[PruneResponse] = withTimeout(
-    s"Prune up to $pruneUpTo, with $attempts attempts",
-    delegate.prune(pruneUpTo, attempts),
-  )
+      activeAtOffset0: Option[Long],
+  )(implicit ec: ExecutionContext): Future[Unit] =
+    delegate.pruneWithAcsCheck(parties, pruneUpTo, attempts, activeAtOffset0)
 
   override def pruneCantonSafe(
       pruneUpTo: Long,

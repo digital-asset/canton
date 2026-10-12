@@ -392,7 +392,7 @@ object ExternalPartyOnboardingDetails {
             .mkString(", ")}",
       )
       _ <- hostingParticipants.toList match {
-        case HostingParticipant(hosting, permission, _onboarding) :: Nil =>
+        case HostingParticipant(hosting, permission, _state) :: Nil =>
           Either.cond(
             hosting == participantId && permission == ParticipantPermission.Confirmation,
             (),

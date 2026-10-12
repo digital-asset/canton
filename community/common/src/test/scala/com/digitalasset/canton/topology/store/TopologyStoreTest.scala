@@ -62,7 +62,6 @@ trait TopologyStoreTest
           PartyId.tryCreate(s"party$i", p1Namespace),
           threshold = PositiveInt.one,
           participants = Seq(HostingParticipant(p1Id, Submission)),
-          isOffline = false,
         )
       )(p1Key)
     }
@@ -179,7 +178,6 @@ trait TopologyStoreTest
               partyId = `fred::p2Namepsace`,
               threshold = PositiveInt.one,
               participants = participants,
-              isOffline = false,
             )
           )(p1Key)
         val ptp1 = ptpFred(
@@ -1238,7 +1236,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value
             )(p1Key)
@@ -1254,7 +1251,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               isProposal = true,
@@ -1271,7 +1267,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value
             )(p1Key)
@@ -1381,7 +1376,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               serial = PositiveInt.two,
@@ -1402,7 +1396,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               serial = PositiveInt.three,
@@ -1423,7 +1416,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Remove,
@@ -1445,7 +1437,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               serial = PositiveInt.tryCreate(5),
@@ -1466,7 +1457,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               serial = PositiveInt.one,
@@ -1608,7 +1598,6 @@ trait TopologyStoreTest
                     ),
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Remove,
@@ -1728,7 +1717,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Replace,
@@ -1746,7 +1734,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Remove,
@@ -1764,7 +1751,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Replace,
@@ -1782,7 +1768,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Remove,
@@ -1866,7 +1851,6 @@ trait TopologyStoreTest
                     )
                   ),
                   partySigningKeysWithThreshold = None,
-                  isOffline = false,
                 )
                 .value,
               op = TopologyChangeOp.Replace,

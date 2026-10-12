@@ -15,7 +15,11 @@ import com.digitalasset.canton.admin.api.client.data.ComponentHealthState.{
 import com.digitalasset.canton.admin.health.v30 as protoV30
 import com.digitalasset.canton.health.ComponentStatus as ComponentStatusInternal
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ShowUtil
 import io.circe.Encoder
@@ -35,11 +39,14 @@ final case class ComponentStatus(
     name: String,
     state: ComponentHealthState,
     labels: Map[String, String],
-) extends PrettyPrinting {
-  override protected val pretty: Pretty[ComponentStatus] = ComponentStatus.componentStatusPretty
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ComponentStatus.this.type] = ComponentStatus
 }
 
-object ComponentStatus {
+object ComponentStatus extends PrettyPrintingCompanion[ComponentStatus] {
+  override protected val pretty: Pretty[ComponentStatus] =
+    prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
+
   def fromProtoV30(
       dependency: protoV30.ComponentStatus
   ): ParsingResult[ComponentStatus] =
@@ -74,11 +81,6 @@ object ComponentStatus {
 
   implicit val componentStatusEncoder: Encoder[ComponentStatus] = deriveEncoder[ComponentStatus]
 
-  implicit val componentStatusPretty: Pretty[ComponentStatus] = {
-    import Pretty.*
-    prettyInfix[ComponentStatus](_.name.unquoted, ":", _.state)
-  }
-
   /** Renders component statuses for display: node-level components as flat lines, followed by a
     * "Synchronizers:" section with one sub-section per synchronizer for components labeled with a
     * synchronizer id. See [[com.digitalasset.canton.health.ComponentStatus.renderEntries]].
@@ -98,21 +100,19 @@ object ComponentStatus {
   * component. However ComponentHealth (below) does not enforce the use of this class and a custom
   * State class can be used instead
   */
-sealed trait ComponentHealthState extends PrettyPrinting {
-  override protected def pretty: Pretty[ComponentHealthState] =
-    ComponentHealthState.prettyComponentHealthState
+sealed trait ComponentHealthState extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ComponentHealthState] =
+    ComponentHealthState
 }
 
-object ComponentHealthState extends ShowUtil {
-  import PrettyUtil.*
-
+object ComponentHealthState extends ShowUtil with PrettyPrintingCompanion[ComponentHealthState] {
   private val NotInitializedState: ComponentHealthState =
     ComponentHealthState.failed("Not Initialized")
 
   implicit val componentHealthStateEncoder: Encoder[ComponentHealthState] =
     deriveEncoder[ComponentHealthState]
 
-  implicit val prettyComponentHealthState: Pretty[ComponentHealthState] = {
+  override protected val pretty: Pretty[ComponentHealthState] = {
     case ok: Ok =>
       prettyOfClass[Ok](unnamedParamIfDefined(_.description.map(_.unquoted))).treeOf(ok)
     case notInitialized if notInitialized == NotInitializedState =>

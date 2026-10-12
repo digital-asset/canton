@@ -444,65 +444,16 @@ class SequencerReader(
     ] = {
       val (previousTimestamp, unvalidatedEvent) = sequenced
 
-      def validateTopologyTimestamp(
-          topologyTimestamp: CantonTimestamp,
-          sequencingTimestamp: CantonTimestamp,
-          eventTraceContext: TraceContext,
-      ): FutureUnlessShutdown[
-        (TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[IdOrPayload])
-      ] = {
-        implicit val traceContext: TraceContext = eventTraceContext
-        // The topology timestamp will end up as the timestamp of topology on the signed event.
-        // So we validate it accordingly.
-        SequencedEventValidator
-          .validateTopologyTimestamp(
-            syncCryptoApi,
-            topologyTimestamp,
-            sequencingTimestamp,
-            topologyClientTimestampBefore,
-            // This warning should never be triggered.
-            warnIfApproximate = true,
-            _.sequencerTopologyTimestampTolerance,
-          )
-          .value
-          .map { snapshotOrError =>
-            val topologyClientTimestampAfter = snapshotOrError.fold(
-              _ => topologyClientTimestampBefore,
-              _ =>
-                latestTopologyClientTimestampAfter(topologyClientTimestampBefore, unvalidatedEvent),
-            )
-
-            topologyClientTimestampAfter -> ValidatedSnapshotWithEvent(
-              topologyClientTimestampBefore,
-              Some(snapshotOrError.leftMap(topologyTimestamp -> _)),
-              previousTimestamp,
-              unvalidatedEvent,
-            )
-          }
-      }
-
-      unvalidatedEvent.event.topologyTimestampO match {
-        // Deliver and receipt events with a topologyTimestamp must be validated
-        case Some(topologyTimestamp) =>
-          validateTopologyTimestamp(
-            topologyTimestamp,
-            unvalidatedEvent.timestamp,
-            unvalidatedEvent.event.traceContext,
-          )
-        // Errors; delivers and receipts with no topologyTimestamp specified bypass validation
-        case None =>
-          val after =
-            latestTopologyClientTimestampAfter(topologyClientTimestampBefore, unvalidatedEvent)
-          FutureUnlessShutdown.pure(
-            after -> ValidatedSnapshotWithEvent(
-              topologyClientTimestampBefore,
-              None,
-              previousTimestamp,
-              unvalidatedEvent,
-            )
-          )
-
-      }
+      val after =
+        latestTopologyClientTimestampAfter(topologyClientTimestampBefore, unvalidatedEvent)
+      FutureUnlessShutdown.pure(
+        after -> ValidatedSnapshotWithEvent(
+          topologyClientTimestampBefore,
+          None,
+          previousTimestamp,
+          unvalidatedEvent,
+        )
+      )
     }
 
     def generateEvent(
@@ -602,7 +553,6 @@ class SequencerReader(
               psid,
               None,
               emptyBatch,
-              None,
               None,
             )
           }
@@ -800,7 +750,6 @@ class SequencerReader(
               messageId,
               _recipients,
               batch,
-              topologyTimestampO,
               _traceContext,
               trafficReceiptO,
             ) =>
@@ -850,7 +799,6 @@ class SequencerReader(
               psid,
               messageIdO,
               filteredBatch,
-              topologyTimestampO,
               // deliver events should only retain the traffic state for the sender's subscription
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
@@ -859,7 +807,6 @@ class SequencerReader(
         case ReceiptStoreEvent(
               sender,
               messageId,
-              topologyTimestampO,
               _traceContext,
               trafficReceiptO,
             ) =>
@@ -870,7 +817,6 @@ class SequencerReader(
               psid,
               Some(messageId),
               emptyBatch,
-              topologyTimestampO,
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
           )
@@ -913,7 +859,6 @@ class SequencerReader(
             psid,
             None,
             emptyBatch,
-            None,
             None,
           )
         }

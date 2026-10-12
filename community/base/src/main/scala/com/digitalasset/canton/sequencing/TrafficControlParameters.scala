@@ -8,9 +8,12 @@ import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeNumeric,
   PositiveInt,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30 as protoV30
-import com.digitalasset.canton.sequencing.TrafficControlParameters.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time
@@ -39,16 +42,17 @@ import java.util.concurrent.TimeUnit
   *   for.
   */
 final case class TrafficControlParameters(
-    maxBaseTrafficAmount: NonNegativeLong = DefaultBaseTrafficAmount,
-    readVsWriteScalingFactor: PositiveInt = DefaultReadVsWriteScalingFactor,
+    maxBaseTrafficAmount: NonNegativeLong = TrafficControlParameters.DefaultBaseTrafficAmount,
+    readVsWriteScalingFactor: PositiveInt =
+      TrafficControlParameters.DefaultReadVsWriteScalingFactor,
     maxBaseTrafficAccumulationDuration: PositiveFiniteDuration =
-      DefaultMaxBaseTrafficAccumulationDuration,
+      TrafficControlParameters.DefaultMaxBaseTrafficAccumulationDuration,
     setBalanceRequestSubmissionWindowSize: PositiveFiniteDuration =
-      DefaultSetBalanceRequestSubmissionWindowSize,
-    enforceRateLimiting: Boolean = DefaultEnforceRateLimiting,
-    baseEventCost: NonNegativeLong = DefaultBaseEventCost,
-    freeConfirmationResponses: Boolean = DefaultFreeConfirmationResponses,
-) extends PrettyPrinting {
+      TrafficControlParameters.DefaultSetBalanceRequestSubmissionWindowSize,
+    enforceRateLimiting: Boolean = TrafficControlParameters.DefaultEnforceRateLimiting,
+    baseEventCost: NonNegativeLong = TrafficControlParameters.DefaultBaseEventCost,
+    freeConfirmationResponses: Boolean = TrafficControlParameters.DefaultFreeConfirmationResponses,
+) extends PrettyPrintingFromCompanion {
 
   /** Base rate acquired in bytes per micro seconds
     */
@@ -70,7 +74,12 @@ final case class TrafficControlParameters(
     freeConfirmationResponses,
   )
 
-  override protected def pretty: Pretty[TrafficControlParameters] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[TrafficControlParameters] =
+    TrafficControlParameters
+}
+
+object TrafficControlParameters extends PrettyPrintingCompanion[TrafficControlParameters] {
+  override protected val pretty: Pretty[TrafficControlParameters] = prettyOfClass(
     param("max base traffic amount", _.maxBaseTrafficAmount),
     param("read vs write scaling factor", _.readVsWriteScalingFactor),
     param("max base traffic accumulation duration", _.maxBaseTrafficAccumulationDuration),
@@ -79,9 +88,7 @@ final case class TrafficControlParameters(
     param("base event cost", _.baseEventCost),
     param("free confirmation responses", _.freeConfirmationResponses),
   )
-}
 
-object TrafficControlParameters {
   // Default is computed such that 10 txs of 20KB can be sequenced during the max traffic accumulation window
   val DefaultBaseTrafficAmount: NonNegativeLong = NonNegativeLong.tryCreate(10 * 20 * 1024)
   val DefaultReadVsWriteScalingFactor: PositiveInt =

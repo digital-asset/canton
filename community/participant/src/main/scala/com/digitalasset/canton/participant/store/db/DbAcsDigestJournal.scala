@@ -203,7 +203,7 @@ class DbAcsDigestJournal[K](
     )
   }
 
-  override def bulkLookup(keysUpToInclusive: immutable.Iterable[(K, Offset)])(implicit
+  override def bulkLookup(keysUpToInclusive: Seq[(K, Offset)])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestStore.AcsDigestUpdate[K]]] =
     if (keysUpToInclusive.isEmpty) {

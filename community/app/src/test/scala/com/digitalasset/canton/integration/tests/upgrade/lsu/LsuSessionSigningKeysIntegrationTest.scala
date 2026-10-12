@@ -20,7 +20,6 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 
@@ -71,84 +70,83 @@ final class LsuSessionSigningKeysIntegrationTest
       )
 
   "Logical synchronizer upgrade" should {
-    "work with session signing keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-      implicit env =>
-        import env.*
+    "work with session signing keys" in { implicit env =>
+      import env.*
 
-        withClue(s"${participant1.id} should have KMS enabled before LSU") {
-          participant1.config.crypto.kms.isDefined shouldBe true
+      withClue(s"${participant1.id} should have KMS enabled before LSU") {
+        participant1.config.crypto.kms.isDefined shouldBe true
+      }
+
+      Seq[LocalInstanceReference](participant1, sequencer1, mediator1).foreach { node =>
+        withClue(s"${node.id} should have session signing keys enabled before LSU") {
+          node.config.crypto.sessionSigningKeys.enabled shouldBe true
         }
+      }
 
-        Seq[LocalInstanceReference](participant1, sequencer1, mediator1).foreach { node =>
-          withClue(s"${node.id} should have session signing keys enabled before LSU") {
-            node.config.crypto.sessionSigningKeys.enabled shouldBe true
-          }
-        }
+      val alice = participant1.parties.enable("Alice")
+      val bank = participant1.parties.enable("Bank")
+      val fixture = fixtureWithDefaults()
 
-        val alice = participant1.parties.enable("Alice")
-        val bank = participant1.parties.enable("Bank")
-        val fixture = fixtureWithDefaults()
+      // current number of times session signing keys are not used,
+      // and we fall back to signing with the long-term key
+      def fallbackSessionSigningKeyMetrics =
+        participant1.underlying.value.metrics.cryptoMetrics.kmsMetricsO
+          .valueOrFail("no KMS metrics")
+          .sessionSigningKeysFallback
+          .valuesWithContext
 
-        // current number of times session signing keys are not used,
-        // and we fall back to signing with the long-term key
-        def fallbackSessionSigningKeyMetrics =
-          participant1.underlying.value.metrics.cryptoMetrics.kmsMetricsO
-            .valueOrFail("no KMS metrics")
-            .sessionSigningKeysFallback
-            .valuesWithContext
+      val initialFallbackMetric = fallbackSessionSigningKeyMetrics
 
-        val initialFallbackMetric = fallbackSessionSigningKeyMetrics
+      // first ping to trigger usage of the initial session signing key
+      participant1.health.ping(participant1)
 
-        // first ping to trigger usage of the initial session signing key
-        participant1.health.ping(participant1)
+      // advance the clock so that the first session signing key expires and a second one must be created
+      environment.simClock.value.advance(
+        SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
+      )
+      // TODO(#31053): Remove after static clock synchronization is fixed.
+      Threading.sleep(1500)
 
-        // advance the clock so that the first session signing key expires and a second one must be created
-        environment.simClock.value.advance(
-          SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
-        )
+      // second ping: this will trigger creation and usage of a new session signing key
+      participant1.health.ping(participant1)
+
+      withClue("perform LSU") {
+        performSynchronizerNodesLsu(fixture)
+        // the clock is advanced past the expiry time of the existing session signing keys,
+        // which forces the creation of new session keys on the participant
+        environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
         // TODO(#31053): Remove after static clock synchronization is fixed.
         Threading.sleep(1500)
 
-        // second ping: this will trigger creation and usage of a new session signing key
-        participant1.health.ping(participant1)
-
-        withClue("perform LSU") {
-          performSynchronizerNodesLsu(fixture)
-          // the clock is advanced past the expiry time of the existing session signing keys,
-          // which forces the creation of new session keys on the participant
-          environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-          // TODO(#31053): Remove after static clock synchronization is fixed.
-          Threading.sleep(1500)
-
-          transferTraffic()
-          eventually() {
-            environment.simClock.value.advance(Duration.ofSeconds(1))
-            participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
-          }
-          oldSynchronizerNodes.all.stop()
-          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+        transferTraffic()
+        eventually() {
+          environment.simClock.value.advance(Duration.ofSeconds(1))
+          participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
         }
+        oldSynchronizerNodes.all.stop()
+        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+      }
 
-        // Verify we can still successfully execute transactions.
-        IouSyntax.createIou(participant1)(bank, alice)
+      // Verify we can still successfully execute transactions.
+      IouSyntax.createIou(participant1)(bank, alice)
 
-        Seq[LocalInstanceReference](participant1, sequencer2, mediator2).foreach { node =>
-          withClue(s"${node.id} should have session signing keys enabled after LSU") {
-            node.config.crypto.sessionSigningKeys.enabled shouldBe true
-          }
+      Seq[LocalInstanceReference](participant1, sequencer2, mediator2).foreach { node =>
+        withClue(s"${node.id} should have session signing keys enabled after LSU") {
+          node.config.crypto.sessionSigningKeys.enabled shouldBe true
         }
+      }
 
-        // even after more time has elapsed we can still use session signing keys correctly
-        environment.simClock.value.advance(
-          SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
-        )
-        // TODO(#31053): Remove after static clock synchronization is fixed.
-        Threading.sleep(1500)
-        participant1.health.ping(participant1)
+      // even after more time has elapsed we can still use session signing keys correctly
+      environment.simClock.value.advance(
+        SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
+      )
+      // TODO(#31053): Remove after static clock synchronization is fixed.
+      Threading.sleep(1500)
+      participant1.health.ping(participant1)
 
-        // Verify that no fallback to long-term signing keys occurred during the test.
-        // The metric should remain unchanged, meaning all operations used session signing keys.
-        initialFallbackMetric shouldBe fallbackSessionSigningKeyMetrics
+      // Verify that no fallback to long-term signing keys occurred during the test.
+      // The metric should remain unchanged, meaning all operations used session signing keys.
+      initialFallbackMetric shouldBe fallbackSessionSigningKeyMetrics
     }
   }
 }

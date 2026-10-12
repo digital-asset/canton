@@ -261,6 +261,12 @@ class OutputModule[E <: Env[E]](
   //  persisted and pushed to post-ordering.
   private val outputStageDurations = new mutable.HashMap[BlockNumber, Instant]()
 
+  // Attributes the output Peano queue extraction wait to the leaders whose lower-numbered blocks ("holes") delay
+  //  extraction, emitting the per-leader (and per-block total) interleaving-wait metrics; see the class doc for
+  //  the algorithm and its complexity/overflow properties.
+  @VisibleForTesting
+  private[output] val interleavingWaitTracker = new OutputQueueInterleavingWaitTracker(metrics)
+
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def receiveInternal(message: Message[E])(implicit
       context: E#ActorContextT[Message[E]],
@@ -399,7 +405,7 @@ class OutputModule[E <: Env[E]](
         )
 
         // If we are onboarding, rather than an initial node starting or restarting, there will be no actual blocks
-        //  stored and the genesis will be returned, but we`ll have a truncated log and we`ll need to start from the
+        //  stored and the genesis will be returned, but we'll have a truncated log, and we'll need to start from the
         //  initial height, rather than from the genesis height, which will be set correctly by the sequencer
         //  runtime as the first block height that we are expected to serve.
         val firstBlockToProcess =
@@ -416,7 +422,7 @@ class OutputModule[E <: Env[E]](
             recoverFromBlockNumber
           }
         // We don't skip the "is it empty" label for the startup figure of blocks ordered,
-        //  as this would cause a third series to appear in grafana, which is confusing and not useful.
+        //  as this would cause a third series to appear in Grafana, which is confusing and not useful.
         //  Since we don't have this information at startup, however, we set it to `false`,
         //  which is the most common case.
         metrics.global.blocksOrdered.mark(Math.max(0L, firstBlockToProcess - 1))(
@@ -427,6 +433,9 @@ class OutputModule[E <: Env[E]](
         maybeCompletedBlocksPeanoQueue
           .putIfAbsent(new PeanoQueue(firstBlockToProcess)(abort))
           .foreach(_ => abort("Completed block processing Peano Queue has already been set"))
+        // The head starts at `firstBlockToProcess`; anchor the interleaving-wait interval here so the
+        //  first extracted block isn't charged wall-clock time elapsed before the queue existed.
+        interleavingWaitTracker.anchorOpenInterval()
 
         if (startupState.previousBftTimeForOnboarding.isEmpty) {
           logger.info(
@@ -806,16 +815,6 @@ class OutputModule[E <: Env[E]](
                 s"Block $orderedBlockNumber being output contains requests " +
                   s"with the following trace IDs: [$traceIdsString]"
               )(blockTraceContext)
-              logger.debug(
-                s"Sending block $orderedBlockNumber " +
-                  s"(current epoch = $epochNumber, " +
-                  s"block's BFT time = $orderedBlockBftTime, " +
-                  s"block size = ${orderedBlockData.requestsView.size}, " +
-                  s"is last in epoch = $isBlockLastInEpoch, " +
-                  s"could alter sequencing topology = $epochCouldAlterOrderingTopology, " +
-                  s"tick topology = $tickTopology) " +
-                  "to sequencer subscription"
-              )(blockTraceContext)
 
               val fullyAssembledBlock =
                 BlockFormat.Block(
@@ -828,6 +827,19 @@ class OutputModule[E <: Env[E]](
                       .toMicros
                   ),
                 )
+
+              val originalLeader = orderedBlockData.orderedBlockForOutput.originalLeader
+
+              logger.info(
+                s"Delivering block $orderedBlockNumber to post-ordering " +
+                  s"(epoch = $epochNumber, " +
+                  s"block's BFT time = $orderedBlockBftTime, " +
+                  s"block size = ${orderedBlockData.requestsView.size}, " +
+                  s"original leader $originalLeader, " +
+                  s"is last in epoch = $isBlockLastInEpoch, " +
+                  s"could alter sequencing topology = $epochCouldAlterOrderingTopology, " +
+                  s"tick topology = $tickTopology)"
+              )(blockTraceContext)
 
               blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
               outputStageStartInstant.foreach { startInstant =>
@@ -978,6 +990,9 @@ class OutputModule[E <: Env[E]](
 
       case Output.Admin.SetPerformanceMetricsEnabled(enabled) =>
         metrics.performance.enabled = enabled
+        // Reset the interleaving-wait bookkeeping synchronously on every enable/disable transition,
+        //  so we never attribute wall-clock time that spanned a disabled period.
+        interleavingWaitTracker.onMetricsEnabledMaybeChanged()
     }
 
   private def completeBlock(
@@ -985,18 +1000,63 @@ class OutputModule[E <: Env[E]](
   )(implicit context: E#ActorContextT[Message[E]], traceContext: TraceContext): Unit = {
     val metadata = completedBlockData.orderedBlockForOutput.orderedBlock.metadata
     val blockNumber = metadata.blockNumber
-    logger.debug(
-      s"Output received completed block; epoch: ${metadata.epochNumber}, " +
-        s"blockID: $blockNumber, batchIDs: ${completedBlockData.batches.map(_._1)}"
+    // Attribute the block to its original (assigned) segment leader, derived from the block's position in the
+    //  epoch by the leader-selection policy, rather than trusting the `originalLeader` carried by the block: live
+    //  consensus, state transfer, and persisted-block recovery populate that field from different proposer notions
+    //  (assigned segment leader vs. actual pre-prepare proposer), which diverge after a view change.
+    //  Fixing it here makes the attribution key consistent across all ingestion paths for every downstream consumer
+    //  (the interleaving-wait metric below and the requests-ordering-latency receiving-sequencer label).
+    //  We fall back to the block's own field when the block is not part of the policy's current epoch
+    //  (no authoritative mapping, e.g. a block buffered ahead of the epoch gate).
+    val orderedBlockForOutput = completedBlockData.orderedBlockForOutput
+    val correctAssignedSegmentLeader =
+      leaderSelectionPolicy
+        .assignedSegmentLeaderInCurrentEpochFromBlock(blockNumber)
+        .getOrElse(orderedBlockForOutput.originalLeader)
+    val completedBlockDataWithCorrectAssignedSegmentLeader =
+      // Avoid GC pressure if the leader is unchanged, which is the most common case
+      if (correctAssignedSegmentLeader == orderedBlockForOutput.originalLeader)
+        completedBlockData
+      else
+        completedBlockData.copy(orderedBlockForOutput =
+          orderedBlockForOutput.copy(originalLeader = correctAssignedSegmentLeader)
+        )
+    logger.info(
+      s"Full data obtained for block $blockNumber in epoch ${metadata.epochNumber}; " +
+        s"original leader $correctAssignedSegmentLeader, " +
+        s"batchIDs: ${completedBlockData.batches.map(_._1)}"
     )
     logger.debug(
       s"Inserting block $blockNumber into Peano queue (head=${completedBlocksPeanoQueue.head})"
     )
-    completedBlocksPeanoQueue.insert(blockNumber, completedBlockData)
-    processFetchedBlocks()
+    // The leader of the block filling the actual queue head, if any. Filling the head hole closes a
+    //  leader-owned interleaving-wait interval, even if the subsequent extraction is still held back by the epoch gate.
+    //  When instead the head was present all along and held back by the epoch gate, its wait is topology
+    //  wait, not interleaving wait, so no head hole is filled here (see the epoch-release call site).
+    val filledHoleLeader =
+      Option.when(blockNumber == completedBlocksPeanoQueue.head.unwrap)(
+        completedBlockDataWithCorrectAssignedSegmentLeader.orderedBlockForOutput.originalLeader
+      )
+    completedBlocksPeanoQueue.insert(
+      blockNumber,
+      completedBlockDataWithCorrectAssignedSegmentLeader,
+    )
+    // Snapshot the block's arrival for interleaving-wait attribution, but only for blocks that arrived strictly
+    //  above the current head hole (`blockNumber > head`), i.e. blocks that were actually buffered behind a lower
+    //  missing block. We deliberately exclude the block that fills the current head (`blockNumber == head`, i.e.
+    //  `filledHoleLeader.isDefined`): it has no lower hole below it, so it never waited in this queue (see
+    //  `OutputQueueInterleavingWaitTracker.onBlockBufferedAboveHead`). Blocks below the current head were already
+    //  emitted and are ignored by the Peano queue, so `>` also skips them to avoid leaks.
+    if (blockNumber > completedBlocksPeanoQueue.head.unwrap)
+      interleavingWaitTracker.onBlockBufferedAboveHead(blockNumber)
+    processFetchedBlocks(filledHoleLeader)
   }
 
-  private def processFetchedBlocks()(implicit
+  // `filledHoleLeader` must be `Some(leader)` only when this call was triggered by an insertion that filled the
+  //  actual queue head hole, carrying that block's leader (see `OutputQueueInterleavingWaitTracker`); the
+  //  epoch-release path passes `None`, since it drains blocks that were present all along but gated by
+  //  `blockEpochNumber <= processingEpoch` (topology wait).
+  private def processFetchedBlocks(filledHoleLeader: Option[BftNodeId])(implicit
       context: E#ActorContextT[Message[E]],
       traceContext: TraceContext,
   ): Unit = {
@@ -1020,6 +1080,8 @@ class OutputModule[E <: Env[E]](
     logger.debug(
       s"Polled blocks from Peano queue ${orderedBlocks.map(_.orderedBlockForOutput.orderedBlock.metadata)}"
     )
+
+    interleavingWaitTracker.attributeAndEmit(orderedBlocks, filledHoleLeader)
 
     // This is the main processing loop where we process blocks in order,
     //  so it is generally safe to use the module's mutable state in it.
@@ -1143,8 +1205,7 @@ class OutputModule[E <: Env[E]](
               logger,
               tracedOrderingRequest.traceContext,
               hashOps,
-              stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
-                currentMembership.orderingTopology.sequencingParameters.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+              currentMembership.orderingTopology.sequencingParameters.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
             )
         },
     )
@@ -1368,7 +1429,10 @@ class OutputModule[E <: Env[E]](
         )
         blocksRecoveredFromConsensus.releaseMessagesForEpoch(newEpochNumber)
 
-        processFetchedBlocks()
+        // Blocks drained here were held back by the epoch gate, not by a missing head hole (any head hole was
+        //  already closed and credited when it was filled), so the interval closed here is topology wait and must
+        //  not be attributed to any leader as interleaving wait.
+        processFetchedBlocks(filledHoleLeader = None)
       }
     }
 

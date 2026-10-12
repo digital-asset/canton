@@ -23,14 +23,10 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   ReplicationParams,
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
-  AcsReplicationParameters,
   AcsReplicationProgress,
   EphemeralSequencerChannelProgress,
-}
-import com.digitalasset.canton.participant.admin.party.acsreplication.{
-  AcsReplicationAgreementParams,
-  AcsReplicationStatus,
 }
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationProcessor
 import com.digitalasset.canton.participant.protocol.v30
@@ -221,11 +217,11 @@ object PartyReplicationStatus
   def fromAcsReplicationStatus(
       acsReplicationStatus: AcsReplicationStatus
   ): PartyReplicationStatus = {
-    val params = ReplicationParams.fromAcsReplicationParams(acsReplicationStatus.params)
+    val params = ReplicationParams.fromAcsReplicationStatus(acsReplicationStatus)
     PartyReplicationStatus(
       params,
-      authorizationO = acsReplicationStatus.authorizationO.map(
-        PartyReplicationAuthorization.fromAcsReplicationAuthorization
+      authorizationO = acsReplicationStatus.partyToParticipantTopologyTransaction.map(
+        PartyReplicationAuthorization.fromAcsPartyToParticipantTopologyTransaction
       ),
       replicationO = acsReplicationStatus.replicationO,
       acsReplicationStatusO = Some(acsReplicationStatus),
@@ -338,13 +334,17 @@ object PartyReplicationStatus
         proto,
       )
 
-    def fromAgreementParams(agreement: AcsReplicationAgreementParams): ReplicationParams =
-      agreement.transformInto[ReplicationParams]
-
-    def fromAcsReplicationParams(
-        acsReplicationParams: AcsReplicationParameters
-    ): ReplicationParams =
-      acsReplicationParams.transformInto[ReplicationParams]
+    def fromAcsReplicationStatus(
+        acsReplicationStatus: AcsReplicationStatus
+    ): ReplicationParams = acsReplicationStatus.params
+      .into[ReplicationParams]
+      .withFieldConst(
+        _.serial,
+        acsReplicationStatus.partyToParticipantTopologyTransaction
+          .map(_.topologySerial)
+          .getOrElse(PositiveInt.one),
+      )
+      .transform
 
     override protected val pretty: Pretty[ReplicationParams] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*
@@ -387,10 +387,13 @@ object PartyReplicationStatus
         proto.isOnboardingFlagCleared,
       )
 
-    def fromAcsReplicationAuthorization(
-        acsReplicationAuthorization: AcsReplicationStatus.PartyReplicationAuthorization
+    def fromAcsPartyToParticipantTopologyTransaction(
+        acsReplicationAuthorization: AcsReplicationStatus.PartyToParticipantTopologyTransaction
     ): PartyReplicationAuthorization =
-      acsReplicationAuthorization.transformInto[PartyReplicationAuthorization]
+      PartyReplicationAuthorization(
+        acsReplicationAuthorization.validFrom,
+        isOnboardingFlagCleared = !acsReplicationAuthorization.isOnboarding,
+      )
 
     override protected val pretty: Pretty[PartyReplicationAuthorization] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*

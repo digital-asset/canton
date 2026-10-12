@@ -59,7 +59,6 @@ class PartyToParticipantKeyUsageIntegrationTest
             PositiveInt.one,
           )
         ),
-        isOffline = false,
       )
       val ptpTx =
         TopologyTransaction.tryCreate(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)
@@ -103,7 +102,6 @@ class PartyToParticipantKeyUsageIntegrationTest
               PositiveInt.two,
             )
           ),
-          isOffline = false,
         )
         val ptpTx =
           TopologyTransaction.tryCreate(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)

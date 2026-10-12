@@ -46,6 +46,7 @@ import com.digitalasset.canton.participant.extension.{
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
+import com.digitalasset.canton.participant.protocol.party.DefaultAcsReplicationContractHandlerFactory
 import com.digitalasset.canton.participant.protocol.submission.{
   CommandDeduplicatorImpl,
   InFlightSubmissionTracker,
@@ -956,6 +957,10 @@ class ParticipantNodeBootstrap(
                     clock,
                     config,
                     storage,
+                    new DefaultAcsReplicationContractHandlerFactory(
+                      sync.participantNodePersistentState,
+                      loggerFactory,
+                    ),
                     futureSupervisor,
                     parameters.exitOnFatalFailures,
                     parameters.processingTimeouts,

@@ -21,7 +21,7 @@ addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.6")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.14"
 
 // helps scaladoc resolve links for common scala libraries
-addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.0.0")
+addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.1.0")
 
 // unifies scaladoc from all modules into a single artifact
 addSbtPlugin("com.github.sbt" % "sbt-unidoc" % "0.5.0")

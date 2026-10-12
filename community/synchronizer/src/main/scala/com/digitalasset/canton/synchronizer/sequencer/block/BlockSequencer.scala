@@ -82,7 +82,6 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   LsuSequencerError,
   LsuTrafficAlreadyInitialized,
   MissingSynchronizerPredecessor,
-  NonEmptyTopologyTimestamp,
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.{
@@ -386,15 +385,6 @@ class BlockSequencer(
         noTracingLogger.error("Sequencer flow has failed", ex)
   }
 
-  private def validateTopologyTimestamp(
-      submission: SubmissionRequest
-  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
-    EitherT.cond[FutureUnlessShutdown](
-      submission.topologyTimestamp.isEmpty || !submission.shouldHaveEmptyTopologyTimestamp,
-      (),
-      NonEmptyTopologyTimestamp.Error,
-    )
-
   private def validateMaxSequencingTime(
       submission: SubmissionRequest
   )(implicit
@@ -420,9 +410,7 @@ class BlockSequencer(
         // intermediate topology change is impossible here (will need to communicate with the BlockUpdateGenerator).
         // If topologyTimestamp happens to be ahead of current topology's timestamp we grab the latter
         // to prevent a deadlock.
-        val topologyTimestamp = cryptoApi.approximateTimestamp.min(
-          submission.topologyTimestamp.getOrElse(CantonTimestamp.MaxValue)
-        )
+        val topologyTimestamp = cryptoApi.approximateTimestamp
         for {
           snapshot <- EitherT.right(cryptoApi.snapshot(topologyTimestamp))
           synchronizerParameters <- EitherT(
@@ -557,10 +545,9 @@ class BlockSequencer(
             // We can check if the aggregation has already been delivered by looking at the head
             // state. If the delivered at is not yet cached (after a crash) we just allow the submission
             // to go through for simplicity.
-            protocolVersion < ProtocolVersion.v35 || // never reject for pv34
-              (protocolVersion == ProtocolVersion.v35 && // if pv35, only check if sender code is the set of codes
-                !parameters.enableRejectDeliveredAggregationsOnPv35
-                  .contains(submission.sender.code.threeLetterId.str)) ||
+            (protocolVersion == ProtocolVersion.v35 && // if pv35, only check if sender code is the set of codes
+              !parameters.enableRejectDeliveredAggregationsOnPv35
+                .contains(submission.sender.code.threeLetterId.str)) ||
               !stateManager.getProcessingHeadState.inFlightAggregations.byId
                 .get(aggregationId)
                 .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
@@ -606,7 +593,6 @@ class BlockSequencer(
       maxSequencingTime,
       _,
       _,
-      _,
     ) = submission
 
     val maybeDelayedProcessingMessage =
@@ -637,7 +623,6 @@ class BlockSequencer(
           _ <- enforceThroughputCap(submission)
           _ <- rejectSubmissionsIfOverloaded(submission)
           _ <- validateMaxSequencingTime(submission)
-          _ <- validateTopologyTimestamp(submission)
           _ <- validateAggregationAlreadyDelivered(submission)
           approximateSnapshot <- EitherT.liftF(
             cryptoApi.currentSnapshotApproximation
@@ -1681,7 +1666,6 @@ class BlockSequencer(
           messageId,
           Batch.closeEnvelopes(batch),
           maxSequencingTime = CantonTimestamp.MaxValue,
-          topologyTimestamp = None,
           aggregationRule = None,
           submissionCost = None, // sequencer is the sender
           SubmissionRequest.protocolVersionRepresentativeFor(protocolVersion),

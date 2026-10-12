@@ -516,6 +516,7 @@ trait BaseTest
   lazy val SubViewsAssetV1Path: String = BaseTest.SubViewsAssetV1Path
   lazy val SubViewsAssetV2Path: String = BaseTest.SubViewsAssetV2Path
   lazy val SubViewsMainV1Path: String = BaseTest.SubViewsMainV1Path
+  lazy val TransactionLimitsPath: String = BaseTest.TransactionLimitsPath
 
   implicit class RichSynchronizerId(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
@@ -723,6 +724,7 @@ object BaseTest extends EitherValues {
   lazy val SubViewsAssetV2Path: String = getResourcePath("sub-views-asset-2.0.0.dar")
   lazy val SubViewsMainV1Path: String = getResourcePath("sub-views-main-1.0.0.dar")
   lazy val UniversalPath: String = getResourcePath("universal.dar")
+  lazy val TransactionLimitsPath: String = getResourcePath("TransactionLimitTests-1.0.0.dar")
 
   def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

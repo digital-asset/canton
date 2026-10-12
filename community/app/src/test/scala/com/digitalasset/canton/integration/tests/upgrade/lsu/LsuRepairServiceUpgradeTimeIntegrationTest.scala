@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 import scala.concurrent.duration.DurationInt
@@ -106,7 +105,7 @@ abstract class LsuRepairServiceUpgradeTimeIntegrationTestBase extends LsuBase {
             alice,
             participant2,
             daId,
-            onboarding = testedProtocolVersion >= ProtocolVersion.v35,
+            onboarding = true,
             beginOffsetExclusive = ledgerEndP1,
           )
           partyActivationOffset > 0L

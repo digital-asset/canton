@@ -1067,8 +1067,7 @@ object TopologyAdminCommands {
     ): Either[String, T] = {
 
       // TODO(#32231): Revise when the feature (signingKeyUsageProtoV31) is actually implemented.
-      // TODO(#36051): Revise when PTP.isOffline is replaced with PTP.HostingParticipant
-      // We force to v31 ONLY if v30 validation explicitly fails (PartyToParticipant.isOffline == true)
+      // We force to v31 ONLY if v30 validation explicitly fails (e.g. a PartyToParticipant hosting state is NOMINATED or FREEZING)
       val useV31 = mapping
         .canBeSerializedTo(ProtoVersion(30))
         .isLeft || ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion)

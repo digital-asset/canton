@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination.Persistence
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
 import com.digitalasset.canton.participant.store.AcsReplicationStateManager.{
   AcsReplicationOperationName,
@@ -70,7 +71,6 @@ private[canton] trait AcsReplicationProgress {
   *     error on the side of safety and have only the update methods use the simple execution queue
   *     to avoid lost updates in the absence of atomic update support in the underlying db store.
   */
-// TODO(#35267) Persist only party replication related ACS replication state
 final class AcsReplicationStateManager(
     participantId: ParticipantId,
     storage: Storage,
@@ -145,7 +145,7 @@ final class AcsReplicationStateManager(
             s"ACS replication ${status.params.requestId} already exists: $alreadyExists"
           )
       )
-      _ <- EitherTUtil.ifThenET(participantId == status.params.targetParticipantId)(
+      _ <- EitherTUtil.ifThenET(shouldStatusBePersisted(status))(
         targetParticipantStore
           .insert(pendingDbOperationFromStatus(status))
           .leftMap(alreadyExists =>
@@ -173,23 +173,23 @@ final class AcsReplicationStateManager(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = executionQueue.executeEUS(
     for {
-      prevStatus <- EitherT.fromEither[FutureUnlessShutdown](
+      previousStatus <- EitherT.fromEither[FutureUnlessShutdown](
         acsReplications
           .get(requestId)
           .toRight(s"ACS replication $requestId does not exist")
       )
-      updatedStatus = modify(prevStatus)
+      updatedStatus = modify(previousStatus)
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        prevStatus.params == updatedStatus.params,
-        s"ACS replication $requestId parameters ${prevStatus.params} not allowed to change ${updatedStatus.params}",
+        previousStatus.params == updatedStatus.params,
+        s"ACS replication $requestId parameters ${previousStatus.params} not allowed to change ${updatedStatus.params}",
       )
-      _ <- EitherTUtil.ifThenET(participantId == prevStatus.params.targetParticipantId)(
+      _ <- EitherTUtil.ifThenET(shouldStatusBePersisted(previousStatus))(
         EitherT.right[String](
           targetParticipantStore.updateOperation(
             updatedStatus,
-            prevStatus.params.synchronizerId,
+            previousStatus.params.synchronizerId,
             AcsReplicationOperationName,
-            prevStatus.params.requestId.toHexString,
+            previousStatus.params.requestId.toHexString,
           )
         )
       )
@@ -244,6 +244,20 @@ final class AcsReplicationStateManager(
       progress: AcsReplicationStatus.AcsReplicationProgress,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     update_(requestId, _.modifyReplication(_ => progress))
+
+  /** Decides whether a status should be persisted to pending operations store.
+    *
+    * If the status is persisted, it survives the participant restart and can be used to resume the
+    * ACS replication.
+    * @param status
+    *   status to check
+    * @return
+    *   whether the status is persisted or not
+    */
+  private def shouldStatusBePersisted(
+      status: AcsReplicationStatus
+  ): Boolean =
+    participantId == status.params.targetParticipantId && status.params.acsReplicationDestination == Persistence
 
   override protected def onClosed(): Unit =
     LifeCycle.close(executionQueue)(logger)

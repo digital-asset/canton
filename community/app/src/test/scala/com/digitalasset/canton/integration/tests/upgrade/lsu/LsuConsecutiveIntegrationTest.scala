@@ -26,7 +26,10 @@ import scala.annotation.nowarn
  *
  * - (lsid, 0, tested protocol version)
  * - (lsid, 1, pv=dev)
- * - (lsid, 2, tested protocol version)
+ * - (lsid, 2, pv=dev)
+ *
+ * Note: going back from pv=dev to the tested protocol version is not possible because protocol
+ * version downgrades are forbidden from `LsuAnnouncement.minimumProtocolVersionForbiddingDowngrade` on.
  */
 @nowarn("msg=dead code")
 final class LsuConsecutiveIntegrationTest extends LsuBase {
@@ -112,7 +115,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
         newSynchronizerNodes = SynchronizerNodes(Seq(sequencer3), Seq(mediator3)),
         newOldNodesResolution = Map("sequencer3" -> "sequencer2", "mediator3" -> "mediator2"),
         oldSynchronizerOwners = Set[InstanceReference](sequencer2, mediator2),
-        newPV = testedProtocolVersion,
+        newPV = ProtocolVersion.dev,
         newSerial = fixture1.newSerial.increment.value.toNonNegative,
       )
 

@@ -121,9 +121,11 @@ class GrpcPartyManagementService(
     ](
       responseObserver,
       Failure(
-        new IllegalArgumentException(
-          "The request stream must contain at least one message with the required AddPartyArguments."
-        )
+        PartyManagementServiceError.InvalidArgument
+          .Error(
+            "The request stream must contain at least one message with the required AddPartyArguments."
+          )
+          .asGrpcError
       ),
       getGzippedBytes = _.acsSnapshot,
       parseMessage = ActiveContract.parseDelimitedFromTrusted,
@@ -135,7 +137,7 @@ class GrpcPartyManagementService(
             .leftMap(err => s"Arguments must be set on the first request: $err")
           args <- verifyArguments(argsP)
         } yield args)
-          .leftMap(err => new IllegalArgumentException(err))
+          .leftMap(PartyManagementServiceError.InvalidArgument.Error(_).asGrpcError)
           .toTry
     ) { case (args, source) =>
       val resultET = for {
@@ -899,29 +901,19 @@ class GrpcPartyManagementService(
       persistentState <- getPersistentState(synchronizerId)
       protocolVersion = persistentState.staticSynchronizerParameters.protocolVersion
 
-      _ <-
-        if (protocolVersion >= ProtocolVersion.v35) {
-          logAction(protocolVersion)
+      _ = logAction(protocolVersion)
+      pendingOp = OnboardingClearanceOperation(effectiveTimestampO)(
+        OnboardingClearanceOperation.protocolVersionRepresentativeFor(protocolVersion)
+      ).toPendingOperation(synchronizerId, partyId)
 
-          val pendingOp = OnboardingClearanceOperation(effectiveTimestampO)(
-            OnboardingClearanceOperation.protocolVersionRepresentativeFor(protocolVersion)
-          ).toPendingOperation(synchronizerId, partyId)
-
-          persistentState.pendingOnboardingClearanceStore
-            .insert(pendingOp)
-            .leftMap(err =>
-              PartyManagementServiceError.InvalidState
-                .Error(
-                  s"Failed to insert pending onboarding operation for party $partyId on synchronizer $synchronizerId: $err."
-                ): PartyManagementServiceError
-            )
-        } else {
-          logger.info(
-            s"Action Required: Skipped pending onboarding clearance for $partyId on $synchronizerId (requires protocol v35+, found $protocolVersion). " +
-              "Please invoke the onboarding flag clearance endpoint after reconnecting to the synchronizer."
-          )
-          EitherT.rightT[FutureUnlessShutdown, PartyManagementServiceError](())
-        }
+      _ <- persistentState.pendingOnboardingClearanceStore
+        .insert(pendingOp)
+        .leftMap(err =>
+          PartyManagementServiceError.InvalidState
+            .Error(
+              s"Failed to insert pending onboarding operation for party $partyId on synchronizer $synchronizerId: $err."
+            ): PartyManagementServiceError
+        )
     } yield ()
 
   private def validateTopologyStateForClearance(

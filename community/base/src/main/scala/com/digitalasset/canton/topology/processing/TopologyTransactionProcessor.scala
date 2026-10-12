@@ -173,11 +173,10 @@ class TopologyTransactionProcessor(
   def processEnvelopes(
       sc: SequencerCounter,
       ts: SequencedTime,
-      topologyTimestampO: Option[CantonTimestamp],
       envelopes: Traced[Seq[DefaultOpenEnvelope]],
   ): HandlerResult =
     envelopes.withTraceContext { implicit traceContext => env =>
-      val broadcasts = validateEnvelopes(sc, ts, topologyTimestampO, env)
+      val broadcasts = validateEnvelopes(sc, ts, env)
       internalProcessEnvelopes(sc, ts, broadcasts)
     }
 
@@ -247,7 +246,7 @@ class TopologyTransactionProcessor(
         MonadUtil.sequentialTraverseMonoid(tracedBatch.value) { withCounter =>
           withCounter.withTraceContext { implicit traceContext =>
             {
-              case Deliver(_, ts, _, _, batch, topologyTimestampO, _) =>
+              case Deliver(_, ts, _, _, batch, _) =>
                 logger.debug(
                   s"Processing sequenced event with counter ${withCounter.counter} and timestamp $ts"
                 )
@@ -265,7 +264,6 @@ class TopologyTransactionProcessor(
                 val broadcasts = validateEnvelopes(
                   withCounter.counter,
                   sequencedTime,
-                  topologyTimestampO,
                   envelopesForRightSynchronizer,
                 )
                 internalProcessEnvelopes(withCounter.counter, sequencedTime, broadcasts)
@@ -296,7 +294,6 @@ class TopologyTransactionProcessor(
   private def validateEnvelopes(
       sc: SequencerCounter,
       sequencedTime: SequencedTime,
-      topologyTimestampO: Option[CantonTimestamp],
       envelopes: Seq[DefaultOpenEnvelope],
   )(implicit errorLoggingContext: ErrorLoggingContext): Seq[TopologyTransactionsBroadcast] = {
     val (invalidRecipients, topologyBroadcasts) =
@@ -308,23 +305,8 @@ class TopologyTransactionProcessor(
         )
         .report()
     }
-    topologyTimestampO.filter(_ => topologyBroadcasts.nonEmpty) match {
-      case Some(topologyTimestamp) =>
-        // Skip processing broadcasts with an explicit topology timestamp, because:
-        // 1. this could cause the group resolution to be done with the wrong timestamp
-        // 2. which could lead to not all members active at sequenced time to receive the topology broadcast
-        // 3. which then results in a ledger fork
-        TopologyManagerError.TopologyManagerAlarm
-          .Warn(
-            s"Discarding a topology broadcast with sc=$sc at $sequencedTime with explicit topology timestamp $topologyTimestamp"
-          )
-          .report()
 
-        // we return the empty list, to signify that we filtered out all invalid envelopes
-        Nil
-      case None =>
-        topologyBroadcasts
-    }
+    topologyBroadcasts
   }
 
   override def onClosed(): Unit =

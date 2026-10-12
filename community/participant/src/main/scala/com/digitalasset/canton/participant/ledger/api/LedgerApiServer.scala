@@ -443,6 +443,7 @@ object LedgerApiServer {
         lookupTopologyClient = lookupTopologyClient,
         lookupSynchronizerCryptoClient = lookupSynchronizerCryptoClient,
         pureCryptoApi = syncService.pureCryptoApi,
+        maxPruningBatchOffsetSize = parameters.batchingConfig.maxPruningBatchSize,
       )
       _ <- startHttpApiIfEnabled(
         authInterceptor,

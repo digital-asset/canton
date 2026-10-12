@@ -6,7 +6,11 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.{
@@ -28,7 +32,7 @@ final case class TransactionConfirmationRequest(
     informeeMessage: InformeeMessage,
     viewEnvelopes: Seq[OpenEnvelope[TransactionViewMessage]],
     protocolVersion: ProtocolVersion,
-) extends PrettyPrinting
+) extends PrettyPrintingFromCompanion
     with HasLoggerName {
 
   def mediator: MediatorGroupRecipient = informeeMessage.mediator
@@ -75,7 +79,13 @@ final case class TransactionConfirmationRequest(
     }
   }
 
-  override protected def pretty: Pretty[TransactionConfirmationRequest] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[TransactionConfirmationRequest] =
+    TransactionConfirmationRequest
+}
+
+object TransactionConfirmationRequest
+    extends PrettyPrintingCompanion[TransactionConfirmationRequest] {
+  override protected val pretty: Pretty[TransactionConfirmationRequest] = prettyOfClass(
     param("informee message", _.informeeMessage),
     param("view envelopes", _.viewEnvelopes),
   )

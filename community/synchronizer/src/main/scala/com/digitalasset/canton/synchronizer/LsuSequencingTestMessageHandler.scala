@@ -53,7 +53,7 @@ final class LsuSequencingTestMessageHandler(
       implicit val tracContext: TraceContext = tracedEvent.traceContext
 
       tracedEvent.value match {
-        case Deliver(_, ts, _, _, batch, _, _) =>
+        case Deliver(_, ts, _, _, batch, _) =>
           logger.debug(s"Processing sequenced event with timestamp $ts")
 
           val lsuSequencingTestMessages = batch.envelopes.mapFilter(

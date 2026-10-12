@@ -20,10 +20,10 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, TimeProof}
 import com.digitalasset.canton.synchronizer.mediator.MediatorNode
 import com.digitalasset.canton.synchronizer.sequencer.SequencerNode
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, FutureHelpers}
-import org.scalatest.Assertion
+import com.digitalasset.canton.{BaseTest, FutureHelpers, time}
 import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers.{matchPattern, *}
+import org.scalatest.{Assertion, Succeeded}
 
 import scala.jdk.CollectionConverters.*
 
@@ -91,27 +91,39 @@ object TestUtils extends FutureHelpers {
     logger.debug(s"Waiting for node $forNode to reach target time $targetTime")
 
     val assertion = BaseTest.eventually(retryOnTestFailuresOnly = false) {
-      // send time proofs until we see a successful deliver with
-      // a sequencing time greater than or equal to the target time.
-      logger.debug(s"Sending time proof to node $forNode")
-      val sendCallback = SendCallback.future
-      sequencerClient.runOnClose(sendCallback.runOnClosing)
-      sequencerClient
-        .send(
-          messageId = TimeProof.mkTimeProofRequestMessageId,
-          batch = Batch(Nil, BaseTest.testedProtocolVersion),
-          callback = sendCallback,
-        )(
-          traceContext,
-          MetricsContext.Empty,
+      // before trying to send a time proof, check if the sequencer has already reached the target time
+      val haveAlreadyReachedTimestamp = sequencerClient.timeFetcher
+        .hasReached(
+          targetTime,
+          time.PositiveFiniteDuration.tryOfSeconds(3),
         )
-        .succeedOnFutureCompleteOrShutdown
+        .futureValueUS
 
-      // this throws an exception if the future times out or fails, which we want to retry (therefore retryOnTestFailuresOnly=true above)
-      val sendResult = sendCallback.future.futureValueUS
-      logger.debug(s"Received send result for time proof $sendResult from node $forNode")
-      sendResult should matchPattern {
-        case SendResult.Success(d: Deliver[?]) if d.timestamp >= targetTime =>
+      if (haveAlreadyReachedTimestamp) {
+        Succeeded
+      } else {
+        // send time proofs until we see a successful deliver with
+        // a sequencing time greater than or equal to the target time.
+        logger.debug(s"Sending time proof to node $forNode")
+        val sendCallback = SendCallback.future
+        sequencerClient.runOnClose(sendCallback.runOnClosing)
+        sequencerClient
+          .send(
+            messageId = TimeProof.mkTimeProofRequestMessageId,
+            batch = Batch(Nil, BaseTest.testedProtocolVersion),
+            callback = sendCallback,
+          )(
+            traceContext,
+            MetricsContext.Empty,
+          )
+          .succeedOnFutureCompleteOrShutdown
+
+        // this throws an exception if the future times out or fails, which we want to retry (therefore retryOnTestFailuresOnly=false above)
+        val sendResult = sendCallback.future.futureValueUS
+        logger.debug(s"Received send result for time proof $sendResult from node $forNode")
+        sendResult should matchPattern {
+          case SendResult.Success(d: Deliver[?]) if d.timestamp >= targetTime =>
+        }
       }
     }
 

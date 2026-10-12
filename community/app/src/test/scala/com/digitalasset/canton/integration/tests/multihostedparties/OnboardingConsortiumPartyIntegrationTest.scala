@@ -36,8 +36,6 @@ The suite contains the following steps:
  */
 sealed trait OnboardingConsortiumPartyIntegrationTest extends ConsortiumPartyIntegrationTest {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1
       .updateTestingConfig(

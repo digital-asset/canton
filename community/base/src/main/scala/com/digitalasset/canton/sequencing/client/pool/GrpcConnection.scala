@@ -12,7 +12,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
@@ -52,7 +56,7 @@ final case class GrpcConnection(
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
     extends Connection
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   private val channelRef = new AtomicReference[Option[GrpcManagedChannel]](None)
   private val lock = new Mutex()
@@ -201,6 +205,10 @@ final case class GrpcConnection(
     )
   }
 
-  override protected def pretty: Pretty[GrpcConnection] =
+  override def prettyCompanion: PrettyPrintingCompanion[GrpcConnection] = GrpcConnection
+}
+
+object GrpcConnection extends PrettyPrintingCompanion[GrpcConnection] {
+  override protected val pretty: Pretty[GrpcConnection] =
     prettyOfString(conn => s"Connection ${conn.name.singleQuoted}")
 }

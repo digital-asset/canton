@@ -5,6 +5,8 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either.*
 import cats.{Functor, Id}
+import com.digitalasset.canton.Errors.raiseCannotSerialize
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -51,7 +53,7 @@ trait HasVersionedWrapperF[F[_], ValueClass] extends HasVersionedToByteStringF[F
         case (protoVersion, supportedVersion) if version >= supportedVersion.fromInclusive =>
           toProtoVersioned(supportedVersion.serializer, protoVersion)
       }
-      .getOrElse(serializeToHighestVersion)
+      .getOrElse(raiseCannotSerialize(companionObj.name, version))
 
   private def toProtoVersioned(
       serializer: ValueClass => F[scalapb.GeneratedMessage],
@@ -60,12 +62,6 @@ trait HasVersionedWrapperF[F[_], ValueClass] extends HasVersionedToByteStringF[F
     functorF.map[scalapb.GeneratedMessage, VersionedMessage[ValueClass]](
       serializer(self)
     )(proto => VersionedMessage(proto.toByteString, protoVersion.v))
-
-  private def serializeToHighestVersion: F[VersionedMessage[ValueClass]] =
-    toProtoVersioned(
-      companionObj.supportedProtoVersions.higherConverter.serializer,
-      companionObj.supportedProtoVersions.higherProtoVersion,
-    )
 
   /** Yields a byte string representation of the corresponding `UntypedVersionedMessage` wrapper of
     * this instance.
@@ -161,18 +157,23 @@ trait HasVersionedMessageCompanionCommonF[F[_], ValueClass] {
       // Sorted with descending order
       converters: NonEmpty[immutable.SortedMap[ProtoVersion, ProtoCodec]]
   ) {
-    val (higherProtoVersion, higherConverter) = converters.head1
-
     def converterFor(protocolVersion: ProtocolVersion): ProtoCodec =
       converters
         .collectFirst {
           case (_, converter) if protocolVersion >= converter.fromInclusive =>
             converter
         }
-        .getOrElse(higherConverter)
+        .getOrElse(raiseCannotSerialize(name, protocolVersion))
 
-    def deserializerFor(protoVersion: ProtoVersion): Deserializer =
-      converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
+    def deserializerFor(protoVersion: ProtoVersion): ParsingResult[Deserializer] =
+      converters
+        .get(protoVersion)
+        .map(_.deserializer)
+        .toRight(
+          OtherError(
+            s"Unable to find deserializer for version $protoVersion and message $name"
+          )
+        )
   }
 
   protected def unsupportedProtoCodecDeserializer(protocolVersion: ProtocolVersion): Deserializer
@@ -272,9 +273,11 @@ trait HasVersionedMessageCompanionF[F[_], ValueClass]
   def fromProtoVersioned(
       proto: VersionedMessage[ValueClass]
   ): ParsingResult[ValueClass] =
-    proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data")).flatMap {
-      data => supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))(data)
-    }
+    for {
+      data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+      deserializer <- supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))
+      valueClass <- deserializer(data)
+    } yield valueClass
 
   /** The embedded version is not validated */
   def fromTrustedByteString(bytes: ByteString): ParsingResult[ValueClass] =
@@ -326,9 +329,14 @@ trait HasVersionedMessageCompanionF[F[_], ValueClass]
     def fromTrustedProtoVersioned(
         proto: VersionedMessage[ValueClass]
     ): ParsingResult[ValueClass] =
-      proto.wrapper.data
-        .toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-        .flatMap(supportedProtoVersions.deserializerFor(ProtoVersion(proto.version)))
+      for {
+        data <- proto.wrapper.data
+          .toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+
+        deserializer <- supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))
+
+        valueClass <- deserializer(data)
+      } yield valueClass
 
     try {
       v1.UntypedVersionedMessage
@@ -402,9 +410,11 @@ trait HasVersionedMessageWithContextCompanionF[F[_], ValueClass, Ctx]
   def fromProtoVersioned(
       ctx: Ctx
   )(proto: VersionedMessage[ValueClass]): ParsingResult[ValueClass] =
-    proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data")).flatMap {
-      data => supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))(ctx, data)
-    }
+    for {
+      data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+      deserializer <- supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))
+      valueClass <- deserializer(ctx, data)
+    } yield valueClass
 
   /** The embedded version is not validated */
   def fromTrustedByteString(ctx: Ctx)(bytes: ByteString): ParsingResult[ValueClass] =

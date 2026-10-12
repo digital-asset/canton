@@ -438,7 +438,6 @@ class ParticipantPartiesAdministrationGroup(
               ),
               partySigningKeysWithThreshold =
                 currentTransaction.flatMap(_.item.partySigningKeysWithThreshold),
-              isOffline = false,
             ),
             // let the topology service determine the appropriate keys to use
             signedBy = Seq.empty,

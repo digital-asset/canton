@@ -5,7 +5,11 @@ package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, ContractsReassignmentBatch}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  ContractReassignment,
+  ContractsReassignmentBatch,
+}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.pruning.CounterParticipantIntervalsBehind
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -14,7 +18,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimit
 import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.{GeneratorsVersion, HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.canton.{GeneratorsLf, LfPartyId, LfVersioned}
+import com.digitalasset.canton.{GeneratorsLf, LfPackageId, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
@@ -223,10 +227,7 @@ final class GeneratorsProtocol(
       } yield LfVersioned(LfSerializationVersion.V2, LfGlobalKeyWithMaintainers(key, maintainers))
     )
 
-  val byKeyArb: Arbitrary[Boolean] =
-    Arbitrary(
-      if (protocolVersion >= ProtocolVersion.v35) Gen.oneOf(true, false) else Gen.const(false)
-    )
+  val byKeyArb: Arbitrary[Boolean] = Arbitrary(Gen.oneOf(true, false))
 
   def contractMetadataArb: Arbitrary[ContractMetadata] = Arbitrary(
     for {
@@ -283,21 +284,32 @@ final class GeneratorsProtocol(
 
   implicit val contractReassignmentBatch: Arbitrary[ContractsReassignmentBatch] = {
 
-    def tuple(metadata: ContractMetadata) = Arbitrary(
+    def validationPackageIdArb(contractInstance: ContractInstance): Gen[LfPackageId] =
+      if (protocolVersion >= ProtocolVersion.v37) {
+        lfPackageId.arbitrary
+      } else {
+        Gen.const(contractInstance.templateId.packageId)
+      }
+
+    def reassignment(metadata: ContractMetadata) = Arbitrary(
       for {
         contract <- Arbitrary(contractInstanceWithGivenMetadataArb(metadata).arbitrary).arbitrary
-        // TODO(#26468): Use lfPackageId.arbitrary for PV>=35
-        sourceValidationId = contract.templateId.packageId // lfPackageId.arbitrary
-        targetValidationId = contract.templateId.packageId // lfPackageId.arbitrary
+        sourceValidationId <- validationPackageIdArb(contract)
+        targetValidationId <- validationPackageIdArb(contract)
         counter <- reassignmentCounterGen
-      } yield (contract, Source(sourceValidationId), Target(targetValidationId), counter)
+      } yield ContractReassignment(
+        contract,
+        Source(sourceValidationId),
+        Target(targetValidationId),
+        counter,
+      )
     )
 
     Arbitrary(
       for {
         metadata <- contractMetadataArb.arbitrary
-        contractCounters <- nonEmptyListGen(tuple(metadata))
-      } yield ContractsReassignmentBatch.create(contractCounters).value
+        contractCounters <- nonEmptyListGen(reassignment(metadata))
+      } yield ContractsReassignmentBatch.create(contractCounters.toSeq).value
     )
   }
 
@@ -311,11 +323,8 @@ final class GeneratorsProtocol(
       signatures <- Gen.sequence(
         parties.map(p => boundedListGen[Signature].map(p -> _))
       )
-      maxRecordTime <-
-        if (protocolVersion >= ProtocolVersion.v35)
-          Gen.option(Arbitrary.arbitrary[CantonTimestamp])
-        else
-          Gen.const[Option[CantonTimestamp]](None)
+      maxRecordTime <- Gen.option(Arbitrary.arbitrary[CantonTimestamp])
+
       hashingSchemeVersion <- hashingSchemeVersionArb.arbitrary
     } yield ExternalAuthorization.create(
       signatures.asScala.toMap,

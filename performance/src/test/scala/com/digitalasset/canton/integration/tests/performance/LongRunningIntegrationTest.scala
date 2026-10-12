@@ -19,8 +19,6 @@ final class LongRunningSingleSynchronizerIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(
@@ -51,8 +49,6 @@ final class LongRunningSingleSynchronizerIntegrationTest
 sealed trait LongRunningMultiSynchronizerIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
-
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition

@@ -39,7 +39,6 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
@@ -157,7 +156,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                 counter,
                 responseTimestamp,
                 responses,
-                topologyTimestamp,
                 recipients,
               ) =>
             HandlerResult.asynchronousUnit(
@@ -168,7 +166,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                   participantResponseDeadline,
                   decisionTime,
                   responses,
-                  topologyTimestamp,
                   recipients,
                 ),
                 "process response",
@@ -732,7 +729,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       participantResponseDeadline: CantonTimestamp,
       decisionTime: CantonTimestamp,
       signedResponses: SignedProtocolMessage[ConfirmationResponses],
-      topologyTimestamp: Option[CantonTimestamp],
       recipients: Recipients,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     withSpan("ConfirmationRequestAndResponseProcessor.processResponse") {
@@ -763,7 +759,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
         (for {
           _ <-
-            if (psid.protocolVersion >= ProtocolVersion.v35 && mediatorGroupRecipients.sizeIs > 1) {
+            if (mediatorGroupRecipients.sizeIs > 1) {
               val error = MediatorError.MalformedMessage
                 .Reject(
                   s"Request ${responses.requestId}, sender ${responses.sender}: More than one mediator group in the recipients: $mediatorGroupRecipients. Discarding..."
@@ -798,37 +794,6 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               )
               OptionT.none[FutureUnlessShutdown, Unit]
             }
-          _ <- {
-
-            if (psid.protocolVersion >= ProtocolVersion.v35) {
-              // Starting from v35, we reject messages with topology timestamp set
-              if (topologyTimestamp.isEmpty)
-                OptionT.some[FutureUnlessShutdown](())
-              else {
-                MediatorError.MalformedMessage
-                  .Reject(
-                    s"Request ${responses.requestId}, sender ${responses.sender}: Discarding confirmation response because the topology timestamp is non-empty."
-                  )
-                  .report()
-                OptionT.none[FutureUnlessShutdown, Unit]
-              }
-            } else {
-              // To ensure that a mediator group address is resolved in the same way as for the request
-              // we require that the topology timestamp on the response submission request is set to the
-              // request's sequencing time. The sequencer communicates this timestamp to the client
-              // via the timestamp of signing key.
-              if (topologyTimestamp.contains(responses.requestId.unwrap))
-                OptionT.some[FutureUnlessShutdown](())
-              else {
-                MediatorError.MalformedMessage
-                  .Reject(
-                    s"Request ${responses.requestId}, sender ${responses.sender}: Discarding confirmation response because the topology timestamp is not set to the request id [$topologyTimestamp]"
-                  )
-                  .report()
-                OptionT.none[FutureUnlessShutdown, Unit]
-              }
-            }
-          }
 
           snapshot <- OptionT.liftF(crypto.awaitSnapshot(responses.requestId.unwrap))
           _ <- signedResponses
@@ -843,9 +808,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             .toOption
 
           responseAggregation <- mediatorState.fetch(responses.requestId).orElse {
-            val logErrorOnUnknownRequestIdF =
-              if (psid.protocolVersion >= ProtocolVersion.v35) isInGroup(snapshot)
-              else OptionT.some[FutureUnlessShutdown](true)
+            val logErrorOnUnknownRequestIdF = isInGroup(snapshot)
 
             // This can happen as part of an attack.
             val cause =

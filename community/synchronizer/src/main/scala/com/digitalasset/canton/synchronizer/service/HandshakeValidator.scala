@@ -37,7 +37,7 @@ object HandshakeValidator {
     // of users running unstable development snapshots in production.
     // We learned this the hard way ...
     val preCheckE: Either[HandshakeError, Unit] =
-      if (serverProtocolVersion > ProtocolVersion.v34 && !disableReleaseVersionHandshakeCheck) {
+      if (!disableReleaseVersionHandshakeCheck) {
         for {
           clientVersion <- clientBinaryVersion.toRight(
             ClientBinaryIsTooOld(

@@ -14,7 +14,6 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   ObservedEvents,
 }
 import com.digitalasset.canton.ledger.api.benchtool.{BenchtoolSandboxFixture, ConfigEnricher}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.AppendedClues
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -25,7 +24,7 @@ class InterfaceSubscriptionITSpec extends BenchtoolSandboxFixture with AppendedC
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "interface subscriptions" should {
-    "be exposed to the benchtool" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
+    "be exposed to the benchtool" in { env =>
       import env.*
 
       val foo1Config = WorkflowConfig.FooSubmissionConfig.ContractDescription(

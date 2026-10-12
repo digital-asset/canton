@@ -11,7 +11,6 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   PossiblyIgnoredSequencedEvent,
   SequencedEventWithTraceContext,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 
@@ -25,24 +24,8 @@ object ProtocolObjectTestUtils extends Matchers {
   def assertSequencedEventEquals[Env <: Envelope[?], Env2 <: Envelope[?]](
       actual: DecompressedSequencedEvent[Env],
       expected: DecompressedSequencedEvent[Env2],
-      testedProtocolVersion: ProtocolVersion,
-  ): Assertion = {
-    SequencedEvent.envelopesOf(actual).foreach { envelope =>
-      assertEnvelopeType(envelope, testedProtocolVersion)
-    }
-
-    normalizeSequencedEvent(actual) shouldBe normalizeSequencedEvent(expected)
-  }
-
-  def assertEnvelopeType[Env <: Envelope[?]](
-      envelope: Env,
-      testedProtocolVersion: ProtocolVersion,
   ): Assertion =
-    if (testedProtocolVersion >= ProtocolVersion.v35) {
-      envelope shouldBe a[ClosedCompressedEnvelope]
-    } else {
-      envelope shouldBe a[ClosedUncompressedEnvelope]
-    }
+    normalizeSequencedEvent(actual) shouldBe normalizeSequencedEvent(expected)
 
   private def normalizeSequencedEvent[Env <: Envelope[?]](
       sequencedEvent: DecompressedSequencedEvent[Env]
@@ -66,13 +49,12 @@ object ProtocolObjectTestUtils extends Matchers {
   def assertSequencedEventSeqWithTraceContextEqual[Env <: Envelope[?], Env2 <: Envelope[?]](
       actual: Seq[SequencedEventWithTraceContext[Batch[Env]]],
       expected: Seq[SequencedEventWithTraceContext[Batch[Env2]]],
-      testedProtocolVersion: ProtocolVersion,
   ): Assertion = {
     for {
       actualSequencedEvent <- actual
       actualFirstEnvelope <- SequencedEvent.envelopesOf(actualSequencedEvent.signedEvent.content)
     } yield {
-      assertEnvelopeType(actualFirstEnvelope, testedProtocolVersion)
+      actualFirstEnvelope shouldBe a[ClosedCompressedEnvelope]
     }
 
     actual.map(normalizeSequencedEventWithTraceContext) shouldBe expected.map(
@@ -90,10 +72,9 @@ object ProtocolObjectTestUtils extends Matchers {
   def assertPossiblyIgnoredSequencedEventSeqEqual[Env <: Envelope[?], Env2 <: Envelope[?]](
       actual: Seq[PossiblyIgnoredSequencedEvent[Batch[Env]]],
       expected: Seq[PossiblyIgnoredSequencedEvent[Batch[Env2]]],
-      testedProtocolVersion: ProtocolVersion,
   ): Assertion = {
     actual.foreach { event =>
-      assertPossiblyIgnoredSequencedEventEnvelopeType(event, testedProtocolVersion)
+      assertPossiblyIgnoredSequencedEventEnvelopeType(event)
     }
 
     actual.map(normalizePossiblyIgnoredSequencedEvent) shouldBe expected.map(
@@ -104,9 +85,8 @@ object ProtocolObjectTestUtils extends Matchers {
   def assertPossiblyIgnoredSequencedEventEquals[Env <: Envelope[?], Env2 <: Envelope[?]](
       actual: PossiblyIgnoredSequencedEvent[Batch[Env]],
       expected: PossiblyIgnoredSequencedEvent[Batch[Env2]],
-      testedProtocolVersion: ProtocolVersion,
   ): Assertion = {
-    assertPossiblyIgnoredSequencedEventEnvelopeType(actual, testedProtocolVersion)
+    assertPossiblyIgnoredSequencedEventEnvelopeType(actual)
 
     normalizePossiblyIgnoredSequencedEvent(actual) shouldBe normalizePossiblyIgnoredSequencedEvent(
       expected
@@ -114,19 +94,18 @@ object ProtocolObjectTestUtils extends Matchers {
   }
 
   private def assertPossiblyIgnoredSequencedEventEnvelopeType[Env <: Envelope[?]](
-      event: PossiblyIgnoredSequencedEvent[Batch[Env]],
-      testedProtocolVersion: ProtocolVersion,
+      event: PossiblyIgnoredSequencedEvent[Batch[Env]]
   ): Unit =
     event match {
       case ignoredSequencedEvent: IgnoredSequencedEvent[Batch[Env]] =>
         ignoredSequencedEvent.underlying.toList
           .flatMap(sc => SequencedEvent.envelopesOf(sc.content))
           .foreach { envelope =>
-            assertEnvelopeType(envelope, testedProtocolVersion)
+            envelope shouldBe a[ClosedCompressedEnvelope]
           }
       case ordinarySequencedEvent: OrdinarySequencedEvent[Batch[Env]] =>
         SequencedEvent.envelopesOf(ordinarySequencedEvent.signedEvent.content).foreach { envelope =>
-          assertEnvelopeType(envelope, testedProtocolVersion)
+          envelope shouldBe a[ClosedCompressedEnvelope]
         }
     }
 

@@ -6,7 +6,11 @@ package com.digitalasset.canton.sequencing
 import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.sequencer.v30
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.SubmissionRequestAmplification.minimumConfirmationResponsePatience
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -33,7 +37,7 @@ final case class SubmissionRequestAmplification(
     patience: NonNegativeFiniteDuration,
     confirmationResponseFactorO: Option[PositiveInt] = None,
     confirmationResponsePatienceO: Option[NonNegativeFiniteDuration] = None,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   private[sequencing] def toProtoV30: v30.SubmissionRequestAmplification =
     v30.SubmissionRequestAmplification(
@@ -43,12 +47,8 @@ final case class SubmissionRequestAmplification(
       confirmationResponsePatience = confirmationResponsePatienceO.map(_.toProtoPrimitive),
     )
 
-  override protected def pretty: Pretty[SubmissionRequestAmplification] = prettyOfClass(
-    param("factor", _.factor),
-    param("patience", _.patience),
-    paramIfDefined("confirmationResponseFactor", _.confirmationResponseFactorO),
-    paramIfDefined("confirmationResponsePatience", _.confirmationResponsePatienceO),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SubmissionRequestAmplification] =
+    SubmissionRequestAmplification
 
   def getActual(
       useConfirmationResponseParameters: Boolean
@@ -71,7 +71,15 @@ final case class SubmissionRequestAmplification(
   )
 }
 
-object SubmissionRequestAmplification {
+object SubmissionRequestAmplification
+    extends PrettyPrintingCompanion[SubmissionRequestAmplification] {
+  override protected val pretty: Pretty[SubmissionRequestAmplification] = prettyOfClass(
+    param("factor", _.factor),
+    param("patience", _.patience),
+    paramIfDefined("confirmationResponseFactor", _.confirmationResponseFactorO),
+    paramIfDefined("confirmationResponsePatience", _.confirmationResponsePatienceO),
+  )
+
   val NoAmplification: SubmissionRequestAmplification =
     SubmissionRequestAmplification(PositiveInt.one, NonNegativeFiniteDuration.Zero)
 

@@ -43,6 +43,7 @@ class DanglingPartiesIntegrationTest
     with SharedEnvironment
     with HasCycleUtils {
 
+  // TODO(#36286) Enable the test again when we handle participant unregistering
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private var alice: PartyId = _
@@ -107,17 +108,17 @@ class DanglingPartiesIntegrationTest
                     HostingParticipant(
                       p1,
                       ParticipantPermission.Submission,
-                      false, // onboarding
+                      HostingParticipant.HostingState.Active,
                     ),
                     HostingParticipant(
                       p2,
                       ParticipantPermission.Confirmation,
-                      false, // onboarding
+                      HostingParticipant.HostingState.Active,
                     ),
                     HostingParticipant(
                       p3,
                       ParticipantPermission.Confirmation,
-                      false, // onboarding
+                      HostingParticipant.HostingState.Active,
                     ),
                   ) if (participant1.id == p1 && participant2.id == p2 && participant3.id == p3) =>
             }
@@ -172,7 +173,6 @@ class DanglingPartiesIntegrationTest
 
     // wait until tx has become effective
     awaitRemoval(TimeQuery.HeadState)
-
   }
 
   "contract with p2 is still alive" in { implicit env =>
@@ -211,7 +211,6 @@ class DanglingPartiesIntegrationTest
         fail("commitment is still outstanding")
       }
     }
-
   }
 
 }

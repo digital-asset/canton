@@ -31,10 +31,9 @@ import scala.concurrent.ExecutionContext
 /** Stores the state of an in-flight aggregation of submission requests.
   *
   * Since the [[com.digitalasset.canton.sequencing.protocol.AggregationId]] computationally
-  * identifies the envelope contents, their recipients, and the
-  * [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest.topologyTimestamp]], we do not
-  * need to maintain these data as part of the in-flight tracking. Instead, we can derive them from
-  * the submission request that makes the aggregation reach its threshold.
+  * identifies the envelope contents and their recipients we do not need to maintain these data as
+  * part of the in-flight tracking. Instead, we can derive them from the submission request that
+  * makes the aggregation reach its threshold.
   *
   * @param aggregatedSenders
   *   The senders whose submission request have already been aggregated with the timestamp of their

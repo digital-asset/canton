@@ -15,7 +15,12 @@ import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentPro
   SubmissionValidationError,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
-import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, Stakeholders}
+import com.digitalasset.canton.protocol.{
+  LfContractId,
+  LfSerializationVersion,
+  ReassignmentId,
+  Stakeholders,
+}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag
@@ -157,6 +162,16 @@ object ReassignmentValidationError extends PrettyPrintingCompanion[ReassignmentV
   ) extends ReassignmentValidationError {
     override def message: String =
       s"Cannot unassign contracts `$contractIds` on synchronizer `$synchronizerId`: ${unknownTo.mkString(", ")}"
+  }
+
+  final case class ContractSerializationVersionNotSupported(
+      reassignmentRef: ReassignmentRef,
+      targetSynchronizerId: PhysicalSynchronizerId,
+      maxSynchronizerVersion: LfSerializationVersion,
+      contractVersion: LfSerializationVersion,
+  ) extends ReassignmentValidationError {
+    override def message: String =
+      s"For `$reassignmentRef`: contracts require serialization version $contractVersion but target synchronizer `$targetSynchronizerId` only supports up to version $maxSynchronizerVersion"
   }
 
   final case class AbortedDueToShutdownOut(contractId: LfContractId)

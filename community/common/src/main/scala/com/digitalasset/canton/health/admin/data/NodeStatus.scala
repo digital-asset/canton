@@ -10,7 +10,12 @@ import com.digitalasset.canton.admin.health.v30
 import com.digitalasset.canton.admin.health.v30.NotInitialized.WaitingForExternalInput as V30WaitingForExternalInput
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.ComponentStatus
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
@@ -168,20 +173,23 @@ object WaitingForExternalInput {
   *   number of observed transactions that are not yet effective
   */
 final case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
   def toProtoV30: v30.TopologyQueueStatus =
     v30.TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients)
 
   def isIdle: Boolean = Seq(manager, dispatcher, clients).forall(_ == 0)
 
-  override protected def pretty: Pretty[TopologyQueueStatus.this.type] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[TopologyQueueStatus] =
+    TopologyQueueStatus
+}
+
+object TopologyQueueStatus extends PrettyPrintingCompanion[TopologyQueueStatus] {
+  override protected val pretty: Pretty[TopologyQueueStatus] = prettyOfClass(
     param("manager", _.manager),
     param("dispatcher", _.dispatcher),
     param("clients", _.clients),
   )
-}
 
-object TopologyQueueStatus {
   def fromProto(
       statusP: v30.TopologyQueueStatus
   ): ParsingResult[TopologyQueueStatus] = {

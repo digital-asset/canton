@@ -70,7 +70,6 @@ final class TopologyUnknownProtoVersionIntegrationTest
       party,
       PositiveInt.one,
       Seq(HostingParticipant(participant1.id, ParticipantPermission.Submission)),
-      isOffline = false,
     )
     val transactionP = TopologyTransaction
       .tryCreate(TopologyChangeOp.Replace, PositiveInt.one, mapping, testedProtocolVersion)
@@ -126,7 +125,6 @@ final class TopologyUnknownProtoVersionIntegrationTest
       messageId = MessageId.randomMessageId(),
       batch = batch,
       maxSequencingTime = CantonTimestamp.MaxValue,
-      topologyTimestamp = None,
       aggregationRule = None,
       submissionCost = None,
       protocolVersion = testedProtocolVersion,

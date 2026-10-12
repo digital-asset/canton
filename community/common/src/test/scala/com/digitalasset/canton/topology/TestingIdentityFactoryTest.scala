@@ -5,14 +5,28 @@ package com.digitalasset.canton.topology
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SynchronizerParameters}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
-import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  ParticipantPermission,
+  PartyToParticipant,
+  TopologyTransaction,
+}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{
+  BaseTest,
+  FailOnShutdown,
+  HasExecutionContext,
+  ProtocolVersionChecksAnyWordSpec,
+}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Await
@@ -22,7 +36,8 @@ class TestingIdentityFactoryTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
-    with FailOnShutdown {
+    with FailOnShutdown
+    with ProtocolVersionChecksAnyWordSpec {
 
   import DefaultTestIdentities.*
 
@@ -327,5 +342,92 @@ class TestingIdentityFactoryTest
       compare(setup)
     }
 
+  }
+
+  "withHostingStates" should {
+    def storedHostingStates(topology: TestingTopology): Map[ParticipantId, HostingState] =
+      topology
+        .build(loggerFactory)
+        .partyToParticipantTxs()
+        .toSeq
+        .flatMap { tx =>
+          TopologyTransaction
+            .fromTrustedByteString(())(tx.transaction.toByteStringChecked)
+            .value
+            .selectMapping[PartyToParticipant]
+        }
+        .flatMap(_.mapping.participants.map(host => host.participantId -> host.state))
+        .toMap
+
+    def supportsAllHostingStates(pv: ProtocolVersion): Boolean =
+      TestingTopology.supportsAllHostingStates(pv).value
+
+    val confirmingTopology = TestingTopology.from(topology =
+      Map(
+        party1.toLf -> Map(
+          participant1 -> ParticipantPermission.Confirmation,
+          participant2 -> ParticipantPermission.Confirmation,
+        )
+      )
+    )
+
+    val onboardingTopology = TestingTopology(topology =
+      Map(
+        party1.toLf -> PartyInfo.nonConsortiumPartyInfo(
+          Map(
+            participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation),
+            participant2 ->
+              ParticipantAttributes(ParticipantPermission.Confirmation, onboarding = true),
+          )
+        )
+      )
+    )
+
+    "store each entry with exactly its hosting state" onlyRunWhen supportsAllHostingStates in {
+      val states = Map(
+        participant1 -> HostingState.Nominated,
+        participant2 -> HostingState.Freezing,
+        participant3 -> HostingState.Onboarding,
+        participant4 -> HostingState.Active,
+      )
+      val topology = TestingTopology
+        .from(topology = Map(party1.toLf -> states.fmap(_ => ParticipantPermission.Confirmation)))
+        .withHostingStates(Map(party1.toLf -> states))
+        .value
+
+      storedHostingStates(topology) shouldBe states
+    }
+
+    "store entries with onboarding = true as ONBOARDING" in {
+      storedHostingStates(onboardingTopology) shouldBe Map(
+        participant1 -> HostingState.Active,
+        participant2 -> HostingState.Onboarding,
+      )
+    }
+
+    "reject states for entries missing from the topology" in {
+      confirmingTopology
+        .withHostingStates(Map(party1.toLf -> Map(participant3 -> HostingState.Active)))
+        .left
+        .value should include("missing from the topology")
+    }
+
+    "reject states that conflict with onboarding = true" in {
+      onboardingTopology
+        .withHostingStates(Map(party1.toLf -> Map(participant2 -> HostingState.Active)))
+        .left
+        .value should include("conflict with onboarding = true")
+    }
+
+    "reject NOMINATED and FREEZING on a protocol version without them" onlyRunWhen (pv =>
+      !supportsAllHostingStates(pv)
+    ) in {
+      Seq(HostingState.Nominated, HostingState.Freezing).foreach { state =>
+        confirmingTopology
+          .withHostingStates(Map(party1.toLf -> Map(participant1 -> state)))
+          .left
+          .value should include("require PartyToParticipant v31")
+      }
+    }
   }
 }

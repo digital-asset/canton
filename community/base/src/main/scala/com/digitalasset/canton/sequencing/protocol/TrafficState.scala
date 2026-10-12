@@ -8,7 +8,11 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.traffic.{
   TrafficConsumed,
@@ -28,7 +32,7 @@ final case class TrafficState(
     lastConsumedCost: NonNegativeLong,
     timestamp: CantonTimestamp,
     serial: Option[PositiveInt],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def extraTrafficRemainder: Long = extraTrafficPurchased.value - extraTrafficConsumed.value
   // Need big int here because it could overflow a long especially if extraTrafficPurchased == Long.MAX
   lazy val availableTraffic: BigInt =
@@ -67,7 +71,11 @@ final case class TrafficState(
     )
   }
 
-  override protected def pretty: Pretty[TrafficState] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[TrafficState] = TrafficState
+}
+
+object TrafficState extends PrettyPrintingCompanion[TrafficState] {
+  override protected val pretty: Pretty[TrafficState] = prettyOfClass(
     param("extraTrafficLimit", _.extraTrafficPurchased),
     param("extraTrafficConsumed", _.extraTrafficConsumed),
     param("baseTrafficRemainder", _.baseTrafficRemainder),
@@ -76,9 +84,6 @@ final case class TrafficState(
     paramIfDefined("serial", _.serial),
     param("availableTraffic", _.availableTraffic),
   )
-}
-
-object TrafficState {
 
   implicit val setResultParameter: SetParameter[TrafficState] = { (v: TrafficState, pp) =>
     pp >> Some(v.extraTrafficPurchased.value)

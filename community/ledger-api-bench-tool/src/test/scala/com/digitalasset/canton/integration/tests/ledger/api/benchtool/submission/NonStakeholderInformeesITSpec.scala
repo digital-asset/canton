@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig.FooSubmissionConfig.ConsumingExercises
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.{EventsObserver, ObservedEvents}
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -23,14 +22,12 @@ class NonStakeholderInformeesITSpec
     with OptionValues
     with Checkpoints {
 
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   "NonStakeholderInformees" should {
-    "divulge events" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { env =>
+    "divulge events" in { env =>
       import env.*
 
       val expectedTemplateNames = Set("Foo1", "Divulger")

@@ -344,7 +344,7 @@ class SendTracker(
       event: DecompressedSequencedEvent[Envelope[?]]
   )(implicit traceContext: TraceContext): Option[(MessageId, SendResult)] =
     Option(event) collect {
-      case deliver @ Deliver(_, _, _, Some(messageId), _, _, _) =>
+      case deliver @ Deliver(_, _, _, Some(messageId), _, _) =>
         logger.trace(s"Send [$messageId] was successful")
         (messageId, SendResult.Success(deliver))
 

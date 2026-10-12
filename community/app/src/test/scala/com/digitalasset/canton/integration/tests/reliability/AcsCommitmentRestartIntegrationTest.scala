@@ -54,7 +54,7 @@ trait AcsCommitmentRestartIntegrationTest
     with HasCycleUtils
     with CommitmentTestUtil {
 
-  // This is flaky, requires multiple runs
+  // TODO(#35929) Enable again when we fix the flakiness of this test
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(60)
@@ -75,8 +75,10 @@ trait AcsCommitmentRestartIntegrationTest
         // Disable traffic accounting as the feature does not support restarting the ledger end
         // performed in this test
         ConfigTransforms.disableTrafficAccounting,
-        // TODO(#35107) Disable the old processor and fix the test
+        // TODO(#36392) This test only makes sense for the old commitment processor
         ConfigTransforms.enableOldAcsCommitmentProcessor,
+        // This test case uses `moveLedgerEndBackToScratch`, which is fundamentally incompatible with the new processor pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

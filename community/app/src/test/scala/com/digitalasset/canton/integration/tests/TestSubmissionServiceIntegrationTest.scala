@@ -23,7 +23,6 @@ import com.digitalasset.canton.integration.util.TestUtils.damlSet
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status.Code
 
 import scala.jdk.CollectionConverters.*
@@ -128,159 +127,158 @@ abstract sealed class TestSubmissionServiceIntegrationTestLF23
     extends TestSubmissionServiceIntegrationTest {
   override def cantonTestsPath: String = CantonTestsLF23Path
 
-  "Create, fetch and lookup by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-    implicit env =>
-      import env.*
+  "Create, fetch and lookup by key" in { implicit env =>
+    import env.*
 
-      val submissionServiceWithActiveKeyResolver =
-        TestSubmissionService(
-          participant1,
-          enableLfDev = true,
-        )
-      val submissionServiceWithLastAssignedKeyResolver =
-        TestSubmissionService(
-          participant = participant1,
-          customKeyResolver = Some(LastAssignedKeyResolver(participant1)),
-          enableLfDev = true,
-        )
+    val submissionServiceWithActiveKeyResolver =
+      TestSubmissionService(
+        participant1,
+        enableLfDev = true,
+      )
+    val submissionServiceWithLastAssignedKeyResolver =
+      TestSubmissionService(
+        participant = participant1,
+        customKeyResolver = Some(LastAssignedKeyResolver(participant1)),
+        enableLfDev = true,
+      )
 
-      val submitter = participant1.adminParty
+    val submitter = participant1.adminParty
 
-      // create KeyOps contract
-      val createOpsCommands =
-        CommandsWithMetadata(
-          new KeyOps(
-            damlSet(Set(submitter.toProtoPrimitive)),
-            submitter.toProtoPrimitive,
-          ).create.commands.asScala.toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand)),
-          Seq(submitter),
-        )
-      val keyOps = JavaDecodeUtil
-        .decodeAllCreated(KeyOps.COMPANION)(
-          Transaction.fromProto(
-            toJavaProto(
-              submissionServiceWithActiveKeyResolver
-                .submitAndWaitForTransaction(participant1, createOpsCommands)
-                .futureValue
-            )
+    // create KeyOps contract
+    val createOpsCommands =
+      CommandsWithMetadata(
+        new KeyOps(
+          damlSet(Set(submitter.toProtoPrimitive)),
+          submitter.toProtoPrimitive,
+        ).create.commands.asScala.toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand)),
+        Seq(submitter),
+      )
+    val keyOps = JavaDecodeUtil
+      .decodeAllCreated(KeyOps.COMPANION)(
+        Transaction.fromProto(
+          toJavaProto(
+            submissionServiceWithActiveKeyResolver
+              .submitAndWaitForTransaction(participant1, createOpsCommands)
+              .futureValue
           )
         )
-        .loneElement
+      )
+      .loneElement
 
-      // Directly create a BasicKey contract
-      val createCommands =
-        CommandsWithMetadata(
-          new BasicKey(
-            damlSet(Set(submitter.toProtoPrimitive)),
-            damlSet(Set.empty),
-          ).create.commands.asScala.toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand)),
-          Seq(submitter),
-        )
-      submissionServiceWithActiveKeyResolver
-        .submitAndWaitForTransaction(participant1, createCommands)
-        .futureValue
+    // Directly create a BasicKey contract
+    val createCommands =
+      CommandsWithMetadata(
+        new BasicKey(
+          damlSet(Set(submitter.toProtoPrimitive)),
+          damlSet(Set.empty),
+        ).create.commands.asScala.toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand)),
+        Seq(submitter),
+      )
+    submissionServiceWithActiveKeyResolver
+      .submitAndWaitForTransaction(participant1, createCommands)
+      .futureValue
 
-      // Use the KeyOps contract to fetch-by-key the BasicKey contract
-      // Use "def" to allow for reusing the command.
-      def fetchKeyCommands: CommandsWithMetadata =
-        CommandsWithMetadata(
-          keyOps.id
-            .exerciseFetch(submitter.toProtoPrimitive)
-            .commands
-            .asScala
-            .toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand)),
-          Seq(submitter),
-        )
-      submissionServiceWithActiveKeyResolver
-        .submitAndWaitForTransaction(participant1, fetchKeyCommands)
-        .futureValue
+    // Use the KeyOps contract to fetch-by-key the BasicKey contract
+    // Use "def" to allow for reusing the command.
+    def fetchKeyCommands: CommandsWithMetadata =
+      CommandsWithMetadata(
+        keyOps.id
+          .exerciseFetch(submitter.toProtoPrimitive)
+          .commands
+          .asScala
+          .toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand)),
+        Seq(submitter),
+      )
+    submissionServiceWithActiveKeyResolver
+      .submitAndWaitForTransaction(participant1, fetchKeyCommands)
+      .futureValue
 
-      def lookupByKeyCommands: CommandsWithMetadata =
-        CommandsWithMetadata(
-          keyOps.id
-            .exerciseLookup(submitter.toProtoPrimitive)
-            .commands
-            .asScala
-            .toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand)),
-          Seq(submitter),
-        )
+    def lookupByKeyCommands: CommandsWithMetadata =
+      CommandsWithMetadata(
+        keyOps.id
+          .exerciseLookup(submitter.toProtoPrimitive)
+          .commands
+          .asScala
+          .toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand)),
+        Seq(submitter),
+      )
 
-      def lookup(): Option[Value] = {
-        val lookupTransactionTree =
-          submissionServiceWithActiveKeyResolver
-            .submitAndWaitForTransaction(participant1, lookupByKeyCommands)
-            .futureValue
-        IntegrationTestUtilities.extractSubmissionResult(lookupTransactionTree) match {
-          case Sum.Optional(res) => res.value
-          case r => fail(s"Unexpected result type: $r")
-        }
+    def lookup(): Option[Value] = {
+      val lookupTransactionTree =
+        submissionServiceWithActiveKeyResolver
+          .submitAndWaitForTransaction(participant1, lookupByKeyCommands)
+          .futureValue
+      IntegrationTestUtilities.extractSubmissionResult(lookupTransactionTree) match {
+        case Sum.Optional(res) => res.value
+        case r => fail(s"Unexpected result type: $r")
       }
+    }
 
-      // Use the KeyOps contract to lookup-by-key the BasicKey contract
-      lookup() should not be empty
+    // Use the KeyOps contract to lookup-by-key the BasicKey contract
+    lookup() should not be empty
 
-      // Submit a transaction that erroneously resolves the key to None.
-      // Expecting a Canton specific error in the command completion
-      // TODO(#16065) Re-enable these assertions once contract keys are supported in 3.x
-      //    val submissionServiceWithEmptyKeyResolver =
-      //      TestSubmissionService(participant1, Some(EmptyKeyResolver))
-      //    val c1: Completion = submissionServiceWithEmptyKeyResolver
-      //      .submitAndWaitForCompletion(participant1, lookupByKeyCommands)
-      //      .futureValue
-      //    c1.status.value.code shouldBe Code.FAILED_PRECONDITION.value()
-      //    c1.status.value.message should startWith("INCONSISTENT_CONTRACT_KEY")
+    // Submit a transaction that erroneously resolves the key to None.
+    // Expecting a Canton specific error in the command completion
+    // TODO(#16065) Re-enable these assertions once contract keys are supported in 3.x
+    //    val submissionServiceWithEmptyKeyResolver =
+    //      TestSubmissionService(participant1, Some(EmptyKeyResolver))
+    //    val c1: Completion = submissionServiceWithEmptyKeyResolver
+    //      .submitAndWaitForCompletion(participant1, lookupByKeyCommands)
+    //      .futureValue
+    //    c1.status.value.code shouldBe Code.FAILED_PRECONDITION.value()
+    //    c1.status.value.message should startWith("INCONSISTENT_CONTRACT_KEY")
 
-      // Use the KeyOps contract to archive-by-key the BasicKey contract
-      val exerciseByKeyCommands =
-        CommandsWithMetadata(
-          keyOps.id
-            .exerciseDeleteKey(submitter.toProtoPrimitive, damlSet(Set(submitter.toProtoPrimitive)))
-            .commands
-            .asScala
-            .toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand)),
-          Seq(submitter),
-        )
-      submissionServiceWithActiveKeyResolver
-        .submitAndWaitForTransaction(participant1, exerciseByKeyCommands)
-        .futureValue
-
-      // Use the KeyOps contract to lookup-by-key the BasicKey contract
-      lookup() shouldBe empty
-
-      // Submit a failing fetch-by-key command.
-      // Expecting that DAMLe fails the submission
-      val ex = submissionServiceWithActiveKeyResolver
-        .submitAndWaitForCompletion(participant1, fetchKeyCommands)
-        .failed
-        .futureValue
-      ex.getMessage should include("ContractKeyNotFound")
-
-      // Submit a fetch-by-key transaction that erroneously resolves the key to the archived contract.
-      // Expecting a Canton specific error in the command completion
-      val c2 = submitMaliciousCommand(
-        participant1,
-        fetchKeyCommands,
-        submitter,
-        Some(submissionServiceWithLastAssignedKeyResolver),
+    // Use the KeyOps contract to archive-by-key the BasicKey contract
+    val exerciseByKeyCommands =
+      CommandsWithMetadata(
+        keyOps.id
+          .exerciseDeleteKey(submitter.toProtoPrimitive, damlSet(Set(submitter.toProtoPrimitive)))
+          .commands
+          .asScala
+          .toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand)),
+        Seq(submitter),
       )
-      c2.status.value.code shouldBe Code.NOT_FOUND.value()
-      c2.status.value.message should startWith("LOCAL_VERDICT_INACTIVE_CONTRACTS")
+    submissionServiceWithActiveKeyResolver
+      .submitAndWaitForTransaction(participant1, exerciseByKeyCommands)
+      .futureValue
 
-      // Submit a lookup-by-key transaction that erroneously resolves the key to the archived contract.
-      // Expecting a Canton specific error in the command completion
-      val c3 = submitMaliciousCommand(
-        participant1,
-        lookupByKeyCommands,
-        submitter,
-        Some(submissionServiceWithLastAssignedKeyResolver),
-      )
-      c3.status.value.code shouldBe Code.NOT_FOUND.value()
-      c3.status.value.message should startWith("LOCAL_VERDICT_INACTIVE_CONTRACTS")
+    // Use the KeyOps contract to lookup-by-key the BasicKey contract
+    lookup() shouldBe empty
+
+    // Submit a failing fetch-by-key command.
+    // Expecting that DAMLe fails the submission
+    val ex = submissionServiceWithActiveKeyResolver
+      .submitAndWaitForCompletion(participant1, fetchKeyCommands)
+      .failed
+      .futureValue
+    ex.getMessage should include("ContractKeyNotFound")
+
+    // Submit a fetch-by-key transaction that erroneously resolves the key to the archived contract.
+    // Expecting a Canton specific error in the command completion
+    val c2 = submitMaliciousCommand(
+      participant1,
+      fetchKeyCommands,
+      submitter,
+      Some(submissionServiceWithLastAssignedKeyResolver),
+    )
+    c2.status.value.code shouldBe Code.NOT_FOUND.value()
+    c2.status.value.message should startWith("LOCAL_VERDICT_INACTIVE_CONTRACTS")
+
+    // Submit a lookup-by-key transaction that erroneously resolves the key to the archived contract.
+    // Expecting a Canton specific error in the command completion
+    val c3 = submitMaliciousCommand(
+      participant1,
+      lookupByKeyCommands,
+      submitter,
+      Some(submissionServiceWithLastAssignedKeyResolver),
+    )
+    c3.status.value.code shouldBe Code.NOT_FOUND.value()
+    c3.status.value.message should startWith("LOCAL_VERDICT_INACTIVE_CONTRACTS")
   }
 }
 

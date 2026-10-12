@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.admin.party.acsreplication
 
 import cats.syntax.either.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -20,7 +20,7 @@ final case class AcsReplicationAgreementParams(
     sourceParticipantId: ParticipantId,
     targetParticipantId: ParticipantId,
     sequencerId: SequencerId,
-    serial: PositiveInt,
+    timestamp: CantonTimestamp,
     participantPermission: ParticipantPermission,
 )
 
@@ -61,13 +61,9 @@ object AcsReplicationAgreementParams {
           .fromProtoPrimitive(synchronizer, "synchronizer")
           // The following error is impossible to trigger as the ledger-api does not emit invalid synchronizer ids
           .leftMap(err => s"Invalid synchronizerId $err")
-      serialInt <- Either.cond(
-        c.topologySerial.toInt.toLong == c.topologySerial,
-        c.topologySerial.toInt,
-        s"Non-integer serial ${c.topologySerial}",
-      )
-      // TODO(#35267) replace with CantonTimestamp
-      serial <- PositiveInt.create(serialInt).leftMap(_.message)
+      timestamp <- CantonTimestamp
+        .fromInstant(c.timestamp)
+        .leftMap(err => s"Invalid timestamp ${c.timestamp}: $err")
       // TODO(#35267) ACS replicator shouldn't know about party party participant permission
       participantPermission = PartyParticipantPermission.fromDaml(c.participantPermission)
     } yield AcsReplicationAgreementParams(
@@ -77,7 +73,7 @@ object AcsReplicationAgreementParams {
       sourceParticipantId,
       targetParticipantId,
       sequencerId,
-      serial, // TODO(#35267) make optional and add CantonTimestamp
+      timestamp,
       participantPermission, // TODO(#35267) ACS replicator shouldn't know about party party participant permission
     )
 
