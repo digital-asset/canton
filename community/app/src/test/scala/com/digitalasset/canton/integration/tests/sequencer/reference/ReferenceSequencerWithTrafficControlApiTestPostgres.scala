@@ -44,7 +44,7 @@ class ReferenceSequencerWithTrafficControlApiTestPostgres
       getSequencerDriverFactory(DriverName, SequencerDriver.DriverApiVersion),
       ReferenceSequencerDriver.Config(StorageConfig.Memory()),
       BlockSequencerConfig(),
-      producePostOrderingTopologyTicks = false,
+      producePostOrderingTopologyTicks = true,
       None,
       storage,
       testedProtocolVersion,

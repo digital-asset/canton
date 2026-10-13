@@ -25,11 +25,13 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   stringEncoderForEnum,
   stringSchemaForEnum,
 }
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import com.google.protobuf
 import io.circe.*
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
@@ -48,6 +50,7 @@ class JsInteractiveSubmissionService(
     protocolConverters: ProtocolConverters,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
+    deprecatedApiGate: DeprecatedApiGate,
 )(implicit
     val executionContext: ExecutionContext,
     val authInterceptor: AuthInterceptor,
@@ -82,7 +85,7 @@ class JsInteractiveSubmissionService(
     withServerLogic(
       JsInteractiveSubmissionService.preferredPackageVersionEndpoint,
       preferredPackageVersion,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsInteractiveSubmissionService.preferredPackagesEndpoint,
       preferredPackages,
@@ -321,8 +324,25 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
       .in(sttp.tapir.query[Option[Instant]](timestampVettingValidityQueryParam))
       .in(sttp.tapir.query[Option[String]](synchronizerIdQueryParam))
       .out(jsonBody[interactive_submission_service.GetPreferredPackageVersionResponse])
-      .protoRef(
-        interactive_submission_service.InteractiveSubmissionServiceGrpc.METHOD_GET_PREFERRED_PACKAGE_VERSION
+      // The gRPC method documentation is not inlined here (unlike for the other endpoints) as it
+      // carries the deprecation notice of the gRPC method, which would duplicate the one below.
+      .description(
+        """Get the preferred package version for constructing a command submission.
+           |
+           |A preferred package is the highest-versioned package for a provided package-name
+           |that is vetted by all the participants hosting the provided parties.
+           |
+           |Ledger API clients should use this endpoint for constructing command submissions
+           |that are compatible with the provided preferred package, by making informed decisions on:
+           |- which are the compatible packages that can be used to create contracts
+           |- which contract or exercise choice argument version can be used in the command
+           |- which choices can be executed on a template or interface of a contract
+           |
+           |Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.""".stripMargin
+      )
+      .deprecatedSince(
+        ApiDeprecation.Canton34.Endpoints,
+        useInstead = "POST /v2/interactive-submission/preferred-packages",
       )
 
   val preferredPackagesEndpoint =

@@ -51,7 +51,10 @@ service InteractiveSubmissionService {
   //
   // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
   //
-  // Deprecated: Use GetPreferredPackages instead.
+  // Deprecated since Canton 3.4: disabled by default since Canton 3.6 (re-enable temporarily with
+  // `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-34 = true`)
+  // and will be removed in Canton 3.7.
+  // Use GetPreferredPackages instead.
   rpc GetPreferredPackageVersion(GetPreferredPackageVersionRequest) returns (GetPreferredPackageVersionResponse);
 
   // Compute the preferred packages for the vetting requirements in the request.

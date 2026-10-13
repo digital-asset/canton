@@ -12,7 +12,6 @@ import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipant
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.tests.ledgerapi.ProtocolType.Json
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
@@ -119,6 +118,7 @@ class LedgerApiConformanceMultiSynchronizerTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   // ensure ledger api conformance tests have less noisy neighbours
@@ -232,25 +232,10 @@ object LedgerApiConformanceBase {
     "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag"
   )
 
-  /** Tests that only fail over the JSON API for PV35, because the JSON security checks reject the
-    * payload with a different error message than the test tool expects.
-    */
-  private val jsonExcludedTestsForPV35 = Seq(
-    "DeeplyNestedValueIT:RejectCreateCommand110",
-    "DeeplyNestedValueIT:RejectCreateCommand200",
-    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand110",
-    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand200",
-    "DeeplyNestedValueIT:RejectExerciseCommand110",
-    "DeeplyNestedValueIT:RejectExerciseCommand200",
-    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand110",
-    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand200",
-  )
-
   def excludedTests(version: ProtocolVersion, protocolType: ProtocolType): Set[String] = {
     val perProtocolVersionExclusions =
       (version, protocolType) match {
         case (ProtocolVersion.v34, _) => excludedTestsForPV34
-        case (ProtocolVersion.v35, Json) => excludedTestsForPV35AndAbove ++ jsonExcludedTestsForPV35
         case (version, _) if version >= ProtocolVersion.v35 => excludedTestsForPV35AndAbove
         case _ => Seq.empty
       }
@@ -267,6 +252,7 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
@@ -302,6 +288,7 @@ trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConforman
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   "Ledger Api Test Tool" can {
@@ -371,6 +358,7 @@ trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiC
           _.focus(_.parameters.activationFrequencyForWarnAboutConsistencyChecks)
             .replace(Long.MaxValue)
         ),
+        ConfigTransforms.enableAllDeprecatedApis,
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
 
@@ -420,6 +408,7 @@ trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiCo
             .replace(config.NonNegativeFiniteDuration(java.time.Duration.ofMillis(3000)))
         )
       )
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   "On a Ledger API with short offsetCheckpoint cache update interval, Ledger Api Test Tool" can {
@@ -453,6 +442,7 @@ class LedgerApiSingleTest extends SingleVersionLedgerApiConformanceBase {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
 
   "Ledger Api Test Tool" can {

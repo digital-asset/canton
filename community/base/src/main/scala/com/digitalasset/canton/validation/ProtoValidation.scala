@@ -38,8 +38,8 @@ object ProtoValidation {
     value.traverse(validate(_, field, pvv))
 
   /** `validate` a value with no field to blame: needed by the Chimney bridge, whose failure path
-    * comes from the transformer. Package-private so no `fromProto` can drop the name that
-    * `validate` requires.
+    * comes from the transformer, and by the [[ProtoUnvalidatedString]] pretty instance.
+    * Package-private so no `fromProto` can drop the name that `validate` requires.
     */
   private[validation] def validateNoField[A](
       value: ProtoUnvalidated[A],

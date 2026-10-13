@@ -5,12 +5,10 @@ package com.digitalasset.canton.user
 
 import com.digitalasset.daml.lf.data.Ref
 
-sealed abstract class UserRight extends Product with Serializable {
-  def getParty: Option[Ref.Party] = None
-}
+sealed trait UserRight extends Product with Serializable
 
-sealed abstract class UserRightForParty(party: Ref.Party) extends UserRight {
-  override def getParty: Option[Ref.Party] = Some(party)
+sealed trait UserRightForParty extends UserRight {
+  def party: Ref.Party
 }
 
 object UserRight {
@@ -18,13 +16,13 @@ object UserRight {
 
   final case object IdentityProviderAdmin extends UserRight
 
-  final case class CanActAs(party: Ref.Party) extends UserRightForParty(party)
+  final case class CanActAs(party: Ref.Party) extends UserRightForParty
 
-  final case class CanReadAs(party: Ref.Party) extends UserRightForParty(party)
+  final case class CanReadAs(party: Ref.Party) extends UserRightForParty
 
   final case object CanReadAsAnyParty extends UserRight
 
-  final case class CanExecuteAs(party: Ref.Party) extends UserRightForParty(party)
+  final case class CanExecuteAs(party: Ref.Party) extends UserRightForParty
 
   final case object CanExecuteAsAnyParty extends UserRight
 

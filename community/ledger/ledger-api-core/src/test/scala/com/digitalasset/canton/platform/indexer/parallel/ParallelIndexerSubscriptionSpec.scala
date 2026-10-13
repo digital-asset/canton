@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
@@ -1332,7 +1333,10 @@ class ParallelIndexerSubscriptionSpec
   behavior of "dbPrepare"
 
   it should "apply missing deactivated activations" in {
-    def lastActivations(@unused _synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+    def lastActivations(
+        @unused _synchronizerContracts: Iterable[(SynchronizerId, Long)],
+        @unused _beforeOrAtEventSeqId: Long,
+    )(
         @unused _connection: Connection
     ): Map[(SynchronizerId, Long), Long] = Map(
       (someSynchronizerId, 5L) -> 2L,
@@ -1378,6 +1382,7 @@ class ParallelIndexerSubscriptionSpec
 
     val outBatchF = ParallelIndexerSubscription.dbPrepare(
       lastActivations,
+      () => Some(ledgerEnd),
       mockDbDispatcher(new TestConnection),
       resolveInternalContractIds,
       executionContext,
@@ -1406,6 +1411,92 @@ class ParallelIndexerSubscriptionSpec
         usedInternalContractIds = Set.empty,
         contractStateEvents = Vector.empty,
       )
+  }
+
+  private def dbPrepareLookupBounds(ledgerEndO: Option[LedgerEnd]): Seq[Long] = {
+    val lookupBounds = new AtomicReference[Seq[Long]](Seq.empty)
+    def lastActivations(
+        @unused _synchronizerContracts: Iterable[(SynchronizerId, Long)],
+        beforeOrAtEventSeqId: Long,
+    )(
+        @unused _connection: Connection
+    ): Map[(SynchronizerId, Long), Long] = {
+      lookupBounds.updateAndGet(_ :+ beforeOrAtEventSeqId).discard
+      Map.empty
+    }
+    val inBatch = Batch(
+      ledgerEnd = ZeroLedgerEnd,
+      batchTraceContext = TraceContext.empty,
+      batch = Vector.empty,
+      batchSize = 0,
+      offsetsUpdates = Vector.empty,
+      missingDeactivatedActivations = Map(SynCon(someSynchronizerId, hashCid("#1")) -> None),
+      eventCount = 0L,
+      distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
+    )
+    ParallelIndexerSubscription
+      .dbPrepare(
+        lastActivations,
+        () => ledgerEndO,
+        mockDbDispatcher(new TestConnection),
+        _ => _ => Future.successful(Map(hashCid("#1") -> 5L)),
+        executionContext,
+        metrics,
+        logger,
+      )(inBatch)
+      .futureValue
+      .discard
+    lookupBounds.get()
+  }
+
+  it should "look up last activations up to the provided ledger end" in {
+    dbPrepareLookupBounds(Some(ZeroLedgerEnd.copy(lastEventSeqId = 1234L))) shouldBe Seq(1234L)
+  }
+
+  it should "not look up last activations without a ledger end" in {
+    dbPrepareLookupBounds(None) shouldBe Seq.empty
+  }
+
+  behavior of "persistedLedgerEndCache"
+
+  private val publishedLedgerEnd = ZeroLedgerEnd.copy(lastEventSeqId = 10L)
+  private val repairLedgerEnd = ZeroLedgerEnd.copy(lastEventSeqId = 20L)
+
+  it should "use the ledger end cache in normal mode" in {
+    val ledgerEndCache = MutableLedgerEndCache()
+    ledgerEndCache.set(Some(publishedLedgerEnd))
+    val persisted = ParallelIndexerSubscription.persistedLedgerEndCache(
+      repairMode = false,
+      aggregatedLedgerEndForRepair = new AtomicReference(Some(repairLedgerEnd)),
+      ledgerEndCache = ledgerEndCache,
+    )
+    persisted() shouldBe Some(publishedLedgerEnd)
+  }
+
+  it should "use the ledger end cache in repair mode before any event is ingested" in {
+    val ledgerEndCache = MutableLedgerEndCache()
+    ledgerEndCache.set(Some(publishedLedgerEnd))
+    val persisted = ParallelIndexerSubscription.persistedLedgerEndCache(
+      repairMode = true,
+      aggregatedLedgerEndForRepair = new AtomicReference(None),
+      ledgerEndCache = ledgerEndCache,
+    )
+    persisted() shouldBe Some(publishedLedgerEnd)
+  }
+
+  it should "follow the aggregated ledger end in repair mode" in {
+    val ledgerEndCache = MutableLedgerEndCache()
+    ledgerEndCache.set(Some(publishedLedgerEnd))
+    val aggregatedLedgerEndForRepair = new AtomicReference[Option[LedgerEnd]](None)
+    val persisted = ParallelIndexerSubscription.persistedLedgerEndCache(
+      repairMode = true,
+      aggregatedLedgerEndForRepair = aggregatedLedgerEndForRepair,
+      ledgerEndCache = ledgerEndCache,
+    )
+    aggregatedLedgerEndForRepair.set(Some(repairLedgerEnd))
+    persisted() shouldBe Some(repairLedgerEnd)
   }
 
   behavior of "batcher"

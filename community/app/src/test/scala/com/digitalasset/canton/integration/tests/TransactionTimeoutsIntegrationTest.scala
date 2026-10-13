@@ -281,11 +281,12 @@ abstract class TransactionTimeoutsIntegrationTest
 
     loggerFactory.assertEventuallyLogsSeq(
       SuppressionRule.LevelAndAbove(Level.INFO) &&
-        SuppressionRule.LoggerNameContains("DefaultVerdictSender")
+        (SuppressionRule.LoggerNameContains("DefaultVerdictSender") || SuppressionRule
+          .LoggerNameContains("RichSequencerClientImpl"))
     )(
       {
         attemptCreate()
-        // Wait until we actually see two INFO messages on the mediator
+        // Wait until we actually see an INFO message on the mediator
         // Otherwise, the ping may make the send tracker observe the timeout first
         eventually() {
           loggerFactory.fetchRecordedLogEntries should not be empty
@@ -297,12 +298,7 @@ abstract class TransactionTimeoutsIntegrationTest
           (
             _.infoMessage should include("Sequencing result message timed out synchronously"),
             "mediator observes synchronous rejection",
-          ),
-          // The ping makes the send tracker on the mediator observe the timeout asynchronously
-          (
-            _.infoMessage should include("Sequencing result message timed out asynchronously"),
-            "mediator observes asynchronous rejection",
-          ),
+          )
         ),
         // Allow all other info level logs
         Seq(_.level shouldBe Level.INFO),

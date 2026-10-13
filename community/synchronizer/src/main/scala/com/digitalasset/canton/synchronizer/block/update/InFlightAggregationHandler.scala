@@ -118,7 +118,7 @@ class InFlightAggregationHandler(
 
     val aggregationIdETO = EitherT.fromEither[FutureUnlessShutdown](
       submissionRequest
-        .aggregationId(syncCryptoClient.pureCrypto)
+        .aggregationId(syncCryptoClient.pureCrypto, protocolVersion)
         .leftMap { err =>
           logger.error(
             s"Internal error occurred when processing request $sequencingTimestamp: computation of aggregation id: ${err.message}"

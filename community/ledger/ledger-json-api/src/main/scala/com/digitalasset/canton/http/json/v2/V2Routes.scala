@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.json.JsHealthService
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.DamlDefinitionsView
 import com.digitalasset.canton.http.{HealthService, WebsocketConfig}
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.client.services.version.VersionClient
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
@@ -91,6 +92,7 @@ object V2Routes {
       ledgerClient: LedgerClient,
       metadataServiceEnabled: Boolean,
       trafficEnforcementEnabled: Boolean,
+      deprecatedApiGate: DeprecatedApiGate,
       packageSyncService: PackageSyncService,
       packagePreferenceBackend: PackagePreferenceBackend,
       executionContext: ExecutionContext,
@@ -117,15 +119,36 @@ object V2Routes {
     )
     val protocolConverters = new ProtocolConverters(schemaProcessors, transcodePackageIdResolver)
     val commandService =
-      new JsCommandService(ledgerClient, protocolConverters, requestLogger, loggerFactory)
+      new JsCommandService(
+        ledgerClient,
+        protocolConverters,
+        requestLogger,
+        loggerFactory,
+        deprecatedApiGate,
+      )
 
     val eventService =
-      new JsEventService(ledgerClient, protocolConverters, requestLogger, loggerFactory)
+      new JsEventService(
+        ledgerClient,
+        protocolConverters,
+        requestLogger,
+        loggerFactory,
+      )
     val versionService =
-      new JsVersionService(ledgerClient.versionClient, requestLogger, loggerFactory)
+      new JsVersionService(
+        ledgerClient.versionClient,
+        requestLogger,
+        loggerFactory,
+      )
 
     val stateService =
-      new JsStateService(ledgerClient, protocolConverters, requestLogger, loggerFactory)
+      new JsStateService(
+        ledgerClient,
+        protocolConverters,
+        requestLogger,
+        loggerFactory,
+        deprecatedApiGate,
+      )
     val partyManagementService =
       new JsPartyManagementService(
         ledgerClient.partyManagementClient,
@@ -139,16 +162,32 @@ object V2Routes {
         ledgerClient.packageManagementClient,
         requestLogger,
         loggerFactory,
+        deprecatedApiGate,
       )
 
     val updateService =
-      new JsUpdateService(ledgerClient, protocolConverters, requestLogger, loggerFactory)
+      new JsUpdateService(
+        ledgerClient,
+        protocolConverters,
+        requestLogger,
+        loggerFactory,
+        deprecatedApiGate,
+      )
 
     val contractService =
-      new JsContractService(ledgerClient, protocolConverters, requestLogger, loggerFactory)
+      new JsContractService(
+        ledgerClient,
+        protocolConverters,
+        requestLogger,
+        loggerFactory,
+      )
 
     val userManagementService =
-      new JsUserManagementService(ledgerClient.userManagementClient, requestLogger, loggerFactory)
+      new JsUserManagementService(
+        ledgerClient.userManagementClient,
+        requestLogger,
+        loggerFactory,
+      )
     val identityProviderService = new JsIdentityProviderService(
       ledgerClient.identityProviderConfigClient,
       requestLogger,
@@ -160,11 +199,16 @@ object V2Routes {
         protocolConverters,
         requestLogger,
         loggerFactory,
+        deprecatedApiGate,
       )
     val damlDefinitionsServiceIfEnabled = Option.when(metadataServiceEnabled) {
       val damlDefinitionsService =
         new DamlDefinitionsView(packageSyncService.getPackageMetadataSnapshot(_))
-      new JsDamlDefinitionsService(damlDefinitionsService, requestLogger, loggerFactory)
+      new JsDamlDefinitionsService(
+        damlDefinitionsService,
+        requestLogger,
+        loggerFactory,
+      )
     }
     val trafficServiceIfEnabled = Option.when(trafficEnforcementEnabled) {
       new JsTrafficService(ledgerClient, requestLogger, loggerFactory)

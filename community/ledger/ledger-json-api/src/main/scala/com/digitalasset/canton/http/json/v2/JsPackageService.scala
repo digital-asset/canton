@@ -17,11 +17,13 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   stringEncoderForEnum,
   stringSchemaForEnum,
 }
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.services.admin.PackageManagementClient
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import com.google.protobuf
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.circe.{Codec, Decoder, Encoder}
@@ -55,11 +57,13 @@ class JsPackageService(
     packageManagementClient: PackageManagementClient,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
+    deprecatedApiGate: DeprecatedApiGate,
 )(implicit
     val executionContext: ExecutionContext,
     materializer: Materializer,
     val authInterceptor: AuthInterceptor,
-) extends Endpoints {
+) extends Endpoints
+    with NamedLogging {
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   def endpoints() =
     List(
@@ -91,11 +95,11 @@ class JsPackageService(
       withServerLogic(
         JsPackageService.listVettedPackagesEndpoint_deprecated,
         listVettedPackages,
-      ),
+      ).gated(deprecatedApiGate),
       withServerLogic(
         JsPackageService.updateVettedPackagesEndpoint_deprecated,
         updateVettedPackages,
-      ),
+      ).gated(deprecatedApiGate),
       withServerLogic(
         JsPackageService.listVettedPackagesEndpoint,
         listVettedPackages,
@@ -252,32 +256,26 @@ object JsPackageService extends DocumentationEndpoints {
       .out(jsonBody[package_service.GetPackageStatusResponse])
       .protoRef(package_service.PackageServiceGrpc.METHOD_GET_PACKAGE_STATUS)
 
-  // GET with body: kept for backwards compatibility; do not add new endpoints with this pattern
+  // GET with body: kept for backwards compatibility
   @SuppressWarnings(Array("com.digitalasset.canton.GetEndpointWithBody"))
   private val listVettedPackagesEndpoint_deprecated =
     packageVetting.get
       .in(jsonBody[package_service.ListVettedPackagesRequest])
       .out(jsonBody[package_service.ListVettedPackagesResponse])
-      .protoRef(
-        package_service.PackageServiceGrpc.METHOD_LIST_VETTED_PACKAGES
-      )
-      .deprecated()
-      .description(
-        """Lists which participant node vetted what packages on which synchronizer.
-        |This endpoint (GET /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/list instead.""".stripMargin
+      .description("Lists which participant node vetted what packages on which synchronizer.")
+      .deprecatedSince(
+        ApiDeprecation.Canton35.Endpoints,
+        useInstead = "POST /v2/package-vetting/list",
       )
 
   private val updateVettedPackagesEndpoint_deprecated =
     packageVetting.post
       .in(jsonBody[package_management_service.UpdateVettedPackagesRequest])
       .out(jsonBody[package_management_service.UpdateVettedPackagesResponse])
-      .protoRef(
-        package_management_service.PackageManagementServiceGrpc.METHOD_UPDATE_VETTED_PACKAGES
-      )
-      .deprecated()
-      .description(
-        """Update the vetted packages of this participant
-        |This endpoint (POST /package-vetting) is deprecated and will be removed in a future release. Please use POST /package-vetting/update instead.""".stripMargin
+      .description("Update the vetted packages of this participant.")
+      .deprecatedSince(
+        ApiDeprecation.Canton35.Endpoints,
+        useInstead = "POST /v2/package-vetting/update",
       )
 
   val listVettedPackagesEndpoint =

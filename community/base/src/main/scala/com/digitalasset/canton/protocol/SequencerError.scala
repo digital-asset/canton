@@ -203,6 +203,25 @@ object SequencerError extends SequencerErrorGroup {
         )
   }
 
+  @Explanation("""
+                 |This error indicates that a request is rejected because the topology timestamp is non-empty.
+                 |Starting from protocol version 36, topology timestamp must be empty.
+                 |""")
+  @Resolution(
+    """Remove value of topology timestamp and re-submit the request."""
+  )
+  object NonEmptyTopologyTimestamp
+      extends ErrorCode(
+        "NON_EMPTY_TOPOLOGY_TIMESTAMP",
+        ErrorCategory.ContentionOnSharedResources,
+      ) {
+    case object Error
+        extends CantonBaseError.Impl(
+          cause =
+            s"Starting from protocol version 36, submission requests must have empty topology timestamp"
+        )
+  }
+
   @Explanation(
     """
      |This error indicates that a sequenced message was not delivered because the sequencing time is outside of the admissible sequencing bounds."""

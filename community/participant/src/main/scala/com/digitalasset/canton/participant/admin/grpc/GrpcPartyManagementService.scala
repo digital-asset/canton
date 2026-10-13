@@ -120,9 +120,11 @@ class GrpcPartyManagementService(
     ](
       responseObserver,
       Failure(
-        new IllegalArgumentException(
-          "The request stream must contain at least one message with the required AddPartyArguments."
-        )
+        PartyManagementServiceError.InvalidArgument
+          .Error(
+            "The request stream must contain at least one message with the required AddPartyArguments."
+          )
+          .asGrpcError
       ),
       getGzippedBytes = _.acsSnapshot,
       parseMessage = ActiveContract.parseDelimitedFromTrusted,
@@ -134,7 +136,7 @@ class GrpcPartyManagementService(
             .leftMap(err => s"Arguments must be set on the first request: $err")
           args <- verifyArguments(argsP)
         } yield args)
-          .leftMap(err => new IllegalArgumentException(err))
+          .leftMap(PartyManagementServiceError.InvalidArgument.Error(_).asGrpcError)
           .toTry
     ) { case (args, source) =>
       val resultET = for {

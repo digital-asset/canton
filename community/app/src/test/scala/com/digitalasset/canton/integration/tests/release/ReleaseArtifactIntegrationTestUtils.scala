@@ -34,6 +34,7 @@ trait ReleaseArtifactIntegrationTestUtils extends FixtureAnyWordSpec with BaseTe
       shouldContain: Seq[String] = Seq(),
       shouldNotContain: Seq[String] = Seq(),
       shouldSucceed: Boolean = true,
+      additionalRegexFilters: Seq[String] = Seq(),
   ): Unit = {
     // Filter out false positives in help message
     val filters = List(
@@ -44,17 +45,26 @@ trait ReleaseArtifactIntegrationTestUtils extends FixtureAnyWordSpec with BaseTe
       // slow ExecutionContextMonitor warnings
       "WARN  c.d.c.c.ExecutionContextMonitor - Execution context",
     )
-    val log = filters
+
+    val regexFilters = Seq(
+      // slow participants might activate ACS commitment catch-up mode
+      regexpCommitmentCatchUpWarning
+    ) ++ additionalRegexFilters
+
+    val logBeforeRegexes = filters
       .foldLeft(logger.output()) { case (log, filter) =>
         log.replace(filter, "")
       }
-      .toLowerCase
-      // slow participants might activate ACS commitment catch-up mode
-      .replaceAll(regexpCommitmentCatchUpWarning, "")
 
-    shouldContain.foreach(str => assert(log.contains(str.toLowerCase())))
-    shouldNotContain.foreach(str => assert(!log.contains(str.toLowerCase())))
+    val finalLog = regexFilters
+      .foldLeft(logBeforeRegexes) { case (currentLog, regex) =>
+        currentLog.replaceAll(regex, "")
+      }
+      .toLowerCase
+
+    shouldContain.foreach(str => assert(finalLog.contains(str.toLowerCase())))
+    shouldNotContain.foreach(str => assert(!finalLog.contains(str.toLowerCase())))
     val undesirables = Seq("warn", "error", "exception")
-    if (shouldSucceed) undesirables.foreach(str => assert(!log.contains(str.toLowerCase())))
+    if (shouldSucceed) undesirables.foreach(str => assert(!finalLog.contains(str.toLowerCase())))
   }
 }

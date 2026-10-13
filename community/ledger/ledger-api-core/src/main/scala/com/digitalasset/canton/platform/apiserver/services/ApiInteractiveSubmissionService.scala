@@ -22,6 +22,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
 }
 import com.daml.ledger.api.v2.package_reference.PackageReference
 import com.daml.metrics.Timed
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate.GatedFutureOps
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
@@ -30,7 +31,11 @@ import com.digitalasset.canton.ledger.api.validation.{
   GetPreferredPackagesRequestValidator,
   SubmitRequestValidator,
 }
-import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
+import com.digitalasset.canton.ledger.api.{
+  DeprecatedApiGate,
+  SubmissionIdGenerator,
+  ValidationLogger,
+}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.NoPreferredPackagesFound
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.{TimerAndTrackOnShutdownSyntax, *}
@@ -45,6 +50,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcFUSExtended
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, Traced}
 import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.version.ApiDeprecation
 import io.grpc.ServerServiceDefinition
 import io.scalaland.chimney.auto.*
 import io.scalaland.chimney.syntax.*
@@ -61,6 +67,7 @@ class ApiInteractiveSubmissionService(
     submissionIdGenerator: SubmissionIdGenerator,
     tracker: CommandProgressTracker,
     metrics: LedgerApiServerMetrics,
+    deprecatedApiGate: DeprecatedApiGate,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends InteractiveSubmissionServiceGrpc
@@ -179,7 +186,11 @@ class ApiInteractiveSubmissionService(
       case Left(failureReason) =>
         logger.debug(s"Could not compute the preferred package versions: $failureReason")
         GetPreferredPackageVersionResponse(packagePreference = None)
-    }
+    }.gated(
+      deprecatedApiGate,
+      ApiDeprecation.Canton34.Endpoints,
+      "InteractiveSubmissionService.GetPreferredPackageVersion",
+    )
   }
 
   override def getPreferredPackages(

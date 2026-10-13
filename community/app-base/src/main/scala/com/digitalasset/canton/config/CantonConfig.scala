@@ -485,6 +485,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
       val participantParameters = participantConfig.parameters
       ParticipantNodeParameters(
         general = CantonNodeParameterConverter.general(this, participantConfig),
+        deprecatedApis = participantConfig.features.deprecated,
         activationFrequencyForWarnAboutConsistencyChecks =
           participantConfig.parameters.activationFrequencyForWarnAboutConsistencyChecks,
         adminWorkflow = participantParameters.adminWorkflow,
@@ -1593,6 +1594,8 @@ object CantonConfig {
         deriveReader[ThreadingConfig]
       deriveReader[CantonParameters]
     }
+    lazy implicit final val deprecatedApiConfigReader: ConfigReader[DeprecatedApiConfig] =
+      deriveReader[DeprecatedApiConfig]
     lazy implicit final val cantonFeaturesReader: ConfigReader[CantonFeatures] =
       deriveReader[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigReader: ConfigReader[WatchdogConfig] =
@@ -2408,6 +2411,8 @@ object CantonConfig {
         deriveWriter[ThreadingConfig]
       deriveWriter[CantonParameters]
     }
+    lazy implicit final val deprecatedApiConfigWriter: ConfigWriter[DeprecatedApiConfig] =
+      deriveWriter[DeprecatedApiConfig]
     lazy implicit final val cantonFeaturesWriter: ConfigWriter[CantonFeatures] =
       deriveWriter[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigWriter: ConfigWriter[WatchdogConfig] =

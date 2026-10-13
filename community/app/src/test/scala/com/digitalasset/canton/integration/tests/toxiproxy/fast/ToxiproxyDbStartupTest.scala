@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{ModifiableDbConfig, StorageConfig}
@@ -52,6 +51,11 @@ abstract class ToxiproxyDbStartupTest extends CommunityIntegrationTest with Shar
     }
 
   def fastStartupTimeLimit: FiniteDuration = 15.seconds
+
+  /** Timeout for completing the bootstrap (node starts, schema migrations, synchronizer bootstrap,
+    * topology idle) once the database is reachable again.
+    */
+  def startupCompletionTimeLimit: FiniteDuration = 1.minute
 
   def sequencerStartupFailsFast(): Unit =
     "the sequencer-db connection" when {
@@ -102,7 +106,7 @@ abstract class ToxiproxyDbStartupTest extends CommunityIntegrationTest with Shar
           val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(proxyConf.name).value
           proxy.underlying.enable()
 
-          val () = Await.result(startF, fastStartupTimeLimit)
+          val () = Await.result(startF, startupCompletionTimeLimit)
 
           participant1.synchronizers.connect_local(sequencer1, alias = daName)
           participant2.synchronizers.connect_local(sequencer1, alias = daName)
@@ -165,7 +169,7 @@ abstract class ToxiproxyDbStartupTest extends CommunityIntegrationTest with Shar
           val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(proxyConf.name).value
           proxy.underlying.enable()
 
-          val () = Await.result(startF, fastStartupTimeLimit)
+          val () = Await.result(startF, startupCompletionTimeLimit)
 
           participant1.synchronizers.connect_local(sequencer1, alias = daName)
           participant2.synchronizers.connect_local(sequencer1, alias = daName)
@@ -228,7 +232,7 @@ abstract class ToxiproxyDbStartupTest extends CommunityIntegrationTest with Shar
           val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(proxyConf.name).value
           proxy.underlying.enable()
 
-          val () = Await.result(startF, fastStartupTimeLimit)
+          val () = Await.result(startF, startupCompletionTimeLimit)
 
           participant1.synchronizers.connect_local(sequencer1, alias = daName)
           participant2.synchronizers.connect_local(sequencer1, alias = daName)
@@ -255,7 +259,6 @@ class ToxiproxySequencerStartupFailsFastPostgres extends ToxiproxySequencerStart
   sequencerStartupFailsFast()
 }
 
-@UnstableTest // TODO(i34735): Remove once the test is stable again
 class ToxiproxySequencerStartupWaitsPostgres extends ToxiproxySequencerStartupTestPostgres {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransform(noFailFastForNode("sequencer1"))

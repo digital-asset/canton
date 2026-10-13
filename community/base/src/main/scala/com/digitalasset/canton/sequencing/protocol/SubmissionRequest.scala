@@ -29,6 +29,8 @@ import com.digitalasset.canton.version.{
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
+import scala.math.Ordered.orderingToOrdered
+
 /** @param topologyTimestamp
   *   The optional timestamp of the topology to use for processing this submission request. If
   *   [[scala.None$]], the snapshot at the sequencing time of the submission request should be used
@@ -69,6 +71,9 @@ final case class SubmissionRequest private (
 
   lazy val requestType: SubmissionRequestType =
     SubmissionRequestType.submissionRequestType(batch.allRecipients, sender)
+
+  val shouldHaveEmptyTopologyTimestamp: Boolean =
+    representativeProtocolVersion >= SubmissionRequest.emptyCantonTimestampRpv
 
   // Caches the serialized request to be able to do checks on its size without re-serializing
   lazy val toProtoV30: v30.SubmissionRequest =
@@ -172,13 +177,18 @@ final case class SubmissionRequest private (
     *     submission request (except if the aggregation rule is SenderDedup starting with PV35)
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
-  def aggregationId(hashOps: HashOps): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
+  def aggregationId(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  ): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
     // TODO(#12075) Use a deterministic serialization scheme for the recipients
     val recipientsSerializerE: ParsingResult[Recipients => ByteString] =
       SubmissionRequest.converterFor(representativeProtocolVersion).map(_.dependencySerializer)
     aggregationRule.traverse { rule =>
       recipientsSerializerE.flatMap { recipientsSerializer =>
-        aggregationIdInternal(hashOps, rule, sender, recipientsSerializer).map((_, rule))
+        aggregationIdInternal(hashOps, rule, sender, protocolVersion, recipientsSerializer).map(
+          (_, rule)
+        )
       }
     }
   }
@@ -187,6 +197,7 @@ final case class SubmissionRequest private (
       hashOps: HashOps,
       rule: AggregationRule,
       sender: Member,
+      protocolVersion: ProtocolVersion,
       recipientsSerializer: Recipients => ByteString,
   ): ParsingResult[AggregationId] =
     batch.toClosedUncompressedBatchResult.map { uncompressedBatch =>
@@ -207,8 +218,18 @@ final case class SubmissionRequest private (
         )
       }
       builder.addLong(maxSequencingTime.underlying.micros)
-      // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
-      builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
+
+      if (protocolVersion <= ProtocolVersion.v35) {
+        // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MinValue as the default.
+        builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
+      } else if (protocolVersion == ProtocolVersion.v36) {
+        // For pv=36, for non-malicious senders, the topologyTimestamp is always empty
+        // To preserve behavior across 3.6.0 snapshots, we add Long.MinvValue
+        builder.addLong(Long.MinValue)
+      }
+
+      // For pv >= 37, nothing goes into the hash
+
       rule.input.appendForAggregationId(builder, sender)
 
       val hash = builder.finish()
@@ -249,6 +270,10 @@ object SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
   )
+
+  private lazy val emptyCantonTimestampRpv
+      : RepresentativeProtocolVersion[SubmissionRequest.this.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.v36)
 
   override def name: String = "submission request"
 

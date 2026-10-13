@@ -4,15 +4,18 @@
 package com.digitalasset.canton.version
 
 import cats.syntax.either.*
+import cats.syntax.functor.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ProtoDeserializationError.{OtherError, UnknownProtoVersion}
 import com.digitalasset.canton.protobuf.{VersionedMessageV0, VersionedMessageV1, VersionedMessageV2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.transaction.TopologyTransaction
 import com.digitalasset.canton.version.ProtocolVersion.ProtocolVersionWithStatus
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import scala.annotation.{nowarn, unused}
 
 /*
@@ -81,7 +84,7 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
       protocolVersionRepresentative(ProtocolVersion(-1)).representative shouldBe basePV + 3
     }
 
-    "fail for an unknown proto version" in {
+    "rpv computation fails for an unknown proto version" in {
       val maxProtoVersion = Message.versioningTable.table.keys.max.v
       val unknownProtoVersion = ProtoVersion(maxProtoVersion + 1)
 
@@ -200,6 +203,124 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
                 _.toProtoV2,
               )"""
           ): Assertion
+        }
+      }
+    }
+  }
+
+  "deserializerFor" should {
+    def assertNoDeserializer(
+        result: ParsingResult[?],
+        protoVersion: Int,
+        name: String,
+    ): Assertion =
+      inside(result.left.value) { case OtherError(error) =>
+        error should include(s"version ${ProtoVersion(protoVersion)}")
+        error should include(name)
+      }
+
+    "return the deserializer of a known proto version" in {
+      val bytes = VersionedMessageV1("Hey", 42).toByteString
+
+      val deserializer = Message.versioningTable.deserializerFor(ProtoVersion(1)).value
+      deserializer(ProtocolVersionValidation.NoValidation, (), bytes, bytes).value shouldBe
+        Message("Hey", 42, 1.0)(protocolVersionRepresentative(basePV + 2), None)
+    }
+
+    "fail for a proto version above the highest supported one" in {
+      val unknownProtoVersion = Message.versioningTable.table.keys.max.v + 1
+
+      assertNoDeserializer(
+        Message.versioningTable.deserializerFor(ProtoVersion(unknownProtoVersion)),
+        unknownProtoVersion,
+        Message.name,
+      )
+    }
+
+    "fail for a proto version below the lowest supported one" in {
+      val unknownProtoVersion = Message.versioningTable.table.keys.min.v - 1
+
+      assertNoDeserializer(
+        Message.versioningTable.deserializerFor(ProtoVersion(unknownProtoVersion)),
+        unknownProtoVersion,
+        Message.name,
+      )
+    }
+
+    "fail for an unknown proto version in all deserialization entry points" in {
+      val unknownProtoVersion = Message.versioningTable.table.keys.max.v + 1
+      val bytes =
+        VersionedMessage[Message](VersionedMessageV1("Hey", 42).toByteString, unknownProtoVersion)
+
+      def check(result: ParsingResult[Message]): Assertion =
+        assertNoDeserializer(result, unknownProtoVersion, Message.name)
+
+      check(Message.fromByteString(basePV + 2, bytes.toByteString))
+      check(Message.fromTrustedByteString(bytes.toByteString))
+      check(Message.fromTrustedByteArray(bytes.toByteArray))
+
+      val output = new ByteArrayOutputStream()
+      bytes.writeDelimitedTo(output)
+      check(
+        Message.parseDelimitedFromTrusted(new ByteArrayInputStream(output.toByteArray)).value
+      )
+    }
+
+    "succeed for a known proto version in all deserialization entry points" in {
+      val message = Message("Hey", 42, 1.0)(protocolVersionRepresentative(basePV + 2), None)
+      val bytes = message.toByteString
+
+      Message.fromByteString(basePV + 2, bytes).value shouldBe message
+      Message.fromTrustedByteString(bytes).value shouldBe message
+      Message.fromTrustedByteArray(bytes.toByteArray).value shouldBe message
+
+      val output = new ByteArrayOutputStream()
+      message.writeDelimitedTo(output).value shouldBe ()
+      Message
+        .parseDelimitedFromTrusted(new ByteArrayInputStream(output.toByteArray))
+        .value
+        .value shouldBe message
+    }
+
+    "only accept proto versions below the lowest supported one for topology transactions" in {
+      clue("both companions use the same versioning table") {
+        TopologyLikeMessage.versioningTable.table.fmap(_.representative) shouldBe
+          NonTopologyMessage.versioningTable.table.fmap(_.representative)
+      }
+
+      // There is a topology transaction with proto version 29 on MainNet
+      Seq(0, 29).foreach { protoVersion =>
+        val bytes = VersionedMessage[TopologyLikeMessage](
+          VersionedMessageV1("Hey", 42).toByteString,
+          protoVersion,
+        ).toByteString
+
+        clue(s"topology transaction with proto version $protoVersion") {
+          // Legacy topology transactions are read with the lowest supported proto version
+          val deserialized = TopologyLikeMessage.fromTrustedByteString(bytes).value
+          deserialized.decodedWith shouldBe 30
+          deserialized.representativeProtocolVersion.representative shouldBe basePV
+        }
+
+        clue(s"other message with proto version $protoVersion") {
+          assertNoDeserializer(
+            NonTopologyMessage.fromTrustedByteString(bytes),
+            protoVersion,
+            NonTopologyMessage.name,
+          )
+        }
+      }
+    }
+
+    "fail for topology transactions with a proto version above the lowest supported one" in {
+      // 31 is a gap between the supported proto versions 30 and 32
+      Seq(31, 33).foreach { protoVersion =>
+        clue(s"proto version $protoVersion") {
+          assertNoDeserializer(
+            TopologyLikeMessage.versioningTable.deserializerFor(ProtoVersion(protoVersion)),
+            protoVersion,
+            TopologyLikeMessage.name,
+          )
         }
       }
     }
@@ -367,5 +488,104 @@ object HasProtocolVersionedWrapperTest {
     @nowarn("msg=parameter .* in method .* is never used")
     def fromProtoV2(message: VersionedMessageV2)(bytes: ByteString): ParsingResult[MessageE] =
       OtherError("No deserialization from v2").asLeft
+  }
+
+  /*
+  TopologyLikeMessage and NonTopologyMessage share the same versioning table and only differ by
+  their name, which is what enables the fallback for legacy topology transactions.
+  `decodedWith` records the proto version of the deserializer that was used.
+   proto               30          32
+   protocolVersion     30    31    32    ...
+   */
+  final case class TopologyLikeMessage(msg: String, decodedWith: Int)(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        TopologyLikeMessage.type
+      ]
+  ) extends HasProtocolVersionedWrapper[TopologyLikeMessage] {
+
+    @transient override protected lazy val companionObj: TopologyLikeMessage.type =
+      TopologyLikeMessage
+
+    def toProtoV30 = VersionedMessageV1(msg, 0)
+    def toProtoV32 = VersionedMessageV2(msg, 0, 0)
+  }
+
+  object TopologyLikeMessage
+      extends VersioningCompanionMemoization[TopologyLikeMessage]
+      with IgnoreInSerializationTestExhaustivenessCheck {
+    def name: String = TopologyTransaction.name
+
+    override val versioningTable: VersioningTable = VersioningTable(
+      ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.createAlpha((basePV + 2).v))(
+        VersionedMessageV2
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV32),
+        _.toProtoV32,
+      ),
+      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.createStable(basePV.v))(
+        VersionedMessageV1
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV30),
+        _.toProtoV30,
+      ),
+    )
+
+    def fromProtoV30(
+        message: VersionedMessageV1
+    ): ByteString => ParsingResult[TopologyLikeMessage] =
+      _ =>
+        protocolVersionRepresentativeFor(ProtoVersion(30))
+          .map(TopologyLikeMessage(message.msg, 30)(_))
+
+    def fromProtoV32(
+        message: VersionedMessageV2
+    ): ByteString => ParsingResult[TopologyLikeMessage] =
+      _ =>
+        protocolVersionRepresentativeFor(ProtoVersion(32))
+          .map(TopologyLikeMessage(message.msg, 32)(_))
+  }
+
+  final case class NonTopologyMessage(msg: String, decodedWith: Int)(
+      override val representativeProtocolVersion: RepresentativeProtocolVersion[
+        NonTopologyMessage.type
+      ]
+  ) extends HasProtocolVersionedWrapper[NonTopologyMessage] {
+
+    @transient override protected lazy val companionObj: NonTopologyMessage.type =
+      NonTopologyMessage
+
+    def toProtoV30 = VersionedMessageV1(msg, 0)
+    def toProtoV32 = VersionedMessageV2(msg, 0, 0)
+  }
+
+  object NonTopologyMessage
+      extends VersioningCompanionMemoization[NonTopologyMessage]
+      with IgnoreInSerializationTestExhaustivenessCheck {
+    def name: String = "NonTopologyMessage"
+
+    override val versioningTable: VersioningTable = VersioningTable(
+      ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.createAlpha((basePV + 2).v))(
+        VersionedMessageV2
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV32),
+        _.toProtoV32,
+      ),
+      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.createStable(basePV.v))(
+        VersionedMessageV1
+      )(
+        supportedProtoVersionMemoized(_)(fromProtoV30),
+        _.toProtoV30,
+      ),
+    )
+
+    def fromProtoV30(message: VersionedMessageV1): ByteString => ParsingResult[NonTopologyMessage] =
+      _ =>
+        protocolVersionRepresentativeFor(ProtoVersion(30))
+          .map(NonTopologyMessage(message.msg, 30)(_))
+
+    def fromProtoV32(message: VersionedMessageV2): ByteString => ParsingResult[NonTopologyMessage] =
+      _ =>
+        protocolVersionRepresentativeFor(ProtoVersion(32))
+          .map(NonTopologyMessage(message.msg, 32)(_))
   }
 }

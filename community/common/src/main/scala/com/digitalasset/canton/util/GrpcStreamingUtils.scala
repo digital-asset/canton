@@ -5,8 +5,8 @@ package com.digitalasset.canton.util
 
 import better.files.*
 import better.files.File.newTemporaryFile
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserverWithContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -27,7 +27,7 @@ import com.digitalasset.canton.version.{
 }
 import com.google.protobuf.ByteString
 import io.grpc.stub.{CallStreamObserver, ServerCallStreamObserver, StreamObserver}
-import io.grpc.{Context, Status}
+import io.grpc.{Context, Status, StatusRuntimeException}
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Source, Source as PekkoSource}
@@ -51,27 +51,29 @@ object GrpcStreamingUtils {
       extractContext: Req => C,
       processFullRequest: (ByteString, C) => Future[Resp],
       responseObserver: StreamObserver[Resp],
-      processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
   )(implicit ec: ExecutionContext): StreamObserver[Req] = {
 
     val observer =
-      new ByteStringStreamObserverWithContext[Req, C](extractChunkBytes, extractContext) {
-        override def onCompleted(): Unit = {
-          super.onCompleted()
-          val responseF = this.result.flatMap {
-            case Some((byteString, context)) =>
-              processFullRequest(byteString, context)
-            case None =>
-              Future.failed(new NoSuchElementException("No elements were received in stream"))
-          }
+      new ByteStringStreamObserverWithContext[Req, C](extractChunkBytes, extractContext)
 
-          Try(Await.result(responseF, processingTimeout)) match {
-            case Failure(exception) => responseObserver.onError(exception)
-            case Success(response) =>
-              responseObserver.onNext(response)
-              responseObserver.onCompleted()
-          }
-        }
+    observer.result
+      .flatMap(_.traverse { case (byteString, context) =>
+        processFullRequest(byteString, context)
+      })
+      .onComplete {
+        case Failure(exception: StatusRuntimeException) =>
+          responseObserver.onError(exception)
+        case Failure(exception) =>
+          responseObserver.onError(Status.INTERNAL.withCause(exception).asRuntimeException())
+        case Success(None) =>
+          responseObserver.onError(
+            Status.INVALID_ARGUMENT
+              .withDescription("No elements were received in stream")
+              .asRuntimeException()
+          )
+        case Success(Some(response)) =>
+          responseObserver.onNext(response)
+          responseObserver.onCompleted()
       }
 
     observer
@@ -106,9 +108,49 @@ object GrpcStreamingUtils {
     */
   def streamGzippedChunksFromClient[Req, Resp, RequestContext, ParsedMessage](
       responseObserver: StreamObserver[Resp],
-      responseIfNoRequests: Try[Resp],
+      responseIfNoRequests: => Try[Resp],
       getGzippedBytes: Req => ByteString,
       parseMessage: InputStream => Option[ParsingResult[ParsedMessage]],
+  )(
+      contextFromFirstRequest: Req => Try[RequestContext]
+  )(action: (RequestContext, Source[ParsedMessage, NotUsed]) => FutureUnlessShutdown[Resp])(implicit
+      ec: ExecutionContext,
+      elc: ErrorLoggingContext,
+  ): StreamObserver[Req] =
+    streamChunksFromClientInternal(
+      responseObserver,
+      responseIfNoRequests,
+      getGzippedBytes,
+      parseMessage,
+      decompressInput = true,
+    )(contextFromFirstRequest)(action)
+
+  /** Same as [[streamGzippedChunksFromClient]], for uncompressed bytes. */
+  def streamChunkedFromClient[Req, Resp, RequestContext, ParsedMessage](
+      responseObserver: StreamObserver[Resp],
+      responseIfNoRequests: => Try[Resp],
+      getBytes: Req => ByteString,
+      parseMessage: InputStream => Option[ParsingResult[ParsedMessage]],
+  )(
+      contextFromFirstRequest: Req => Try[RequestContext]
+  )(action: (RequestContext, Source[ParsedMessage, NotUsed]) => FutureUnlessShutdown[Resp])(implicit
+      ec: ExecutionContext,
+      elc: ErrorLoggingContext,
+  ): StreamObserver[Req] =
+    streamChunksFromClientInternal(
+      responseObserver,
+      responseIfNoRequests,
+      getBytes,
+      parseMessage,
+      decompressInput = false,
+    )(contextFromFirstRequest)(action)
+
+  private def streamChunksFromClientInternal[Req, Resp, RequestContext, ParsedMessage](
+      responseObserver: StreamObserver[Resp],
+      responseIfNoRequests: => Try[Resp],
+      getBytes: Req => ByteString,
+      parseMessage: InputStream => Option[ParsingResult[ParsedMessage]],
+      decompressInput: Boolean,
   )(
       contextFromFirstRequest: Req => Try[RequestContext]
   )(action: (RequestContext, Source[ParsedMessage, NotUsed]) => FutureUnlessShutdown[Resp])(implicit
@@ -120,7 +162,7 @@ object GrpcStreamingUtils {
     // this Piped*Stream setup connects the incoming requests containing the gzipped bytes
     // with the pekko parsing source
     val output = new PipedOutputStream()
-    val input = new PipedInputStream(output)
+    val input = new PipedInputStream(output, defaultChunkSize)
 
     // when reporting the error, also close the output stream, since there will be no more data to be processed
     def reportError(err: Throwable): Unit = {
@@ -131,7 +173,7 @@ object GrpcStreamingUtils {
     // blocking write the request bytes to the output stream
     def writeRequestBytes(request: Req): Unit = Try {
       // gRPC backpressure works by "blocking" the onNext call.
-      blocking(getGzippedBytes(request).writeTo(output))
+      blocking(getBytes(request).writeTo(output))
     } forFailed {
       case err: java.io.IOException
           if err.getMessage != null && err.getMessage.contains("Pipe closed") =>
@@ -158,7 +200,7 @@ object GrpcStreamingUtils {
               // hold a lazy reference, because the constructor of GZIPInputStream immediately executes a blocking read
               // No zip-bomb risk: messages are parsed and ingested one at a time, so only a single
               // decompressed message is held in memory rather than the whole decompressed stream.
-              lazy val gunzip = new GzipCompressorInputStream(input)
+              lazy val gunzip = if (decompressInput) new GzipCompressorInputStream(input) else input
               // construct the source by repeatedly reading from the gunzip input stream until there's no more data.
               // we don't really have a "state", so we use Unit.
               val parsedMessagesSource = PekkoSource.unfold(())(_ =>
