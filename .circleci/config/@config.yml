@@ -9,14 +9,9 @@ parameters:
     type: string
     default: ""
 
-  pv_for_run_many_times:
-    type: enum
+  protocol_version:
+    type: string
     default: ""
-    enum: [
-      "",
-      "35",
-      "dev"
-    ]
 
   manual_job:
     type: enum
