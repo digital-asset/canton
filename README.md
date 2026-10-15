@@ -1,6 +1,5 @@
 <picture>
- <source media="(prefers-color-scheme: dark)" srcset="https://github.com/digital-asset/.github/raw/main/images/Canton - Horizontal-stack-Logo-White.png">
- <img alt="Canton" src="https://github.com/digital-asset/.github/raw/main/images/Canton-Vertical-logo-Black-logo-Yellow-C-Black-diamond.png" width="50%">
+<img width="1600" height="900" alt="Landscape New DA Brand Social Template" src="https://github.com/user-attachments/assets/633666d3-6afa-4578-b5c3-a57022e08d08" />
 </picture>
 
 <br/><br/>
