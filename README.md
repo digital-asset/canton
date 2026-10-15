@@ -1,6 +1,5 @@
-<picture>
-<img width="1600" height="900" alt="Landscape New DA Brand Social Template" src="https://github.com/user-attachments/assets/633666d3-6afa-4578-b5c3-a57022e08d08" />
-</picture>
+<img width="1600" height="900" alt="Landscape New DA Brand Social Template" src="https://github.com/user-attachments/assets/687b2686-5445-4b89-8644-0beaf58aff25" />
+
 
 <br/><br/>
 
