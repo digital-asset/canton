@@ -700,8 +700,6 @@ object BuildCommon {
       `performance-driver`,
       performance,
       `sequencer-driver-api`,
-      `sequencer-driver-api-conformance-tests`,
-      `sequencer-driver-lib`,
       `reference-sequencer-driver`,
       blake2b,
       `slick-fork`,
@@ -826,7 +824,6 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `community-synchronizer` % "compile->compile;test->test",
         `community-integration-testing` % Test,
-        `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
         `ledger-common-dars` % Test,
@@ -1070,7 +1067,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("35", "36")),
+          BuildInfoKey("stableProtocolVersions" -> List("36")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1239,6 +1236,7 @@ object BuildCommon {
         DamlProjects.`daml-lf-archive-encoder` % Test,
         DamlProjects.`daml-lf-encoder` % Test,
         DamlProjects.`daml-lf-parser` % Test,
+        DamlProjects.`daml-lf-transaction`,
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`test-evidence-tag` % "test->test",
         `community-common` % "test->test",
@@ -1394,31 +1392,6 @@ object BuildCommon {
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := HouseRules.wartremoverErrorsForTestScope,
-
-        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-        UberLibrary.assemblySettings("community-integration-testing-lib"),
-        // when building the fat jar, we need to properly merge our artefacts
-        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
-      )
-
-    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-    lazy val `community-integration-testing-lib` = project
-      .settings(
-        sharedCantonCommunitySettings,
-        UberLibrary.of(`community-integration-testing`),
-        excludeTranscodeConflictingDependencies,
-        Compile / packageDoc := {
-          // TODO(i12766): producing an empty file because there are errors in running the `doc` task
-          val destination = (Compile / packageDoc / artifactPath).value
-          IO.touch(destination)
-          destination
-        },
-
-        // The dependency override is needed because `community-testing` depends transitively on
-        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
-        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
-        // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
       )
 
     lazy val microbench = project
@@ -1587,35 +1560,7 @@ object BuildCommon {
           pureconfig_core,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        UberLibrary.assemblySettings("sequencer-driver-lib"),
       )
-
-    lazy val `sequencer-driver-api-conformance-tests` = project
-      .in(file("community/sequencer-driver-api-conformance-tests"))
-      .dependsOn(
-        `community-testing`,
-        `sequencer-driver-api`,
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          scalatest
-        ),
-      )
-
-    // TODO(i12761): package individual libraries instead of fat JARs for external consumption
-    lazy val `sequencer-driver-lib`: Project =
-      project
-        .settings(
-          sharedCantonCommunitySettings,
-          libraryDependencies ++= Seq(
-            circe_core,
-            circe_generic,
-            circe_parser,
-            better_files,
-          ),
-        )
-        .settings(UberLibrary.of(`sequencer-driver-api`))
 
     lazy val `reference-sequencer-driver` = project
       .in(file("community/reference-sequencer-driver"))

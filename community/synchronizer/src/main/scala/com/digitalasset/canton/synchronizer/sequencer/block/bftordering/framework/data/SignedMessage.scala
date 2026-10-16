@@ -9,6 +9,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.version.ProtoVersion
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
 import com.google.protobuf.ByteString
 
@@ -35,19 +36,21 @@ object SignedMessage {
       MessageT <: ProtocolVersionedMemoizedEvidence & MessageFrom,
       Proto <: scalapb.GeneratedMessage,
   ](
-      p: scalapb.GeneratedMessageCompanion[Proto]
+      p: scalapb.GeneratedMessageCompanion[Proto],
+      expectedProtoVersion: ProtoVersion,
   )(
       parse: Proto => ByteString => ParsingResult[MessageT]
   )(
       proto: v30.SignedMessage
   ): ParsingResult[SignedMessage[MessageT]] =
-    fromProtoWithNodeId(p)(_ => parse)(proto)
+    fromProtoWithNodeId(p, expectedProtoVersion)(_ => parse)(proto)
 
   def fromProtoWithNodeId[
       A <: ProtocolVersionedMemoizedEvidence & MessageFrom,
       Proto <: scalapb.GeneratedMessage,
   ](
-      p: scalapb.GeneratedMessageCompanion[Proto]
+      p: scalapb.GeneratedMessageCompanion[Proto],
+      expectedProtoVersion: ProtoVersion,
   )(
       parse: BftNodeId => Proto => ByteString => ParsingResult[A]
   )(proto: v30.SignedMessage): ParsingResult[SignedMessage[A]] = {
@@ -55,6 +58,18 @@ object SignedMessage {
     for {
       versionedMessage <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(
         proto.message
+      )
+      // Validate the embedded wire version against the expected one (derived from the runtime protocol version):
+      //  selecting the decoder purely from the local protocol version would otherwise accept mismatched wire
+      //  versions whenever the payloads happen to be wire-compatible (e.g. a v30-tagged payload decoded with the
+      //  v31 decoder and mislabeled as such).
+      _ <- Either.cond(
+        versionedMessage.version == expectedProtoVersion.v,
+        (),
+        ProtoDeserializationError.OtherError(
+          s"Wire protobuf version ${versionedMessage.version} does not match the expected version " +
+            s"${expectedProtoVersion.v} for the runtime protocol version"
+        ),
       )
       unVersionedBytes <- versionedMessage.wrapper.data.toRight(
         ProtoDeserializationError.OtherError("Missing data in UntypedVersionedMessage")

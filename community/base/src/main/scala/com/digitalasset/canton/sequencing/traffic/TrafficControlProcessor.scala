@@ -141,11 +141,7 @@ class TrafficControlProcessor(
     val listenersNotifiedF = NonEmpty.from(trafficEnvelopes) match {
       case Some(trafficEnvelopesNE) =>
         // Used to combine the `FutureUnlessShutdown[Boolean]` below by disjunction
-        implicit def disjunctionBoolean: Monoid[Boolean] =
-          new Monoid[Boolean] {
-            override def empty: Boolean = false
-            override def combine(a: Boolean, b: Boolean): Boolean = a || b
-          }
+        implicit val disjunctionBoolean: Monoid[Boolean] = Monoid.instance(false, _ || _)
 
         for {
           // We use the topology snapshot at the time of event sequencing to check

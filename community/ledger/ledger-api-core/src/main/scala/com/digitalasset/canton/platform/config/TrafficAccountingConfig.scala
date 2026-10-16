@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.topology.PartyId
 
 /** Base configuration for the user traffic enforcement in the participant node. Currently, only the
   * internal, in-process server variant is supported, allowing for later an external TEA server to
@@ -85,6 +86,7 @@ object TrafficEnforcementServerConfig {
   }
 
   /** Config of the pekko projection in the internal traffic enforcement component
+    *
     * @param maxHandlerRetries
     *   max number of retries on projection handler failure
     * @param handlerRetryDelay
@@ -95,8 +97,16 @@ object TrafficEnforcementServerConfig {
     *   maximum amount of time before between retries of the projection on failure
     * @param initialCompletionOffsetBeginExclusive
     *   the first ever time the TEA is started it will have no prior offset to start its completion
-    *   stream from. By default it will start at ledgerEnd. Use this config to override the offset
+    *   stream from. By default, it will start at ledgerEnd. Use this config to override the offset
     *   at which it will start.
+    * @param initialTopUpOffsetBeginExclusive
+    *   the first ever time the TEA is started it will have no prior offset to start its top-up
+    *   stream from. By default, it will start from the current participant pruned up to offset. Use
+    *   this config to override the offset at which it will start.
+    * @param topUpPaymasters
+    *   parties whose TrafficPurchaser contracts are trusted: only top-ups made on a contract signed
+    *   by one of them are credited. The parties must be hosted on this participant. Top-up
+    *   ingestion is disabled when empty.
     */
   final case class ProjectionConfig(
       maxHandlerRetries: PositiveInt = PositiveInt.MaxValue,
@@ -106,5 +116,7 @@ object TrafficEnforcementServerConfig {
       projectionRestartRandomFactor: Double = 0.2d,
       projectionMaxRestarts: Int = Int.MaxValue,
       initialCompletionOffsetBeginExclusive: Option[Long] = None,
+      initialTopUpOffsetBeginExclusive: Option[Long] = None,
+      topUpPaymasters: Set[PartyId] = Set.empty,
   )
 }

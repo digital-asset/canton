@@ -116,6 +116,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         m1SequencerClient
           .send(
             createAggregationResultMessage(m1Crypto, 1, requestId),
+            currentSnapshotApproximation = None,
             timestamps = SendRequestTimestamps(
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
@@ -137,6 +138,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         val send2 = m1SequencerClient
           .send(
             createAggregationResultMessage(m1Crypto, 2, requestId),
+            currentSnapshotApproximation = None,
             timestamps = SendRequestTimestamps(
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
@@ -151,6 +153,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         val send3 = m2SequencerClient
           .send(
             createAggregationResultMessage(m2Crypto, 2, requestId),
+            currentSnapshotApproximation = None,
             timestamps = SendRequestTimestamps(
               approximateTimestampForSigning = now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
@@ -298,6 +301,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         m2SequencerClient
           .send(
             createAggregationResultMessage(m2Crypto, 1, requestId),
+            currentSnapshotApproximation = None,
             timestamps = SendRequestTimestamps(
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,
@@ -317,6 +321,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
         m2SequencerClient
           .send(
             createAggregationResultMessage(m2Crypto, 2, requestId),
+            currentSnapshotApproximation = None,
             timestamps = SendRequestTimestamps(
               approximateTimestampForSigning = environment.now,
               maxSequencingTime = maxSequencingTimeOfAggregation,

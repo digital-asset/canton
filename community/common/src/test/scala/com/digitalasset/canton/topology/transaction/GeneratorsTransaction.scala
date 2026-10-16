@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllMappings,
   CanSignSpecificMappings,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.{
@@ -41,7 +42,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{Generators, GeneratorsLf, LfPackageId}
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.EitherValues.*
@@ -100,19 +101,19 @@ final class GeneratorsTransaction(
     for {
       pid <- Arbitrary.arbitrary[ParticipantId]
       permission <- Arbitrary.arbitrary[ParticipantPermission]
-      // NOMINATED and FREEZING are only representable in proto v31 or higher
+      // Nominated and Freezing are only representable in proto v31 or higher
       state <-
         if (TopologyTransaction.protoVersionFor(protocolVersion).value.v >= 31)
-          Gen.oneOf[HostingParticipant.HostingState](
-            HostingParticipant.HostingState.Nominated,
-            HostingParticipant.HostingState.Freezing,
-            HostingParticipant.HostingState.Onboarding,
-            HostingParticipant.HostingState.Active,
+          Gen.oneOf[HostingState](
+            HostingState.Nominated,
+            HostingState.Freezing,
+            HostingState.Onboarding,
+            HostingState.Active,
           )
         else
-          Gen.oneOf[HostingParticipant.HostingState](
-            HostingParticipant.HostingState.Onboarding,
-            HostingParticipant.HostingState.Active,
+          Gen.oneOf[HostingState](
+            HostingState.Onboarding,
+            HostingState.Active,
           )
     } yield HostingParticipant(pid, permission, state)
   )
@@ -150,27 +151,53 @@ final class GeneratorsTransaction(
       .value
   )
 
+  // `required` plus at least `min` distinct codes from `codes`, at most MaxMappings in total so that
+  // the restriction deserializes
+  private def specificMappingsGen(
+      codes: Set[TopologyMapping.Code],
+      required: Set[TopologyMapping.Code],
+      min: Int,
+  ): Gen[CanSignSpecificMappings] =
+    for {
+      count <- Gen.choose(
+        min,
+        math.min(codes.size, DelegationRestriction.MaxMappings.unwrap - required.size),
+      )
+      picked <- Gen.pick(count, codes)
+    } yield CanSignSpecificMappings(NonEmptyUtil.fromUnsafe(required ++ picked))
+
   val restrictionWithNamespaceDelegation: Gen[DelegationRestriction] = Gen.oneOf(
     Gen.const(CanSignAllMappings),
-    Generators
-      // generate a random sequence of codes,
-      .nonEmptySetGen[TopologyMapping.Code]
-      // but always add the namespace delegation code, so that the result can always sign namespace delegations
-      .map(_ incl TopologyMapping.Code.NamespaceDelegation)
-      .map(CanSignSpecificMappings(_)),
+    // always include the namespace delegation code, so that the result can always sign namespace delegations
+    specificMappingsGen(
+      codes = TopologyMapping.Code.all.toSet - TopologyMapping.Code.NamespaceDelegation,
+      required = Set(TopologyMapping.Code.NamespaceDelegation),
+      min = 0,
+    ),
   )
 
   val restrictionWithoutNamespaceDelegation: Gen[DelegationRestriction] = Gen.oneOf(
     Gen.const(CanSignAllButNamespaceDelegations),
-    Generators
-      .nonEmptySetGen(
-        Arbitrary(
-          // generate a random set of codes but don't allow for NamespaceDelegation to be included
-          Gen.oneOf(TopologyMapping.Code.all.toSet - TopologyMapping.Code.NamespaceDelegation)
-        )
-      )
-      .map(CanSignSpecificMappings(_)),
+    specificMappingsGen(
+      codes = TopologyMapping.Code.all.toSet - TopologyMapping.Code.NamespaceDelegation,
+      required = Set.empty,
+      min = 1,
+    ),
   )
+
+  implicit val synchronizerTrustCertificateArb: Arbitrary[SynchronizerTrustCertificate] =
+    Arbitrary(
+      for {
+        participantId <- Arbitrary.arbitrary[ParticipantId]
+        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
+        // At most MaxFeatureFlags, so that the certificate deserializes
+        flagCount <- Gen.choose(0, SynchronizerTrustCertificate.MaxFeatureFlags.unwrap)
+        featureFlags <- Gen.listOfN(
+          flagCount,
+          Arbitrary.arbitrary[SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag],
+        )
+      } yield SynchronizerTrustCertificate(participantId, synchronizerId, featureFlags.toSet)
+    )
 
   implicit val namespaceDelegationArb: Arbitrary[NamespaceDelegation] = Arbitrary(
     for {

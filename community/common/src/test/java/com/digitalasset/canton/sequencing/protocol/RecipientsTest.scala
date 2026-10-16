@@ -39,7 +39,7 @@ class RecipientsTest
     }
 
     "be preserved through serialization / deserialization" in {
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = SynchronizerLimits.default
 
       val proto = recipients.toProtoV30
       val fromProto = Recipients.fromProtoV30(
@@ -51,7 +51,7 @@ class RecipientsTest
     }
 
     "deserialization checks the limits" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-      val limits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val limits = SynchronizerLimits.default
 
       val t123 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP1, recP2, recP3))
 
@@ -114,6 +114,25 @@ class RecipientsTest
           "repeated field has 2 elements, exceeding the maximum of 1",
         )
       )
+
+      val res = Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxRecipientsPerEnvelope)
+          .replace(PositiveInt.tryCreate(4)),
+        proto,
+      )
+      if (testedProtocolVersion >= ProtocolVersion.nextValidationBoundPV)
+        res shouldBe Left(
+          InvariantViolation(
+            "recipients",
+            "number of distinct recipients of a single envelope exceeds maximum of 4",
+          )
+        )
+      else {
+        // Previous protocol versions do not check the number of distinct recipients
+        res.isRight shouldBe true
+      }
     }
 
     "store all recipients" in {

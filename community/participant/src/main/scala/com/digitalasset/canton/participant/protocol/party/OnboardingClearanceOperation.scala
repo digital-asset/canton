@@ -50,7 +50,7 @@ object OnboardingClearanceOperation extends VersioningCompanion[OnboardingCleara
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v35), v30.OnboardingClearanceOperation)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.OnboardingClearanceOperation)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )

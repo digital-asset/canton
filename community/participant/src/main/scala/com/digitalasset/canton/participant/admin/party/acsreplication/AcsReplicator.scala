@@ -71,13 +71,13 @@ import scala.util.chaining.scalaUtilChainingOps
 /** Acts on behalf of the participant's ACS replication requests handling asynchronous requests and
   * driving progress in its execution queue and based on state from the AcsReplicationStateManager.
   */
-// TODO(#35267) some auxiliary methods are duplicated here and in PartyReplicator
+// TODO(#36508) some auxiliary methods are duplicated here and in PartyReplicator
 final class AcsReplicator(
     participantId: ParticipantId,
     syncService: CantonSyncService,
     internalIndexService: InternalIndexService,
     clock: Clock,
-    // TODO(#35267) replace with an AcsReplicator-specific config class (ACS replication could be allowed but not OnPR)
+    // TODO(#36539) replace with an AcsReplicator-specific config class (ACS replication could be allowed but not OnPR)
     config: AlphaOnlinePartyReplicationConfig,
     storage: Storage,
     acsReplicationContractHandlerFactory: AcsReplicationContractHandlerFactory,
@@ -250,24 +250,23 @@ final class AcsReplicator(
         .flatMap(AcsReplicationStage.fromAcsReplicationStatus)
         .fold(EitherTUtil.unitUS[String]) {
           // Stages listed in order of occurrence
-          // TODO(#35267) remove this step completely
           /*
             - onboarding flag is verified by PartyReplicator
             - the fact that TP hosts the party is verified in replicateAcsAsync and
               processAcsReplicationProposalAtSourceParticipant methods
-            - the stage is needed for now, because the topology transaction timestamp is obtained here
-              (needed for the sequencer channel processor). Later, the timestamp will be provided by the client.
+            - the stage verifies that a topology transaction with PTP mapping containing both SP and TP exists
+              and updates the ACS replication status with the topology transaction info
+              (which is only used for status reporting, not for ACS replication logic)
            */
           case VerifyingOnboardingTopologyAuthorization(params) =>
             logger.debug(s"Verifying party replication $requestId topology authorization")
-            verifyOnboardingTopology(params.requestId)
+            verifyAuthorizedTopology(params.requestId)
           case NeedsToProposeAcsReplicationSequencerChannel(params, errorMessage) =>
             logger.debug(
               s"Proposing to create sequencer channel for ACS replication $requestId of party ${params.partyId}." +
                 errorMessage.fold("")(msg => s" The channel was previously disconnected: $msg")
             )
             proposeAcsReplicationSequencerChannel(params)
-          // TODO(#35267) rename to AcsReplicationSequencerChannelAgreementProposed
           case AcsReplicationSequencerChannelAgreementProposed(params) =>
             logger.debug(
               s"Sequencer channel proposed for ACS replication $requestId of party ${params.partyId}. Waiting for agreement."
@@ -305,7 +304,7 @@ final class AcsReplicator(
                   EitherT.leftT[FutureUnlessShutdown, Unit](
                     s"ACS replication ${p.requestId} AcsReplicationProgress not in runtime state: $replicationNonRuntime"
                   )
-                // TODO(#35267) no mention of file import should be here
+                // TODO(#36539) no mention of file import should be here
                 case _: EphemeralFileImporterProgress =>
                   EitherT.leftT[FutureUnlessShutdown, Unit](
                     s"Sequencer channel based ACS replication ${p.requestId} shouldn't have EphemeralFileImporterProgress"
@@ -541,8 +540,7 @@ final class AcsReplicator(
           .toSet
       )
 
-  // TODO(#35267) remove verification of serial and onboarding flag
-  private def verifyOnboardingTopology(requestId: AcsReplicationRequestId)(implicit
+  private def verifyAuthorizedTopology(requestId: AcsReplicationRequestId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     ensureParticipantStateAndSynchronizerConnectedWithChannelSupport(requestId) {
@@ -995,7 +993,6 @@ final class AcsReplicator(
     }
   }
 
-  // TODO(#35267) stop verifying the serial and use a timestamp instead (or nothing)
   /** Checks that the party is
     *   - hosted by the source and target participant
     *   - serial matches head authorized topology
@@ -1206,7 +1203,7 @@ final class AcsReplicator(
               response.sourceParticipantId,
               response.targetParticipantId,
               response.timestamp,
-              // TODO(#35267) remove permission once using AcsReplicationStatus
+              // TODO(#36539) remove permission once using AcsReplicationStatus
               response.participantPermission,
             ),
             protocolVersion,
@@ -1322,6 +1319,11 @@ final class AcsReplicator(
         processUntrackedAgreement()
       else processExpectedAgreement(statusO)
     }
+
+  private[admin] def getAcsReplicationStatus(
+      requestId: AcsReplicationRequestId
+  ): Option[AcsReplicationStatus] =
+    acsReplicationStateManager.get(requestId)
 
   private[party] def retryUntilLocalStoreUpdatedInExpectedState[T](
       operation: String

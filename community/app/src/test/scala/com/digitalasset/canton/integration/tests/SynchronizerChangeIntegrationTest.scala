@@ -11,6 +11,7 @@ import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.UnassignedWrapper
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedIncompleteUnassigned
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig
@@ -45,6 +46,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.DamlPackageLoader
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.Ast
 import monocle.macros.syntax.lens.*
@@ -356,9 +358,43 @@ abstract class SynchronizerChangeSimClockIntegrationTest
   // Workaround to avoid false errors reported by IDEA.
   implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
 
+  private val automaticAssignmentDelay = NonNegativeFiniteDurationConfig.ofMinutes(1)
+
+  override protected def additionalConfigTransforms: Seq[ConfigTransform] = Seq(
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.parameters.reassignmentsConfig.automaticAssignmentDelay)
+        .replace(automaticAssignmentDelay)
+    )
+  )
+
+  /** Returns the earliest and the latest time at which the automatic assignment is submitted: the
+    * exclusivity deadline up to protocol version 36, and between the unassignment record time plus
+    * the automatic assignment delay and plus twice that delay from protocol version 37.
+    */
+  private def automaticAssignmentWindow(
+      unassigned: UnassignedWrapper,
+      participants: Seq[LocalParticipantReference],
+      party: PartyId,
+  ): (CantonTimestamp, CantonTimestamp) =
+    if (testedProtocolVersion <= ProtocolVersion.v36) {
+      val exclusivityDeadline = CantonTimestamp
+        .fromProtoTimestamp(
+          getIncompleteUnassignedContracts(participants, party).assignmentExclusivity.value
+        )
+        .value
+      (exclusivityDeadline, exclusivityDeadline)
+    } else {
+      val unassignmentTs =
+        CantonTimestamp.fromProtoTimestamp(unassigned.reassignment.recordTime.value).value
+      (
+        unassignmentTs.plus(automaticAssignmentDelay.asJava),
+        unassignmentTs.plus(automaticAssignmentDelay.asJava.multipliedBy(2)),
+      )
+    }
+
   "The paint fence scenario" when {
 
-    "assignment triggered automatically after the exclusivity timeout" must {
+    "assignment triggered automatically" must {
       "succeed" taggedAs SecurityTest(
         SecurityTest.Property.Integrity,
         "virtual shared ledger",
@@ -384,28 +420,23 @@ abstract class SynchronizerChangeSimClockIntegrationTest
 
           val clock = env.environment.simClock.value
 
-          logger.info(
-            s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
-          )
+          logger.info(s"An assignment for $reassignmentId is triggered automatically")
 
-          // Get reassignment from the store
-          val unassignedEvent = getIncompleteUnassignedContracts(participants, painter)
-          val exclusivityDeadline = CantonTimestamp
-            .fromProtoTimestamp(unassignedEvent.assignmentExclusivity.value)
-            .value
+          val (earliestAssignment, latestAssignment) =
+            automaticAssignmentWindow(reassignmentId, participants, painter)
 
           val margin = NonNegativeFiniteDuration.tryOfSeconds(1)
 
-          // Advance clock just before the exclusivity timeout
-          clock.advanceTo(exclusivityDeadline.minus(margin.unwrap))
+          // Advance clock just before the earliest automatic assignment
+          clock.advanceTo(earliestAssignment.minus(margin.unwrap))
           participants.foreach(_.testing.fetch_synchronizer_times())
           checkIncompleteUnassignedContracts(
             participants,
             painter,
           ) // assignment did not happen yet
 
-          // Advance clock to the exclusivity timeout so that the automatic assignment can be triggered
-          clock.advanceTo(exclusivityDeadline)
+          // Advance clock to the latest automatic assignment so that it is triggered
+          clock.advanceTo(latestAssignment)
 
           participants.foreach(_.testing.fetch_synchronizer_times())
 
@@ -463,14 +494,98 @@ abstract class SynchronizerChangeSimClockIntegrationTest
             P4.health.ping(P5, synchronizerId = Some(iouSynchronizerId))
             P4.health.ping(P5, synchronizerId = Some(paintSynchronizerId))
 
-            logger.info(
-              s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
-            )
+            logger.info(s"An assignment for $reassignmentId is triggered automatically")
+
+            val (earliestAssignment, latestAssignment) =
+              automaticAssignmentWindow(reassignmentId, participants, painter)
 
             val margin = NonNegativeFiniteDuration.tryOfSeconds(1)
 
-            // Advance clock just before the exclusivity timeout
-            clock.advance(exclusivityTimeout.unwrap.minus(margin.unwrap))
+            // Advance clock just before the earliest automatic assignment
+            clock.advanceTo(earliestAssignment.minus(margin.unwrap))
+            participants.foreach(_.testing.fetch_synchronizer_times())
+            checkIncompleteUnassignedContracts(
+              participants,
+              painter,
+            ) // assignment did not happen yet
+
+            // Advance clock to the latest automatic assignment so that it is triggered
+            clock.advanceTo(latestAssignment)
+            participants.foreach(_.testing.fetch_synchronizer_times())
+
+            // The reassignment store should be empty once the automatic assignment has completed
+            checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)
+          }
+        }
+      }
+
+      "take parameters changes into account" onlyRunWithOrLessThan ProtocolVersion.v36 in {
+        implicit env =>
+          import env.*
+
+          withUniqueParties { case (alice, bank, painter) =>
+            val participants = Seq(P4, P5)
+
+            val clock = env.environment.simClock.value
+            clock.advance(NonNegativeFiniteDuration.tryOfSeconds(1).unwrap)
+            participants.foreach(_.testing.fetch_synchronizer_times())
+
+            val exclusivityTimeoutIncrease = NonNegativeFiniteDuration.tryOfSeconds(2)
+            val updatedExclusivityTimeout = exclusivityTimeout + exclusivityTimeoutIncrease
+
+            // Ensure initial assignmentExclusivityTimeout is the expected one
+            sequencer1.topology.synchronizer_parameters
+              .get_dynamic_synchronizer_parameters(
+                daId
+              )
+              .assignmentExclusivityTimeout shouldBe exclusivityTimeout.toConfig
+
+            // Increase assignmentExclusivityTimeout by exclusivityTimeoutIncrease
+            sequencer1.topology.synchronizer_parameters.propose_update(
+              iouSynchronizerId,
+              _.update(assignmentExclusivityTimeout = updatedExclusivityTimeout.toConfig),
+            )
+
+            sequencer1.topology.synchronizer_parameters
+              .get_dynamic_synchronizer_parameters(daId)
+              .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
+
+            eventually() {
+              P4.topology.synchronizer_parameters
+                .get_dynamic_synchronizer_parameters(synchronizerId = iouSynchronizerId)
+                .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
+            }
+
+            /*
+            Advance time a bit
+
+            We need that otherwise, the timestamp that determines the synchronizer parameters
+            (via a time proof) is before the change of assignmentExclusivityTimeout.
+             */
+            val baseTime = clock.now
+            val newTime = baseTime + NonNegativeFiniteDuration.tryOfMillis(1)
+            clock.advanceTo(newTime)
+            // any event still pending from the sequencer on P4 that gets consumed between
+            // the clock.advance above and the fetch time below will make the
+            // test hang (as we'll schedule a fetch synchronizer time in the future, but
+            // that future will never appear)
+            participants.foreach(_.testing.fetch_synchronizer_times())
+            P4.testing.await_synchronizer_time(iouSynchronizerAlias, newTime, 5.seconds)
+
+            // Trigger flow
+            val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
+            logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
+
+            val reassignmentId =
+              P4.ledger_api.commands.submit_unassign(
+                painter,
+                Seq(paintOfferId),
+                paintSynchronizerId,
+                iouSynchronizerId,
+              )
+
+            // Advance clock at the initial exclusivity timeout
+            clock.advance(exclusivityTimeout.unwrap)
             participants.foreach(_.testing.fetch_synchronizer_times())
             checkIncompleteUnassignedContracts(
               participants,
@@ -483,108 +598,19 @@ abstract class SynchronizerChangeSimClockIntegrationTest
               .fromProtoTimestamp(
                 unassignedEvent.assignmentExclusivity.value
               )
-              .value + exclusivityTimeout
-            // Advance clock to the exclusivity timeout so that the automatic assignment can be triggered
+              .value + updatedExclusivityTimeout
+            // Advance clock at the updated exclusivity timeout
             clock.advanceTo(targetTimestamp)
+            logger.info(
+              s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
+            )
             participants.foreach(_.testing.fetch_synchronizer_times())
-
-            // The reassignment store should be empty once the automatic assignment has completed
-            checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)
-          }
-        }
-      }
-
-      "take parameters changes into account" in { implicit env =>
-        import env.*
-
-        withUniqueParties { case (alice, bank, painter) =>
-          val participants = Seq(P4, P5)
-
-          val clock = env.environment.simClock.value
-          clock.advance(NonNegativeFiniteDuration.tryOfSeconds(1).unwrap)
-          participants.foreach(_.testing.fetch_synchronizer_times())
-
-          val exclusivityTimeoutIncrease = NonNegativeFiniteDuration.tryOfSeconds(2)
-          val updatedExclusivityTimeout = exclusivityTimeout + exclusivityTimeoutIncrease
-
-          // Ensure initial assignmentExclusivityTimeout is the expected one
-          sequencer1.topology.synchronizer_parameters
-            .get_dynamic_synchronizer_parameters(
-              daId
-            )
-            .assignmentExclusivityTimeout shouldBe exclusivityTimeout.toConfig
-
-          // Increase assignmentExclusivityTimeout by exclusivityTimeoutIncrease
-          sequencer1.topology.synchronizer_parameters.propose_update(
-            iouSynchronizerId,
-            _.update(assignmentExclusivityTimeout = updatedExclusivityTimeout.toConfig),
-          )
-
-          sequencer1.topology.synchronizer_parameters
-            .get_dynamic_synchronizer_parameters(daId)
-            .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
-
-          eventually() {
-            P4.topology.synchronizer_parameters
-              .get_dynamic_synchronizer_parameters(synchronizerId = iouSynchronizerId)
-              .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
-          }
-
-          /*
-            Advance time a bit
-
-            We need that otherwise, the timestamp that determines the synchronizer parameters
-            (via a time proof) is before the change of assignmentExclusivityTimeout.
-           */
-          val baseTime = clock.now
-          val newTime = baseTime + NonNegativeFiniteDuration.tryOfMillis(1)
-          clock.advanceTo(newTime)
-          // any event still pending from the sequencer on P4 that gets consumed between
-          // the clock.advance above and the fetch time below will make the
-          // test hang (as we'll schedule a fetch synchronizer time in the future, but
-          // that future will never appear)
-          participants.foreach(_.testing.fetch_synchronizer_times())
-          P4.testing.await_synchronizer_time(iouSynchronizerAlias, newTime, 5.seconds)
-
-          // Trigger flow
-          val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
-          logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
-
-          val reassignmentId =
-            P4.ledger_api.commands.submit_unassign(
-              painter,
-              Seq(paintOfferId),
-              paintSynchronizerId,
+            checkReassignmentStoreIsEmpty(
               iouSynchronizerId,
-            )
-
-          // Advance clock at the initial exclusivity timeout
-          clock.advance(exclusivityTimeout.unwrap)
-          participants.foreach(_.testing.fetch_synchronizer_times())
-          checkIncompleteUnassignedContracts(
-            participants,
-            painter,
-          ) // assignment did not happen yet
-
-          // Get reassignment from the store
-          val unassignedEvent = getIncompleteUnassignedContracts(participants, painter)
-          val targetTimestamp = CantonTimestamp
-            .fromProtoTimestamp(
-              unassignedEvent.assignmentExclusivity.value
-            )
-            .value + updatedExclusivityTimeout
-          // Advance clock at the updated exclusivity timeout
-          clock.advanceTo(targetTimestamp)
-          logger.info(
-            s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
-          )
-          participants.foreach(_.testing.fetch_synchronizer_times())
-          checkReassignmentStoreIsEmpty(
-            iouSynchronizerId,
-            participants,
-            painter,
-          ) // assignment should be done
-        }
+              participants,
+              painter,
+            ) // assignment should be done
+          }
 
       }
 
@@ -774,10 +800,12 @@ trait SynchronizerChangeRealClockIntegrationTest
 
           val unassignedEvent = unassignedEvents.loneElement
 
-          // The time proof can vary depending on other concurrent events
-          (CantonTimestamp
-            .fromProtoTimestamp(unassignedEvent.assignmentExclusivity.value)
-            .value - targetSynchronizerTime).toMillis should be <= 5000L
+          if (testedProtocolVersion <= ProtocolVersion.v36)
+            // The time proof can vary depending on other concurrent events
+            (CantonTimestamp
+              .fromProtoTimestamp(unassignedEvent.assignmentExclusivity.value)
+              .value - targetSynchronizerTime).toMillis should be <= 5000L
+          else unassignedEvent.assignmentExclusivity shouldBe None
         }
       }
 

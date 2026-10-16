@@ -466,7 +466,8 @@ object PekkoP2PGrpcNetworking {
                   } { case (recipientInstanceName, delayConf) =>
                     if (delayConf.nextGrpcSendAcceptedByFlowControl(recipientInstanceName)) {
                       if (delayConf.nextGrpcSendSucceeds(recipientInstanceName)) {
-                        sendAndRecordDiscard()
+                        if (delayConf.nextGrpcGoesThrough(recipientInstanceName))
+                          sendAndRecordDiscard()
                       } else {
                         throw new SimulatedSendFailureException
                       }

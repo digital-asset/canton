@@ -204,6 +204,10 @@ python3 "$OLDPWD/scripts/ci/report_failing_tests.py"
 
 The rota lookup also honors an optional `ROTA_SHEET_ID` variable to point at a different sheet, defaulting to the roster sheet baked into `select_rota.py`.
 
+## Investigating a flaky test
+
+Run the `/investigate-flaky-test` Claude Code skill on a downloaded investigation package (the `flake-pkg-*` artifact linked from the flaky issue's evidence comment); see its [README](../../.claude/skills/investigate-flaky-test/README.md).
+
 ## Rota Slack channel topics
 
 `update_rota_topics.py` keeps three channel topics in sync with the people on duty this week, reading the same [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) and roster (`roster_people.json`) as `select_rota.py`:

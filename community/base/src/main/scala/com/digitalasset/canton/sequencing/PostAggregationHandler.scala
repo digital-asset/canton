@@ -85,9 +85,7 @@ class PostAggregationHandlerImpl private[canton] (
           }
         if (isIdle) {
           val handlingF = handleReceivedEventsUntilEmpty(eventQueue)
-          addToFlushAndLogError("invoking the application handler")(
-            handlingF.failOnShutdownToAbortException("sequencer client: flush and log errors")
-          )
+          addToFlushAndLogError("invoking the application handler")(handlingF.unwrap)
         }
       }
       .discard

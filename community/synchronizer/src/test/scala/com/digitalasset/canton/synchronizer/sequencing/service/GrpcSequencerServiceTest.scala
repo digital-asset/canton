@@ -18,7 +18,7 @@ import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
   SynchronizerLimits,
   TestSynchronizerParameters,
-  v31 as protocolV31,
+  v32 as protocolV32,
 }
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.*
@@ -116,7 +116,7 @@ final class GrpcSequencerServiceTest
     private val topologyClient = mock[SynchronizerTopologyClient]
     private val mockTopologySnapshot = mock[TopologySnapshot]
     when(topologyClient.getSynchronizerLimits)
-      .thenReturn(SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion))
+      .thenReturn(SynchronizerLimits.default)
     when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
       .thenReturn(FutureUnlessShutdown.pure(mockTopologySnapshot))
     when(
@@ -312,7 +312,7 @@ final class GrpcSequencerServiceTest
 
     "reject empty request" in { implicit env =>
       val requestV1 =
-        protocolV31.SubmissionRequest(
+        protocolV32.SubmissionRequest(
           sender = "",
           messageId = "",
           batch = None,
@@ -322,7 +322,7 @@ final class GrpcSequencerServiceTest
           submissionCost = None,
         )
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 31).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 32).toByteString
       )
 
       loggerFactory.assertLogs(
@@ -352,6 +352,7 @@ final class GrpcSequencerServiceTest
             )(
               DecompressionBudget(MaxBytesToDecompress.HardcodedDefault),
               testedProtocolVersionValidation,
+              maxSignaturesPerEnvelope = PositiveInt.MaxValue,
             )
 
           case other => other // Won't happen, but is required for the match to be exhaustive
@@ -366,12 +367,12 @@ final class GrpcSequencerServiceTest
     }
 
     "reject envelopes with invalid sender" in { implicit env =>
-      val requestV1 = defaultRequest.toProtoV31.focus(_.sender).modify { sender =>
+      val requestV1 = defaultRequest.toProtoV32.focus(_.sender).modify { sender =>
         if (sender == "".toProtoUnvalidated) fail("sender should be set")
         else "THISWILLFAIL".toProtoUnvalidated
       }
       val signedRequestV0 = signedContent(
-        VersionedMessage[SubmissionRequest](requestV1.toByteString, 31).toByteString
+        VersionedMessage[SubmissionRequest](requestV1.toByteString, 32).toByteString
       )
       loggerFactory.assertLogs(
         sendProtoAndCheckError(

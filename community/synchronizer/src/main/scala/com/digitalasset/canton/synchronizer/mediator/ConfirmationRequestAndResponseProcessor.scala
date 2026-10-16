@@ -112,6 +112,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       HandlerResult.done
     } else {
       val synchronousResult: HandlerResult = for {
+        // We validate the confirmation request using the sequenced timestamp, which in this case is the `requestId` timestamp.
         snapshot <- crypto.ips.awaitSnapshot(requestTimestamp)
 
         synchronizerParameters <- snapshot
@@ -256,6 +257,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           span.setAttribute("counter", counter.toString)
 
           for {
+            // We validate the confirmation request using the sequenced timestamp, which in this case is the `requestId` timestamp.
             snapshot <- crypto.awaitSnapshot(requestId.unwrap)
 
             unitOrVerdictO <- validateRequest(

@@ -5,11 +5,15 @@ package com.digitalasset.canton.participant.synchronizer
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
+  TopologyTransactionDeserializationContext,
+}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -57,13 +61,13 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
 
   def apply(
       transactions: NonEmpty[Seq[GenericSignedTopologyTransaction]],
-      protocolVersion: ProtocolVersion,
+      protocolVersion: ReleaseProtocolVersion,
   ): PendingOnboardingTransactions =
-    PendingOnboardingTransactions(transactions)(protocolVersionRepresentativeFor(protocolVersion))
+    PendingOnboardingTransactions(transactions)(protocolVersionRepresentativeFor(protocolVersion.v))
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v35), v30.PendingOnboardingTransactions)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.PendingOnboardingTransactions)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )
@@ -80,8 +84,11 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
       proto: v30.PendingOnboardingTransactions
   ): ParsingResult[PendingOnboardingTransactions] =
     for {
+      // Trusted bytes from the node's own store, so the limits in the context are never read.
       transactions <- proto.transactions.traverse(
-        SignedTopologyTransaction.fromTrustedByteString
+        SignedTopologyTransaction.fromTrustedByteString(
+          TopologyTransactionDeserializationContext(SynchronizerLimits.default)
+        )
       )
       transactionsNE <- NonEmpty
         .from(transactions)

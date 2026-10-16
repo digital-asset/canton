@@ -23,7 +23,7 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{BytesUnit, EitherTUtil, ErrorUtil, MonadUtil, retry}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.nonempty.NonEmptyReturningOps.*
@@ -62,6 +62,7 @@ class InMemorySequencerStore(
 
   private val nextNewMemberId = new AtomicInteger()
   private val memberMap = TrieMap[Member, RegisteredMember]()
+  private val memberOnboardedAt = TrieMap[Member, CantonTimestamp]()
   private val memberPrunedPreviousEventTimestamps: mutable.Map[Member, CantonTimestamp] =
     mutable.Map.empty
   private val payloads = new ConcurrentSkipListMap[CantonTimestamp, StoredPayload]()
@@ -79,18 +80,46 @@ class InMemorySequencerStore(
     // we're running in-memory so we immediately committing to the "store" we have
     EitherTUtil.unitUS
 
-  protected override def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
+  protected override def registerOnboardingMemberInternal(
+      member: Member,
+      timestamp: CantonTimestamp,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[RegisteredMember] =
     FutureUnlessShutdown.pure {
       memberMap
         .getOrElseUpdate(
-          member,
-          RegisteredMember(
-            SequencerMemberId(nextNewMemberId.getAndIncrement()),
-            timestamp,
-            enabled = true,
-          ),
+          member, {
+            memberOnboardedAt.putIfAbsent(member, timestamp).discard
+            RegisteredMember.Onboarding(SequencerMemberId(nextNewMemberId.getAndIncrement()))
+          },
+        )
+    }
+
+  protected override def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[RegisteredMember] =
+    FutureUnlessShutdown.pure {
+      memberMap
+        .updateWith(member) {
+          case Some(registeredMember) =>
+            registeredMember match {
+              case RegisteredMember.Onboarding(memberId) =>
+                Some(RegisteredMember.Active(memberId, timestamp))
+              case existing =>
+                Some(existing)
+            }
+          case None =>
+            Some(
+              RegisteredMember.Active(
+                SequencerMemberId(nextNewMemberId.getAndIncrement()),
+                timestamp,
+              )
+            )
+        }
+        .getOrElse(
+          // Never happens as long as we return Some(_) above
+          ErrorUtil.invalidState(s"Failed to register member $member")
         )
     }
 
@@ -116,7 +145,7 @@ class InMemorySequencerStore(
     FutureUnlessShutdown.pure(
       memberMap
         .filter { case (_, registeredMember) =>
-          registeredMember.registeredFrom <= registeredAtBeforeInclusive
+          registeredMember.registeredFrom.exists(_ <= registeredAtBeforeInclusive)
         }
         .map { case (member, _) => member }
         .toSet
@@ -272,12 +301,12 @@ class InMemorySequencerStore(
           Option(payloads.get(id.unwrap))
             .map(storedPayload =>
               id -> BytesPayload(id, storedPayload.content)
-                .decodeBatchAndTrim(protocolVersion, member)
+                .decodeBatchAndTrim(member)
             )
             .toList
         case payload: BytesPayload =>
           List(
-            payload.id -> payload.decodeBatchAndTrim(protocolVersion, member)
+            payload.id -> payload.decodeBatchAndTrim(member)
           )
       }.toMap
     )
@@ -293,11 +322,11 @@ class InMemorySequencerStore(
           Option(payloads.get(id.unwrap))
             .map(storedPayload =>
               id -> BytesPayload(id, storedPayload.content)
-                .decodeBatch(protocolVersion)
+                .decodeBatch()
             )
             .toList
         case payload: BytesPayload =>
-          List(payload.id -> payload.decodeBatch(protocolVersion))
+          List(payload.id -> payload.decodeBatch())
       }.toMap
     )
 
@@ -435,13 +464,14 @@ class InMemorySequencerStore(
         lowerBound.get().map { case (timestamp, _) => timestamp }.getOrElse(CantonTimestamp.Epoch),
       now = now,
       members = memberMap.collect {
-        case (member, RegisteredMember(memberId, registeredFrom, enabled))
-            if (registeredFrom <= now) =>
-          SequencerMemberStatus(
+        case (member, registeredMember)
+            if registeredMember.registeredFrom.exists(_ <= now) ||
+              memberOnboardedAt.get(member).exists(_ <= now) =>
+          memberStatusAt(
             member,
-            registeredFrom,
-            lastAcknowledged = acknowledgements.asScala.get(memberId),
-            enabled = enabled,
+            registeredMember,
+            now,
+            acknowledgements.asScala.get(registeredMember.memberId),
           )
       }.toSet,
     )
@@ -456,8 +486,9 @@ class InMemorySequencerStore(
     */
   private def lookupExpectedMember(memberId: SequencerMemberId): Member =
     memberMap
-      .collectFirst { case (member, RegisteredMember(`memberId`, _, _)) =>
-        member
+      .collectFirst {
+        case (member, registeredMember) if registeredMember.memberId == memberId =>
+          member
       }
       .getOrElse(sys.error(s"Member id [$memberId] is not registered"))
 
@@ -466,7 +497,10 @@ class InMemorySequencerStore(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.pure {
       val member = lookupExpectedMember(memberId)
-      memberMap.put(member, memberMap(member).copy(enabled = false)).discard
+      val registeredMember = memberMap(member)
+      memberMap
+        .put(member, RegisteredMember.Disabled(memberId, registeredMember.registeredFrom))
+        .discard
     }
 
   /** There can be no other sequencers sharing this storage */
@@ -590,7 +624,7 @@ class InMemorySequencerStore(
             if latestTopologyTimestampCandidate.forall(_ < lowerBound) =>
           topologyLowerBound
         // if no lower bound is set we use the candidate or fall back to the member registration time
-        case _ => Some(latestTopologyTimestampCandidate.getOrElse(registeredMember.registeredFrom))
+        case _ => latestTopologyTimestampCandidate.orElse(registeredMember.registeredFrom)
       }
     }
 

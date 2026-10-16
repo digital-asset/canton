@@ -590,12 +590,10 @@ final class BlockChunkProcessor(
                     latestSequencerEventTimestamp,
                     warnIfApproximate,
                   )
-
-                /* Submission request signatures are always
-                 * created using an approximate snapshot and must therefore be verified using the sequencing time.
-                 * This keeps signing and verification timestamps aligned. Otherwise, delayed confirmation
-                 * responses/results may cause the session key (when enabled) to appear expired at verification time
-                 * and lead to valid requests being rejected.
+                /* Submission request signatures are always created using an approximate snapshot and must therefore be
+                 * verified using the sequencing time. This keeps signing and verification timestamps aligned.
+                 * Otherwise, delayed confirmation responses/results may cause the session key (when enabled) to appear
+                 * expired at verification time and lead to valid requests being rejected.
                  */
                 _ = logger.debug(
                   s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +

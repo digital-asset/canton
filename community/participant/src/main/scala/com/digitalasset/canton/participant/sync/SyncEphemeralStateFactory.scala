@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.sync
 import cats.Eval
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CacheConfigWithTimeout,
+  ProcessingTimeout,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
@@ -57,6 +61,7 @@ trait SyncEphemeralStateFactory {
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+      transparencyCheckCacheConfig: CacheConfigWithTimeout,
       synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
@@ -88,6 +93,7 @@ class SyncEphemeralStateFactoryImpl(
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+      transparencyCheckCacheConfig: CacheConfigWithTimeout,
       synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
@@ -206,6 +212,7 @@ class SyncEphemeralStateFactoryImpl(
         metrics,
         exitOnFatalFailures = exitOnFatalFailures,
         sessionKeyCacheConfig,
+        transparencyCheckCacheConfig,
         timeouts,
         synchronizerLoggerFactory,
         futureSupervisor,

@@ -1,0 +1,63 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.sequencer.admin.v31;
+
+import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
+import "com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_snapshot.proto";
+import "scalapb/scalapb.proto";
+
+// Difference with v30:
+// - SequencerPruningStatus is updated from v30 to v31
+message SequencerSnapshot {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  int64 latest_timestamp = 1; // in microseconds of UTC time since Unix epoch
+  uint64 last_block_height = 2;
+  reserved 3; // was head_member_counters
+  SequencerPruningStatus status = 4;
+  v30.ImplementationSpecificInfo additional = 5;
+  repeated v30.SequencerSnapshot.InFlightAggregationWithId in_flight_aggregations = 6;
+  repeated com.digitalasset.canton.protocol.v30.TrafficPurchased traffic_purchased = 7;
+  repeated com.digitalasset.canton.protocol.v30.TrafficConsumed traffic_consumed = 8;
+  repeated v30.SequencerSnapshot.MemberPreviousTimestamp member_previous_timestamps = 9;
+}
+
+// Difference with v30:
+// - `enabled` flag has been replaced with a status
+message SequencerMemberStatus {
+  // The member has received/purchased traffic, but is not yet registered on the sequencer.
+  message Onboarding {}
+
+  // The member has completed onboarding and is active.
+  message Active {
+    int64 registered_at = 1; // in microseconds of UTC time since Unix epoch
+    optional int64 last_acknowledged = 2; // in microseconds of UTC time since Unix epoch
+  }
+
+  // The member has been disabled and is no longer active.
+  message Disabled {
+    optional int64 registered_at = 1; // in microseconds of UTC time since Unix epoch
+    optional int64 last_acknowledged = 2; // in microseconds of UTC time since Unix epoch
+  }
+
+  string member = 1;
+  oneof status {
+    Onboarding onboarding = 2;
+    Active active = 3;
+    Disabled disabled = 4;
+  }
+}
+
+// Difference with v30:
+// - SequencerMemberStatus is updated from v30 to v31
+message SequencerPruningStatus {
+  // current time according to the sequencer in microseconds of UTC time since Unix epoch
+  int64 now = 1;
+  // the earliest event we are currently storing in microseconds of UTC time since Unix epoch
+  int64 earliest_event_timestamp = 2;
+  // details of each member registered on the sequencer
+  repeated SequencerMemberStatus members = 3;
+}

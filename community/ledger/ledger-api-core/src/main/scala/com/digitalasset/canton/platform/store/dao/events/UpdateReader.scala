@@ -197,12 +197,22 @@ private[dao] final class UpdateReader(
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[Offset]] =
-    dispatcher.executeSql(dbMetrics.highestOffsetBeforeOrFirstAtRecordTime)(
-      eventStorageBackend.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
-        synchronizerId,
-        recordTime.underlying,
+    dispatcher
+      .executeSql(dbMetrics.highestOffsetBeforeOrFirstAtRecordTime)(
+        eventStorageBackend.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
+          synchronizerId,
+          recordTime.underlying,
+        )
       )
-    )
+      .map(vector =>
+        // Filter out situation when we have an exact match on record time, but there are no entries before.
+        // We don't know if some updates for this record time were already pruned.
+        if (vector.lastOption.exists(_._2 < recordTime.underlying)) {
+          vector.headOption.map(_._1)
+        } else {
+          None
+        }
+      )
 }
 
 private[dao] object UpdateReader {

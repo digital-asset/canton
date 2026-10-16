@@ -156,7 +156,7 @@ class TransactionConfirmationRequestFactoryV2Test
   }
 
   "A ConfirmationRequestFactory version 2 (uses ciphertext IDs references)" must {
-    if (testedProtocolVersion >= ProtocolVersion.transparency)
+    if (testedProtocolVersion >= ProtocolVersion.transparencyAndCiphertextId)
       behave like transactionConfirmationRequestFactoryTest()
   }
 

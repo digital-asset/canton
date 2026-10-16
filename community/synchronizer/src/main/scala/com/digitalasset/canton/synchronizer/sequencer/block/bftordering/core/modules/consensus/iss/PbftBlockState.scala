@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.mutable
 
@@ -33,6 +34,7 @@ import IssConsensusModuleMetrics.emitNonCompliance
 import PbftBlockState.{
   PbftBlockStateAction,
   ProcessResult,
+  RequestMissingPrePrepare,
   SendPbftMessage,
   SignPbftMessage,
   StorePrePrepare,
@@ -137,6 +139,26 @@ final class PbftBlockState(
         )
     }
 
+  private class RequestMissingPrePrepareAction {
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    private var fired: Boolean = false
+    def run(): Seq[ProcessResult] =
+      NonEmpty.from(prepareMap.toSeq) match {
+        case Some(nonEmptyPrepares)
+            if !fired && view == ViewNumber.First && prepareMap.sizeIs >= membership.orderingTopology.weakQuorum =>
+          fired = true
+          Seq(
+            RequestMissingPrePrepare(
+              blockMetadata = nonEmptyPrepares.head1._2.message.blockMetadata,
+              nodesThatHavePrePrepare = nonEmptyPrepares.map(_._1),
+            )
+          )
+        case _ => Seq.empty
+      }
+  }
+
+  private val requestMissingPrePrepareAction = new RequestMissingPrePrepareAction()
+
   private val createCommitAction = pbftAction(implicit traceContext =>
     prePrepare.fold(false) { case Traced(pp) =>
       val hasReachedQuorumOfPrepares = {
@@ -225,10 +247,9 @@ final class PbftBlockState(
     *   only depends on the state.
     */
   def advance(): Seq[ProcessResult] =
-    prePrepare
-      .map(_.withTraceContext({ implicit traceContext => pp =>
+    prePrepare.fold(requestMissingPrePrepareAction.run())(_.withTraceContext({
+      implicit traceContext => pp =>
         val hash = pp.message.hash
-
         Seq(
           prePrepareAction,
           createPrepareAction,
@@ -239,8 +260,7 @@ final class PbftBlockState(
         ).flatMap { action =>
           action.run(hash, pp)
         }
-      }))
-      .getOrElse(Seq.empty)
+    }))
 
   def prepareVoters: Iterable[BftNodeId] = prepareMap.keys
 
@@ -277,6 +297,8 @@ final class PbftBlockState(
             false
           },
           { _ =>
+            if (pp.message.actualSender.exists(_ != pp.from))
+              metrics.consensus.retransmissions.acceptedRetransmittedPrePreparesMeter.mark(1L)
             prePrepare = Some(Traced(pp))
             true
           },
@@ -477,6 +499,10 @@ object PbftBlockState {
   ) extends ProcessResult
   final case class ViewChangeStartNestedTimer(blockMetadata: BlockMetadata, viewNumber: ViewNumber)
       extends ProcessResult
+  final case class RequestMissingPrePrepare(
+      blockMetadata: BlockMetadata,
+      nodesThatHavePrePrepare: NonEmpty[Seq[BftNodeId]],
+  ) extends ProcessResult
 
   /** Indicates that the view change was successfully completed. If this node is the leader of this
     * view, it will have sent the new view message and stored it as part of that. If this node is

@@ -131,6 +131,15 @@ final case class SessionEncryptionKeyCacheConfig(
   * @param finalizedMediatorConfirmationRequests
   *   cache size for the finalized mediator confirmation requests such the mediator does not have to
   *   perform a db round-trip if we have slow responders.
+  * @param transparencyCheckCache
+  *   cache configuration for the transparency check cache, which stores the hashes of the encrypted
+  *   session key randomness that has already been checked for transparency, avoiding repeating
+  *   expensive encryption operations. This is a purely local, per-node performance optimization,
+  *   which is why it is configured here rather than as part of `StaticSynchronizerParameters`: each
+  *   node is free to size and tune its own cache as it sees fit. This is unlike
+  *   `enableTransparencyChecks` in `StaticSynchronizerParameters`, which dictates whether
+  *   transparency checks are performed at all and therefore must be agreed upon by every node on
+  *   the synchronizer.
   */
 final case class CachingConfigs(
     indexedStrings: CacheConfig = CachingConfigs.defaultStaticStringCache,
@@ -142,6 +151,7 @@ final case class CachingConfigs(
     participantCache: CacheConfig = CachingConfigs.defaultParticipantCache,
     keyCache: CacheConfig = CachingConfigs.defaultKeyCache,
     sessionEncryptionKeyCache: SessionEncryptionKeyCacheConfig = SessionEncryptionKeyCacheConfig(),
+    transparencyCheckCache: CacheConfigWithTimeout = CachingConfigs.defaultTransparencyCheckCache,
     publicKeyConversionCache: CacheConfig = CachingConfigs.defaultPublicKeyConversionCache,
     packageVettingCache: CacheConfig = CachingConfigs.defaultPackageVettingCache,
     packageUpgradeCache: CacheConfigWithSizeOnly = CachingConfigs.defaultPackageUpgradeCache,
@@ -185,6 +195,10 @@ object CachingConfigs {
     CacheConfig.apply(maximumSize = PositiveNumeric.tryCreate(20))
   val defaultFinalizedMediatorConfirmationRequestsCache =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
+  val defaultTransparencyCheckCache: CacheConfigWithTimeout = CacheConfigWithTimeout(
+    maximumSize = PositiveNumeric.tryCreate(10000),
+    expireAfterTimeout = PositiveFiniteDuration.ofMinutes(5),
+  )
   val defaultSequencerPayloadCache: CacheConfigWithMemoryBounds =
     CacheConfigWithMemoryBounds(
       maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(64L)),

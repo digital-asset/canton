@@ -58,7 +58,6 @@ import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   TestSynchronizerParameters,
-  v31 as protocolV31,
   v32 as protocolV32,
 }
 import com.digitalasset.canton.sequencer.api.v30
@@ -99,9 +98,10 @@ import io.grpc.{Server, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.scaladsl.Sink
 import org.mockito.ArgumentMatchersSugar
-import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
+import org.scalatest.{Assertions, Outcome}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -118,7 +118,8 @@ class Env(
 ) extends AutoCloseable
     with NamedLogging
     with org.mockito.MockitoSugar
-    with ArgumentMatchersSugar { self =>
+    with ArgumentMatchersSugar
+    with Assertions { self =>
   implicit val actorSystem: ActorSystem =
     PekkoUtil.createActorSystem("GrpcSequencerIntegrationTest")
   implicit val executionSequencerFactory: ExecutionSequencerFactory =
@@ -183,6 +184,8 @@ class Env(
         )
       )
     )
+  when(sequencer.sequencingTime(any[TraceContext]))
+    .thenReturn(FutureUnlessShutdown.pure(Some(clock.now)))
 
   val authenticationCheck = new AuthenticationCheck {
 
@@ -256,7 +259,7 @@ class Env(
     ): Future[v30.SequencerAuthentication.ChallengeResponse] =
       for {
         approximateSnapshot <- cryptoApi.ips.currentSnapshotApproximation
-          .failOnShutdownToAbortException("shutting down")
+          .onShutdown(fail("shutting down"))
         fingerprints <- approximateSnapshot
           .signingKeys(participant, SigningKeyUsage.SequencerAuthenticationOnly)
           .map(_.map(_.fingerprint).toList)
@@ -357,6 +360,7 @@ class Env(
       _ => None,
       _ => None,
       CommonMockMetrics.sequencerClient,
+      new BftTopologyForInitDownloader(loggerFactory),
       LoggingConfig(),
       exitOnFatalErrors = false,
       loggerFactory,
@@ -512,7 +516,8 @@ class GrpcSequencerIntegrationTest
               .of(
                 testedProtocolVersion,
                 (MockProtocolMessage, Recipients.cc(env.anotherParticipant)),
-              )
+              ),
+            None,
           )
           .value
           .onShutdown(fail())
@@ -650,9 +655,6 @@ class GrpcSequencerIntegrationTest
     override def psid: PhysicalSynchronizerId =
       DefaultTestIdentities.physicalSynchronizerId
 
-    override def toProtoSomeEnvelopeContentV31: protocolV31.EnvelopeContent.SomeEnvelopeContent =
-      protocolV31.EnvelopeContent.SomeEnvelopeContent.Empty
-
     override def toProtoSomeEnvelopeContentV32: protocolV32.EnvelopeContent.SomeEnvelopeContent =
       protocolV32.EnvelopeContent.SomeEnvelopeContent.Empty
   }
@@ -692,7 +694,8 @@ final class EnvWithFailingTokenRefresh(
 class GrpcSequencerIntegrationWithFailingTokenRefreshTest
     extends FixtureAnyWordSpec
     with BaseTest
-    with HasExecutionContext {
+    with HasExecutionContext
+    with HasActorSystem {
   override type FixtureParam = EnvWithFailingTokenRefresh
 
   override def withFixture(test: OneArgTest): Outcome = {
@@ -709,7 +712,8 @@ class GrpcSequencerIntegrationWithFailingTokenRefreshTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           inside(
             client
-              .downloadTopologyStateForInit(maxRetries = 5, retryLogLevel = Some(Level.WARN))
+              .streamTopologyStateForInit(maxRetries = 5, retryLogLevel = Some(Level.WARN))
+              .semiflatMap(source => FutureUnlessShutdown.outcomeF(source.runWith(Sink.seq)))
               .value
               .futureValueUS
           ) { case Left(message) =>

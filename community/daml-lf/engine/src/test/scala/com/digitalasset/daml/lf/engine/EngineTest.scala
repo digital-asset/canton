@@ -19,7 +19,12 @@ import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Error.{Interpretation as IErr, Validation as VErr}
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.Error.Dev.Limit
-import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig, Limits}
+import com.digitalasset.daml.lf.interpretation.{
+  ExecutionMode,
+  InterpretationConfig,
+  LimitConfig,
+  Limits,
+}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
@@ -1945,8 +1950,8 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
     res shouldBe a[Right[?, ?]]
-    val limits = Limits.Lenient.copy(choiceAuthorizers = 1)
-    val engineWithLimits = newEngine(executionMode, limits = limits)
+    val limitConfig = LimitConfig(Limits.Lenient.copy(choiceAuthorizers = 1), None)
+    val engineWithLimits = newEngine(executionMode, limitConfig = limitConfig)
     val contractInst =
       TransactionBuilder.fatContractInstanceWithDummyDefaults(
         version = defaultSerializationVersion,
@@ -1988,7 +1993,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               choiceName,
               choiceArg,
               submitters,
-              limits.choiceAuthorizers,
+              limitConfig.limits.choiceAuthorizers,
             )
           )
         }
@@ -3170,13 +3175,13 @@ class EngineTestHelpers(
   def newEngine(
       executionMode: ExecutionMode,
       requireCidSuffixes: Boolean = false,
-      limits: interpretation.Limits = interpretation.Limits.Lenient,
+      limitConfig: interpretation.LimitConfig = interpretation.LimitConfig.Off,
   ) =
     new Engine(
       EngineConfig(
         allowedLanguageVersions = language.LanguageVersion.allLfVersions,
         forbidLocalContractIds = requireCidSuffixes,
-        transactionLimits = limits,
+        transactionLimits = limitConfig,
         executionMode = executionMode,
       ),
       loggerFactory,

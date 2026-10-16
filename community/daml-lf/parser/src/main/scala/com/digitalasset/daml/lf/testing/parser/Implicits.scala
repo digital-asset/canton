@@ -36,11 +36,45 @@ object Implicits {
 
     @SuppressWarnings(Array("org.wartremover.warts.Any"))
     private def interpolate[T](p: Parsers.Parser[T])(args: Seq[Any]): T =
-      Parsers.parseAll(
-        Parsers.phrase(p),
-        StringContext.standardInterpolator(identity, args.map(prettyPrint), sc.parts),
-      )
+      try {
+        Parsers.parseAll(
+          Parsers.phrase(p),
+          StringContext.standardInterpolator(identity, args.map(prettyPrint), sc.parts),
+        )
+      } catch {
+        case e: ParserError =>
+          throw InterpolationError(e, callSite(e))
+      }
   }
+
+  private val internalClassPrefixes = Seq(
+    "scala.",
+    "java.",
+    "jdk.",
+    "sun.",
+    "org.scalatest.",
+    "com.digitalasset.daml.lf.testing.parser.Implicits",
+    "com.digitalasset.daml.lf.testing.parser.Parsers",
+    "com.digitalasset.daml.lf.testing.parser.Lexer",
+    "com.digitalasset.daml.lf.testing.parser.ExprParser",
+    "com.digitalasset.daml.lf.testing.parser.ModParser",
+    "com.digitalasset.daml.lf.testing.parser.TypeParser",
+    "com.digitalasset.daml.lf.testing.parser.KindParser",
+  )
+
+  // Prefixes ending with a dot match packages; the others match a class and its inner classes only
+  // (so that e.g. `Parsers` does not match `ParsersSpec`).
+  private def matches(className: String, prefix: String): Boolean =
+    if (prefix.endsWith(".")) className.startsWith(prefix)
+    else className == prefix || className.startsWith(prefix + "$")
+
+  // First stack frame outside of the parser and the Scala library: the code calling the interpolator.
+  // The line is the one of the interpolator call: the line reported by the parser error
+  // is relative to the beginning of the interpolated string.
+  private def callSite(e: ParserError): Option[CallSite] =
+    e.getStackTrace
+      .find(f => !internalClassPrefixes.exists(p => matches(f.getClassName, p)))
+      .map(f => CallSite(f.getFileName, f.getLineNumber))
 
   implicit class BigDecimalOp(val x: BigDecimal) extends AnyVal {
     def fmt: String = Numeric.toUnscaledString(Numeric.assertFromUnscaledBigDecimal(x))

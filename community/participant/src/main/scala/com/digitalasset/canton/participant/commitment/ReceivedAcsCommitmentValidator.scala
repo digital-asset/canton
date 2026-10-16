@@ -22,8 +22,17 @@ import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.protocol.v30 as v30participant
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
-import com.digitalasset.canton.protocol.UpdateId
-import com.digitalasset.canton.protocol.messages.AcsCommitmentProtocolMessage
+import com.digitalasset.canton.protocol.messages.{
+  AcsCommitmentDeserializationContext,
+  AcsCommitmentProtocolMessage,
+}
+import com.digitalasset.canton.protocol.{
+  AcsCommitmentLimits,
+  SynchronizerLimits,
+  TopologyLimits,
+  TransactionProtocolLimits,
+  UpdateId,
+}
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.sequencing.{HandlerResult, UnthrottledImmediate}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -181,9 +190,7 @@ class ReceivedAcsCommitmentValidatorImpl(
       messages: NonEmpty[Seq[AcsCommitmentProtocolMessage]],
   )(implicit traceContext: TraceContext): ReceivedAcsCommitment = {
     val serializedMessages =
-      ReceivedAcsCommitments(messages).toByteString(
-        ProtocolVersion.v35
-      )
+      ReceivedAcsCommitments(messages).toByteString(ProtocolVersion.v36)
     ReceivedAcsCommitment(
       synchronizerId = physicalSynchronizerId.logical,
       recordTime = timestamp,
@@ -218,7 +225,7 @@ object ReceivedAcsCommitments
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v35,
+        ProtocolVersion.v36,
         supportedProtoVersion(v30participant.ReceivedAcsCommitments)(fromProtoV30),
         _.toProtoV30,
       )
@@ -226,12 +233,22 @@ object ReceivedAcsCommitments
 
   private def fromProtoV30(
       proto: v30participant.ReceivedAcsCommitments
-  ): ParsingResult[ReceivedAcsCommitments] =
+  ): ParsingResult[ReceivedAcsCommitments] = {
+    // These messages are trusted because they come from a local DB.
+    // We therefore do not need additional validations and set the limits to the max.
+    val trustedContext = AcsCommitmentDeserializationContext(
+      SynchronizerLimits(
+        TransactionProtocolLimits.default,
+        TopologyLimits.default,
+        AcsCommitmentLimits.default,
+      )
+    )
     for {
       messages <- ProtoConverter.parseRequiredNonEmpty(
-        AcsCommitmentProtocolMessage.fromTrustedByteString,
+        AcsCommitmentProtocolMessage.fromTrustedByteString(trustedContext),
         "commitment",
         proto.commitment,
       )
     } yield ReceivedAcsCommitments(messages)
+  }
 }

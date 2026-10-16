@@ -184,16 +184,23 @@ private[reassignment] object UnassignmentValidation {
       val reassignmentMetrics: ReassignmentMetrics,
   )(implicit val executionContext: ExecutionContext, val traceContext: TraceContext) {
 
+    /** Returns the assignment exclusivity deadline up to protocol version 36, and None from
+      * protocol version 37.
+      */
     private def checkAssignmentExclusivity(
         fullTree: FullUnassignmentTree,
         targetTopology: Target[TopologySnapshot],
     ): ValidationErrorOr[Option[Target[CantonTimestamp]]] =
-      ProcessingSteps
-        .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
-        .map(Option(_))
-        .leftMap[ReassignmentProcessorError](
-          ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
-        )
+      if (
+        ReassignmentValidation.isAssignmentExclusivityEnforced(fullTree.targetSynchronizer.unwrap)
+      )
+        ProcessingSteps
+          .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
+          .map(Option(_))
+          .leftMap[ReassignmentProcessorError](
+            ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
+          )
+      else EitherT.rightT(None)
 
     // check the package of the template is vetted
     private def checkTargetPackagesVetted(
@@ -322,6 +329,11 @@ private[reassignment] object UnassignmentValidation {
 
   }
 
+  /** @param assignmentExclusivity
+    *   before this time (measured on the target synchronizer), only the submitter of the
+    *   unassignment can initiate the assignment; None when the target synchronizer runs protocol
+    *   version 37 or higher, or when its topology is unknown
+    */
   private[reassignment] final case class ReassigningParticipantValidation(
       assignmentExclusivity: Option[Target[CantonTimestamp]],
       reassigningParticipantValidationResult: UnassignmentValidationResult.ReassigningParticipantValidationResult,

@@ -45,6 +45,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencer.admin.v30.SequencerInitializationServiceGrpc
 import com.digitalasset.canton.sequencing.client.{
+  BftTopologyForInitDownloader,
   RequestSigner,
   SendTracker,
   SequencedEventValidatorFactory,
@@ -495,14 +496,12 @@ class SequencerNodeBootstrap(
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
                   crypto.pureCrypto,
                   synchronizerTopologyStore,
-                  parameters.batchingConfig.topologyCacheAggregator,
+                  parameters.batchingConfig,
                   config.topology,
                   Some(crypto.staticSynchronizerParameters),
                   timeouts,
                   futureSupervisor = futureSupervisor,
                   loggerFactory,
-                  // only filter out completed proposals if this is a bootstrap from genesis.
-                  cleanupTopologySnapshot = sequencerSnapshot.isEmpty,
                 )
                 for {
                   _ <- topologySnapshotValidator.validateAndApplyInitialTopologySnapshot(
@@ -860,6 +859,7 @@ class SequencerNodeBootstrap(
             None,
             replayEnabled = false,
             syncCryptoWithOptionalSessionKeys,
+            new BftTopologyForInitDownloader(loggerFactory),
             parameters.loggingConfig,
             None,
             parameters.exitOnFatalFailures,

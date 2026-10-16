@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.testing.parser.Token.*
 import scala.util.Try
 import scala.util.matching.Regex
 import scala.util.parsing.combinator.RegexParsers
-import scala.util.parsing.input.Position
+import scala.util.parsing.input.{CharSequenceReader, Position}
 
 private[parser] object Lexer extends RegexParsers {
 
@@ -19,8 +19,13 @@ private[parser] object Lexer extends RegexParsers {
   def lex(s: String): List[(Position, Token)] =
     parseAll(phrase(rep(positionedToken)), s) match {
       case Success(l, _) => l
-      case f: NoSuccess => throw LexingError(f.msg)
+      case f: NoSuccess => throw LexingError(f.msg, f.next.pos)
     }
+
+  // Position just after the last non-whitespace character of the string.
+  // Used to report errors due to unexpected end of input.
+  def endPosition(s: String): Position =
+    new CharSequenceReader(s, s.reverseIterator.dropWhile(_.isWhitespace).size).pos
 
   val keywords: Map[String, Token] = Map(
     "Cons" -> `cons`,
@@ -89,8 +94,11 @@ private[parser] object Lexer extends RegexParsers {
       """-?\d+\.\d*""".r >> toNumeric |
       """-?\d+""".r >> toNumber
 
+  // The position is the one of the token itself, i.e. after skipping whitespaces and comments.
   private val positionedToken: Parser[(Position, Token)] = Parser { in =>
-    token(in).map(in.pos -> _)
+    val start = handleWhiteSpace(in.source, in.offset)
+    val pos = in.drop(start - in.offset).pos
+    token(in).map(pos -> _)
   }
 
   private def toTimestamp(s: String): Parser[Timestamp] =

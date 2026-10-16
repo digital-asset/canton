@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -165,6 +165,22 @@ class UnassignmentValidationTest
       val validation = performValidation().futureValueUS.value
 
       validation.isSuccessful.futureValueUS shouldBe true
+    }
+
+    "only compute the assignment exclusivity up to protocol version 36" in {
+      def assignmentExclusivity(protocolVersion: ProtocolVersion) =
+        performValidation(
+          targetPsid = Target(
+            PhysicalSynchronizerId(
+              targetSynchronizer.unwrap.logical,
+              NonNegativeInt.zero,
+              protocolVersion,
+            )
+          )
+        ).futureValueUS.value.assignmentExclusivity
+
+      assignmentExclusivity(ProtocolVersion.v36) shouldBe defined
+      assignmentExclusivity(ProtocolVersion.v37) shouldBe None
     }
 
     val invalidContractReason = "invalid-contract"
@@ -532,6 +548,7 @@ class UnassignmentValidationTest
       submitter: LfPartyId = signatory,
       validatingParticipant: ParticipantId = confirmingParticipant,
       identityFactory: TestingIdentityFactory = identityFactory,
+      targetPsid: Target[PhysicalSynchronizerId] = targetSynchronizer,
       targetTopology: Target[TopologySnapshot] = Target(identityFactory.topologySnapshot()),
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       sourceValidationPackageId: Option[LfPackageId] = None,
@@ -542,7 +559,7 @@ class UnassignmentValidationTest
         .apply(
           contract = contract,
           sourceSynchronizer = sourceSynchronizer,
-          targetSynchronizer = targetSynchronizer,
+          targetSynchronizer = targetPsid,
           identityFactory = identityFactory,
           targetTimestamp = Target(CantonTimestamp.Epoch),
           sourceValidationPackageId = sourceValidationPackageId,

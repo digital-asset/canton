@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.event
 
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
@@ -69,24 +68,16 @@ object AcsChangeSupport extends HasLoggerName {
        reassignment counter from the last create / assign event on that contract.
      */
 
-    // Exclude contracts if there are onboarding hosted parties and all hosted contract stakeholders are onboarding.
-    // This filter excludes activeness changes whose hosted stakeholders are all onboarding parties and in such cases
-    // helps ensure that "fully" hosted non-stakeholder informees witness the corresponding change as a ledger effect
-    // rather than an ACS delta. AcsChangeFactory.contractActivenessChanged(cid) returning false causes the indexer to
-    // treat corresponding exercises and creates as witnessed events.
-    def excludeForPartyOnboarding(stakeholders: Set[LfPartyId]): Boolean =
-      commitSet.hostedOnboardingPartiesO.fold(false)(
-        _.hostedPartiesIfAllOnboarding(stakeholders).nonEmpty
-      )
-
     val tmpActivations = commitSet.creations.collect {
-      case (contractId, data) if !excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
+      case (contractId, data)
+          if !commitSet.excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
         contractId -> ContractStakeholdersAndReassignmentCounter(
           data.contractMetadata.stakeholders,
           data.reassignmentCounter,
         )
     } ++ commitSet.assignments.collect {
-      case (contractId, data) if !excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
+      case (contractId, data)
+          if !commitSet.excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
         contractId -> ContractStakeholdersAndReassignmentCounter(
           data.contractMetadata.stakeholders,
           data.reassignmentCounter,
@@ -97,7 +88,7 @@ object AcsChangeSupport extends HasLoggerName {
     Subtracting the reassignment counter of unassignments to correctly match deactivated contracts as explained above
      */
     val tmpUnassignments = commitSet.unassignments.collect {
-      case (contractId, data) if !excludeForPartyOnboarding(data.stakeholders) =>
+      case (contractId, data) if !commitSet.excludeForPartyOnboarding(data.stakeholders) =>
         contractId -> ContractStakeholdersAndReassignmentCounter(
           data.stakeholders,
           data.reassignmentCounter - 1,
@@ -105,7 +96,7 @@ object AcsChangeSupport extends HasLoggerName {
     }
 
     val tmpArchivals = commitSet.archivals.collect {
-      case (contractId, data) if !excludeForPartyOnboarding(data.stakeholders) =>
+      case (contractId, data) if !commitSet.excludeForPartyOnboarding(data.stakeholders) =>
         contractId -> data.stakeholders
     }
 

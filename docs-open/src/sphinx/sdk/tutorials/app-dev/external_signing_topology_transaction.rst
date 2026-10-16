@@ -464,6 +464,11 @@ Wrap the serialized transaction in an ``UntypedVersionedMessage``, and serialize
            :caption: Build versioned message function
 
        .. literalinclude:: CANTON/community/app/src/pack/scripts/topology/topology_util.sh
+           :start-after: [start serialize_versioned_message fn]
+           :end-before: [end serialize_versioned_message fn]
+           :caption: Serialize a versioned message function
+
+       .. literalinclude:: CANTON/community/app/src/pack/scripts/topology/topology_util.sh
            :start-after: [start json_to_serialized_versioned_message fn]
            :end-before: [end json_to_serialized_versioned_message fn]
            :caption: Serialize JSON into a versioned protobuf message

@@ -21,6 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -83,6 +84,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     clock: Clock,
     val protocolVersion: Source[ProtocolVersion],
     reassignmentMetrics: ReassignmentMetrics,
+    participantNodeParameters: ParticipantNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -383,13 +385,12 @@ private[reassignment] class UnassignmentProcessingSteps(
   ] = {
     val message = envelope.protocolMessage
 
-    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullUnassignmentTree] =
+    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullUnassignmentTree] = {
+      val sourcePVV = protocolVersion.map(ProtocolVersionValidation.PV(_))
       FullUnassignmentTree
-        .fromByteString(
-          sourceSnapshot.pureCrypto,
-          protocolVersion.map(ProtocolVersionValidation.PV(_)),
-        )(bytes)
+        .fromByteString(sourceSnapshot.pureCrypto, sourcePVV)(bytes)
         .leftMap(e => DefaultDeserializationError(e.toString))
+    }
 
     EncryptedViewMessage
       .decryptFor(
@@ -644,6 +645,10 @@ private[reassignment] class UnassignmentProcessingSteps(
           rejected(ErrorDetails.fromLocalError(rejection))
 
         case (_: Verdict.Approve, _) =>
+          unassignmentValidationResult.alarmIfActivenessCheckFailed(
+            requestId,
+            participantNodeParameters.crashAfterFailedValidation,
+          )
           val commitSet = unassignmentValidationResult.commitSet
           val commitSetFO = Some(FutureUnlessShutdown.pure(commitSet))
           val unassignmentData = unassignmentValidationResult.unassignmentData
@@ -732,6 +737,9 @@ private[reassignment] class UnassignmentProcessingSteps(
           pendingRequestData.submitterMetadata,
           participantId,
           t0,
+          pendingRequestData.requestId.unwrap,
+          participantNodeParameters.reassignmentsConfig,
+          clock,
         )
 
     } yield automaticAssignment

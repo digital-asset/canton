@@ -467,14 +467,11 @@ class AvailabilityModuleOutputFetchTest
         // While the (potentially expensive) hashing runs off the actor thread, the batch is
         //  tracked as being validated.
         outputFetchProtocolState.pendingRemoteBatchIdsToValidate should contain(otherBatchId)
-        assertLogs(
+        assertWarns(
           // The batch ID validation happens off the actor thread, so the warning is emitted when
           //  the validation result is processed
           context.runPipedMessagesUntilNoMorePiped(availability),
-          log => {
-            log.level shouldBe Level.WARN
-            log.message should include("BatchId doesn't match digest")
-          },
+          log => log.message should include("doesn't match computed batch ID"),
         )
 
         // The invalid result clears the in-flight validation phase (without moving the batch to the

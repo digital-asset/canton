@@ -54,7 +54,7 @@ final case class EngineConfig(
     profileDir: Option[Path] = None,
     snapshotDir: Option[Path] = None,
     forbidLocalContractIds: Boolean = false,
-    transactionLimits: interpretation.Limits = interpretation.Limits.Lenient,
+    transactionLimits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
     checkAuthorization: Boolean = true,
     iterationsBetweenInterruptions: Long = 10000,
     paranoid: Boolean = false,

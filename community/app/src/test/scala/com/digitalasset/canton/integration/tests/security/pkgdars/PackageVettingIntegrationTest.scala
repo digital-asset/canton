@@ -489,12 +489,16 @@ sealed trait PackageVettingIntegrationTest
       // An attempt to assign this contract fails because the package is not vetted on participant4
       def tryAssign(assertion: Seq[LogEntry] => Assertion): Unit =
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-          participant2.ledger_api.commands.submit_assign_async(
-            participant2.adminParty,
-            unassignment.reassignmentId,
-            daId,
-            acmeId,
-          ),
+          {
+            participant2.ledger_api.commands.submit_assign_async(
+              participant2.adminParty,
+              unassignment.reassignmentId,
+              daId,
+              acmeId,
+            )
+            // Do a ping as a proxy for the assignment to be processed. The assignment is not expected to succeed, but we want to wait until the assignment has been processed.
+            participant2.health.ping(participant2)
+          },
           assertion,
         )
 

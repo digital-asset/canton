@@ -261,7 +261,7 @@ trait SessionKeyIntegrationTest
         )
         .valueOrFail("failed to create session key from randomness")
 
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = SynchronizerLimits.default
 
       val messages = Batch
         .openEnvelopes(submissionRequest.batch)(

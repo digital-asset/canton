@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.PartiesAllocator
+import com.digitalasset.canton.integration.util.{AutomaticAssignment, PartiesAllocator}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -30,6 +29,7 @@ abstract class PartyOffboardingIncompleteReassignmentIntegrationTest
     with SharedEnvironment {
 
   override def environmentDefinition: EnvironmentDefinition = EnvironmentDefinition.P2_S1M1_S1M1
+    .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
     .addConfigTransforms(
       ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
     )
@@ -41,10 +41,7 @@ abstract class PartyOffboardingIncompleteReassignmentIntegrationTest
       participants.all.dars.upload(CantonTestsPath, synchronizerId = acmeId)
 
       // Disable automatic assignment
-      sequencer2.topology.synchronizer_parameters.propose_update(
-        acmeId,
-        _.copy(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-      )
+      AutomaticAssignment.disable(Seq(sequencer2), acmeId)
 
       val targetPermissions = (
         PositiveInt.one,

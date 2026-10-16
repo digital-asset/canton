@@ -4,12 +4,12 @@
 package com.digitalasset.canton.scheduler
 
 import cats.data.EitherT
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.store.PruningSchedulerStore
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 trait HasPruningSchedulerStore extends PruningScheduler with FlagCloseable {
   this: ScheduleRefresher =>
@@ -18,56 +18,42 @@ trait HasPruningSchedulerStore extends PruningScheduler with FlagCloseable {
 
   protected def pruningSchedulerStore: PruningSchedulerStore
 
-  override def clearSchedule()(implicit traceContext: TraceContext): Future[Unit] =
-    updateScheduleAndReactivateIfActive(
-      pruningSchedulerStore
-        .clearSchedule()
-        .failOnShutdownToAbortException("HasPruningSchedulerStore.clearSchedule")
-    )
+  override def clearSchedule()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    updateScheduleAndReactivateIfActive(pruningSchedulerStore.clearSchedule())
 
   override def updateCron(
       cron: Cron
-  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      _updated <- pruningSchedulerStore
-        .updateCron(cron)
-        .failOnShutdownToAbortException("HasPruningSchedulerStore.updateCron")
+      _updated <- pruningSchedulerStore.updateCron(cron)
       _reactivated <- reactivateSchedulerIfActiveET()
     } yield ()
 
   override def updateMaxDuration(maxDuration: PositiveSeconds)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      _updated <- pruningSchedulerStore
-        .updateMaxDuration(maxDuration)
-        .failOnShutdownToAbortException("HasPruningSchedulerStore.updateMaxDuration")
+      _updated <- pruningSchedulerStore.updateMaxDuration(maxDuration)
       _reactivated <- reactivateSchedulerIfActiveET()
     } yield ()
 
   override def updateRetention(retention: PositiveSeconds)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit] = for {
-    _updated <- pruningSchedulerStore
-      .updateRetention(retention)
-      .failOnShutdownToAbortException("HasPruningSchedulerStore.updateRetention")
+  ): EitherT[FutureUnlessShutdown, String, Unit] = for {
+    _updated <- pruningSchedulerStore.updateRetention(retention)
     _reactivated <- reactivateSchedulerIfActiveET()
   } yield ()
 
   override def setSchedule(schedule: PruningSchedule)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = updateScheduleAndReactivateIfActive(
-    pruningSchedulerStore
-      .setSchedule(schedule)
-      .failOnShutdownToAbortException("HasPruningSchedulerStore.setSchedule")
+  ): FutureUnlessShutdown[Unit] = updateScheduleAndReactivateIfActive(
+    pruningSchedulerStore.setSchedule(schedule)
   )
 
   override def getSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[PruningSchedule]] = pruningSchedulerStore
-    .getSchedule()
-    .failOnShutdownToAbortException("HasPruningSchedulerStore.getSchedule")
+  ): FutureUnlessShutdown[Option[PruningSchedule]] =
+    pruningSchedulerStore.getSchedule()
 
   override def onClosed(): Unit = pruningSchedulerStore.close()
-
 }

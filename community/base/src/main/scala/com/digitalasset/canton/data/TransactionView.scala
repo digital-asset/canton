@@ -382,7 +382,7 @@ final case class TransactionView private (
 object TransactionView
     extends VersioningCompanionContext[
       TransactionView,
-      (HashOps, DepthCounter, ProtocolVersion),
+      TransactionViewDeserializationContext,
     ]
     with PrettyPrintingCompanion[TransactionView] {
   override def name: String = "TransactionView"
@@ -394,8 +394,8 @@ object TransactionView
     param("subviews", _.subviews),
   )
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewNode)(
-      supportedProtoVersion(_)(fromProtoV30),
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ViewNode)(
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -484,25 +484,37 @@ object TransactionView
   }
 
   private def fromProtoV30(
-      context: (HashOps, DepthCounter, ProtocolVersion),
+      pvv: ProtocolVersionValidation,
+      context: TransactionViewDeserializationContext,
       protoView: v30.ViewNode,
   ): ParsingResult[TransactionView] = {
-    val (hashOps, depthCounter, expectedProtocolVersion) = context
+    val TransactionViewDeserializationContext(
+      hashOps,
+      depthCounter,
+      expectedProtocolVersion,
+      transactionLimits,
+    ) = context
     for {
       commonData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewCommonData,
-        ViewCommonData.fromByteString(expectedProtocolVersion, hashOps),
+        ViewCommonData.fromByteString(
+          pvv,
+          ViewCommonDataDeserializationContext(hashOps, transactionLimits),
+          _,
+        ),
       )
       participantData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(
-          expectedProtocolVersion,
-          (hashOps, expectedProtocolVersion),
-        ),
+        ViewParticipantData.fromByteString(pvv, (hashOps, expectedProtocolVersion), _),
       )
 
       subViews <- TransactionSubviews.fromProtoV30(
-        (hashOps, expectedProtocolVersion),
+        pvv,
+        TransactionSubviewsDeserializationContext(
+          hashOps,
+          expectedProtocolVersion,
+          transactionLimits,
+        ),
         depthCounter,
         protoView.subviews,
       )
@@ -642,3 +654,21 @@ object TransactionView
       protocolVersion >= ProtocolVersion.v36
   }
 }
+
+/** Context required to deserialize TransactionView
+  *
+  * @param hashOps
+  *   hash operations
+  * @param depthCounter
+  *   counter to limit transaction view depth
+  * @param pv
+  *   protocol version
+  * @param limits
+  *   protocol limits
+  */
+final case class TransactionViewDeserializationContext(
+    hashOps: HashOps,
+    depthCounter: DepthCounter,
+    pv: ProtocolVersion,
+    limits: TransactionProtocolLimits,
+)

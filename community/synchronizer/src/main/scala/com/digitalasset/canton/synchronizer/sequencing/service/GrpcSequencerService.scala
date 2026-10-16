@@ -394,8 +394,16 @@ class GrpcSequencerService(
 
         _ = {
           val envelopesCount = request.batch.envelopesCount
+          val recipientsSummary = request.batch.allRecipients
+            .groupBy {
+              case MemberRecipient(member) => member.code.threeLetterId.unwrap
+              case group: GroupRecipient => group.code.threeLetterId.unwrap
+            }
+            .toSeq
+            .map { case (code, recipients) => s"$code=${recipients.size}" }
+            .mkString(", ")
           logger.info(
-            s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes."
+            s"'$sender' sends request with id '$messageId' of size $requestSize bytes with $envelopesCount envelopes to $recipientsSummary."
           )
         }
 

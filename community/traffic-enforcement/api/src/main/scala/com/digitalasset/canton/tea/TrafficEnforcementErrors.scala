@@ -93,6 +93,33 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
   }
 
   @Explanation(
+    "This error indicates that a traffic purchase was committed on the ledger, but its traffic was not" +
+      " credited because its choice result does not have the shape TEA expects."
+  )
+  @Resolution(
+    "Check that the TEA version matches the deployed traffic purchase Daml model, then credit the" +
+      " affected account through the TEA API. The error metadata contains `update_id` and `offset`."
+  )
+  object TopUpNotCredited
+      extends ErrorCode(
+        id = "TRAFFIC_TOP_UP_NOT_CREDITED",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      ) {
+    final case class Reject(updateId: String, offset: Long, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Top-up in transaction $updateId at offset $offset is committed on the ledger but will not be credited: $reason"
+        )
+        with TrafficEnforcementError {
+      override def context: Map[String, String] = Map(
+        "update_id" -> updateId,
+        "offset" -> offset.toString,
+      )
+    }
+  }
+
+  @Explanation(
     "This error occurs if a traffic account operation failed for a reason expected to be transient," +
       " such as a database timeout, and the request can be retried."
   )
@@ -145,6 +172,7 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
     InsufficientBalance.id,
     MultiPartySubmissionRejected.id,
     TrafficUpdateOutOfBound.id,
+    TopUpNotCredited.id,
     TransientFailure.id,
     FatalFailure.id,
   )

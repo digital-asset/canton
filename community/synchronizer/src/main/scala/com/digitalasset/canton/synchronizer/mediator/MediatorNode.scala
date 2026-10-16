@@ -40,6 +40,7 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnectionPool,
 }
 import com.digitalasset.canton.sequencing.client.{
+  BftTopologyForInitDownloader,
   RecordingConfig,
   ReplayConfig,
   RequestSigner,
@@ -676,6 +677,7 @@ class MediatorNodeBootstrap(
             .lift(member)
             .map(Synchronizer.defaultReplayPath(member)),
         arguments.metrics.sequencerClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         parameters.loggingConfig,
         parameters.exitOnFatalFailures,
         synchronizerLoggerFactory,
@@ -763,7 +765,7 @@ class MediatorNodeBootstrap(
             new InitialTopologySnapshotValidator(
               new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
               synchronizerTopologyStore,
-              parameters.batchingConfig.topologyCacheAggregator,
+              parameters.batchingConfig,
               topologyConfig,
               Some(staticSynchronizerParameters),
               timeouts,

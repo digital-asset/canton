@@ -191,7 +191,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           FutureUnlessShutdown.pure(
             parties
               .map(x =>
-                x -> PartyInfo(
+                x -> PartyInfo.forTesting(
                   PositiveInt.one,
                   Map(one -> ParticipantAttributes(Confirmation)),
                 )
@@ -667,7 +667,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           FutureUnlessShutdown.pure(
             parties
               .map(x =>
-                x -> PartyInfo(
+                x -> PartyInfo.forTesting(
                   PositiveInt.one,
                   Map(one -> ParticipantAttributes(Confirmation)),
                 )
@@ -1045,7 +1045,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenAnswer { (parties: Seq[LfPartyId]) =>
           FutureUnlessShutdown.pure(
             Map(
-              alice -> PartyInfo(
+              alice -> PartyInfo.forTesting(
                 PositiveInt.two,
                 Map(
                   one -> ParticipantAttributes(Confirmation),
@@ -1053,7 +1053,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   three -> ParticipantAttributes(Confirmation),
                 ),
               ),
-              bob -> PartyInfo(
+              bob -> PartyInfo.forTesting(
                 PositiveInt.three,
                 Map(
                   one -> ParticipantAttributes(Confirmation),
@@ -2007,7 +2007,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         .thenAnswer { (parties: Seq[LfPartyId]) =>
           FutureUnlessShutdown.pure(
             Map(
-              alice -> PartyInfo(
+              alice -> PartyInfo.forTesting(
                 PositiveInt.two,
                 Map(
                   one -> ParticipantAttributes(Confirmation),
@@ -2015,7 +2015,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   three -> ParticipantAttributes(Confirmation),
                 ),
               ),
-              bob -> PartyInfo(
+              bob -> PartyInfo.forTesting(
                 PositiveInt.three,
                 Map(
                   three -> ParticipantAttributes(Confirmation),

@@ -50,6 +50,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.Duration
@@ -253,23 +255,10 @@ class GrpcSequencerConnection(
   ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]] =
     stub.getTime(timeout, retryPolicy = retryPolicy(retryOnUnavailable = false)).leftMap(_.toString)
 
-  override def downloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] = {
-    logger.debug("Downloading topology state for initialization")
-
-    for {
-      result <- stub.downloadTopologyStateForInit(request, timeout).leftMap(_.toString)
-      storedTxs = result.topologyTransactions.value
-      _ = logger.debug(
-        s"Downloaded topology state for initialization with last change timestamp at ${storedTxs.lastChangeTimestamp}: " +
-          s"${storedTxs.result.size} transactions"
-      )
-    } yield result
-  }
+  override def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(
+      implicit traceContext: TraceContext
+  ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] =
+    stub.streamTopologyStateForInit(request, timeout).leftMap(_.toString)
 
   override def subscribe[E](
       request: SubscriptionRequest,

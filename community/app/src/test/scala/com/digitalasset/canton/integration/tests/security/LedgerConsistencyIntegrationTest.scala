@@ -9,7 +9,6 @@ import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
 import com.daml.ledger.javaapi.data
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
-import com.digitalasset.canton.annotations.MinProtocolVersion
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
 import com.digitalasset.canton.damltestslf23.java.da.types
@@ -23,8 +22,8 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseProgrammableSequencer,
 }
-import com.digitalasset.canton.integration.util.MultiSynchronizerFeatureFlag
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
+import com.digitalasset.canton.integration.util.{AutomaticAssignment, MultiSynchronizerFeatureFlag}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
@@ -98,8 +97,6 @@ import scala.util.{Failure, Success}
   *
   * TODO(i12904): Update description
   */
-// Enable only for protocol version 35 and higher, as the test uses contract keys.
-@MinProtocolVersion("35")
 abstract sealed class LedgerConsistencyIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -124,6 +121,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         // participant1 tolerates a failed validation without crashing
@@ -171,13 +169,12 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Disable automatic assignments. They are not under test here, and when they fire long after the
         // triggering unassignment, their completions leak into the tracking window of later tests.
-        runOnAllInitializedSynchronizersForAllOwners { (owner, synchronizer) =>
-          owner.topology.synchronizer_parameters
-            .propose_update(
-              synchronizer.synchronizerId,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-        }
+        initializedSynchronizers.values.foreach(synchronizer =>
+          AutomaticAssignment.disable(
+            synchronizer.synchronizerOwners,
+            synchronizer.synchronizerId,
+          )
+        )
 
         maliciousP1 = MaliciousParticipantNode(
           participant1,
@@ -241,6 +238,20 @@ abstract sealed class LedgerConsistencyIntegrationTest
     ),
     "Failed activeness check",
   )
+  private lazy val failedUnassignmentActivenessCheckApproved: (LogEntry => Assertion, String) = (
+    _.shouldBeCantonError(
+      SyncServiceAlarm,
+      _ should fullyMatch regex raw"Unassignment request RequestId\(\S+\) with failed activeness check is approved\.",
+    ),
+    "Failed unassignment activeness check",
+  )
+  private lazy val failedAssignmentActivenessCheckApproved: (LogEntry => Assertion, String) = (
+    _.shouldBeCantonError(
+      SyncServiceAlarm,
+      _ should fullyMatch regex raw"Assignment request RequestId\(\S+\) with failed activeness check is approved\.",
+    ),
+    "Failed assignment activeness check",
+  )
 
   "A participant" when {
     "a contract is non-existent" can {
@@ -272,7 +283,11 @@ abstract sealed class LedgerConsistencyIntegrationTest
         val (_, events) = runMaliciously()(
           unassignMaliciously(instance),
           LogEntry.assertLogSeq(
-            Seq(unexpectedMediatorApproval, indexerWarnings)
+            Seq(
+              failedUnassignmentActivenessCheckApproved,
+              unexpectedMediatorApproval,
+              indexerWarnings,
+            )
           ),
         )
 
@@ -376,6 +391,14 @@ abstract sealed class LedgerConsistencyIntegrationTest
                 ),
                 "model conformance check",
               ),
+              (
+                // FIXME(i29855): the contract was not active before, so the archival should not be an
+                //  ACS delta and this warning should not occur.
+                _.warningMessage should include(
+                  "Activation is missing for a deactivation for deactivated event with type"
+                ),
+                "warning that deactivations were found without corresponding active events",
+              ),
               unexpectedMediatorApproval,
             )
           ),
@@ -384,17 +407,18 @@ abstract sealed class LedgerConsistencyIntegrationTest
         events.assertStatusOk(participant1)
         val cid = inside(events.awaitTransactions(participant1).loneElement.events) {
           case Seq(ev1, ev2, ev3) =>
-            val exercisedId = exercisedIdOfEvent(ev1, acsDelta = false)
+            // FIXME(i29855): the archival should not be an ACS delta, because the contract was not
+            //  active before. Instead, exercisedIdOfEvent(ev1, acsDelta = false) should succeed.
+            val exercisedId = exercisedIdOfEvent(ev1)
+            val createdCid = createdIdOfEvent(ev2)
 
-            // FIXME(i29855): creation should appear in the acs delta stream.
-            val createdCid = createdIdOfEvent(ev2, acsDelta = false)
             exercisedId shouldBe createdCid
 
             exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
 
             exercisedId
         }
-        assertInactive(cid) // FIXME(i29855): should be active, because the create comes last
+        assertActive(cid)
       }
 
       "rollback creation and commit archival of a transient contract" in { implicit env =>
@@ -564,7 +588,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
           assignMaliciously(instance, maintainer),
           LogEntry.assertLogSeq(
             Seq(
-              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+              failedAssignmentActivenessCheckApproved,
+              unexpectedMediatorApproval, // WARN, as the contract is known to be archived
             )
           ),
         )
@@ -581,7 +606,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
         // Assign the contract
         val (_, events) = runMaliciously()(
           assignMaliciously(instance),
-          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
+          LogEntry.assertLogSeq(
+            Seq(failedAssignmentActivenessCheckApproved, unexpectedMediatorApproval)
+          ),
         )
 
         events.assertStatusOk(participant1)
@@ -598,7 +625,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         val (_, events) = runMaliciously()(
           unassignMaliciously(instance),
           LogEntry.assertLogSeq(
-            Seq(unexpectedMediatorApproval)
+            Seq(failedUnassignmentActivenessCheckApproved, unexpectedMediatorApproval)
           ),
         )
 
@@ -681,7 +708,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
           assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 1)),
           LogEntry.assertLogSeq(
             Seq(
-              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+              failedAssignmentActivenessCheckApproved,
+              unexpectedMediatorApproval, // WARN, as the contract is known to be archived
             )
           ),
         )
@@ -701,7 +729,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
             reassignmentCounter = ReassignmentCounter(counter + 1),
           ),
           LogEntry.assertLogSeq(
-            Seq(unexpectedMediatorApproval)
+            Seq(failedUnassignmentActivenessCheckApproved, unexpectedMediatorApproval)
           ),
         )
 
@@ -788,7 +816,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         val (_, events) = runMaliciously()(
           assignMaliciously(instance),
-          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
+          LogEntry.assertLogSeq(
+            Seq(failedAssignmentActivenessCheckApproved, unexpectedMediatorApproval)
+          ),
         )
 
         events.assertStatusOk(participant1)
@@ -855,7 +885,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
           assignMaliciously(instance),
           LogEntry.assertLogSeq(
             Seq(
-              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+              failedAssignmentActivenessCheckApproved,
+              unexpectedMediatorApproval, // WARN, as the contract is known to be archived
             )
           ),
         )
@@ -1079,7 +1110,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
         // Assign the contract again
         val (_, events) = runMaliciously()(
           assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 1)),
-          LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
+          LogEntry.assertLogSeq(
+            Seq(failedAssignmentActivenessCheckApproved, unexpectedMediatorApproval)
+          ),
         )
 
         events.assertStatusOk(participant1)
@@ -1157,8 +1190,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
         events.assertStatusOk(participant1)
         inside(events.awaitTransactions(participant1).loneElement.events) {
           case Seq(ev1, ev2, ev3) =>
-            exercisedIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
-            createdIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
+            // both the archive and create should be emitted on the LAPI
+            exercisedIdOfEvent(ev1) shouldBe instance.contractId
+            createdIdOfEvent(ev2) shouldBe instance.contractId
             exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
         }
 
@@ -1168,9 +1202,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
           unassignedCount = 0,
           assignedCount = 1,
         )
-        // FIXME(i29855): the Canton ACS reorders archive; create to create; archive
-        //  Instead, assertActive(instance.contractId) should succeed
-        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
+        assertActive(instance.contractId, assignedCount = 1)
       }
 
       "create and archive the contract within the same transaction" in { implicit env =>
@@ -1203,10 +1235,13 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
+          // FIXME(i29855): the archival should be an ACS delta, because the contract was already
+          //  active. exercisedIdOfEvent(ev2) should succeed.
           createdIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
           exercisedIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
         }
-        // FIXME(i29855): The ledger acs currently ignores transient archivals
+        // FIXME(i29855): the archival is not an ACS delta, so the assigned contract stays active
+        //  on the ledger API.
         //  Instead, assertInactive(instance.contractId, assignedCount = 1) should succeed.
         assertLedgerAcsEntries(
           instance.contractId,

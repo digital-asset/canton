@@ -8,7 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.{SynchronizerLimits, v31, v32}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v32, v33}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
@@ -66,17 +66,6 @@ final case class SubmissionRequest private (
     representativeProtocolVersion >= SubmissionRequest.emptyCantonTimestampRpv
 
   // Caches the serialized request to be able to do checks on its size without re-serializing
-  lazy val toProtoV31: v31.SubmissionRequest =
-    v31.SubmissionRequest(
-      sender = sender.toProtoPrimitive,
-      messageId = messageId.toProtoPrimitive,
-      batch = Some(batch.toProtoV31),
-      maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-      topologyTimestamp = None,
-      aggregationRule = aggregationRule.map(_.toProtoV30),
-      submissionCost = submissionCost.map(_.toProtoV30),
-    )
-
   lazy val toProtoV32: v32.SubmissionRequest =
     v32.SubmissionRequest(
       sender = sender.toProtoPrimitive,
@@ -84,6 +73,16 @@ final case class SubmissionRequest private (
       batch = Some(batch.toProtoV32),
       maxSequencingTime = maxSequencingTime.toProtoPrimitive,
       topologyTimestamp = None,
+      aggregationRule = aggregationRule.map(_.toProtoV30),
+      submissionCost = submissionCost.map(_.toProtoV30),
+    )
+
+  lazy val toProtoV33: v33.SubmissionRequest =
+    v33.SubmissionRequest(
+      sender = sender.toProtoPrimitive,
+      messageId = messageId.toProtoPrimitive,
+      batch = Some(batch.toProtoV32),
+      maxSequencingTime = maxSequencingTime.toProtoPrimitive,
       aggregationRule = aggregationRule.map(_.toProtoV30),
       submissionCost = submissionCost.map(_.toProtoV30),
     )
@@ -114,7 +113,7 @@ final case class SubmissionRequest private (
       maxSequencingTime: CantonTimestamp = this.maxSequencingTime,
       aggregationRule: Option[AggregationRule] = this.aggregationRule,
       submissionCost: Option[SequencingSubmissionCost] = this.submissionCost,
-  ) = SubmissionRequest
+  ): SubmissionRequest = SubmissionRequest
     .create(
       sender,
       messageId,
@@ -152,13 +151,18 @@ final case class SubmissionRequest private (
     *     submission request (except if the aggregation rule is SenderDedup starting with PV35)
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
-  def aggregationId(hashOps: HashOps): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
+  def aggregationId(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  ): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
     // TODO(#12075) Use a deterministic serialization scheme for the recipients
     val recipientsSerializerE: ParsingResult[Recipients => ByteString] =
       SubmissionRequest.converterFor(representativeProtocolVersion).map(_.dependencySerializer)
     aggregationRule.traverse { rule =>
       recipientsSerializerE.flatMap { recipientsSerializer =>
-        aggregationIdInternal(hashOps, rule, sender, recipientsSerializer).map((_, rule))
+        aggregationIdInternal(hashOps, rule, sender, protocolVersion, recipientsSerializer).map(
+          (_, rule)
+        )
       }
     }
   }
@@ -167,6 +171,7 @@ final case class SubmissionRequest private (
       hashOps: HashOps,
       rule: AggregationRule,
       sender: Member,
+      protocolVersion: ProtocolVersion,
       recipientsSerializer: Recipients => ByteString,
   ): ParsingResult[AggregationId] =
     batch.toClosedUncompressedBatchResult.map { uncompressedBatch =>
@@ -188,6 +193,14 @@ final case class SubmissionRequest private (
       }
       builder.addLong(maxSequencingTime.underlying.micros)
 
+      if (protocolVersion == ProtocolVersion.v36) {
+        // For pv=36, for non-malicious senders, the topologyTimestamp is always empty
+        // To preserve behavior across 3.6.0 snapshots, we add Long.MinvValue
+        builder.addLong(Long.MinValue)
+      }
+
+      // For pv >= 37, nothing goes into the hash
+
       rule.input.appendForAggregationId(builder, sender)
 
       val hash = builder.finish()
@@ -206,19 +219,19 @@ object SubmissionRequest
     ] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec.withDependency(
-      ProtocolVersion.v35
-    )(v31.SubmissionRequest)(
-      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
-      _.toProtoV31, // Serialization of SubmissionRequest
-      _.toProtoV30, // Serialization of Recipients
-    ),
     // TODO(#36148) When introducing a new proto version after v32, please drop the old aggregation rule
     ProtoVersion(32) -> VersionedProtoCodec.withDependency(
       ProtocolVersion.v36
     )(v32.SubmissionRequest)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32, // Serialization of SubmissionRequest
+      _.toProtoV30, // Serialization of Recipients
+    ),
+    ProtoVersion(33) -> VersionedProtoCodec.withDependency(
+      ProtocolVersion.v37
+    )(v33.SubmissionRequest)(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV33),
+      _.toProtoV33, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
   )
@@ -273,25 +286,14 @@ object SubmissionRequest
   sealed private trait ProtoSubmissionRequest {
     def batch: Option[ProtoBatch]
   }
-  private final case class ProtoSubmissionRequestV31(wrapped: v31.SubmissionRequest)
-      extends ProtoSubmissionRequest {
-    def batch: Option[ProtoBatchV31] = wrapped.batch.map(ProtoBatchV31.apply)
-  }
   private final case class ProtoSubmissionRequestV32(wrapped: v32.SubmissionRequest)
       extends ProtoSubmissionRequest {
     def batch: Option[ProtoBatchV32] = wrapped.batch.map(ProtoBatchV32.apply)
   }
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      context: SubmissionRequestDeserializationContext,
-      requestP: v31.SubmissionRequest,
-  )(bytes: ByteString): ParsingResult[SubmissionRequest] =
-    fromProtoGeneric(
-      pvv,
-      context,
-      ProtoSubmissionRequestV31(requestP),
-    )(bytes)
+  private final case class ProtoSubmissionRequestV33(wrapped: v33.SubmissionRequest)
+      extends ProtoSubmissionRequest {
+    def batch: Option[ProtoBatchV32] = wrapped.batch.map(ProtoBatchV32.apply)
+  }
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,
@@ -304,6 +306,17 @@ object SubmissionRequest
       ProtoSubmissionRequestV32(requestP),
     )(bytes)
 
+  private def fromProtoV33(
+      pvv: ProtocolVersionValidation,
+      context: SubmissionRequestDeserializationContext,
+      requestP: v33.SubmissionRequest,
+  )(bytes: ByteString): ParsingResult[SubmissionRequest] =
+    fromProtoGeneric(
+      pvv,
+      context,
+      ProtoSubmissionRequestV33(requestP),
+    )(bytes)
+
   private def fromProtoGeneric(
       pvv: ProtocolVersionValidation,
       context: SubmissionRequestDeserializationContext,
@@ -312,13 +325,13 @@ object SubmissionRequest
     val SubmissionRequestDeserializationContext(decompressionPolicy, synchronizerLimits) = context
     val batchContext = BatchDeserializationContext(decompressionPolicy, synchronizerLimits)
     def batchFromProto: ParsingResult[Batch[ClosedEnvelope]] = protoSubmissionRequest match {
-      case ProtoSubmissionRequestV31(wrapped) =>
+      case ProtoSubmissionRequestV32(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV31(pvv, batchContext, _),
+          Batch.fromProtoV32(pvv, batchContext, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
-      case ProtoSubmissionRequestV32(wrapped) =>
+      case ProtoSubmissionRequestV33(wrapped) =>
         ProtoConverter.parseRequired(
           Batch.fromProtoV32(pvv, batchContext, _),
           "SubmissionRequest.batch",
@@ -333,7 +346,7 @@ object SubmissionRequest
       aggregationRuleP,
       submissionCostP,
     ) = protoSubmissionRequest match {
-      case ProtoSubmissionRequestV31(wrapped) =>
+      case ProtoSubmissionRequestV32(wrapped) =>
         (
           wrapped.sender,
           wrapped.messageId,
@@ -341,7 +354,7 @@ object SubmissionRequest
           wrapped.aggregationRule.traverse(AggregationRule.fromProtoV30(pvv, _)),
           wrapped.submissionCost,
         )
-      case ProtoSubmissionRequestV32(wrapped) =>
+      case ProtoSubmissionRequestV33(wrapped) =>
         (
           wrapped.sender,
           wrapped.messageId,
@@ -352,8 +365,8 @@ object SubmissionRequest
     }
 
     val protoVersion = protoSubmissionRequest match {
-      case ProtoSubmissionRequestV31(_) => ProtoVersion(31)
       case ProtoSubmissionRequestV32(_) => ProtoVersion(32)
+      case ProtoSubmissionRequestV33(_) => ProtoVersion(33)
     }
 
     for {

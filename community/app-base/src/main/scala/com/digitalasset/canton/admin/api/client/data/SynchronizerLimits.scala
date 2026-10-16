@@ -11,13 +11,16 @@ import com.digitalasset.canton.logging.pretty.{
 }
 import com.digitalasset.canton.protocol.{
   SynchronizerLimits as SynchronizerLimitsInternal,
+  TopologyLimits as TopologyLimitsInternal,
   TransactionProtocolLimits as TransactionProtocolLimitsInternal,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
 
-final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtocolLimits)
-    extends PrettyPrintingFromCompanion {
+final case class SynchronizerLimits(
+    transactionProtocolLimits: TransactionProtocolLimits,
+    topologyLimits: TopologyLimits,
+    acsCommitmentLimits: AcsCommitmentLimits,
+) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SynchronizerLimits] = SynchronizerLimits
 
   def toInternal: SynchronizerLimitsInternal = this.transformInto[SynchronizerLimitsInternal]
@@ -25,15 +28,20 @@ final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtoc
 
 object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
   override protected val pretty: Pretty[SynchronizerLimits] = prettyOfClass(
-    param("transaction protocol limits", _.transactionProtocolLimits)
+    param("transaction protocol limits", _.transactionProtocolLimits),
+    param("topology limits", _.topologyLimits),
   )
 
-  lazy val max: SynchronizerLimits =
-    SynchronizerLimitsInternal.max.transformInto[SynchronizerLimits]
-
-  def defaultFor(protocolVersion: ProtocolVersion): SynchronizerLimits =
-    SynchronizerLimitsInternal.defaultFor(protocolVersion).transformInto[SynchronizerLimits]
+  lazy val default: SynchronizerLimits =
+    SynchronizerLimitsInternal.default.transformInto[SynchronizerLimits]
 }
+
+final case class AcsCommitmentLimits(
+    maxCommitmentSizeBytes: PositiveInt,
+    maxCommitmentSummarySizeBytes: PositiveInt,
+    maxAddressedCounterparticipants: PositiveInt,
+    maxUnsentDigests: PositiveInt,
+)
 
 final case class TransactionProtocolLimits(
     maxActAs: PositiveInt,
@@ -47,6 +55,8 @@ final case class TransactionProtocolLimits(
     maxTransactionRootViews: PositiveInt,
     maxTransactionSubViews: PositiveInt,
     maxTransactionTreeDepth: PositiveInt,
+    maxSignaturesPerEnvelope: PositiveInt,
+    maxQuorumSize: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TransactionProtocolLimits] =
     TransactionProtocolLimits
@@ -68,8 +78,31 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     param("max transaction root views", _.maxTransactionRootViews),
     param("max transaction sub views", _.maxTransactionSubViews),
     param("max transaction tree depth", _.maxTransactionTreeDepth),
+    param("max signatures per envelope", _.maxSignaturesPerEnvelope),
+    param("max quorum size", _.maxTransactionTreeDepth),
   )
 
   lazy val default: TransactionProtocolLimits =
     TransactionProtocolLimitsInternal.default.transformInto[TransactionProtocolLimits]
+}
+
+final case class TopologyLimits(
+    maxSigningKeysPerEntity: PositiveInt,
+    maxOwnersPerDecentralizedNamespace: PositiveInt,
+    maxHostingParticipantsPerParty: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[TopologyLimits] = TopologyLimits
+
+  def toInternal: TopologyLimitsInternal = this.transformInto[TopologyLimitsInternal]
+}
+
+object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
+  override protected val pretty: Pretty[TopologyLimits] = prettyOfClass(
+    param("max signing keys per entity", _.maxSigningKeysPerEntity),
+    param("max owners per decentralized namespace", _.maxOwnersPerDecentralizedNamespace),
+    param("max hosting participants per party", _.maxHostingParticipantsPerParty),
+  )
+
+  lazy val default: TopologyLimits =
+    TopologyLimitsInternal.default.transformInto[TopologyLimits]
 }

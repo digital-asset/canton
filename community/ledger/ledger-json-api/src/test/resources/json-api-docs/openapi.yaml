@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: JSON Ledger API HTTP endpoints
-  version: 3.7.0-SNAPSHOT
+  version: 3.8.0-SNAPSHOT
 paths:
   /v2/commands/submit-and-wait:
     post:
@@ -7893,7 +7893,8 @@ components:
           description: |-
             Assignment exclusivity
             Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-            Defined for reassigning participants.
+            Defined for reassigning participants, up to protocol version 36.
+            Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
             Optional
           type: string

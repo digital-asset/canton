@@ -27,7 +27,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingTopologyInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.StateTransferTimeout
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.{
+  BlockTransferResponse,
+  StateTransferTimeout,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
@@ -38,6 +41,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 import java.time.Instant
 import scala.util.{Failure, Success}
@@ -150,21 +154,48 @@ class StateTransferManager[E <: Env[E]](
     if (inStateTransfer) {
       logger.info(s"State transfer requesting new epoch $newEpochNumber")
     } else {
-      logger.info(s"Starting onboarding state transfer from epoch $newEpochNumber")
+      logger.info(s"Starting state transfer from epoch $newEpochNumber")
       initStateTransfer(newEpochNumber)(abort)
     }
-    val responsesForNewEpoch = postponedResponses
-      .dequeueAll(_.forEpoch <= newEpochNumber)
-      .filter(_.forEpoch == newEpochNumber)
+
+    val responsesForNewEpoch =
+      postponedResponses
+        .dequeueAll(_.forEpoch <= newEpochNumber)
+        .filter(_.forEpoch == newEpochNumber)
 
     responsesForNewEpoch
       .foreach(delayedMessage => context.self.asyncSend(delayedMessage.message))
 
-    if (responsesForNewEpoch.sizeIs >= membership.orderingTopology.epochLength.toInt) {
+    val distinctBlocksCount =
+      responsesForNewEpoch
+        .collect {
+          case DelayedStateTransferMessage(
+                _,
+                StateTransferMessage.UnverifiedStateTransferMessage(
+                  SignedMessage(message: BlockTransferResponse, _)
+                ),
+              ) =>
+            message.commitCertificates.view
+              // A queued (possibly invalid) response may carry certificates from other epochs; only
+              //  certificates for the epoch being transferred count towards its completion, otherwise a peer
+              //  could suppress the immediate request with foreign-epoch blocks and force a timeout wait.
+              .filter(_.prePrepare.message.blockMetadata.epochNumber == newEpochNumber)
+              .map(_.prePrepare.message.blockMetadata.blockNumber)
+        }
+        .flatten
+        .toSet
+        .size
+        .toLong
+
+    if (distinctBlocksCount >= membership.orderingTopology.epochLength) {
+      // Speculative block transfer may have already completed all blocks for the epoch:
+      //  allow for some time to complete processing postponed messages and transition to consensus,
+      //  before sending a new request, in order to avoid unnecessary network traffic.
       logger.info(
-        s"Might already have all necessary blocks for new epoch (have ${responsesForNewEpoch.size} messages) waiting to send request"
+        s"All necessary blocks ($distinctBlocksCount) " +
+          s"for the new epoch $newEpochNumber may be already available, " +
+          s"waiting ${config.epochStateTransferTimeoutForFutureEpoch} before sending a block transfer request"
       )
-      // we might already have everything, we schedule a small timeout for us locally to finish first otherwise make a new request
       val reason =
         s"we had ${responsesForNewEpoch.size} requests saved locally, but local timeout reached so we make new request"
       timeoutManager.scheduleTimeout(
@@ -173,7 +204,7 @@ class StateTransferManager[E <: Env[E]](
         overrideTimeout = Some(config.epochStateTransferTimeoutForFutureEpoch),
       )
     } else {
-      // we don't have everything so make a new request
+      // We don't have everything, so make a new request
       initiateSendBlockTransferRequest(
         newEpochNumber,
         membership,
@@ -240,13 +271,13 @@ class StateTransferManager[E <: Env[E]](
         )
       )
 
-  private def extractCommitCertificate(
+  private def extractCommitCertificates(
       message: StateTransferMessage.StateTransferNetworkMessage
-  ): Option[(StateTransferMessage.BlockTransferResponse, CommitCertificate)] =
+  ): Option[(StateTransferMessage.BlockTransferResponse, NonEmpty[Seq[CommitCertificate]])] =
     message match {
       case _: StateTransferMessage.BlockTransferRequest => None
       case response: StateTransferMessage.BlockTransferResponse =>
-        response.commitCertificate.map(response -> _)
+        NonEmpty.from(response.commitCertificates).map(response -> _)
     }
 
   private def isStrictlyWithinFutureWindow(
@@ -279,35 +310,43 @@ class StateTransferManager[E <: Env[E]](
   ): StateTransferMessageResult =
     message match {
       case msg @ StateTransferMessage.UnverifiedStateTransferMessage(unverifiedMessage) =>
-        extractCommitCertificate(unverifiedMessage.message) match {
-          case Some((response, cc))
-              if isStrictlyWithinFutureWindow(cc, latestCompletedEpoch.info.number) =>
+        extractCommitCertificates(unverifiedMessage.message) match {
+          // All commit certificates in a single correct response share the same epoch
+          //  (one epoch is transferred at a time), so it's enough to check the first one against the future window.
+          case Some((response, commitCerts))
+              if isStrictlyWithinFutureWindow(
+                commitCerts.head1,
+                latestCompletedEpoch.info.number,
+              ) =>
+            val epochNumber =
+              commitCerts.head1.prePrepare.message.blockMetadata.epochNumber
             validator.validateBlockTransferResponse(
               response = response,
-              latestLocallyCompletedEpoch =
-                EpochNumber(cc.prePrepare.message.blockMetadata.epochNumber - 1), //
+              latestLocallyCompletedEpoch = EpochNumber(epochNumber - 1), //
               membership = topologyInfo.currentMembership,
             ) match {
               case Left(_) =>
-              // if the commit certificate doesn't validate we will not early fetch it, (but it might validate later due
-              // topology change so we still add it to postponed queue.
+              // if the commit certificates don't validate we will not early fetch them (but they might validate later
+              // due to topology change so we still add them to the postponed queue).
 
               case Right(()) =>
-                // verify the CC in the current epoch if this succeeds we will send BlockConsensusStarted to Output
-                validator.verifyCommitCertificateSignatures(
-                  cc,
-                  msg.signedMessage.from,
-                  topologyInfo,
-                  currentEpochInfo,
-                  isForFutureEpoch = true,
-                )
+                // verify the CCs in the current epoch if this succeeds we will send BlockConsensusStarted to Output
+                commitCerts.foreach { cc =>
+                  validator.verifyCommitCertificateSignatures(
+                    cc,
+                    msg.signedMessage.from,
+                    topologyInfo,
+                    currentEpochInfo,
+                    isForFutureEpoch = true,
+                  )
+                }
             }
 
             postponedResponses
               .enqueue(
                 unverifiedMessage.from,
                 DelayedStateTransferMessage(
-                  cc.prePrepare.message.blockMetadata.epochNumber,
+                  epochNumber,
                   msg,
                 ),
               )
@@ -461,9 +500,10 @@ class StateTransferManager[E <: Env[E]](
             currentEpochInfo,
           )
         } else {
-          val blockMetadata = response.commitCertificate.map(_.prePrepare.message.blockMetadata)
+          val blockMetadata =
+            response.commitCertificates.map(_.prePrepare.message.blockMetadata)
           logger.info(
-            s"Received block transfer response for block $blockMetadata " +
+            s"Received block transfer response for block(s) $blockMetadata " +
               s"from ${response.from} while not in state transfer; ignoring unneeded response"
           )
           StateTransferMessageResult.Continue
@@ -515,17 +555,19 @@ class StateTransferManager[E <: Env[E]](
       traceContext: TraceContext,
   ): StateTransferMessageResult = {
     val from = response.from
-    response.commitCertificate match {
-      case None =>
+    response.commitCertificates match {
+      case Seq() =>
         StateTransferMessageResult.NothingToStateTransfer(from)
-      case Some(commitCert) =>
-        validator.verifyCommitCertificateSignatures(
-          commitCert,
-          from,
-          orderingTopologyInfo,
-          currentEpochInfo,
-          isForFutureEpoch = false,
-        )
+      case commitCerts =>
+        commitCerts.foreach { commitCert =>
+          validator.verifyCommitCertificateSignatures(
+            commitCert,
+            from,
+            orderingTopologyInfo,
+            currentEpochInfo,
+            isForFutureEpoch = false,
+          )
+        }
         StateTransferMessageResult.Continue
     }
   }

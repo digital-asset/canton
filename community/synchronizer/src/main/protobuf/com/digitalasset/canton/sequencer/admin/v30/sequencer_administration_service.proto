@@ -5,12 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.sequencer.admin.v30;
 
-import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
-import "com/digitalasset/canton/protocol/v31/sequencing.proto";
-import "com/digitalasset/canton/protocol/v32/sequencing.proto";
 import "com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_snapshot.proto";
-import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "scalapb/scalapb.proto";
@@ -50,13 +46,6 @@ service SequencerAdministrationService {
 
   // fetch a snapshot of the sequencer state based on the given timestamp
   rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
-
-  // Fetch the onboarding state for a given sequencer.
-  // the returned bytestring can be used directly to initialize the given sequencer later on
-  // Deprecated in favor of OnboardingStateV2
-  rpc OnboardingState(OnboardingStateRequest) returns (stream OnboardingStateResponse) {
-    option deprecated = true;
-  }
 
   // Fetch the onboarding state for a given sequencer.
   // the returned bytestring can be used directly to initialize the given sequencer later on
@@ -201,32 +190,6 @@ message SnapshotResponse {
     // Used for sequencers running protocol version CNTestNet or higher.
     VersionedSuccess versioned_success = 3;
   }
-}
-
-message OnboardingStateRequest {
-  oneof request {
-    // The sequencer for which to fetch the onboarding state
-    string sequencer_uid = 1;
-    // The effective time the should be "contained" in the sequencer snapshot
-    google.protobuf.Timestamp timestamp = 2;
-  }
-}
-
-message OnboardingStateResponse {
-  // versioned OnboardingStateForSequencer
-  bytes onboarding_state_for_sequencer = 1;
-}
-
-message OnboardingStateForSequencer {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
-
-  com.digitalasset.canton.topology.admin.v30.TopologyTransactions topology_snapshot = 1;
-  oneof parameters {
-    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
-    com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 4;
-    com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 5;
-  }
-  SequencerSnapshot sequencer_snapshot = 3;
 }
 
 message OnboardingStateV2Request {

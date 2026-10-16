@@ -311,6 +311,7 @@ final class DefaultVerdictSenderTest
         delay = config.NonNegativeFiniteDuration.ofMillis(100),
         parallelism = PositiveInt.two,
       ),
+      clock,
       loggerFactory,
     )
 

@@ -181,7 +181,7 @@ object BlacklistLeaderSelectionPolicyState
     VersioningTable(
       ProtoVersion(30) ->
         VersionedProtoCodec(
-          SupportedVersions.CantonProtocol
+          SupportedVersions.CantonProtocol36
         )(v30.BlacklistLeaderSelectionPolicyState)(
           supportedProtoVersion(_)(fromProto30),
           _.toProto30,

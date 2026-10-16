@@ -65,7 +65,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   override protected def configTransforms: List[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
-    // TODO(#35499): OffPR with Squencer Channels - Switch dev / alpha to 37
+    // TODO(#35499): OffPR with Sequencer Channels - Switch dev / alpha to 37
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
@@ -477,8 +477,7 @@ final class LsuOffPRInterleavedLsuWithProtoVersionChange
     extends LsuOfflinePartyReplicationIntegrationTest {
 
   "Logical synchronizer upgrade" should {
-    // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
-    "allow to recover a stuck party-to-participant proposal" onlyRunLessThan ProtocolVersion.dev in {
+    "allow to recover a stuck party-to-participant proposal" onlyRunLessThan ProtocolVersion.offPRWithSequencerChannels in {
       implicit env =>
         import env.*
 
@@ -489,8 +488,8 @@ final class LsuOffPRInterleavedLsuWithProtoVersionChange
           newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
           newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
           oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
-          // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
-          newPV = ProtocolVersion.dev, // results in a topology proto version change (v30 -> v31)
+          // Results in a topology proto version change (v30 -> v31)
+          newPV = ProtocolVersion.offPRWithSequencerChannels,
           newSerial = env.daId.serial.increment.value.toNonNegative,
         )
         val lsid = fixture.currentPsid.logical

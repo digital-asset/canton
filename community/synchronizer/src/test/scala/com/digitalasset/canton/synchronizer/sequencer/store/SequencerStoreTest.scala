@@ -13,13 +13,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.sequencing.protocol.{
-  Batch,
-  ClosedUncompressedEnvelope,
-  MessageId,
-  Recipients,
-  SequencerErrors,
-}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
@@ -175,7 +169,9 @@ trait SequencerStoreTest
         for {
           registeredMemberO <- store.lookupMember(member)
           result = registeredMemberO
-            .map(registeredMember => registeredMember.memberId -> registeredMember.registeredFrom)
+            .map(registeredMember =>
+              registeredMember.memberId -> registeredMember.registeredFrom.value
+            )
             .getOrElse(fail(s"$member is not registered"))
         } yield result
 
@@ -333,6 +329,81 @@ trait SequencerStoreTest
         } yield {
           registeredMember2 shouldEqual registeredMember1
           lookedUpMember.value shouldBe registeredMember1
+        }
+      }
+
+      "be able to register an onboarding member" in {
+        val store = mk()
+        for {
+          registeredMember <- store.registerOnboardingMember(alice, ts1)
+          fetched <- store.lookupMember(alice)
+        } yield {
+          val member = fetched.value
+          member shouldBe RegisteredMember.Onboarding(registeredMember.memberId)
+          registeredMember shouldEqual member
+        }
+      }
+
+      "upgrade an onboarded member to active" in {
+        val store = mk()
+        for {
+          onboarding <- store.registerOnboardingMember(alice, ts1)
+          _ <- store.registerMember(alice, ts1)
+          fetched <- store.lookupMember(alice)
+        } yield {
+          val member = fetched.value
+          member shouldBe RegisteredMember.Active(onboarding.memberId, ts1)
+        }
+      }
+
+      "trying to onboard an existing member should leave it unchanged" in {
+        val store = mk()
+        for {
+          onboarding <- store.registerOnboardingMember(alice, ts1)
+          _ <- store.registerMember(alice, ts1)
+          _ <- store.registerOnboardingMember(alice, ts1)
+          fetched <- store.lookupMember(alice)
+        } yield {
+          val member = fetched.value
+          member shouldBe RegisteredMember.Active(onboarding.memberId, ts1)
+        }
+
+      }
+
+      "report a member as onboarding at times before its registration" in {
+        val store = mk()
+        for {
+          _ <- store.registerOnboardingMember(alice, ts1)
+          _ <- store.registerMember(alice, ts3)
+          beforeOnboarding <- store.status(ts(0))
+          whileOnboarding <- store.status(ts2)
+          afterRegistration <- store.status(ts3)
+          _ <- store.disableMember(alice)
+          whileOnboardingAfterDisabling <- store.status(ts2)
+          afterDisabling <- store.status(ts3)
+        } yield {
+          beforeOnboarding.members shouldBe empty
+          whileOnboarding.members shouldBe Set(SequencerMemberStatus.Onboarding(alice))
+          afterRegistration.members shouldBe Set(SequencerMemberStatus.Active(alice, ts3, None))
+          whileOnboardingAfterDisabling.members shouldBe Set(
+            SequencerMemberStatus.Onboarding(alice)
+          )
+          afterDisabling.members shouldBe Set(
+            SequencerMemberStatus.Disabled(alice, Some(ts3), None)
+          )
+        }
+      }
+
+      "report a member disabled while onboarding only from its onboarding time" in {
+        val store = mk()
+        for {
+          _ <- store.registerOnboardingMember(alice, ts2)
+          _ <- store.disableMember(alice)
+          beforeOnboarding <- store.status(ts1)
+          afterOnboarding <- store.status(ts2)
+        } yield {
+          beforeOnboarding.members shouldBe empty
+          afterOnboarding.members shouldBe Set(SequencerMemberStatus.Disabled(alice, None, None))
         }
       }
     }
@@ -693,8 +764,13 @@ trait SequencerStoreTest
       def acknowledgements(
           status: SequencerPruningStatus
       ): Map[Member, Option[CantonTimestamp]] =
-        status.members.map { case SequencerMemberStatus(member, _, lastAcknowledged, _) =>
-          member -> lastAcknowledged
+        status.members.map {
+          case SequencerMemberStatus.Onboarding(member) =>
+            member -> None
+          case SequencerMemberStatus.Active(member, _, lastAcknowledged) =>
+            member -> lastAcknowledged
+          case SequencerMemberStatus.Disabled(member, _, lastAcknowledged) =>
+            member -> lastAcknowledged
         }.toMap
 
       "latestAcknowledgements should return acknowledgements" in {
@@ -971,21 +1047,21 @@ trait SequencerStoreTest
         _ <- List(alice, bob, carole).parTraverse(
           store.registerMember(_, ts(0))
         )
-        disabledClientsBefore <- store.status(ts(0)).map(_.disabledClients)
+        inactiveClientsBefore <- store.status(ts(0)).map(_.inactiveClients)
         _ = {
-          disabledClientsBefore.members shouldBe empty
+          inactiveClientsBefore.members shouldBe empty
         }
         _ <- store.lookupMember(alice) // this line populates the cache
         _ <- store.disableMember(alice)
         _ <- store.disableMember(bob)
-        disabledClientsAfter <- store.status(ts(0)).map(_.disabledClients)
-        _ = disabledClientsAfter.members should contain.only(alice, bob)
+        inactiveClientsAfter <- store.status(ts(0)).map(_.inactiveClients)
+        _ = inactiveClientsAfter.members should contain.only(alice, bob)
         // alice instances should be entirely disabled
         aliceRegisteredMember <- clue("lookupMember alice") {
           store.lookupMember(alice).map(_.getOrElse(fail("lookupMember alice")))
         }
         _ = clue("alice was not disabled, maybe due to caching?") {
-          aliceRegisteredMember.enabled shouldBe false
+          aliceRegisteredMember.status shouldBe MemberLifeCycleStatus.Disabled
         }
         // should also be idempotent
         _ <- store.disableMember(alice)
@@ -1134,6 +1210,44 @@ trait SequencerStoreTest
             sequencerMember -> Some(ts(5)),
           )
           snapshotFromNewStoreAfterNewEvents.previousTimestamps shouldBe expectedMemberPreviousTimestampsAfter
+        }
+      }
+
+      "include members registered after the snapshot time that were onboarding at that time" in {
+        for {
+          snapshot <- {
+            val env = Env()
+            for {
+              _ <- env.store.registerOnboardingMember(alice, ts1)
+              _ <- env.store.registerMember(alice, ts3)
+              snapshot <- env.store.readStateAtTimestamp(ts2)
+            } yield snapshot
+          }
+
+          // resetting the db tables
+          _ = this match {
+            case dbTest: DbTest => dbTest.beforeEach()
+            case _ => ()
+          }
+
+          env = Env()
+          _ <- env.store
+            .initializeFromSnapshot(
+              SequencerInitialState(
+                synchronizerId = DefaultTestIdentities.physicalSynchronizerId, // not used
+                snapshot = snapshot,
+                latestSequencerEventTimestamp = None,
+                initialTopologyEffectiveTimestamp = None,
+                latestPendingTopologyTransactionTimestamp = None,
+              )
+            )
+            .valueOrFail("initializeFromSnapshot")
+          newAlice <- env.store.lookupMember(alice)
+          statusFromNewStore <- env.store.status(ts2)
+        } yield {
+          snapshot.status.members shouldBe Set(SequencerMemberStatus.Onboarding(alice))
+          inside(newAlice) { case Some(RegisteredMember.Onboarding(_)) => succeed }
+          statusFromNewStore.members shouldBe Set(SequencerMemberStatus.Onboarding(alice))
         }
       }
     }

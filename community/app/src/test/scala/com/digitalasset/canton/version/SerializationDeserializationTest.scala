@@ -36,11 +36,17 @@ import com.digitalasset.canton.sequencing.protocol.channel.{
   SequencerChannelSessionKeyAck,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.GeneratorsBftOrdering
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistLeaderSelectionPolicyState
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
+  data as bft,
+  modules as bftmodules,
+}
 import com.digitalasset.canton.synchronizer.sequencer.store.VersionedStatus
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.synchronizer.sequencer.{
   GeneratorsSequencer,
-  OnboardingStateForSequencer,
   OnboardingStateForSequencerV2,
   SequencerSnapshot,
 }
@@ -84,6 +90,7 @@ final class SerializationDeserializationTest
         generators.lf,
         version,
       )
+    val bftOrderingGenerators = new GeneratorsBftOrdering(version)
 
     import com.digitalasset.canton.crypto.GeneratorsCrypto.*
     import generators.data.*
@@ -97,13 +104,14 @@ final class SerializationDeserializationTest
     import generators.verdict.*
     import participantGenerators.*
     import sequencerGenerators.*
+    import bftOrderingGenerators.*
 
     s"Serialization and deserialization methods using protocol version $version" should {
       "compose to the identity" in {
         implicit val getByteStringId: Id[ByteString] => ByteString = identity
         implicit val getByteStringE: Either[String, ByteString] => ByteString = _.value
 
-        val synchronizerLimits = SynchronizerLimits.defaultFor(version)
+        val synchronizerLimits = SynchronizerLimits.default
 
         testVersioned(SymmetricKey, version)
 
@@ -113,16 +121,28 @@ final class SerializationDeserializationTest
 
         if (version >= ProtocolVersion.v36) {
           test(AcsCommitment, version)
-          test(AcsCommitmentProtocolMessage, version)
+          testContext(
+            AcsCommitmentProtocolMessage,
+            AcsCommitmentDeserializationContext(synchronizerLimits),
+            version,
+          )
 
-          test(AcsCommitmentSummary, version)
-          testContext(AcsCommitmentSummaryProtocolMessage, version, version)
+          testContext(
+            AcsCommitmentSummary,
+            AcsCommitmentDeserializationContext(synchronizerLimits),
+            version,
+          )
+          testContext(
+            AcsCommitmentSummaryProtocolMessage,
+            AcsCommitmentDeserializationContext(synchronizerLimits),
+            version,
+          )
         }
 
-        testContext(LegacyAcsCommitmentProtocolMessage, version, version)
+        test(LegacyAcsCommitmentProtocolMessage, version)
 
         test(LegacyAcsCommitment, version)
-        testContext(LsuSequencingTestMessage, version, version)
+        test(LsuSequencingTestMessage, version)
         test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
         test(ConfirmationResponses, version)
@@ -157,10 +177,17 @@ final class SerializationDeserializationTest
         testContext(UnassignmentCommonData, TestHash, version)
         testContext(UnassignmentView, TestHash, version)
         test(UnassignmentData, version)
-        testContext(ViewCommonData, TestHash, version)
+        testContext(
+          ViewCommonData,
+          ViewCommonDataDeserializationContext(
+            TestHash,
+            SynchronizerLimits.default.transactionProtocolLimits,
+          ),
+          version,
+        )
 
         testContext(RootHashMessage, SerializedRootHashMessagePayload.fromByteString, version)
-        testContext(AssignmentMediatorMessage, (TestHash, Target(version)), version)(
+        testContext(AssignmentMediatorMessage, (TestHash, Target(pvv)), version)(
           assignmentMediatorMessageArb,
           getByteStringId,
         )
@@ -188,12 +215,11 @@ final class SerializationDeserializationTest
           getByteStringId,
         )
 
-        test(TopologyTransaction, version)
-        testContext(TopologyTransactionsBroadcast, version, version)
-        test(SignedTopologyTransaction, version)
-        test(SignedTopologyTransactions, version)
+        testContext(TopologyTransaction, testedTopologyTransactionContext, version)
+        testContext(TopologyTransactionsBroadcast, testedTopologyTransactionContext, version)
+        testContext(SignedTopologyTransaction, testedTopologyTransactionContext, version)
+        testContext(SignedTopologyTransactions, testedTopologyTransactionContext, version)
         testContext(SequencerSnapshot, version, version)
-        test(OnboardingStateForSequencer, version)
         test(OnboardingStateForSequencerV2, version)
         test(LsuTrafficState, version)
         test(SynchronizerPredecessor, version)
@@ -204,7 +230,7 @@ final class SerializationDeserializationTest
           Batch,
           BatchDeserializationContext(
             defaultDecompressionPolicy,
-            SynchronizerLimits.defaultFor(version),
+            SynchronizerLimits.default,
           ),
           version,
         )
@@ -213,7 +239,7 @@ final class SerializationDeserializationTest
           SubmissionRequest,
           SubmissionRequestDeserializationContext(
             defaultDecompressionPolicy,
-            SynchronizerLimits.defaultFor(version),
+            SynchronizerLimits.default,
           ),
           version,
         )
@@ -247,7 +273,7 @@ final class SerializationDeserializationTest
           SequencedEvent,
           SequencedEventDeserializationContext(
             defaultDecompressionPolicy,
-            SynchronizerLimits.defaultFor(version),
+            SynchronizerLimits.default,
           ),
           version,
         )
@@ -266,12 +292,21 @@ final class SerializationDeserializationTest
                     _,
                     pvv,
                     defaultDecompressionPolicy,
-                    SynchronizerLimits.defaultFor(version),
+                    SynchronizerLimits.default,
                   )
               ),
         )
         test(SignedContent, version)
-        testContext(TransactionView, (TestHash, DepthCounter.NoLimit, version), version)
+        testContext(
+          TransactionView,
+          TransactionViewDeserializationContext(
+            TestHash,
+            DepthCounter.NoLimit,
+            version,
+            SynchronizerLimits.default.transactionProtocolLimits,
+          ),
+          version,
+        )
         testContext(
           FullInformeeTree,
           (GenTransactionTreeDeserializationContext(TestHash, synchronizerLimits), version),
@@ -281,15 +316,12 @@ final class SerializationDeserializationTest
         testContext(
           MerkleSeq,
           (
-            (
-              TestHash,
-              (bytes: ByteString, _: DepthCounter) =>
-                SubmitterMetadata.fromTrustedByteString(
-                  SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits)
-                )(bytes),
-              DepthCounter.NoLimit,
-            ),
-            version,
+            TestHash,
+            (bytes: ByteString, _: DepthCounter) =>
+              SubmitterMetadata.fromTrustedByteString(
+                SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits)
+              )(bytes),
+            DepthCounter.NoLimit,
           ),
           version,
         )
@@ -307,7 +339,11 @@ final class SerializationDeserializationTest
           ),
           version,
         )
-        testContextTaggedProtocolVersion(AssignmentViewTree, TestHash, Target(version))
+        testContext(
+          AssignmentViewTree,
+          (TestHash, Target(pvv)),
+          version,
+        )
         testContext(
           UnassignmentViewTree,
           (TestHash, Source(pvv)),
@@ -318,6 +354,73 @@ final class SerializationDeserializationTest
 
         test(VersionedStatus, version)
         test(AggregatedSignaturesOfSender, version)
+
+        // CantonBFT messages
+        test(bft.topology.SequencingParameters, version)
+        test(BlacklistLeaderSelectionPolicyState, version)
+        test(OrderingRequestBatch, version)
+        testContext(bftmodules.ConsensusStatus.EpochStatus, actualSender, version)
+
+        testContext(bftmodules.Availability.RemoteDissemination.RemoteBatch, actualSender, version)
+        testContext(
+          bftmodules.Availability.RemoteDissemination.RemoteBatchAcknowledged,
+          actualSender,
+          version,
+        )
+        testContext(
+          bftmodules.Availability.RemoteOutputFetch.RemoteBatchDataFetched,
+          actualSender,
+          version,
+        )
+        testContext(
+          bftmodules.Availability.RemoteOutputFetch.FetchRemoteBatchData,
+          actualSender,
+          version,
+        )
+
+        testContext(
+          bftmodules.Consensus.StateTransferMessage.BlockTransferRequest,
+          actualSender,
+          version,
+        )
+        testContext(
+          bftmodules.ConsensusSegment.ConsensusMessage.Commit,
+          Some(actualSender),
+          version,
+        )(arb = commitArb(Some(actualSender)), getByteStringValue = getByteStringId)
+        testContext(
+          bftmodules.ConsensusSegment.ConsensusMessage.Prepare,
+          Some(actualSender),
+          version,
+        )
+        testContext(
+          bftmodules.ConsensusSegment.ConsensusMessage.PrePrepare,
+          Some(actualSender),
+          version,
+        )
+        testContext(
+          bftmodules.ConsensusSegment.ConsensusMessage.ViewChange,
+          Some(actualSender),
+          version,
+        )
+        testContext(
+          bftmodules.ConsensusSegment.ConsensusMessage.NewView,
+          Some(actualSender),
+          version,
+        )
+        if (version < ProtocolVersion.v37) {
+          testContext(
+            bftmodules.Consensus.StateTransferMessage.BlockTransferResponse30,
+            actualSender,
+            version,
+          )
+        } else {
+          testContext(
+            bftmodules.Consensus.StateTransferMessage.BlockTransferResponse31,
+            actualSender,
+            version,
+          )
+        }
       }
     }
 
@@ -380,23 +483,6 @@ final class SerializationDeserializationTest
       // TODO(#26599) Remove this exception
       "com.digitalasset.canton.participant.admin.data.ActiveContract$",
 
-      // TODO(#26601) Remove these exceptions
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistLeaderSelectionPolicyState$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability$RemoteDissemination$RemoteBatch$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability$RemoteDissemination$RemoteBatchAcknowledged$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability$RemoteOutputFetch$RemoteBatchDataFetched$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability$RemoteOutputFetch$FetchRemoteBatchData$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus$EpochStatus$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus$StateTransferMessage$BlockTransferRequest$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus$StateTransferMessage$BlockTransferResponse$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment$ConsensusMessage$Commit$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment$ConsensusMessage$NewView$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment$ConsensusMessage$PrePrepare$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment$ConsensusMessage$Prepare$",
-      "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment$ConsensusMessage$ViewChange$",
-
       // TODO(#26726) Remove this exception
       "com.digitalasset.canton.data.MerkleSeq$MerkleSeqElement$",
     )
@@ -421,10 +507,10 @@ final class SerializationDeserializationTest
 
   // Test that it is not possible to create ViewParticipantData containing contracts
   // serialized with a LF serialization version that is not supported by the protocol version.
-  // In practice, at time of writing, this means that pv=35 should not allow V3 contracts, while pv=36 should allow them.
-  s"ViewParticipantData.tryCreate with protocol version ${ProtocolVersion.v35}" should {
+  // In practice this means that pv=ProtocolVersion.latest should not allow VDev contracts, while pv=dev should allow them.
+  s"ViewParticipantData.tryCreate with protocol version ${ProtocolVersion.latest}" should {
 
-    val generators = new CommonGenerators(ProtocolVersion.v35)
+    val generators = new CommonGenerators(ProtocolVersion.latest)
 
     def recreateWith(
         extraCoreInput: Option[InputContract],
@@ -440,24 +526,24 @@ final class SerializationDeserializationTest
         rollbackContext = vpd.rollbackContext,
         salt = vpd.salt,
         externalCallResults = vpd.externalCallResults,
-        protocolVersion = ProtocolVersion.v35,
+        protocolVersion = ProtocolVersion.latest,
       )
     }
 
-    val v3Contract = ExampleContractFactory.build(
+    val vDevContract = ExampleContractFactory.build(
       keyOpt = Some(ExampleContractFactory.buildKeyWithMaintainers()),
-      overrideSerializationVersion = Some(LfSerializationVersion.V3),
+      overrideSerializationVersion = Some(LfSerializationVersion.VDev),
     )
-    v3Contract.inst.version shouldBe LfSerializationVersion.V3
+    vDevContract.inst.version shouldBe LfSerializationVersion.VDev
 
-    s"allow ${LfSerializationVersion.V2} contracts" in {
+    s"allow ${LfSerializationVersion.V3} contracts" in {
       recreateWith(None, None).isRight shouldBe true
     }
 
-    s"disallow ${LfSerializationVersion.V3} input contracts" in {
+    s"disallow ${LfSerializationVersion.VDev} input contracts" in {
       inside(
         recreateWith(
-          Some(InputContract(v3Contract, consumed = false)),
+          Some(InputContract(vDevContract, consumed = false)),
           None,
         )
       ) { case Left(err) =>
@@ -467,11 +553,11 @@ final class SerializationDeserializationTest
       }
     }
 
-    s"disallow ${LfSerializationVersion.V3} created contracts" in {
+    s"disallow ${LfSerializationVersion.VDev} created contracts" in {
       inside(
         recreateWith(
           None,
-          Some(CreatedContract.tryCreate(v3Contract, consumedInCore = false, rolledBack = false)),
+          Some(CreatedContract.tryCreate(vDevContract, consumedInCore = false, rolledBack = false)),
         )
       ) { case Left(err) =>
         err should include(

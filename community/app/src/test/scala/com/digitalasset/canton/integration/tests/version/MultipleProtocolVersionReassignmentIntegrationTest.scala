@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.version
 
 import com.daml.ledger.api.v2.commands.Command
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.examples.java.cycle as M
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -12,6 +13,7 @@ import com.digitalasset.canton.integration.util.{
   AcsInspection,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
+  MultiSynchronizerFeatureFlag,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -24,6 +26,18 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import monocle.macros.syntax.lens.*
 
+/** We test reassignments between synchronizers running different protocol versions.
+  *
+  * The topology used:
+  *   - S1 (da) and S2 (acme) run the two latest stable protocol versions, or both the same one when
+  *     there is only one stable protocol version
+  *   - S3 (repair) runs the first protocol version after them (for example v35, v36 and v37), or
+  *     dev when the tested protocol version is dev
+  *   - P1 is connected to S1, S2 and S3
+  *
+  * A contract is reassigned between every ordered pair of synchronizers. The multi-synchronizer
+  * feature flag is enabled on all synchronizers.
+  */
 sealed trait MultipleProtocolVersionReassignmentIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -31,27 +45,41 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
     with HasReassignmentCommandsHelpers
     with HasCommandRunnersHelpers {
 
-  // Test topology transactions against the latest two stable versions (we don't exclude that the two are equal)
-  // TODO(#16458) Change to the commented code below when we have two stable protocol versions
-  private lazy val (beforeLastStable, lastStable) = (ProtocolVersion.v34, ProtocolVersion.v34)
-//  private lazy val (beforeLastStable, lastStable) = {
-//    val lastTwoStables = ProtocolVersion.stableAndSupported.sorted.takeRight(2)
-//    if (lastTwoStables.sizeIs == 2)
-//      (lastTwoStables(0), lastTwoStables(1))
-//    else (lastTwoStables(0), lastTwoStables(0))
-//  }
+  // The two latest stable protocol versions, equal when there is only one
+  private lazy val (beforeLastStable, lastStable) = {
+    val lastTwoStables = ProtocolVersion.stable.sorted.takeRight(2)
+    if (lastTwoStables.sizeIs == 2)
+      (lastTwoStables(0), lastTwoStables(1))
+    else (lastTwoStables(0), lastTwoStables(0))
+  }
 
-  private lazy val devProtocolVersion: ProtocolVersion = ProtocolVersion.dev
+  // The first beta, alpha or dev protocol version after the latest stable one
+  private lazy val nextProtocolVersion: ProtocolVersion =
+    (ProtocolVersion.beta ++ ProtocolVersion.alpha :+ ProtocolVersion.dev)
+      .map(pv => pv: ProtocolVersion)
+      .filter(pv => pv > lastStable && pv != ProtocolVersion.almostDev)
+      .min
+
+  private lazy val s3ProtocolVersion: ProtocolVersion =
+    if (testedProtocolVersion.isStable) nextProtocolVersion else testedProtocolVersion
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1_S1M1_S1M1_S1M1
+    EnvironmentDefinition
+      .P1_S1M1_S1M1_S1M1_WithStaticParameters(
+        Map(
+          "synchronizer1" -> StaticSynchronizerParameters.defaults(beforeLastStable),
+          "synchronizer2" -> StaticSynchronizerParameters.defaults(lastStable),
+          "synchronizer3" -> StaticSynchronizerParameters.defaults(s3ProtocolVersion),
+        )
+      )
       .addConfigTransforms(
         ConfigTransforms.updateParticipantConfig("participant1") {
           _.focus(_.parameters.minimumProtocolVersion)
             .replace(Some(ParticipantProtocolVersion(beforeLastStable)))
         },
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        _.focus(_.parameters.enableAlphaStateViaConfig).replace(true),
       )
+      .addConfigTransforms(ConfigTransforms.setProtocolVersion(s3ProtocolVersion)*)
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
       .withSetup { implicit env =>
         import env.*
@@ -59,9 +87,11 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.synchronizers.connect_local(sequencer2, alias = acmeName)
         participant1.synchronizers.connect_local(sequencer3, alias = repairSynchronizerName)
-        participant1.synchronizers.connect_local(sequencer4, alias = devSynchronizerName)
-        Seq(daId, acmeId, repairSynchronizerId, devSynchronizerId).foreach(psid =>
-          participant1.dars.upload(CantonExamplesPath, synchronizerId = psid)
+        Seq(daId, acmeId, repairSynchronizerId)
+          .foreach(psid => participant1.dars.upload(CantonExamplesPath, synchronizerId = psid))
+
+        Seq(daId, acmeId, repairSynchronizerId).foreach(psid =>
+          MultiSynchronizerFeatureFlag.enable(Seq(participant1), psid.logical)
         )
       }
 
@@ -134,44 +164,39 @@ sealed trait MultipleProtocolVersionReassignmentIntegrationTest
   }
 
   "A contract created on a synchronizer" should {
-    "be reassignable to synchronizers running on different protocol versions" onlyRunWhen (ProtocolVersion.alpha.nonEmpty) in {
-      implicit env =>
-        import env.*
+    // The protocol version of each synchronizer only depends on whether the tested protocol version
+    // is stable, so running this test for every tested protocol version (35, 36, 37) in CI would run
+    // the same test several times.
+    "be reassignable to synchronizers running on different protocol versions" onlyRunWhen (
+      testedProtocolVersion == ProtocolVersion.latest || testedProtocolVersion.isDev
+    ) in { implicit env =>
+      import env.*
 
-        val alphaProtocolVersion = ProtocolVersion.alpha.min
+      val synchronizers: List[(ProtocolVersion, SynchronizerId, SynchronizerAlias)] = List(
+        (beforeLastStable, daId, daName),
+        (lastStable, acmeId, acmeName),
+        (s3ProtocolVersion, repairSynchronizerId, repairSynchronizerName),
+      )
 
-        val synchronizerForPV: Map[ProtocolVersion, (SynchronizerId, SynchronizerAlias)] = Map(
-          beforeLastStable -> (daId, daName),
-          lastStable -> (acmeId, acmeName),
-          alphaProtocolVersion -> (repairSynchronizerId, repairSynchronizerName),
-          devProtocolVersion -> (devSynchronizerId, devSynchronizerName),
-        )
+      // 2-permutations (`permutations` doesn't support it)
+      val possibleReassignments =
+        for {
+          source <- synchronizers
+          target <- synchronizers
+          if source != target
+        } yield (source, target)
 
-        val protocolVersions = synchronizerForPV.keysIterator.toList
-
-        // 2-permutations (`permutations` doesn't support it)
-        val possibleReassignments =
-          for {
-            source <- protocolVersions
-            target <- protocolVersions
-            if source != target
-          } yield (source, target)
-
-        forAll(possibleReassignments) { case (sourcePV, targetPV) =>
-          clue(s"Reassigning from $sourcePV to $targetPV") {
-            reassign(
-              synchronizerForPV(sourcePV)._1,
-              synchronizerForPV(targetPV)._1,
-              synchronizerForPV(sourcePV)._2,
-              synchronizerForPV(targetPV)._2,
-            )
+      forAll(possibleReassignments) {
+        case ((sourcePV, sourceId, sourceAlias), (targetPV, targetId, targetAlias)) =>
+          clue(s"Reassigning from $sourceAlias ($sourcePV) to $targetAlias ($targetPV)") {
+            reassign(sourceId, targetId, sourceAlias, targetAlias)
           }
-        }
+      }
     }
   }
 }
 
-class MultipleProtocolVersionReassignmentIntegrationTestPostgres
+final class MultipleProtocolVersionReassignmentIntegrationTestPostgres
     extends MultipleProtocolVersionReassignmentIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -181,7 +206,6 @@ class MultipleProtocolVersionReassignmentIntegrationTestPostgres
         Set("sequencer1"),
         Set("sequencer2"),
         Set("sequencer3"),
-        Set("sequencer4"),
       ),
     )
   )

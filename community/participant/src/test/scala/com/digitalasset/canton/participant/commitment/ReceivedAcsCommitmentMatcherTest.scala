@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.store.{
   DelegatingAcsCommitmentPeriodStore,
 }
 import com.digitalasset.canton.platform.store.interning.{MockStringInterning, StringInterning}
+import com.digitalasset.canton.protocol.AcsCommitmentLimits
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -75,6 +76,8 @@ class ReceivedAcsCommitmentMatcherTest
   private val p2: LedgerParticipantId = DefaultTestIdentities.participant2.toLf
   private val p3: LedgerParticipantId = DefaultTestIdentities.participant3.toLf
   private val p4: LedgerParticipantId = DefaultTestIdentities.participant4.toLf
+
+  private val defaultMaxAcsSize = AcsCommitmentLimits.default.maxCommitmentSizeBytes
 
   class Fixture(
       participant: LedgerParticipantId
@@ -140,15 +143,19 @@ class ReceivedAcsCommitmentMatcherTest
         offset: Offset,
         recordTime: CantonTimestamp,
     )(implicit traceContext: TraceContext): OptionalAcsUpdateContainer = {
-      val commitment = AcsCommitment.create(
-        psid,
-        sender,
-        participant,
-        CommitmentPeriod.tryCreate(fromExclusive, toInclusive),
-        digest,
-        testedProtocolVersion,
-      )
-      val message = AcsCommitmentProtocolMessage(commitment, Signature.noSignature)
+      val commitment = AcsCommitment
+        .create(
+          psid,
+          sender,
+          participant,
+          CommitmentPeriod.tryCreate(fromExclusive, toInclusive),
+          digest,
+          testedProtocolVersion,
+        )
+        .value
+      val message = AcsCommitmentProtocolMessage
+        .create(commitment, Signature.noSignature, defaultMaxAcsSize)
+        .value
       val receivedAcsCommitments = ReceivedAcsCommitments(NonEmpty(Seq, message))
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
       OptionalAcsUpdateContainer(
@@ -358,7 +365,9 @@ class ReceivedAcsCommitmentMatcherTest
         AcsCommitment.create(psid, p3, p1, cp, "P3:10-20", testedProtocolVersion)
       )
       val messages = (commitmentsP2 ++ commitmentsP3).map(cmt =>
-        AcsCommitmentProtocolMessage(cmt, Signature.noSignature)
+        AcsCommitmentProtocolMessage
+          .create(cmt.value, Signature.noSignature, defaultMaxAcsSize)
+          .value
       )
       val receivedAcsCommitments = ReceivedAcsCommitments(messages)
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)

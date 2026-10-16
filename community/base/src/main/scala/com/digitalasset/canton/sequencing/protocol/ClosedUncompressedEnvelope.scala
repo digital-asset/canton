@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.checkedToByteString
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{HashOps, Signature, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -136,6 +136,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
         MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size))
       ),
       pvv,
+      // Not enforced for serialization
+      maxSignaturesPerEnvelope = PositiveInt.MaxValue,
     )
   }
 

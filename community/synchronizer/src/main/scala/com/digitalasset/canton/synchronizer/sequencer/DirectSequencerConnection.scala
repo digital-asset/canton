@@ -127,18 +127,6 @@ class DirectSequencerConnection(
       }
       .leftMap(_.toString)
 
-  override def downloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] =
-    ErrorUtil.internalError(
-      new UnsupportedOperationException(
-        s"$functionFullName is not implemented for DirectSequencerConnection"
-      )
-    )
-
   override def logout()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, Unit] =
@@ -236,6 +224,14 @@ class DirectSequencerConnection(
     // unlikely there will be any errors with this direct transport implementation
     SubscriptionErrorRetryPolicyPekko.never
 
+  override def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(
+      implicit traceContext: TraceContext
+  ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] =
+    ErrorUtil.internalError(
+      new UnsupportedOperationException(
+        s"$functionFullName is not implemented for DirectSequencerConnection"
+      )
+    )
 }
 
 object DirectSequencerConnection extends PrettyPrintingCompanion[DirectSequencerConnection] {

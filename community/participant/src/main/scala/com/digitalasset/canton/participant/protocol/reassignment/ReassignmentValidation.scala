@@ -137,6 +137,11 @@ object ReassignmentValidation {
   def isMultiSynchronizerFlagRequired(psid: PhysicalSynchronizerId): Boolean =
     psid.protocolVersion < ProtocolVersion.v37
 
+  /** The assignment exclusivity timeout is only enforced up to protocol version 36.
+    */
+  def isAssignmentExclusivityEnforced(psid: PhysicalSynchronizerId): Boolean =
+    psid.protocolVersion <= ProtocolVersion.v36
+
   def checkStakeholders(
       reassignmentRequest: FullReassignmentViewTree
   ): Either[ReassignmentValidationError, Unit] = {

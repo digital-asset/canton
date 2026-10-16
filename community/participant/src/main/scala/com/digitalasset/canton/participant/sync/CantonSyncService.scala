@@ -126,7 +126,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -1098,7 +1098,7 @@ class CantonSyncService(
       }
       operation = PendingOnboardingTransactions(
         transactions.sortBy(TopologyStore.initialParticipantDispatchingOrder),
-        ProtocolVersion.latest,
+        ReleaseProtocolVersion(ProtocolVersion.latest),
       )
         .toPendingOperation(synchronizerId, config.synchronizerAlias)
       _ <- pendingOnboardingTransactionsStore
