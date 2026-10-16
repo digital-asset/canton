@@ -15,7 +15,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v32}
 import com.digitalasset.canton.sequencer.api.v30 as v30Sequencer
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.TokenExpiration
@@ -57,14 +57,12 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
     .SubscriptionResponse(
       v30
         .SignedContent(
-          v31
+          v32
             .SequencedEvent(
               previousTimestamp = None,
               timestamp = 0,
               batch = Some(
-                v31.CompressedBatch(
-                  algorithm =
-                    v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED,
+                v32.CompressedBatch(
                   compressedEnvelopes = Seq(envelope.bytes),
                   compressedRecipients = ByteString.empty(),
                 )

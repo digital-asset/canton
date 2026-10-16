@@ -15,7 +15,7 @@ import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.{SyncCryptoError, SynchronizerCryptoClient}
+import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
@@ -40,6 +40,7 @@ import com.digitalasset.canton.participant.store.{
   PaginationTokenDone,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.protocol.AcsCommitmentLimits
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -66,6 +67,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MonadUtil, PekkoUtil}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.common.annotations.VisibleForTesting
 import com.google.rpc.status.Status
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
@@ -309,11 +311,14 @@ class AcsCommitmentSenderImpl(
   ): EitherT[FutureUnlessShutdown, AcsCommitmentSenderError, Unit] = {
     metrics.sendAttemptCount.inc()
 
+    val limits = cryptoApi.staticSynchronizerParameters.synchronizerLimits.acsCommitmentLimits
+
     sendAcsCommitmentBatchesRecursively(
       RecursionStep[digestJournal.SnapshotPaginationToken](
         paginationToken = Right(timepoint.offset)
       ),
       timepoint.recordTime,
+      limits,
     ).semiflatMap { _ =>
       increaseWatermark(timepoint)
     }.leftMap { error =>
@@ -331,6 +336,7 @@ class AcsCommitmentSenderImpl(
   private def sendSingleBatch(
       recursionStep: RecursionStep[digestJournal.SnapshotPaginationToken],
       timestamp: CantonTimestamp,
+      limits: AcsCommitmentLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, AcsCommitmentSenderError, Either[RecursionStep[
@@ -353,12 +359,17 @@ class AcsCommitmentSenderImpl(
       digestPartitionResult <- partitionDigestsForActiveAndInactiveCounterparticipants(digests)
       (internalDigestsForActive, internalDigestsForInactive) = digestPartitionResult
 
-      unsentDigests = internalDigestsForInactive.map { digest =>
-        DigestForCounterparticipant(
-          digest = digest.digest,
-          counterparticipant = digest.participantId.toLf,
-        )
-      }
+      unsentDigests <- EitherT.fromEither[FutureUnlessShutdown](
+        internalDigestsForInactive
+          .traverse(digest =>
+            DigestForCounterparticipant.create(
+              ProtocolVersionValidation.PV(synchronizerId.protocolVersion),
+              digest = digest.digest,
+              counterparticipant = digest.participantId.toLf,
+            )
+          )
+          .leftMap(AcsCommitmentSenderError.CommitmentCreationError.apply)
+      )
 
       _ = logger.info(
         s"Preparing the ACS commitments batch [timestamp=$timestamp, batchIndex=${recursionStep.batchIndex}, attemptNumber=${recursionStep.attemptNumber}, toSend=${internalDigestsForActive.size}, unsents=${unsentDigests.size}]"
@@ -366,14 +377,18 @@ class AcsCommitmentSenderImpl(
 
       nextBatchIndex <-
         if (internalDigestsForActive.nonEmpty || unsentDigests.nonEmpty) {
-          val commitments = internalDigestsForActive.map(commitmentFromDigest(_, timestamp))
-
           for {
+            commitments <- EitherT.fromEither[FutureUnlessShutdown](
+              internalDigestsForActive
+                .traverse(commitmentFromDigest(_, timestamp))
+                .leftMap(err => AcsCommitmentSenderError.CommitmentCreationError(err))
+            )
             protocolMessages <- MonadUtil
-              .parTraverseWithLimit(config.parallelism)(commitments)(
-                AcsCommitmentProtocolMessage.signAndCreate(cryptoApi, _)
+              .parTraverseWithLimit(config.parallelism)(commitments)(commitment =>
+                AcsCommitmentProtocolMessage
+                  .signAndCreate(cryptoApi, commitment, limits.maxCommitmentSizeBytes)
               )
-              .leftMap(AcsCommitmentSenderError.SigningError.apply)
+              .leftMap(AcsCommitmentSenderError.CommitmentCreationError.apply)
 
             commitmentEnvelopes = protocolMessages.map { protocolMessage =>
               OpenEnvelope(
@@ -390,18 +405,24 @@ class AcsCommitmentSenderImpl(
               )(synchronizerId.protocolVersion)
             }
 
+            acsCommitmentSummary <- EitherT.fromEither[FutureUnlessShutdown](
+              makeAcsCommitmentSummary(
+                counterparticipants = commitments.map(_.counterparticipant),
+                unsentDigests = unsentDigests,
+                commitmentTick = timestamp,
+                batchIndex = recursionStep.batchIndex,
+                lastBatch = pagination.isLeft,
+                sizeLimits = limits,
+              ).leftMap(AcsCommitmentSenderError.CommitmentCreationError.apply)
+            )
+
             acsCommitmentSummaryMessage <- AcsCommitmentSummaryProtocolMessage
               .signAndCreate(
                 cryptoApi,
-                makeAcsCommitmentSummary(
-                  counterparticipants = commitments.map(_.counterparticipant),
-                  unsentDigests = unsentDigests,
-                  commitmentTick = timestamp,
-                  batchIndex = recursionStep.batchIndex,
-                  lastBatch = pagination.isLeft,
-                ),
+                acsCommitmentSummary,
+                limits.maxCommitmentSummarySizeBytes,
               )
-              .leftMap(AcsCommitmentSenderError.SigningError.apply)
+              .leftMap(AcsCommitmentSenderError.CommitmentCreationError.apply)
 
             commitmentSummaryEnvelope = OpenEnvelope(
               acsCommitmentSummaryMessage,
@@ -418,6 +439,7 @@ class AcsCommitmentSenderImpl(
             _ <- sequencerClient
               .send(
                 batch,
+                currentSnapshotApproximation = None,
                 callback = sendCallback,
               )
               .leftMap[AcsCommitmentSenderError](
@@ -535,6 +557,7 @@ class AcsCommitmentSenderImpl(
   private def sendAcsCommitmentBatchesRecursively(
       initialRecursionStep: RecursionStep[digestJournal.SnapshotPaginationToken],
       timestamp: CantonTimestamp,
+      limits: AcsCommitmentLimits,
   )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, AcsCommitmentSenderError, Unit] =
@@ -547,13 +570,13 @@ class AcsCommitmentSenderImpl(
             EitherT(
               clock
                 .scheduleAfterCancelledOnShutdown(
-                  action = _ => sendSingleBatch(recursionStep, timestamp).value,
+                  action = _ => sendSingleBatch(recursionStep, timestamp, limits).value,
                   taskName = s"${getClass.getName}: send ACS commitments batch with a delay",
                   delta = DurationConverters.toJava(delay),
                 )
                 .flatten
             )
-          case None => sendSingleBatch(recursionStep, timestamp)
+          case None => sendSingleBatch(recursionStep, timestamp, limits)
         }
       }
 
@@ -581,7 +604,7 @@ class AcsCommitmentSenderImpl(
   private def commitmentFromDigest(
       digest: InternalAcsDigest,
       timestamp: CantonTimestamp,
-  ): AcsCommitment =
+  ): Either[String, AcsCommitment] =
     AcsCommitment.create(
       synchronizerId = synchronizerId,
       sender = participantId.toLf,
@@ -601,7 +624,8 @@ class AcsCommitmentSenderImpl(
       commitmentTick: CantonTimestamp,
       batchIndex: NonNegativeInt,
       lastBatch: Boolean,
-  ) = AcsCommitmentSummary.create(
+      sizeLimits: AcsCommitmentLimits,
+  ): Either[String, AcsCommitmentSummary] = AcsCommitmentSummary.create(
     psid = synchronizerId,
     commitmentTick = commitmentTick,
     addressedCounterparticipants = counterparticipants,
@@ -609,6 +633,7 @@ class AcsCommitmentSenderImpl(
     batchIndex = batchIndex,
     lastBatch = lastBatch,
     protocolVersion = synchronizerId.protocolVersion,
+    limits = sizeLimits,
   )
 }
 
@@ -747,7 +772,8 @@ object AcsCommitmentSender {
   }
 
   private[commitment] object AcsCommitmentSenderError {
-    final case class SigningError(error: SyncCryptoError) extends AcsCommitmentSenderError {
+
+    final case class CommitmentCreationError(error: String) extends AcsCommitmentSenderError {
       override val retryStrategy: RetryStrategy = RetryStrategy(retryDelay = None)
     }
 

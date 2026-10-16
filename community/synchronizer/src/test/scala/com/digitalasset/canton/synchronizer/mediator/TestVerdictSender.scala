@@ -13,6 +13,7 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -25,6 +26,7 @@ class TestVerdictSender(
     crypto: SynchronizerCryptoClient,
     mediatorId: MediatorId,
     sequencerSend: SequencerClientSend,
+    clock: Clock,
     loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, closeContext: CloseContext)
     extends DefaultVerdictSender(
@@ -39,6 +41,7 @@ class TestVerdictSender(
         delay = config.NonNegativeFiniteDuration.ofSeconds(1),
         parallelism = PositiveInt.two,
       ),
+      clock,
       loggerFactory,
     ) {
 

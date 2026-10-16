@@ -5,8 +5,9 @@ package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoPureApi}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.store.db.{DbTest, PostgresTest}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -19,14 +20,19 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
+  NamespaceDelegation,
   SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyMapping,
 }
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 import com.digitalasset.nonempty.NonEmpty
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 abstract class InitialTopologySnapshotValidatorTest
     extends TopologyTransactionHandlingBase
@@ -44,21 +50,89 @@ abstract class InitialTopologySnapshotValidatorTest
   )
 
   protected def mk(
-      store: TopologyStore[TopologyStoreId.SynchronizerStore]
+      store: TopologyStore[TopologyStoreId.SynchronizerStore],
+      validateInitialTopologySnapshot: Boolean = true,
+      maxTopologyUpdateBatchSize: PositiveInt = BatchingConfig().maxTopologyUpdateBatchSize,
   ): (InitialTopologySnapshotValidator, TopologyStore[TopologyStoreId.SynchronizerStore]) = {
 
     val validator = new InitialTopologySnapshotValidator(
       new SynchronizerCryptoPureApi(defaultStaticSynchronizerParameters, crypto),
       store,
-      BatchAggregatorConfig.defaultsForTesting,
-      TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
+      BatchingConfig().copy(
+        topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting,
+        maxTopologyUpdateBatchSize = maxTopologyUpdateBatchSize,
+      ),
+      TopologyConfig.forTesting
+        .copy(validateInitialTopologySnapshot = validateInitialTopologySnapshot),
       staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
       timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory,
-      cleanupTopologySnapshot = true,
     )
     (validator, store)
+  }
+
+  "Pekko groupedAdjacentBy" should {
+    // The docs don't say anything explicitly about the order, so we can have our own unit test
+    // that simulates the behavior of `validateAndApplyInitialTopologySnapshot`
+    "keep the order of the elements" in {
+      def topologyTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](
+          tx: SignedTopologyTransaction[Op, M],
+          sequenced: CantonTimestamp,
+          validFrom: CantonTimestamp,
+      ) = StoredTopologyTransaction(
+        SequencedTime(sequenced),
+        EffectiveTime(validFrom),
+        None,
+        tx,
+        None,
+      )
+
+      val ts1 = CantonTimestamp.ofEpochSecond(1)
+      val ts2 = CantonTimestamp.ofEpochSecond(2)
+      val ts3 = CantonTimestamp.ofEpochSecond(3)
+
+      val transactions: Seq[StoredTopologyTransaction[Replace, NamespaceDelegation]] = Seq(
+        topologyTransaction(ns1k1_k1, ts1, ts1),
+        topologyTransaction(ns1k3_k2_restrict_nsd, ts1, ts1),
+        topologyTransaction(ns1k1_k1, ts1, ts2),
+        topologyTransaction(ns6k3_k6, ts1, ts2),
+        topologyTransaction(ns1k1_k1, ts2, ts2),
+        topologyTransaction(ns1k2_k3, ts2, ts2),
+        topologyTransaction(ns6k3_k6, ts2, ts2),
+        topologyTransaction(ns1k1_k1, ts2, ts3),
+        topologyTransaction(ns1k2_k3, ts2, ts3),
+        topologyTransaction(ns3k3_k3, ts2, ts3),
+        topologyTransaction(ns6k3_k6, ts2, ts3),
+      )
+
+      val source = Source(transactions)
+
+      val result =
+        source.groupedAdjacentBy(tx => (tx.sequenced, tx.validFrom)).runWith(Sink.seq).futureValue
+
+      result shouldBe Seq(
+        Seq(
+          topologyTransaction(ns1k1_k1, ts1, ts1),
+          topologyTransaction(ns1k3_k2_restrict_nsd, ts1, ts1),
+        ),
+        Seq(
+          topologyTransaction(ns1k1_k1, ts1, ts2),
+          topologyTransaction(ns6k3_k6, ts1, ts2),
+        ),
+        Seq(
+          topologyTransaction(ns1k1_k1, ts2, ts2),
+          topologyTransaction(ns1k2_k3, ts2, ts2),
+          topologyTransaction(ns6k3_k6, ts2, ts2),
+        ),
+        Seq(
+          topologyTransaction(ns1k1_k1, ts2, ts3),
+          topologyTransaction(ns1k2_k3, ts2, ts3),
+          topologyTransaction(ns3k3_k3, ts2, ts3),
+          topologyTransaction(ns6k3_k6, ts2, ts3),
+        ),
+      )
+    }
   }
 
   "processing the initial topology snapshot" should {
@@ -99,6 +173,35 @@ abstract class InitialTopologySnapshotValidatorTest
       result shouldBe Right(())
       val stateAfterInitialization = fetch(store, timestampForInit.immediateSuccessor)
       validate(stateAfterInitialization, genesisState.result.map(_.transaction))
+    }
+
+    "store the same state with and without validation" in {
+      val timestampForInit = SignedTopologyTransaction.InitialTopologySequencingTime
+      // more transactions with the same effective time than fit into one batch
+      val genesisState = StoredTopologyTransactions(
+        List(ns1k1_k1, dmp1_k1, ns2k2_k2, ns3k3_k3, ns1k2_k1, okm1bk5k1E_k1, dtcp1_k1).map(tx =>
+          StoredTopologyTransaction(
+            SequencedTime(timestampForInit),
+            EffectiveTime(timestampForInit),
+            validUntil = None,
+            tx,
+            None,
+          )
+        )
+      )
+      def importAndHash(synchronizerId: PhysicalSynchronizerId, validate: Boolean) = {
+        val (validator, store) = mk(
+          mkStore(synchronizerId, s"validate-$validate"),
+          validateInitialTopologySnapshot = validate,
+          maxTopologyUpdateBatchSize = PositiveInt.two,
+        )
+        val result = validator.validateAndApplyInitialTopologySnapshot(genesisState).futureValueUS
+        result shouldBe Right(())
+        store.findEssentialStateHashAtSequencedTime(SequencedTime.MaxValue).futureValueUS
+      }
+
+      importAndHash(Factory.physicalSynchronizerId1a, validate = true) shouldBe
+        importAndHash(Factory.physicalSynchronizerId1, validate = false)
     }
 
     "successfully process the genesis state at topology initialization time ignoring missing signatures of signing keys" in {
@@ -168,6 +271,7 @@ abstract class InitialTopologySnapshotValidatorTest
         SignedTopologyTransaction
           .fromProtoV30(
             testedProtocolVersionValidation,
+            testedTopologyTransactionContext,
             protoWithDuplicateSig,
           )
           .value

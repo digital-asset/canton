@@ -4,10 +4,7 @@
 package com.digitalasset.canton.resource
 
 import better.files.*
-import cats.syntax.functorFilter.*
 import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.util.ReleaseUtils
-import com.digitalasset.canton.version.ReleaseVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Flyway SQL and Scala-based migrations should not be changed after we have Canton GA as that will
@@ -63,32 +60,7 @@ final class FlywayChecksumsTest extends AnyWordSpec {
       sha256Files: Seq[String],
       sqlFiles: Seq[String],
   ): Unit = {
-    // Throws if the string does not contain `major.minor` nor `initial`
-    def releaseVersionFrom(filename: String): Option[String] =
-      "\\d+\\.\\d+".r
-        .findFirstIn(filename)
-        .orElse(
-          if (filename.contains("initial"))
-            None
-          else
-            sys.error(
-              s"$filename or its .sql counterpart does not have a release version (major.minor)!"
-            )
-        )
-
-    val stableReleasedVersions = ReleaseUtils.previousSupportedStableReleases
-      .map { case ReleaseVersion(major, minor, _, _) => s"$major.$minor" }
-
-    val missingSqlChecksumFiles =
-      sqlFiles.map(_.replace(".sql", ".sha256")).diff(sha256Files).mapFilter { missingSha =>
-        val shaRequired = releaseVersionFrom(missingSha) match {
-          case Some(releaseVersion) => stableReleasedVersions.contains(releaseVersion)
-          case None =>
-            false // TODO(#16458) Should be true so that missing sha for initial migration makes the test fail
-        }
-
-        Option.when(shaRequired)(missingSha)
-      }
+    val missingSqlChecksumFiles = sqlFiles.map(_.replace(".sql", ".sha256")).diff(sha256Files)
 
     if (missingSqlChecksumFiles.nonEmpty) {
       sys.error(

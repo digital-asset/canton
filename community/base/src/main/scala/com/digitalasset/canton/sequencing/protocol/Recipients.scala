@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -13,8 +14,8 @@ import com.digitalasset.canton.logging.pretty.{
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 
 /** Recipients of a batch. Uses a list of
@@ -70,6 +71,8 @@ object Recipients extends PrettyPrintingCompanion[Recipients] {
       proto: v30.Recipients,
   ): ParsingResult[Recipients] = {
     val maxRecipientsTrees = synchronizerLimits.transactionProtocolLimits.maxRecipientsTrees
+    val maxRecipientsPerEnvelope =
+      synchronizerLimits.transactionProtocolLimits.maxRecipientsPerEnvelope
 
     for {
       trees <- ProtoValidation
@@ -77,9 +80,9 @@ object Recipients extends PrettyPrintingCompanion[Recipients] {
           proto.recipientsTree,
           "recipients_tree",
           pvv,
-          maxRecipientsTrees.value,
+          ValidationParam(ProtocolVersion.v36 -> maxRecipientsTrees),
         )((element, _) => RecipientsTree.fromProtoV30(pvv, synchronizerLimits, element))
-      recipients <- NonEmpty
+      recipientsNonEmpty <- NonEmpty
         .from(trees)
         .toRight(
           ProtoDeserializationError.ValueConversionError(
@@ -87,7 +90,19 @@ object Recipients extends PrettyPrintingCompanion[Recipients] {
             s"RecipientsTree.recipients must be non-empty",
           )
         )
-    } yield Recipients(recipients)
+      recipients = Recipients(recipientsNonEmpty)
+      _ <- ProtoValidation.validateCondition(
+        pvv,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> maxRecipientsPerEnvelope),
+      )(
+        max => recipients.allRecipients.sizeIs <= max.value,
+        max =>
+          InvariantViolation(
+            "recipients",
+            s"number of distinct recipients of a single envelope exceeds maximum of $max",
+          ),
+      )
+    } yield recipients
   }
 
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing a group of

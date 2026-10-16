@@ -62,7 +62,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
         participants.all.dars.upload(CantonExamplesPath)
       }
 
-  private val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+  private val synchronizerLimits = SynchronizerLimits.default
 
   def cryptoPureApi(config: LocalNodeConfig)(implicit ec: ExecutionContext): CryptoPureApi =
     JcePureCrypto

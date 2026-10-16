@@ -184,7 +184,7 @@ final class SyncStateInspection(
         syncPersistentStateManager
           .acsInspection(synchronizerAlias)
           .traverse(_.findContracts(exactId, filterPackage, filterTemplate, limit))
-          .failOnShutdownToAbortException("findContracts")
+          .onShutdown(throw new IllegalStateException("findContracts aborted due to shutdown"))
       },
       synchronizerAlias,
     )
@@ -361,7 +361,7 @@ final class SyncStateInspection(
         psid.protocolVersion,
         state.pureCryptoApi,
         // This method is called only from tests
-        SynchronizerLimits.defaultFor(psid.protocolVersion),
+        SynchronizerLimits.default,
       )
       if (warnOnDiscardedEnvelopes && openWithErrors.openingErrors.nonEmpty) {
         logger.warn(s"Discarding envelopes with errors: ${openWithErrors.openingErrors}")
@@ -390,7 +390,7 @@ final class SyncStateInspection(
               psid.protocolVersion,
               state.pureCryptoApi,
               // This method is called only from tests
-              SynchronizerLimits.defaultFor(psid.protocolVersion),
+              SynchronizerLimits.default,
             )
             .event
         )
@@ -1047,18 +1047,21 @@ final class SyncStateInspection(
         )
         persistentState.sequencedEventStore.delete(nextSequencerCounter)
       }
-      .failOnShutdownToAbortException("cleanSequencedEventStoreAboveCleanSynchronizerIndex")
+      .onShutdown(
+        throw new IllegalStateException(
+          "cleanSequencedEventStoreAboveCleanSynchronizerIndex was aborted due to shutdown"
+        )
+      )
 
     timeouts.inspection.await(functionFullName)(resultF)
   }
 
   def lookupDeduplicationData(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
-  ): Future[Option[CommandDeduplicationData]] =
+  ): FutureUnlessShutdown[Option[CommandDeduplicationData]] =
     participantNodePersistentState.value.commandDeduplicationStore
       .lookup(changeIdHash)
       .value
-      .failOnShutdownToAbortException("lookupDeduplicationData")
 }
 
 object SyncStateInspection {

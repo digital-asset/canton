@@ -92,7 +92,7 @@ trait BlockOrderer extends AutoCloseable {
     */
   def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): EitherT[Future, SequencerDeliverError, Unit]
 
   def health(implicit
       traceContext: TraceContext

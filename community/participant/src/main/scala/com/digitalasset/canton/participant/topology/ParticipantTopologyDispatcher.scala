@@ -198,7 +198,7 @@ class ParticipantTopologyDispatcher(
               SynchronizerTrustCertificate(
                 participantId,
                 logicalSynchronizerId,
-                requiredFeatureFlagsForPV.toSeq,
+                requiredFeatureFlagsForPV,
               ),
               serial = None,
               signingKeys = Seq.empty,

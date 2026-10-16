@@ -986,6 +986,16 @@ class BftOrderingMetrics private[metrics] (
           qualification = MetricQualification.Traffic,
         )
       )
+
+      val acceptedRetransmittedPrePreparesMeter: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "accepted-retransmitted-pre-prepares",
+          summary = "Accepted retransmitted pre-prepares",
+          description =
+            "Accepted retransmitted pre-prepares that were missing and got successfully processed due to retransmissions",
+          qualification = MetricQualification.Traffic,
+        )
+      )
     }
 
     // Private constructor to avoid being instantiated multiple times by accident

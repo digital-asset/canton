@@ -566,7 +566,19 @@ class SequencerReaderTest
         error <- leftOrFail(reader.read(alice, requestedTimestampInclusive = None))(
           "read disabled member"
         )
-      } yield error shouldBe CreateSubscriptionError.MemberDisabled(alice)
+      } yield error shouldBe CreateSubscriptionError.MemberNotActive(alice)
+    }
+
+    "attempting to read for an onboarding member returns error" in { env =>
+      import env.*
+
+      for {
+        _ <- store.registerMember(topologyClientMember, ts0)
+        _ <- store.registerOnboardingMember(alice, ts0)
+        error <- leftOrFail(reader.read(alice, requestedTimestampInclusive = None))(
+          "read onboarding member"
+        )
+      } yield error shouldBe CreateSubscriptionError.MemberNotActive(alice)
     }
 
     "waits for a signal that new events are available" in { env =>

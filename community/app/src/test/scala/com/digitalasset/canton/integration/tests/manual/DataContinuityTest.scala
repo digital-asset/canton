@@ -355,7 +355,7 @@ trait DataContinuityTest
       .focus(_.staticSynchronizerParameters.protocolVersion)
       .replace(pv)
       .focus(_.staticSynchronizerParameters.synchronizerLimits)
-      .replace(SynchronizerLimits.defaultFor(pv))
+      .replace(SynchronizerLimits.default)
 }
 
 trait DataContinuityTestFixturePostgres extends DataContinuityTest {

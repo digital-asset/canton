@@ -7,9 +7,9 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.*
 import com.digitalasset.canton.data.TransactionViewDecompositionFactory.{
   RollbackState,
-  TransactionRootViewLimitExceeded,
   TransactionSubViewLimitExceeded,
 }
+import com.digitalasset.canton.metrics.{CommonMockMetrics, TransactionViewMetrics}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.util.LfTransactionUtil
@@ -28,12 +28,14 @@ import com.digitalasset.daml.lf.transaction.test.{
   TestNodeBuilder,
   TreeTransactionBuilder,
 }
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
 @SuppressWarnings(Array("org.wartremover.warts.SizeIs"))
 class TransactionViewDecompositionTest
     extends AnyWordSpec
     with BaseTest
+    with BeforeAndAfterEach
     with HasExecutionContext
     with ComparesLfTransactions
     with NeedsNewLfContractIds {
@@ -42,17 +44,24 @@ class TransactionViewDecompositionTest
 
   val rollbackContextFactory: RollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
 
+  val transactionViewMetrics: TransactionViewMetrics = CommonMockMetrics.transactionViewMetrics
+
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+
+    transactionViewMetrics.subViews.updateValue(0)
+  }
+
   s"With factory ${factory.getClass.getSimpleName}" when {
 
     val exampleTransactionFactory = new ExampleTransactionFactory()()
     val examples = exampleTransactionFactory.standardHappyCases
 
     examples foreach { example =>
-      s"decomposing $example into views" must {
-
+      s"decomposing '$example' into views" must {
         def fromTransaction(
-            maxRootViews: PositiveInt,
-            maxSubViews: PositiveInt,
+            maxSubViews: PositiveInt = TransactionProtocolLimits.default.maxTransactionSubViews,
+            metrics: TransactionViewMetrics = transactionViewMetrics,
         ): Either[TransactionViewDecompositionFactory.TransactionViewLimitExceeded, List[NewView]] =
           factory
             .fromTransaction(
@@ -61,49 +70,33 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               Some(ExampleTransactionFactory.submitter),
               rollbackContextFactory,
-              limitConfig = Some(
-                TransactionViewLimitConfig(
-                  maxRootViews = maxRootViews,
-                  maxSubViews = maxSubViews,
-                  maxTreeDepth = PositiveInt.one, // Not used during decomposition
+              limits = Some(
+                TransactionProtocolLimits.default.copy(
+                  maxTransactionSubViews = maxSubViews
                 )
               ),
+              metrics = metrics,
             )
             .futureValueUS
             .map(_.toList)
 
-        val result = fromTransaction(
-          maxRootViews = TransactionProtocolLimits.max.maxTransactionRootViews,
-          maxSubViews = TransactionProtocolLimits.max.maxTransactionSubViews,
-        )
-        // As we use PositiveInt, ensure root and subview limits are always >= 1
-        val maxRootViewsLimit = example.rootViewDecompositions.size.max(1)
+        val result = fromTransaction()
+        // As we use PositiveInt, ensure subview limits are always >= 1
         val expectedSubViews = inside(result) { case Right(views) =>
           views
         }
         val maxSubViewsLimit = expectedSubViews.map(_.viewCount).maxOption.getOrElse(1)
 
-        "with zero root views and a maximal number of subviews" in {
+        "with one subview" in {
           val result = fromTransaction(
-            maxRootViews = PositiveInt.one,
-            maxSubViews = PositiveInt.tryCreate(maxSubViewsLimit),
-          )
-
-          inside(result) {
-            case Right(views) if maxRootViewsLimit <= 1 =>
-              views shouldEqual example.rootViewDecompositions.toList
-
-            case Left(TransactionRootViewLimitExceeded(viewCount, limit)) =>
-              viewCount shouldBe maxRootViewsLimit
-              limit shouldBe 1
-          }
-        }
-
-        "with a maximal number of root views and zero subviews" in {
-          val result = fromTransaction(
-            maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
             maxSubViews = PositiveInt.one,
+            metrics = transactionViewMetrics,
           )
+
+          transactionViewMetrics.subViews.getValue shouldBe example.rootViewDecompositions
+            .map(_.viewCount)
+            .maxOption
+            .getOrElse(0)
 
           inside(result) {
             case Right(views) if maxSubViewsLimit <= 1 =>
@@ -114,10 +107,9 @@ class TransactionViewDecompositionTest
           }
         }
 
-        "succeed with maximal root views and subviews" in {
+        "succeed with maximal subviews" in {
           val result = fromTransaction(
-            maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
-            maxSubViews = PositiveInt.tryCreate(maxSubViewsLimit),
+            maxSubViews = PositiveInt.tryCreate(maxSubViewsLimit)
           )
 
           inside(result) { case Right(actualSubViews) =>
@@ -125,26 +117,9 @@ class TransactionViewDecompositionTest
           }
         }
 
-        "fail with one fewer root view than the limit and a maximal number of subviews" in {
+        "fail with one fewer subview than the limit" in {
           val result = fromTransaction(
-            maxRootViews = PositiveInt.tryCreate(1.max(maxRootViewsLimit - 1)),
-            maxSubViews = PositiveInt.tryCreate(maxSubViewsLimit),
-          )
-
-          inside(result) {
-            case Right(views) if maxRootViewsLimit <= 1 =>
-              views shouldEqual example.rootViewDecompositions.toList
-
-            case Left(TransactionRootViewLimitExceeded(viewCount, limit)) =>
-              viewCount shouldBe maxRootViewsLimit
-              limit shouldBe 1.max(maxRootViewsLimit - 1)
-          }
-        }
-
-        "fail with a maximal number of root views and one fewer subview than the limit" in {
-          val result = fromTransaction(
-            maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
-            maxSubViews = PositiveInt.tryCreate(1.max(maxSubViewsLimit - 1)),
+            maxSubViews = PositiveInt.tryCreate(1.max(maxSubViewsLimit - 1))
           )
 
           inside(result) {
@@ -175,7 +150,8 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               None,
               rollbackContextFactory,
-              limitConfig = None,
+              limits = None,
+              metrics = transactionViewMetrics,
             )
             .value
             .failOnShutdown
@@ -193,13 +169,13 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               None,
               rollbackContextFactory,
-              limitConfig = Some(
-                TransactionViewLimitConfig(
-                  maxRootViews = PositiveInt.tryCreate(flatTransactionSize),
-                  maxSubViews = PositiveInt.one,
-                  maxTreeDepth = PositiveInt.one,
+              limits = Some(
+                TransactionProtocolLimits.default.copy(
+                  maxTransactionRootViews = PositiveInt.tryCreate(flatTransactionSize),
+                  maxTransactionSubViews = PositiveInt.one,
                 )
               ),
+              metrics = transactionViewMetrics,
             )
             .value
             .failOnShutdown
@@ -269,7 +245,8 @@ class TransactionViewDecompositionTest
             rollbackContextFactory.empty,
             None,
             rollbackContextFactory,
-            limitConfig = Some(TransactionViewLimitConfig.Off),
+            limits = Some(TransactionProtocolLimits.default),
+            metrics = transactionViewMetrics,
           )
           .futureValueUS
           .map(_.toList)
@@ -287,13 +264,13 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               None,
               rollbackContextFactory,
-              limitConfig = Some(
-                TransactionViewLimitConfig(
-                  maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
-                  maxSubViews = PositiveInt.one,
-                  maxTreeDepth = PositiveInt.one,
+              limits = Some(
+                TransactionProtocolLimits.default.copy(
+                  maxTransactionRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
+                  maxTransactionSubViews = PositiveInt.one,
                 )
               ),
+              metrics = transactionViewMetrics,
             )
             .futureValueUS
 
@@ -310,13 +287,13 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               None,
               rollbackContextFactory,
-              limitConfig = Some(
-                TransactionViewLimitConfig(
-                  maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
-                  maxSubViews = PositiveInt.tryCreate(maxSubViewsLimit),
-                  maxTreeDepth = PositiveInt.one,
+              limits = Some(
+                TransactionProtocolLimits.default.copy(
+                  maxTransactionRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
+                  maxTransactionSubViews = PositiveInt.tryCreate(maxSubViewsLimit),
                 )
               ),
+              metrics = transactionViewMetrics,
             )
             .futureValueUS
 
@@ -336,13 +313,13 @@ class TransactionViewDecompositionTest
               rollbackContextFactory.empty,
               None,
               rollbackContextFactory,
-              limitConfig = Some(
-                TransactionViewLimitConfig(
-                  maxRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
-                  maxSubViews = PositiveInt.tryCreate(1.max(maxSubViewsLimit - 1)),
-                  maxTreeDepth = PositiveInt.one,
+              limits = Some(
+                TransactionProtocolLimits.default.copy(
+                  maxTransactionRootViews = PositiveInt.tryCreate(maxRootViewsLimit),
+                  maxTransactionSubViews = PositiveInt.tryCreate(1.max(maxSubViewsLimit - 1)),
                 )
               ),
+              metrics = transactionViewMetrics,
             )
             .futureValueUS
 
@@ -494,6 +471,5 @@ object RollbackDecomposition {
         .toList
 
     go(init)
-
   }
 }

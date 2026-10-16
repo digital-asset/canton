@@ -685,6 +685,7 @@ final class ExternalCallProtocolIntegrationTest
       validatedExternalTransactionHash = None,
       crashAfterFailedValidation = false,
       hostedOnboardingPartiesO = None,
+      activationsDeactivationsOrderFO = FutureUnlessShutdown.pure(None),
     )
 
     responsesFactory

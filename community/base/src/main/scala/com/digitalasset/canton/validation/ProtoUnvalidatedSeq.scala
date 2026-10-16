@@ -18,7 +18,7 @@ import scala.language.implicitConversions
 
 /** The type a `repeated` proto field maps to. Exposes the length but not the elements: a collection
   * must not be processed before its length is checked, so the elements are reachable only through
-  * [[ProtoValidation.validateLength]] and the entry points built on it. Pretty printing is the one
+  * `ProtoValidation.validateLength` and the entry points built on it. Pretty printing is the one
   * exception, and caps what it renders itself.
   */
 final class ProtoUnvalidatedSeq[+E](private[validation] val elements: Seq[E])
@@ -86,9 +86,9 @@ object ProtoUnvalidatedSeq extends PrettyPrintingCompanion[ProtoUnvalidatedSeq[A
 
   /** scalapb hook named by the `collection.adapter` option, there for generated (de)serializers and
     * nothing else. MUST NOT be used directly: it hands out the elements with no length check, so
-    * every per-element step after it runs unbounded; read through
-    * [[ProtoValidation.validateLength]] instead. Generated code shares the `canton` package tree,
-    * so this is a convention, not a visibility guarantee.
+    * every per-element step after it runs unbounded; read through `validateLength` instead.
+    * Generated code shares the `canton` package tree, so this is a convention, not a visibility
+    * guarantee.
     *
     * One adapter serves every element type: `E` is inferred from the field's expected
     * `CollectionAdapter[E, ProtoUnvalidatedSeq[E]]`.

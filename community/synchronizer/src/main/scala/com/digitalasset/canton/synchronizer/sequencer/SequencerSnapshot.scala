@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.sequencer.admin.v30
+import com.digitalasset.canton.sequencer.admin.{v30, v31}
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationBySender,
   AggregationId,
@@ -41,43 +41,66 @@ final case class SequencerSnapshot(
     trafficPurchased: Seq[TrafficPurchased],
     trafficConsumed: Seq[TrafficConsumed],
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot.type])
-    extends HasProtocolVersionedWrapper[SequencerSnapshot]
+    extends HasProtocolVersionedWrapperE[SequencerSnapshot]
     with PrettyPrintingFromCompanion {
 
   @transient override protected lazy val companionObj: SequencerSnapshot.type = SequencerSnapshot
 
-  def toProtoV30: v30.SequencerSnapshot = {
-    def serializeInFlightAggregation(
-        args: (AggregationId, InFlightAggregation)
-    ): v30.SequencerSnapshot.InFlightAggregationWithId = {
-      // firstSequencingTimestamp is not serialized, because the sequencer that uses the sequencer snapshot to
-      // initialize itself, takes the lowest sequencing timestamp from aggregated senders and stores it as the first
-      // sequencing time for the aggregation.
-      val (
-        aggregationId,
-        InFlightAggregation(aggregatedSenders, maxSequencingTime, rule, _),
-      ) = args
-      v30.SequencerSnapshot.InFlightAggregationWithId(
-        aggregationId.toProtoPrimitive,
-        Some(rule.toProtoV30),
-        maxSequencingTime.toProtoPrimitive,
-        aggregatedSenders.toSeq.map {
-          case (sender, AggregationBySender(sequencingTimestamp, signatures)) =>
-            v30.SequencerSnapshot.AggregationBySender(
-              sender.toProtoPrimitive,
-              sequencingTimestamp.toProtoPrimitive,
-              signatures.map(sigsOnEnv =>
-                v30.SequencerSnapshot.SignaturesForEnvelope(sigsOnEnv.map(_.toProtoV30))
-              ),
-            )
+  private def serializeInFlightAggregation(
+      args: (AggregationId, InFlightAggregation)
+  ): v30.SequencerSnapshot.InFlightAggregationWithId = {
+    // firstSequencingTimestamp is not serialized, because the sequencer that uses the sequencer snapshot to
+    // initialize itself, takes the lowest sequencing timestamp from aggregated senders and stores it as the first
+    // sequencing time for the aggregation.
+    val (
+      aggregationId,
+      InFlightAggregation(aggregatedSenders, maxSequencingTime, rule, _),
+    ) = args
+    v30.SequencerSnapshot.InFlightAggregationWithId(
+      aggregationId.toProtoPrimitive,
+      Some(rule.toProtoV30),
+      maxSequencingTime.toProtoPrimitive,
+      aggregatedSenders.toSeq.map {
+        case (sender, AggregationBySender(sequencingTimestamp, signatures)) =>
+          v30.SequencerSnapshot.AggregationBySender(
+            sender.toProtoPrimitive,
+            sequencingTimestamp.toProtoPrimitive,
+            signatures.map(sigsOnEnv =>
+              v30.SequencerSnapshot.SignaturesForEnvelope(sigsOnEnv.map(_.toProtoV30))
+            ),
+          )
+      },
+    )
+  }
+
+  /** Fails if the pruning status contains a member that v30 cannot represent, see
+    * [[SequencerMemberStatus.toProtoV30]].
+    */
+  def toProtoV30: Either[String, v30.SequencerSnapshot] =
+    status.toProtoV30.map { statusP =>
+      v30.SequencerSnapshot(
+        latestTimestamp = lastTs.toProtoPrimitive,
+        lastBlockHeight = latestBlockHeight.toLong,
+        status = Some(statusP),
+        inFlightAggregations = inFlightAggregations.byId.toSeq.map(serializeInFlightAggregation),
+        additional =
+          additional.map(a => v30.ImplementationSpecificInfo(a.implementationName, a.info)),
+        trafficPurchased = trafficPurchased.map(_.toProtoV30),
+        trafficConsumed = trafficConsumed.map(_.toProtoV30),
+        memberPreviousTimestamps = previousTimestamps.toSeq.map { case (member, timestamp) =>
+          v30.SequencerSnapshot.MemberPreviousTimestamp(
+            member.toProtoPrimitive,
+            timestamp.map(_.toProtoPrimitive),
+          )
         },
       )
     }
 
-    v30.SequencerSnapshot(
+  def toProtoV31: v31.SequencerSnapshot =
+    v31.SequencerSnapshot(
       latestTimestamp = lastTs.toProtoPrimitive,
       lastBlockHeight = latestBlockHeight.toLong,
-      status = Some(status.toProtoV30),
+      status = Some(status.toProtoV31),
       inFlightAggregations = inFlightAggregations.byId.toSeq.map(serializeInFlightAggregation),
       additional =
         additional.map(a => v30.ImplementationSpecificInfo(a.implementationName, a.info)),
@@ -90,7 +113,6 @@ final case class SequencerSnapshot(
         )
       },
     )
-  }
 
   override def prettyCompanion: PrettyPrintingCompanion[SequencerSnapshot] = SequencerSnapshot
 
@@ -109,7 +131,7 @@ final case class SequencerSnapshot(
 }
 
 object SequencerSnapshot
-    extends VersioningCompanionContext[SequencerSnapshot, ProtocolVersion]
+    extends VersioningCompanionContext2E[SequencerSnapshot, SequencerSnapshot, ProtocolVersion]
     with PrettyPrintingCompanion[SequencerSnapshot] {
 
   override protected val pretty: Pretty[SequencerSnapshot] = prettyOfClass(
@@ -124,10 +146,15 @@ object SequencerSnapshot
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.SequencerSnapshot)(
+    ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(v30.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    // v31 can represent every member status, so its serialization never fails.
+    ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.v37)(v31.SequencerSnapshot)(
+      supportedProtoVersion(_)(fromProtoV31),
+      _.toProtoV31.asRight[String],
+    ),
   )
 
   override def name: String = "sequencer snapshot"
@@ -167,98 +194,102 @@ object SequencerSnapshot
     )
   }
 
+  private def parseInFlightAggregationWithId(expectedProtocolVersion: ProtocolVersion)(
+      proto: v30.SequencerSnapshot.InFlightAggregationWithId
+  ): ParsingResult[(AggregationId, InFlightAggregation)] = {
+    val v30.SequencerSnapshot.InFlightAggregationWithId(
+      aggregationIdP,
+      aggregationRuleP,
+      maxSequencingTimeP,
+      aggregatedSendersP,
+    ) = proto
+    for {
+      // TODO(#35385): Reinstate practical admin API limits for aggregated_senders, signatures_by_envelope,
+      //  signatures, member_previous_timestamps, in_flight_aggregations, traffic_purchased, and traffic_consumed.
+      aggregatedSendersP <- ProtoValidation.validateLength(
+        aggregatedSendersP,
+        "aggregated_senders",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )
+      aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
+      aggregationRule <- ProtoConverter.parseRequired(
+        AggregationRule
+          .fromProtoV30(
+            ProtocolVersionValidation(expectedProtocolVersion),
+            _,
+          ),
+        "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",
+        aggregationRuleP,
+      )
+      maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
+      aggregatedSenders <- aggregatedSendersP
+        .traverse {
+          case v30.SequencerSnapshot.AggregationBySender(
+                senderP,
+                sequencingTimestampP,
+                signaturesByEnvelopeP,
+              ) =>
+            for {
+              sender <- Member.fromProtoPrimitive(
+                senderP,
+                "v30.SequencerSnapshot.AggregationBySender.sender",
+              )
+              sequencingTimestamp <- CantonTimestamp.fromProtoPrimitive(sequencingTimestampP)
+              signaturesByEnvelopeP <- ProtoValidation.validateLength(
+                signaturesByEnvelopeP,
+                "signatures_by_envelope",
+                ProtocolVersionValidation.NoValidation,
+                ProtoValidation.MaxCollectionSize,
+              )
+              signatures <- signaturesByEnvelopeP.traverse {
+                case v30.SequencerSnapshot.SignaturesForEnvelope(sigsOnEnv) =>
+                  for {
+                    sigsOnEnv <- ProtoValidation.validateLength(
+                      sigsOnEnv,
+                      "signatures",
+                      ProtocolVersionValidation.NoValidation,
+                      ProtoValidation.MaxCollectionSize,
+                    )
+                    sigs <- sigsOnEnv.traverse(Signature.fromProtoV30)
+                  } yield sigs
+              }
+            } yield sender -> AggregationBySender(sequencingTimestamp, signatures)
+        }
+        .map(_.toMap)
+      inFlightAggregation <- InFlightAggregation
+        .create(
+          aggregatedSenders,
+          maxSequencingTime,
+          aggregationRule,
+        )
+        .leftMap(err => ProtoDeserializationError.InvariantViolation(field = None, err))
+    } yield aggregationId -> inFlightAggregation
+  }
+
+  private def parsePreviousTimestamps(
+      memberPreviousTimestamps: Seq[v30.SequencerSnapshot.MemberPreviousTimestamp]
+  ) =
+    ProtoValidation
+      .validateLengthThen(
+        memberPreviousTimestamps,
+        "member_previous_timestamps",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      ) { case (v30.SequencerSnapshot.MemberPreviousTimestamp(member, timestamp), _) =>
+        Member
+          .fromProtoPrimitive(member, "registeredMembers")
+          .flatMap(m => timestamp.traverse(CantonTimestamp.fromProtoPrimitive).map(m -> _))
+      }
+      .map(_.toMap)
+
   def fromProtoV30(
       expectedProtocolVersion: ProtocolVersion,
       request: v30.SequencerSnapshot,
-  ): ParsingResult[SequencerSnapshot] = {
-    def parseInFlightAggregationWithId(
-        proto: v30.SequencerSnapshot.InFlightAggregationWithId
-    ): ParsingResult[(AggregationId, InFlightAggregation)] = {
-      val v30.SequencerSnapshot.InFlightAggregationWithId(
-        aggregationIdP,
-        aggregationRuleP,
-        maxSequencingTimeP,
-        aggregatedSendersP,
-      ) = proto
-      for {
-        // TODO(#35385): Reinstate practical admin API limits for aggregated_senders, signatures_by_envelope,
-        //  signatures, member_previous_timestamps, in_flight_aggregations, traffic_purchased, and traffic_consumed.
-        aggregatedSendersP <- ProtoValidation.validateLength(
-          aggregatedSendersP,
-          "aggregated_senders",
-          ProtocolVersionValidation.NoValidation,
-          ProtoValidation.MaxCollectionSize,
-        )
-        aggregationId <- AggregationId.fromProtoPrimitive(aggregationIdP)
-        aggregationRule <- ProtoConverter.parseRequired(
-          AggregationRule
-            .fromProtoV30(
-              ProtocolVersionValidation(expectedProtocolVersion),
-              _,
-            ),
-          "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",
-          aggregationRuleP,
-        )
-        maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
-        aggregatedSenders <- aggregatedSendersP
-          .traverse {
-            case v30.SequencerSnapshot.AggregationBySender(
-                  senderP,
-                  sequencingTimestampP,
-                  signaturesByEnvelopeP,
-                ) =>
-              for {
-                sender <- Member.fromProtoPrimitive(
-                  senderP,
-                  "v30.SequencerSnapshot.AggregationBySender.sender",
-                )
-                sequencingTimestamp <- CantonTimestamp.fromProtoPrimitive(sequencingTimestampP)
-
-                signaturesByEnvelopeP <- ProtoValidation.validateLength(
-                  signaturesByEnvelopeP,
-                  "signatures_by_envelope",
-                  ProtocolVersionValidation.NoValidation,
-                  ProtoValidation.MaxCollectionSize,
-                )
-                signatures <- signaturesByEnvelopeP.traverse {
-                  case v30.SequencerSnapshot.SignaturesForEnvelope(sigsOnEnv) =>
-                    for {
-                      sigsOnEnv <- ProtoValidation.validateLength(
-                        sigsOnEnv,
-                        "signatures",
-                        ProtocolVersionValidation.NoValidation,
-                        ProtoValidation.MaxCollectionSize,
-                      )
-                      sigs <- sigsOnEnv.traverse(Signature.fromProtoV30)
-                    } yield sigs
-                }
-              } yield sender -> AggregationBySender(sequencingTimestamp, signatures)
-          }
-          .map(_.toMap)
-        inFlightAggregation <- InFlightAggregation
-          .create(
-            aggregatedSenders,
-            maxSequencingTime,
-            aggregationRule,
-          )
-          .leftMap(err => ProtoDeserializationError.InvariantViolation(field = None, err))
-      } yield aggregationId -> inFlightAggregation
-    }
-
+  ): ParsingResult[SequencerSnapshot] =
     for {
       lastTs <- CantonTimestamp.fromProtoPrimitive(request.latestTimestamp)
-      previousTimestamps <- ProtoValidation
-        .validateLengthThen(
-          request.memberPreviousTimestamps,
-          "member_previous_timestamps",
-          ProtocolVersionValidation.NoValidation,
-          ProtoValidation.MaxCollectionSize,
-        ) { case (v30.SequencerSnapshot.MemberPreviousTimestamp(member, timestamp), _) =>
-          Member
-            .fromProtoPrimitive(member, "registeredMembers")
-            .flatMap(m => timestamp.traverse(CantonTimestamp.fromProtoPrimitive).map(m -> _))
-        }
-        .map(_.toMap)
+      previousTimestamps <- parsePreviousTimestamps(request.memberPreviousTimestamps)
       status <- ProtoConverter.parseRequired(
         SequencerPruningStatus.fromProtoV30,
         "status",
@@ -270,7 +301,7 @@ object SequencerSnapshot
           "in_flight_aggregations",
           ProtocolVersionValidation.NoValidation,
           ProtoValidation.MaxCollectionSize,
-        )((proto, _) => parseInFlightAggregationWithId(proto))
+        )((proto, _) => parseInFlightAggregationWithId(expectedProtocolVersion)(proto))
         .map(_.toMap)
       trafficPurchased <- ProtoValidation.validateLengthThen(
         request.trafficPurchased,
@@ -299,7 +330,54 @@ object SequencerSnapshot
       trafficPurchased = trafficPurchased,
       trafficConsumed = trafficConsumed,
     )(rpv)
-  }
+
+  def fromProtoV31(
+      expectedProtocolVersion: ProtocolVersion,
+      request: v31.SequencerSnapshot,
+  ): ParsingResult[SequencerSnapshot] =
+    for {
+      lastTs <- CantonTimestamp.fromProtoPrimitive(request.latestTimestamp)
+      previousTimestamps <- parsePreviousTimestamps(request.memberPreviousTimestamps)
+      status <- ProtoConverter.parseRequired(
+        SequencerPruningStatus.fromProtoV31,
+        "status",
+        request.status,
+      )
+      inFlightAggregations <- ProtoValidation
+        .validateLengthThen(
+          request.inFlightAggregations,
+          "in_flight_aggregations",
+          ProtocolVersionValidation.NoValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((proto, _) => parseInFlightAggregationWithId(expectedProtocolVersion)(proto))
+        .map(_.toMap)
+      trafficPurchased <- ProtoValidation.validateLengthThen(
+        request.trafficPurchased,
+        "traffic_purchased",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )((tp, _) =>
+        TrafficPurchased.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tp)
+      )
+      trafficConsumed <- ProtoValidation.validateLengthThen(
+        request.trafficConsumed,
+        "traffic_consumed",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )((tc, _) =>
+        TrafficConsumed.fromProtoV30(ProtocolVersionValidation(expectedProtocolVersion), tc)
+      )
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+    } yield SequencerSnapshot(
+      lastTs,
+      request.lastBlockHeight,
+      previousTimestamps,
+      status,
+      InFlightAggregations.fromMap(inFlightAggregations),
+      request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
+      trafficPurchased = trafficPurchased,
+      trafficConsumed = trafficConsumed,
+    )(rpv)
 }
 
 final case class SequencerInitialState(

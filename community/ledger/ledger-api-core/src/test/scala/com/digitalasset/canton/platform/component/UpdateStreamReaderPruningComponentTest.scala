@@ -31,7 +31,6 @@ class UpdateStreamReaderPruningComponentTest
   private lazy val eventStorageBackend = dbSupport.storageBackendFactory.createEventStorageBackend(
     ledgerEndCache = ledgerEndCache,
     stringInterning = stringInterning,
-    loggerFactory = loggerFactory,
   )
 
   private val create1 = creates(nextRecordTime, 10)(1)

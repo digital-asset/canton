@@ -107,7 +107,7 @@ sealed trait MigrateAndStartIntegrationTest
     }
   )
 
-  // map all praticipants to the same db
+  // map all participants to the same db
   protected def adjustDbNames(name: String): String =
     if (name.startsWith("participant")) {
       dbPrefix + "_participant"

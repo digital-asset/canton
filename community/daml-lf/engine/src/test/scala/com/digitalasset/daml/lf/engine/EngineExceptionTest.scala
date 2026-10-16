@@ -123,12 +123,19 @@ trait EngineExceptionTestFixture extends Matchers with SuppressingLogging {
     engine
   }
 
+  protected def templatePayload(valid: Boolean) = Value.ValueRecord(
+    None,
+    ImmArray(
+      // field party
+      None -> Value.ValueParty(alice),
+      // field valid
+      None -> Value.ValueBool(valid),
+    ),
+  )
+
   protected def command(choiceName: String) = ApiCommand.CreateAndExercise(
     templateId.toRef,
-    Value.ValueRecord(
-      None,
-      ImmArray(None -> Value.ValueParty(alice), None -> Value.ValueBool(true)),
-    ),
+    templatePayload(valid = true),
     Ref.ChoiceName.assertFromString(choiceName),
     Value.ValueUnit,
   )
@@ -188,6 +195,25 @@ abstract class EngineExceptionTest(override protected val executionMode: Executi
           errorId shouldBe "UNHANDLED_EXCEPTION/M:E1"
           trace should include("M:T:Throwing")
           trace.indexOf("M:T:Throwing") should be < trace.indexOf("M:T:Middle")
+      }
+    }
+
+    "report the failing command when no exercise encloses the failure" in {
+      val engine = newEngine()
+      val createInvalid = ApiCommand.Create(templateId.toRef, templatePayload(valid = false))
+      val result = engine
+        .submit(
+          submitters = Set(alice),
+          cmds = ApiCommands(ImmArray(createInvalid), let, "exception-test"),
+          participantId = participantId,
+          submissionSeed = submissionSeed,
+          contractIdVersion = ContractIdVersion.V1,
+          interpretationConfig = InterpretationConfig.Dev,
+          prefetchKeys = Seq.empty,
+        )
+        .consume(lookupHandler(pkgs = allPkgs))
+      inside(result) { case Left(Error.Interpretation(_, trace)) =>
+        trace shouldBe Some("    in create command " + s"${pkgId.take(8)}:M:T.\n")
       }
     }
 
@@ -264,10 +290,7 @@ class EngineFailureStatusTest extends AnyWordSpec with Inside with EngineExcepti
   "Engine.computeInterfaceView" should {
     "convert an unhandled view exception to FailureStatus" in {
       val engine = newEngine()
-      val argument = Value.ValueRecord(
-        None,
-        ImmArray(None -> Value.ValueParty(alice), None -> Value.ValueBool(true)),
-      )
+      val argument = templatePayload(valid = true)
 
       inside(
         engine
@@ -288,10 +311,7 @@ class EngineFailureStatusTest extends AnyWordSpec with Inside with EngineExcepti
   "Engine.validateContractInstance" should {
     "return a structured error when the template precondition fails" in {
       val engine = newEngine()
-      val argument = Value.ValueRecord(
-        None,
-        ImmArray(None -> Value.ValueParty(alice), None -> Value.ValueBool(false)),
-      )
+      val argument = templatePayload(valid = false)
       val contractInstance = FatContractInstance.fromCreateNode(
         Node.Create(
           coid = TransactionBuilder.newCid,

@@ -152,6 +152,13 @@ private[canton] class DummyCopyTopologyStore(
   override def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = ???
+  override def findStoredByHashes(
+      asOfExclusive: CantonTimestamp,
+      hashes: Set[TxHash],
+      includeRejected: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[TxHash, GenericStoredTopologyTransaction]] = ???
   override def findTransactionsForMapping(
       asOfExclusive: EffectiveTime,
       hashes: NonEmpty[Set[MappingHash]],
@@ -240,6 +247,11 @@ private[canton] class DummyCopyTopologyStore(
   ] = ???
   override def findEssentialStateAtSequencedTime(
       asOfInclusive: SequencedTime,
+      includeRejected: Boolean,
+  )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed] = ???
+  override def findEssentialStateInInterval(
+      fromExclusiveO: Option[SequencedTime],
+      toInclusive: SequencedTime,
       includeRejected: Boolean,
   )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed] = ???
   override def findEssentialStateHashAtSequencedTime(asOfInclusive: SequencedTime)(implicit

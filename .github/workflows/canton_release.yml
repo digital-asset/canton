@@ -44,16 +44,6 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  package_sequencer_driver_api:
-    name: Package Sequencer Driver API
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_package_sequencer_driver_api.yml
-    secrets: inherit
-    with:
-      is_nightly_workflow: false
-      is_manual: false
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
   build_scaladoc:
     name: Build Scaladoc
     needs: [pick_runner, compile]
@@ -118,13 +108,26 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  release_test:
+    name: Release Test
+    needs: [pick_runner, package_community, package_kms_driver]
+    uses: ./.github/workflows/_release_test.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   notify:
     name: Notify on Failure
     needs:
       - pick_runner
       - compile
       - package_community
-      - package_sequencer_driver_api
       - build_scaladoc
       - package_jsonapi
       - package_kms_driver
@@ -132,7 +135,7 @@ jobs:
 #      - build_and_publish_docker
 #      - publish_libraries
 #      - publish_release
-#      - release_test
+      - release_test
       - tag_new_releases
 #      - run_propose_script
       - generate_data_continuity_dumps

@@ -69,6 +69,12 @@ service PartyManagementService {
   // successfully.
   rpc GetAddPartyStatus(GetAddPartyStatusRequest) returns (GetAddPartyStatusResponse);
 
+  // ACS replication endpoint.
+  //
+  // Status endpoint that given an acs_replication_request_id returns status information about progress,
+  // completion, or errors of the specified ACS replication.
+  rpc GetAcsReplicationStatus(GetAcsReplicationStatusRequest) returns (GetAcsReplicationStatusResponse);
+
   // Offline party replication focussed ACS export.
   //
   // Exports the ACS of a single party from a source participant, so that the party can be
@@ -197,6 +203,33 @@ message GetAddPartyStatusResponse {
   PartyReplicationStatus status = 1;
 }
 
+// Request to obtain information about progress, completion, or errors of the specified ACS replication.
+// The request id is obtained from a return value of triggering an operation that uses
+// sequencer channel-based ACS replication, such as AddPartyAsync or GetRemoteAcs.
+message GetAcsReplicationStatusRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The ACS replication request ID returned by either AddPartyAsync or get_remote_acs
+  // Required
+  string acs_replication_request_id = 1;
+}
+
+// Information about the progress, completion, or errors of the specified ACS replication.
+// Note that the status reflects the state as perceived by this participant and does not
+// imply the state of other participants.
+//
+// The status on the target participant is more authoritative as the target participant drives
+// the process of the ACS replication by proposing the sequencer channel and asking
+// the source participant to send the contracts in batches. Also, target participant has the option
+// of persisting the ACS replication progress and resume later in case of interruption.
+//
+// ACS replication should only be considered successfully completed once target participant indicates so.
+message GetAcsReplicationStatusResponse {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  AcsReplicationStatus status = 1;
+}
+
 // The PartyReplicationStatus describes the various pieces of state of a party replication.
 message PartyReplicationStatus {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
@@ -255,31 +288,6 @@ message PartyReplicationStatus {
     REPLICATION_MODE_SEQUENCER_CHANNEL = 2;
   }
 
-  // Status of the sequencer channel-based ACS replication.
-  message AcsReplicationStatus {
-    // Agreement among participants to replicate the ACS via sequencer channel.
-    message SequencerChannelAgreement {
-      // Sequencer hosting the channel for ACS replication.
-      string sequencer_uid = 1;
-    }
-
-    // Error message when disconnected or operator intervention needed.
-    message AcsReplicationError {
-      // Error message.
-      // required
-      string error_message = 1;
-    }
-
-    // Sequencer channel agreement for ACS replication.
-    // required for ACS-based replication
-    SequencerChannelAgreement agreement = 1;
-    // Whether replicating the ACS via sequencer channel has completed.
-    bool has_completed = 2;
-    // ACS replication error.
-    // optional, set when there is a transient or terminal error.
-    AcsReplicationError error_message = 3;
-  }
-
   // Static party replication parameters.
   // required
   ReplicationParameters parameters = 1;
@@ -304,6 +312,85 @@ message PartyReplicationStatus {
   AcsReplicationStatus acs_replication_status = 7;
   // File-based or sequencer channel-based ACS replication mode.
   ReplicationMode replication_mode = 8;
+}
+
+// Status of the sequencer channel-based ACS replication.
+message AcsReplicationStatus {
+  // Static ACS replication parameters.
+  // Provided at the beginning of the ACS replication.
+  message AcsReplicationParameters {
+    // Request id of the operation that triggered the ACS replication,
+    // e.g. AddPartyAsync (online party replication) or GetRemoteAcs.
+    //
+    // For example, in case of online party replication,
+    // the OnPR request id is the same as the corresponding ACS replication request id.
+    // required
+    string request_id = 1;
+    string party_id = 2;
+    string synchronizer_id = 3;
+    string source_participant_uid = 4;
+    string target_participant_uid = 5;
+    // Timestamp of the ACS snapshot that is being replicated.
+    // required
+    google.protobuf.Timestamp timestamp = 6;
+  }
+
+  // Agreement among participants to replicate the ACS via sequencer channel.
+  message SequencerChannelAgreement {
+    // Sequencer hosting the channel for ACS replication.
+    string sequencer_uid = 1;
+  }
+
+  // Topology transaction that confirms that party is hosted by both source and target participant.
+  // Used only for status reporting purposes, not for ACS replication logic.
+  message PartyToParticipantTopologyTransaction {
+    // The timestamp at which the party-to-participant topology transaction became effective
+    // required
+    google.protobuf.Timestamp valid_from = 1;
+  }
+
+  // Progress of ACS replication.
+  message AcsReplicationProgress {
+    // Non negative running total (odometer) of ACS contracts sent by the source or persisted by the target participant.
+    // required
+    uint64 processed_contract_count = 1;
+    // The homomorphic hash bytes of the portion of the ACS replicated so far
+    // optional, present if and only if processed_contract_count higher than zero
+    optional bytes acs_hash = 2;
+    // Whether replication has been fully processed the ACS
+    // required
+    bool fully_processed_acs = 3;
+  }
+
+  // Error message when disconnected or operator intervention needed.
+  message AcsReplicationError {
+    // Error message.
+    // required
+    string error_message = 1;
+    // Whether the error is terminal and cannot be recovered from.
+    // required
+    bool is_terminal = 2;
+  }
+
+  // Static ACS replication parameters.
+  // required
+  AcsReplicationParameters parameters = 1;
+  // Topology transaction that confirms that party is hosted by both source and target participant.
+  // Used only for status reporting purposes, not for ACS replication logic.
+  // optional, set once the party-to-participant topology transaction has been verified
+  // at the beginning of the ACS replication (verification consists of finding
+  // a party-to-participant topology transaction such that it contains mapping of party
+  // to both source and target participant).
+  PartyToParticipantTopologyTransaction ptp_topology_transaction = 2;
+  // ACS replication progress.
+  // optional, set once the ACS replication has started.
+  AcsReplicationProgress replication_progress = 3;
+  // Whether replicating the ACS has completed.
+  // required
+  bool has_completed = 4;
+  // ACS replication error.
+  // optional, set when there is a transient or terminal error.
+  AcsReplicationError error_message = 5;
 }
 
 // Enum indicating the permission level of the party on the target participant.

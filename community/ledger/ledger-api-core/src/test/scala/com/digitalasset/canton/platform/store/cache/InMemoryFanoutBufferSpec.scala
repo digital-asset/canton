@@ -41,17 +41,54 @@ class InMemoryFanoutBufferSpec
   private val firstOffset = offset(1L)
   private val offsets = offsetIdx.map(i => offset(i.toLong))
   private val someSynchronizerId = SynchronizerId.tryFromString("some::synchronizer id")
+  private val otherSynchronizerId = SynchronizerId.tryFromString("other::synchronizer id")
+  private val recordTimes = Vector(
+    Time.Timestamp.Epoch,
+    makeRecordTime(10),
+    makeRecordTime(5),
+    makeRecordTime(15),
+    makeRecordTime(20),
+    makeRecordTime(25),
+  )
 
   private val IdentityFilter: TransactionLogUpdate => Option[TransactionLogUpdate] =
     tracedUpdate => Some(tracedUpdate)
 
+  private def makeRecordTime(micros: Int): Time.Timestamp =
+    Time.Timestamp.Epoch.addMicros(micros.toLong)
+
   inside(offsets) { case Seq(offset1, offset2, offset3, offset4, offset5) =>
-    val txAccepted1 = txAccepted(1L, offset1)
-    val reassignmentAccepted2 = reassignmentAccepted(2L, offset2)
-    val txAccepted3 = txAccepted(3L, offset3)
-    val topologyTxAccepted4 = topologyTxAccepted(4L, offset4)
+    val txAccepted1 = txAccepted(
+      1L,
+      offset1,
+      recordTime = recordTimes(1),
+      synchronizerId = someSynchronizerId.toProtoPrimitive,
+    )
+    val reassignmentAccepted2 = reassignmentAccepted(
+      2L,
+      offset2,
+      recordTime = recordTimes(2),
+      synchronizerId = otherSynchronizerId.toProtoPrimitive,
+    )
+    val txAccepted3 = txAccepted(
+      3L,
+      offset3,
+      recordTime = recordTimes(3),
+      synchronizerId = someSynchronizerId.toProtoPrimitive,
+    )
+    val topologyTxAccepted4 = topologyTxAccepted(
+      4L,
+      offset4,
+      recordTime = recordTimes(4),
+      synchronizerId = someSynchronizerId.toProtoPrimitive,
+    )
     val bufferValues = Seq(txAccepted1, reassignmentAccepted2, txAccepted3, topologyTxAccepted4)
-    val txAccepted5 = txAccepted(5L, offset5)
+    val txAccepted5 = txAccepted(
+      5L,
+      offset5,
+      recordTime = recordTimes(5),
+      synchronizerId = someSynchronizerId.toProtoPrimitive,
+    )
     val bufferElements = offsets.zip(bufferValues)
     val LastOffset = offset4
 
@@ -156,7 +193,14 @@ class InMemoryFanoutBufferSpec
           )
 
           // Enqueue a rejected transaction
-          buffer.push(txRejected(5L, offset5))
+          buffer.push(
+            txRejected(
+              5L,
+              offset5,
+              recordTime = makeRecordTime(30),
+              synchronizerId = someSynchronizerId.toProtoPrimitive,
+            )
+          )
 
           // Assert the last element is evicted on full buffer
           verifyLookupAbsent(buffer, txAccepted1)
@@ -179,7 +223,14 @@ class InMemoryFanoutBufferSpec
           ) { buffer =>
             (0 until 1000).foreach { idx =>
               val updateOffset = offset(idx.toLong)
-              buffer.push(txAccepted(idx.toLong, updateOffset))
+              buffer.push(
+                txAccepted(
+                  idx.toLong,
+                  updateOffset,
+                  recordTime = makeRecordTime(30 + idx * 10),
+                  synchronizerId = someSynchronizerId.toProtoPrimitive,
+                )
+              )
             } // fill buffer to max size
 
             val pushExecutor, sliceExecutor =
@@ -188,7 +239,12 @@ class InMemoryFanoutBufferSpec
             (0 until 1000).foreach { idx =>
               val expected = ((idx + 901) to (1000 + idx)).map { idx =>
                 val updateOffset = offset(idx.toLong)
-                updateOffset -> txAccepted(idx.toLong, updateOffset)
+                updateOffset -> txAccepted(
+                  idx.toLong,
+                  updateOffset,
+                  recordTime = makeRecordTime(30 + idx * 10),
+                  synchronizerId = someSynchronizerId.toProtoPrimitive,
+                )
               }
 
               implicit val ec: ExecutionContextExecutorService = pushExecutor
@@ -200,7 +256,14 @@ class InMemoryFanoutBufferSpec
                   val updateOffset = offset(lastInsertedIdx)
                   for {
                     _ <- Future(
-                      buffer.push(txAccepted(lastInsertedIdx, updateOffset))
+                      buffer.push(
+                        txAccepted(
+                          lastInsertedIdx,
+                          updateOffset,
+                          recordTime = makeRecordTime(30 + (1000 + idx) * 10),
+                          synchronizerId = someSynchronizerId.toProtoPrimitive,
+                        )
+                      )
                     )(
                       pushExecutor
                     )
@@ -566,14 +629,26 @@ class InMemoryFanoutBufferSpec
       "hash-based lookup" should {
         "find a transaction by its hash" in {
           val hash = mkHash("hash-1")
-          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          val txWithHash = txAccepted(
+            10L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
             buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe Some(txWithHash)
           }
         }
 
         "return None for a hash that is not in the buffer" in {
-          val txWithHash = txAccepted(10L, offset(20L), Some(mkHash("hash-2")))
+          val txWithHash = txAccepted(
+            10L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(mkHash("hash-2")),
+          )
           withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
             buffer.lookup(
               LookupKey.ByHash(mkHash("nonexistent").unwrap)
@@ -583,13 +658,29 @@ class InMemoryFanoutBufferSpec
 
         "evict hash from hash map when entry is dropped" in {
           val hash = mkHash("hash-3")
-          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          val txWithHash = txAccepted(
+            10L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(
             2,
             Vector(
               offset(20L) -> txWithHash,
-              offset(21L) -> txAccepted(11L, offset(21L)),
-              offset(22L) -> txAccepted(12L, offset(22L)),
+              offset(21L) -> txAccepted(
+                11L,
+                offset(21L),
+                recordTime = makeRecordTime(40),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              ),
+              offset(22L) -> txAccepted(
+                12L,
+                offset(22L),
+                recordTime = makeRecordTime(50),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              ),
             ),
           ) { buffer =>
             buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe None
@@ -598,7 +689,13 @@ class InMemoryFanoutBufferSpec
 
         "clear hash map on flush" in {
           val hash = mkHash("hash-4")
-          val txWithHash = txAccepted(10L, offset(20L), Some(hash))
+          val txWithHash = txAccepted(
+            10L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(10, Vector(offset(20L) -> txWithHash)) { buffer =>
             buffer.flush()
             buffer.lookup(LookupKey.ByHash(hash.unwrap)) shouldBe None
@@ -607,7 +704,17 @@ class InMemoryFanoutBufferSpec
         }
 
         "not add entries without hash to hash map" in {
-          withBuffer(10, Vector(offset(20L) -> txAccepted(10L, offset(20L)))) { buffer =>
+          withBuffer(
+            10,
+            Vector(
+              offset(20L) -> txAccepted(
+                10L,
+                offset(20L),
+                recordTime = makeRecordTime(30),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              )
+            ),
+          ) { buffer =>
             buffer._acceptedByHash shouldBe empty
           }
         }
@@ -616,14 +723,25 @@ class InMemoryFanoutBufferSpec
       "rejection indexing" should {
         "index a rejection with hash in _rejectionsByHash" in {
           val hash = mkHash("rej-hash-1")
-          val rejected = txRejected(5L, offset(20L), Some(hash))
+          val rejected = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
             buffer._rejectionsByHash(hash.unwrap) shouldBe Vector(rejected)
           }
         }
 
         "not index a rejection without hash" in {
-          val rejected = txRejected(5L, offset(20L))
+          val rejected = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+          )
           withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
             buffer._rejectionsByHash shouldBe empty
           }
@@ -631,9 +749,27 @@ class InMemoryFanoutBufferSpec
 
         "store multiple rejections for the same hash newest-first" in {
           val hash = mkHash("rej-hash-2")
-          val rejected1 = txRejected(5L, offset(20L), Some(hash))
-          val rejected2 = txRejected(6L, offset(21L), Some(hash))
-          val rejected3 = txRejected(7L, offset(22L), Some(hash))
+          val rejected1 = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
+          val rejected2 = txRejected(
+            6L,
+            offset(21L),
+            recordTime = makeRecordTime(35),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
+          val rejected3 = txRejected(
+            7L,
+            offset(22L),
+            recordTime = makeRecordTime(40),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(
             10,
             Vector(
@@ -652,14 +788,31 @@ class InMemoryFanoutBufferSpec
 
         "evict oldest rejection from vector on drop" in {
           val hash = mkHash("rej-hash-3")
-          val rejected1 = txRejected(5L, offset(20L), Some(hash))
-          val rejected2 = txRejected(6L, offset(21L), Some(hash))
+          val rejected1 = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(20),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
+          val rejected2 = txRejected(
+            6L,
+            offset(21L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(
             2,
             Vector(
               offset(20L) -> rejected1,
               offset(21L) -> rejected2,
-              offset(22L) -> txAccepted(7L, offset(22L)),
+              offset(22L) -> txAccepted(
+                7L,
+                offset(22L),
+                recordTime = makeRecordTime(40),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              ),
             ),
           ) { buffer =>
             // rejected1 should have been evicted (buffer size 2; 3 entries pushed)
@@ -669,13 +822,29 @@ class InMemoryFanoutBufferSpec
 
         "remove hash key when last rejection is evicted" in {
           val hash = mkHash("rej-hash-4")
-          val rejected1 = txRejected(5L, offset(20L), Some(hash))
+          val rejected1 = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(
             2,
             Vector(
               offset(20L) -> rejected1,
-              offset(21L) -> txAccepted(6L, offset(21L)),
-              offset(22L) -> txAccepted(7L, offset(22L)),
+              offset(21L) -> txAccepted(
+                6L,
+                offset(21L),
+                recordTime = makeRecordTime(40),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              ),
+              offset(22L) -> txAccepted(
+                7L,
+                offset(22L),
+                recordTime = makeRecordTime(50),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+              ),
             ),
           ) { buffer =>
             buffer._rejectionsByHash should not contain key(hash.unwrap)
@@ -684,8 +853,20 @@ class InMemoryFanoutBufferSpec
 
         "lookupCompletionsByHash returns both accepted and rejections" in {
           val hash = mkHash("rej-hash-5")
-          val accepted = txAccepted(5L, offset(20L), Some(hash))
-          val rejected = txRejected(6L, offset(21L), Some(hash))
+          val accepted = txAccepted(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(20),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            hash = Some(hash),
+          )
+          val rejected = txRejected(
+            6L,
+            offset(21L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            hash = Some(hash),
+          )
           withBuffer(
             10,
             Vector(
@@ -702,7 +883,15 @@ class InMemoryFanoutBufferSpec
         "lookupCompletionsByHash returns empty for unknown hash" in {
           withBuffer(
             10,
-            Vector(offset(20L) -> txAccepted(5L, offset(20L), Some(mkHash("known")))),
+            Vector(
+              offset(20L) -> txAccepted(
+                5L,
+                offset(20L),
+                recordTime = makeRecordTime(30),
+                synchronizerId = someSynchronizerId.toProtoPrimitive,
+                Some(mkHash("known")),
+              )
+            ),
           ) { buffer =>
             val (acc, rejs) = buffer.lookupCompletionsByHash(mkHash("unknown").unwrap)
             acc shouldBe None
@@ -712,7 +901,13 @@ class InMemoryFanoutBufferSpec
 
         "flush clears _rejectionsByHash" in {
           val hash = mkHash("rej-hash-6")
-          val rejected = txRejected(5L, offset(20L), Some(hash))
+          val rejected = txRejected(
+            5L,
+            offset(20L),
+            recordTime = makeRecordTime(30),
+            synchronizerId = someSynchronizerId.toProtoPrimitive,
+            Some(hash),
+          )
           withBuffer(10, Vector(offset(20L) -> rejected)) { buffer =>
             buffer.flush()
             buffer._rejectionsByHash shouldBe empty
@@ -724,6 +919,183 @@ class InMemoryFanoutBufferSpec
         "yield the index gt the searched entry" in {
           InMemoryFanoutBuffer.indexAfter(InsertionPoint(3)) shouldBe 3
           InMemoryFanoutBuffer.indexAfter(Found(3)) shouldBe 4
+        }
+      }
+    }
+
+    inside(bufferElements) { case Seq(entry1, entry2, entry3, entry4) =>
+      "record time to synchronizer lookup" when {
+        "adding new elements" should {
+          "remove entries from the synchronizer map when all elements are removed from the buffer" in {
+            withBuffer(maxBufferSize = 2) { buffer =>
+              buffer._synchronizerRecordTimes.keySet should equal(
+                Set(someSynchronizerId.toProtoPrimitive)
+              )
+              buffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+                otherSynchronizerId.toProtoPrimitive,
+                recordTimes(2),
+              ) shouldBe empty
+            }
+          }
+
+          "remove old entries from the synchronizer map when elements are removed from the buffer" in {
+            withBuffer(maxBufferSize = 2) { buffer =>
+              buffer._synchronizerRecordTimes(someSynchronizerId.toProtoPrimitive) shouldBe (Vector(
+                entry3._2,
+                entry4._2,
+              ))
+              buffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+                someSynchronizerId.toProtoPrimitive,
+                recordTimes(2),
+              ) shouldBe empty
+              buffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+                someSynchronizerId.toProtoPrimitive,
+                recordTimes(3),
+              ) shouldBe empty
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  someSynchronizerId.toProtoPrimitive,
+                  recordTimes(4),
+                )
+                .value shouldBe (entry4._2)
+            }
+          }
+
+        }
+
+        "pruning" should {
+          "remove elements from synchronizer record time map" in {
+            withBuffer() { buffer =>
+              buffer.prune(offset3)
+              buffer._synchronizerRecordTimes.keySet should equal(
+                Set(someSynchronizerId.toProtoPrimitive)
+              )
+              buffer._synchronizerRecordTimes(someSynchronizerId.toProtoPrimitive) shouldBe (Vector(
+                entry4._2
+              ))
+            }
+          }
+        }
+
+        "asked about the first matching offset in the buffer" should {
+          "return None" in {
+            withBuffer() { buffer =>
+              buffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+                someSynchronizerId.toProtoPrimitive,
+                recordTimes(1),
+              ) shouldBe None
+              buffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+                otherSynchronizerId.toProtoPrimitive,
+                recordTimes(2),
+              ) shouldBe None
+            }
+          }
+        }
+
+        "asked about the record time not in the buffer" should {
+          "return the value for the time less than requested" in {
+            withBuffer() { buffer =>
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  someSynchronizerId.toProtoPrimitive,
+                  recordTimes(4).addMicros(10),
+                )
+                .value
+                .offset shouldBe offset4
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  otherSynchronizerId.toProtoPrimitive,
+                  recordTimes(3),
+                )
+                .value
+                .offset shouldBe offset2
+            }
+          }
+        }
+
+        "asked about the record time that is not the first one for the synchronizer in the buffer" should {
+          "return the value for this time point" in {
+            withBuffer() { buffer =>
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  someSynchronizerId.toProtoPrimitive,
+                  recordTimes(3),
+                )
+                .value
+                .offset shouldBe offset3
+            }
+          }
+        }
+
+        "adding several updates with the same record time" should {
+          val elements = Vector(
+            offset(19L) -> txAccepted(
+              19,
+              offset(19L),
+              makeRecordTime(5),
+              someSynchronizerId.toProtoPrimitive,
+            ),
+            offset(20L) -> txAccepted(
+              20,
+              offset(20L),
+              makeRecordTime(10),
+              someSynchronizerId.toProtoPrimitive,
+            ),
+            offset(21L) -> txAccepted(
+              21,
+              offset(21L),
+              makeRecordTime(10),
+              someSynchronizerId.toProtoPrimitive,
+            ),
+            offset(22L) -> topologyTxAccepted(
+              22,
+              offset(22L),
+              makeRecordTime(10),
+              someSynchronizerId.toProtoPrimitive,
+            ),
+          )
+          "put the updates in the same order in the map" in {
+            withBuffer(elems = elements) { buffer =>
+              buffer
+                ._synchronizerRecordTimes(someSynchronizerId.toProtoPrimitive) shouldBe (elements
+                .map(_._2)
+                .toVector)
+            }
+          }
+          "prune vector elements from synchronizer record time offset map" in {
+            withBuffer(elems = elements) { buffer =>
+              buffer.prune(offset(21L))
+
+              buffer
+                ._synchronizerRecordTimes(someSynchronizerId.toProtoPrimitive) shouldBe (Vector(
+                elements(3)._2
+              ))
+            }
+          }
+
+          "return the first element of the vector on record time for this time" in {
+            withBuffer(elems = elements) { buffer =>
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  someSynchronizerId.toProtoPrimitive,
+                  makeRecordTime(10),
+                )
+                .value
+                .offset shouldBe offset(20L)
+            }
+          }
+
+          "return the last element of the vector on record time for time after" in {
+            withBuffer(elems = elements) { buffer =>
+              buffer
+                .lookupLastOffsetBeforeOrFirstAtRecordTime(
+                  someSynchronizerId.toProtoPrimitive,
+                  makeRecordTime(20),
+                )
+                .value
+                .offset shouldBe offset(22L)
+            }
+          }
         }
       }
     }
@@ -751,7 +1123,13 @@ class InMemoryFanoutBufferSpec
       HashAlgorithm.Sha256,
     )
 
-  private def txAccepted(idx: Long, offset: Offset, hash: Option[Hash] = None) =
+  private def txAccepted(
+      idx: Long,
+      offset: Offset,
+      recordTime: Time.Timestamp,
+      synchronizerId: String,
+      hash: Option[Hash] = None,
+  ) =
     TransactionLogUpdate.TransactionAccepted(
       updateId = TestUpdateId(s"tx-$idx").toHexString,
       workflowId = s"workflow-$idx",
@@ -760,12 +1138,18 @@ class InMemoryFanoutBufferSpec
       events = Vector.empty,
       completionStreamResponseO = None,
       commandId = "",
-      synchronizerId = someSynchronizerId.toProtoPrimitive,
-      recordTime = Time.Timestamp.Epoch,
+      synchronizerId = synchronizerId,
+      recordTime = recordTime,
       transactionHash = hash,
     )
 
-  private def txRejected(idx: Long, offset: Offset, hash: Option[Hash] = None) =
+  private def txRejected(
+      idx: Long,
+      offset: Offset,
+      recordTime: Time.Timestamp,
+      synchronizerId: String,
+      hash: Option[Hash] = None,
+  ) =
     TransactionLogUpdate.TransactionRejected(
       offset = offset,
       completionStreamResponse = CompletionStreamResponse.defaultInstance.withCompletion(
@@ -774,16 +1158,23 @@ class InMemoryFanoutBufferSpec
           transactionHash = hash.map(_.unwrap),
         )
       ),
+      synchronizerId = synchronizerId,
+      recordTime = recordTime,
     )
 
-  private def reassignmentAccepted(idx: Long, offset: Offset) =
+  private def reassignmentAccepted(
+      idx: Long,
+      offset: Offset,
+      recordTime: Time.Timestamp,
+      synchronizerId: String,
+  ) =
     TransactionLogUpdate.ReassignmentAccepted(
       updateId = TestUpdateId(s"reassignment-$idx").toHexString,
       workflowId = s"workflow-$idx",
       offset = offset,
       completionStreamResponseO = None,
       commandId = "",
-      recordTime = Time.Timestamp.Epoch,
+      recordTime = recordTime,
       reassignmentInfo = ReassignmentInfo(
         sourceSynchronizer = ReassignmentTag.Source(someSynchronizerId),
         targetSynchronizer = ReassignmentTag.Target(someSynchronizerId),
@@ -792,15 +1183,20 @@ class InMemoryFanoutBufferSpec
         isReassigningParticipant = false,
       ),
       reassignment = null,
-      synchronizerId = someSynchronizerId.toProtoPrimitive,
+      synchronizerId = synchronizerId,
     )
 
-  private def topologyTxAccepted(idx: Long, offset: Offset) =
+  private def topologyTxAccepted(
+      idx: Long,
+      offset: Offset,
+      recordTime: Time.Timestamp,
+      synchronizerId: String,
+  ) =
     TransactionLogUpdate.TopologyTransactionEffective(
       updateId = TestUpdateId(s"topology-tx-$idx").toHexString,
       offset = offset,
-      effectiveTime = Time.Timestamp.Epoch,
-      synchronizerId = someSynchronizerId.toProtoPrimitive,
+      effectiveTime = recordTime,
+      synchronizerId = synchronizerId,
       events = Vector.empty,
       synchronizerParametersState = None,
     )

@@ -33,6 +33,7 @@ import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.Particip
 import com.digitalasset.canton.integration.util.GrpcServices.StateService
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
 }
@@ -52,7 +53,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Party, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.TestEngine
-import com.digitalasset.canton.{BaseTest, ReassignmentCounter, config}
+import com.digitalasset.canton.{BaseTest, ReassignmentCounter}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder
@@ -90,6 +91,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         // Ensure reassignments are not tripped up by some participants being a little behind.
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -110,12 +112,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
         // Disable automatic assignment so that we really control it
         synchronizers.foreach { case (synchronizerId, owners) =>
-          owners.foreach(
-            _.topology.synchronizer_parameters.propose_update(
-              synchronizerId = synchronizerId,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-          )
+          AutomaticAssignment.disable(owners, synchronizerId)
         }
 
         for {

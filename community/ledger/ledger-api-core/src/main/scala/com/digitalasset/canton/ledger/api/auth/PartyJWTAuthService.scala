@@ -28,6 +28,7 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
 }
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.IdentityProviderId
@@ -143,20 +144,21 @@ class PartyJWTAuthService(
       synchronizerCryptoClient <- fromEitherString(
         lookupSynchronizerCryptoClient(synchronizerId).toRight("Synchronizer not found")
       )
-      snapshotApproximation <- synchronizerCryptoClient.currentSnapshotApproximation
-        .failOnShutdownToAbortException("PartyJWTAuthService.currentSnapshotApproximation")
+      snapshotApproximation <-
+        CantonGrpcUtil.shutdownAsGrpcError(synchronizerCryptoClient.currentSnapshotApproximation)
       signature <- fromEitherString(verifier.fromJwtSignature(signatureBytes))
-      verification <- snapshotApproximation
-        .verifyPartyJwtSignature(
-          bytes = ByteString.copyFromUtf8(signedBytes),
-          signer = partyId,
-          signature = signature,
-          // Currently, we allow Party JWTs to be signed with the same keys that are used to sign protocol messages.
-          // TODO(i32231): Introduce a dedicated key usage for this, but keep Protocol for backwards-compatibility with older keys.
-          usage = SigningKeyUsage.ProtocolOnly,
-        )
-        .value
-        .failOnShutdownToAbortException("verifyPartySignature")
+      verification <- CantonGrpcUtil.shutdownAsGrpcError(
+        snapshotApproximation
+          .verifyPartyJwtSignature(
+            bytes = ByteString.copyFromUtf8(signedBytes),
+            signer = partyId,
+            signature = signature,
+            // Currently, we allow Party JWTs to be signed with the same keys that are used to sign protocol messages.
+            // TODO(i32231): Introduce a dedicated key usage for this, but keep Protocol for backwards-compatibility with older keys.
+            usage = SigningKeyUsage.ProtocolOnly,
+          )
+          .value
+      )
       _ <- fromEitherString(verification.left.map(_.toString()))
 
       // Check for expiry

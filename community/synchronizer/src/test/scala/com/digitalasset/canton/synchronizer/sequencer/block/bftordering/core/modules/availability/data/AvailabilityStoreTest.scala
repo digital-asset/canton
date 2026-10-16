@@ -13,7 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequest,
   OrderingRequestBatch,
 }
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -32,13 +32,13 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
 
   private val batch1Epoch = EpochNumber.First
   private val batch1 = OrderingRequestBatch.create(Seq(request1, request3), batch1Epoch)
-  private val batch1Id = BatchId.from(batch1)
+  private val batch1Id = BatchId.from(batch1, logger)(implicitly, TraceContext.empty)
   private val batch2Epoch = EpochNumber(1L)
   private val batch2 = OrderingRequestBatch.create(Seq(request2, request3), batch2Epoch)
-  private val batch2Id = BatchId.from(batch2)
+  private val batch2Id = BatchId.from(batch2, logger)(implicitly, TraceContext.empty)
   private val batchEmptyEpoch = EpochNumber(2L)
   private val batchEmpty = OrderingRequestBatch.create(Seq(), batchEmptyEpoch)
-  private val batchEmptyId = BatchId.from(batchEmpty)
+  private val batchEmptyId = BatchId.from(batchEmpty, logger)(implicitly, TraceContext.empty)
 
   private val missingBatchId1 = BatchId.createForTesting("A missing batchId")
 
@@ -175,13 +175,13 @@ trait AvailabilityStoreTest extends AsyncWordSpec with BftSequencerBaseTest {
         val store = createStore()
 
         val batch1 = OrderingRequestBatch.create(Seq(request1), EpochNumber.First)
-        val batch1Id = BatchId.from(batch1)
+        val batch1Id = BatchId.from(batch1, logger)(implicitly, TraceContext.empty)
 
         val batch2 = OrderingRequestBatch.create(Seq(request1), EpochNumber(1L))
-        val batch2Id = BatchId.from(batch2)
+        val batch2Id = BatchId.from(batch2, logger)(implicitly, TraceContext.empty)
 
         val batch3 = OrderingRequestBatch.create(Seq(request1), EpochNumber(2L))
-        val batch3Id = BatchId.from(batch3)
+        val batch3Id = BatchId.from(batch3, logger)(implicitly, TraceContext.empty)
 
         for {
           _ <- store.addBatch(batch1Id, batch1)

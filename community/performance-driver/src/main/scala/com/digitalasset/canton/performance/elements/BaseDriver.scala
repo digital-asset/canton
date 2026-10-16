@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event.Event.Event.{Archived, Created, Exercised}
 import com.daml.ledger.api.v2.reassignment.{Reassignment, ReassignmentEvent}
 import com.daml.ledger.api.v2.transaction.Transaction
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.{Contract, ContractId}
@@ -246,7 +247,11 @@ abstract class BaseDriver(
           new ResilientLedgerSubscription(
             makeSource = subscribeOffset =>
               ledgerClient.updateService
-                .getUpdatesSource(subscribeOffset, format),
+                .getUpdatesSource(
+                  begin = subscribeOffset,
+                  eventFormat = format,
+                  transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+                ),
             consumingFlow = BaseDriver.buildGraph(myDriver),
             subscriptionName = "PerformanceRunner",
             startOffset = offset,

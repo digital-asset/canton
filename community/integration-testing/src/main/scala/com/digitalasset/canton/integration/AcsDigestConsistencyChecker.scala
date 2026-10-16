@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration
 
+import com.digitalasset.canton.admin.api.client.data.NodeStatus
 import com.digitalasset.canton.config.SharedCantonConfig
 import com.digitalasset.canton.console.{FeatureFlag, ParticipantReference}
 import com.digitalasset.canton.integration.plugins.UseExternalProcess
@@ -56,8 +57,10 @@ class AcsDigestConsistencyChecker(
     val activeParticipants = (localParticipants ++ externalParticipants).filter { participant =>
       featureSet.contains(FeatureFlag.Testing) &&
       participant.health.is_running() &&
-      participant.health.status.isActive
-        .getOrElse(false)
+      (participant.health.status match {
+        case NodeStatus.Success(status) => status.active
+        case _ => false
+      })
     }
 
     val allParticipantAndSynchronizerPairs: Seq[(ParticipantReference, SynchronizerId)] =

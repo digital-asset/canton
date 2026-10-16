@@ -90,13 +90,13 @@ class GrpcSequencerPruningAdministrationService(
 
   override protected def ensureScheduler(implicit
       traceContext: TraceContext
-  ): Future[PruningScheduler] = sequencer.pruningScheduler match {
+  ): FutureUnlessShutdown[PruningScheduler] = sequencer.pruningScheduler match {
     case None =>
-      Future.failed(
+      FutureUnlessShutdown.failed(
         Status.UNIMPLEMENTED
           .withDescription(PruningError.ScheduledPruningNotSupported.message)
           .asException()
       )
-    case Some(scheduler) => Future.successful(scheduler)
+    case Some(scheduler) => FutureUnlessShutdown.pure(scheduler)
   }
 }

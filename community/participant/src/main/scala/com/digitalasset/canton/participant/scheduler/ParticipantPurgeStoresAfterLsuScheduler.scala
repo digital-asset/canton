@@ -19,7 +19,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.Future
 
 /** @param schedule
   *   Schedule for the job
@@ -85,7 +84,7 @@ final class ParticipantPurgeStoresAfterLsuScheduler(
 
   override protected def initializeSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[JobSchedule]] = Future(schedule)
+  ): FutureUnlessShutdown[Option[JobSchedule]] = FutureUnlessShutdown.pure(schedule)
 }
 
 object ParticipantPurgeStoresAfterLsuScheduler {

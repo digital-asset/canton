@@ -106,6 +106,7 @@ trait NightlyPerformanceBase {
               "indexer.events",
               "sequencer-events",
               "daml.sequencer.block.events",
+              "daml.sequencer.block.event-bytes",
               "canton.performance.failed",
               "canton.performance.latency",
               "daml.participant.phase",

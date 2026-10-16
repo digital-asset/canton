@@ -50,23 +50,16 @@ object FlywayMigrationsSpec {
     val resources = resourceScanner.getResources("", ".sql").asScala.toSeq
     resources.size should be >= minMigrationCount
 
-    // TODO(#16458) Remove these exceptions
-    def skipCheck(filename: String): Boolean = {
-      val skip = Seq("V1_1__initial", "V1_2__initial_views")
-      skip.exists(filename.contains)
-    }
+    resources.foreach { res =>
+      val fileName = res.getFilename
+      val expectedDigest =
+        getExpectedDigest(fileName, fileName.dropRight(4) + ".sha256", resourceScanner)
+      val currentDigest = getCurrentDigest(res, config.getEncoding)
 
-    resources.collect {
-      case res if !skipCheck(res.getFilename) =>
-        val fileName = res.getFilename
-        val expectedDigest =
-          getExpectedDigest(fileName, fileName.dropRight(4) + ".sha256", resourceScanner)
-        val currentDigest = getCurrentDigest(res, config.getEncoding)
-
-        assert(
-          currentDigest == expectedDigest,
-          s"Digest of migration file $fileName has changed! It is NOT allowed to change neither existing sql migrations files nor their digests!",
-        )
+      assert(
+        currentDigest == expectedDigest,
+        s"Digest of migration file $fileName has changed! It is NOT allowed to change neither existing sql migrations files nor their digests!",
+      )
     }
   }
 

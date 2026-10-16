@@ -745,6 +745,50 @@ object EnvironmentDefinition extends LazyLogging {
       NetworkBootstrapper(S1M1_S1M1_S1M1)
     }
 
+  /**   - 1 participant '''not''' connected to any synchronizer
+    *   - 3 synchronizers with 1 sequencer and 1 mediator each, with the static synchronizer
+    *     parameters given per synchronizer name
+    */
+  def P1_S1M1_S1M1_S1M1_WithStaticParameters(
+      staticSynchronizerParametersMap: Map[String, StaticSynchronizerParameters]
+  ): EnvironmentDefinition =
+    P1S3M3_Config
+      .setStaticSynchronizerParameters(staticSynchronizerParametersMap)
+      .withNetworkBootstrap { implicit env =>
+        import env.*
+
+        def paramsOrDefaults(alias: SynchronizerAlias): StaticSynchronizerParameters =
+          staticSynchronizerParametersMap
+            .getOrElse(alias.unwrap, defaultStaticSynchronizerParameters)
+
+        new NetworkBootstrapper(
+          NetworkTopologyDescription.createWithStaticSynchronizerParameters(
+            daName,
+            synchronizerOwners = Seq(sequencer1),
+            synchronizerThreshold = PositiveInt.one,
+            sequencers = Seq(sequencer1),
+            mediators = Seq(mediator1),
+            staticSynchronizerParameters = paramsOrDefaults(daName),
+          ),
+          NetworkTopologyDescription.createWithStaticSynchronizerParameters(
+            acmeName,
+            synchronizerOwners = Seq(sequencer2),
+            synchronizerThreshold = PositiveInt.one,
+            sequencers = Seq(sequencer2),
+            mediators = Seq(mediator2),
+            staticSynchronizerParameters = paramsOrDefaults(acmeName),
+          ),
+          NetworkTopologyDescription.createWithStaticSynchronizerParameters(
+            repairSynchronizerName,
+            synchronizerOwners = Seq(sequencer3),
+            synchronizerThreshold = PositiveInt.one,
+            sequencers = Seq(sequencer3),
+            mediators = Seq(mediator3),
+            staticSynchronizerParameters = paramsOrDefaults(repairSynchronizerName),
+          ),
+        )
+      }
+
   /**   - 2 participants '''not''' connected to any synchronizer
     *   - 3 synchronizers with 1 sequencer and 1 mediator each
     */

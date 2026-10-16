@@ -145,6 +145,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
             .generateSigningKeyPair(keySpec, name)
             .map(_.unwrap)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
 
         } yield keyId
@@ -168,6 +169,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
             .generateAsymmetricEncryptionKeyPair(keySpec, name)
             .map(_.unwrap)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield keyId
       }
@@ -184,6 +186,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
             .generateSymmetricEncryptionKey(name)
             .map(_.unwrap)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield keyId
       }
@@ -209,6 +212,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
               crypto.SigningKeySpec.EcP256,
             )
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield signature.toByteArray
       }
@@ -228,6 +232,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
           data <- kms
             .decryptAsymmetric(kmsKeyId, cipher, encryptSpec)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield data.unwrap.toByteArray
       }
@@ -244,6 +249,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
           decrypted <- kms
             .decryptSymmetric(kmsKeyId, cipher)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield decrypted.unwrap.toByteArray
       }
@@ -260,6 +266,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
           encrypted <- kms
             .encryptSymmetric(kmsKeyId, plaintext)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield encrypted.unwrap.toByteArray
       }
@@ -284,6 +291,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
                   .map(PublicKey(key.toByteArray, _))
               case unknownKey => Left(s"Invalid public key: $unknownKey")
             }
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
         } yield publicKey
       }
@@ -297,6 +305,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
           _ <- kms
             .keyExistsAndIsActive(kmsKeyId)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
 
         } yield ()
@@ -311,6 +320,7 @@ class AwsKmsDriver(kms: AwsKms)(implicit ec: ExecutionContext) extends KmsDriver
           _ <- kms
             .deleteKey(kmsKeyId)
             .leftMap(_.toString)
+            // Recovered in DriverKms.monitor
             .failOnShutdownToAbortException(functionFullName)
 
         } yield ()

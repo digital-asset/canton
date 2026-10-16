@@ -55,7 +55,8 @@ class GenTransactionTreeTest
   ): Seq[SubviewReferenceAndKey] =
     subviewHashes.map(subviewHash =>
       SubviewReferenceAndKey(
-        if (testedProtocolVersion < ProtocolVersion.transparency) ByViewHash(subviewHash)
+        if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId)
+          ByViewHash(subviewHash)
         // for the purposes of this test, we use the view hash as a dummy ciphertext ID, as all view hashes in the
         // test are unique
         else ByCiphertextId(subviewHash.unwrap, NonNegativeInt.zero),
@@ -74,7 +75,7 @@ class GenTransactionTreeTest
     val randomnesses = generateRandomKeysForSubviewHashes(tvt.subviewHashes, pureCrypto)
       .map(_.viewEncryptionKeyRandomness)
 
-    if (testedProtocolVersion < ProtocolVersion.transparency) {
+    if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId) {
       LightTransactionViewTree.fromTransactionViewTreeUsingViewHashReference(
         tvt,
         randomnesses,
@@ -137,7 +138,7 @@ class GenTransactionTreeTest
   private def attachCiphertextIdLookup(
       withViewPosition: Seq[(LightTransactionViewTree, ViewPosition)]
   ): Seq[((LightTransactionViewTree, ViewPosition), Option[ByCiphertextId])] =
-    if (testedProtocolVersion < ProtocolVersion.transparency)
+    if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId)
       withViewPosition.map(ltv => ltv -> None)
     else
       withViewPosition.map(ltv =>
@@ -196,7 +197,7 @@ class GenTransactionTreeTest
       }
 
       "be serialized and deserialized" in {
-        val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+        val synchronizerLimits = SynchronizerLimits.default
         val fullInformeeTree = example.fullInformeeTree
         FullInformeeTree.fromByteString(
           GenTransactionTreeDeserializationContext(factory.cryptoOps, synchronizerLimits),
@@ -617,7 +618,7 @@ class GenTransactionTreeTest
           // respective keys are no longer tied to view hashes, but rather to ciphertext IDs.
           // Consequently, subview hashes are not included and, thus no longer validated, and the creation of the
           // light transaction view tree will succeed.
-          if (testedProtocolVersion < ProtocolVersion.transparency)
+          if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId)
             an[InvalidLightTransactionViewTree] should be thrownBy LightTransactionViewTree
               .tryCreate(
                 genTransactionTree,

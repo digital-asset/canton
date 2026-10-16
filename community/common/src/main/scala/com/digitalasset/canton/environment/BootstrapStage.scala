@@ -27,8 +27,8 @@ import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SimpleExecutionQueu
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 sealed trait BootstrapStageOrLeaf[T <: CantonNode]
@@ -258,12 +258,6 @@ abstract class BootstrapStageWithStorage[
     * "PassiveInstanceException" if it becomes passive
     */
   protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[M]]
-
-  /** if external input is necessary */
-  protected def completeWithExternal(
-      storeAndPassResult: => EitherT[Future, String, M]
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    completeWithExternalUS(storeAndPassResult.mapK(FutureUnlessShutdown.outcomeK))
 
   protected def resumeIfCompleteStage()(implicit
       traceContext: TraceContext

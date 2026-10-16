@@ -10,7 +10,6 @@ import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.synchronizer.block.SequencerDriver
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageBuilder.ExclusiveStorage
@@ -170,11 +169,9 @@ object SequencerMetaFactory {
           blockSequencerConfig.testingInterceptor,
         )
 
-      case External(sequencerType, blockSequencerConfig, rawConfig) =>
+      case External(blockSequencerConfig, config) =>
         DriverBlockSequencerFactory(
-          sequencerType,
-          SequencerDriver.DriverApiVersion,
-          rawConfig,
+          config,
           blockSequencerConfig,
           health,
           storage,

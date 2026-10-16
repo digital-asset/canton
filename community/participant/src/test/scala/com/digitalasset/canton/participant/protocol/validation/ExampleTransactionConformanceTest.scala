@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
@@ -234,6 +235,7 @@ class ExampleTransactionConformanceTest
         factory.cryptoOps,
         TestContractHasher.Async,
         loggerFactory,
+        CommonMockMetrics.transactionViewMetrics,
       )
 
     def reInterpret(

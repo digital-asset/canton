@@ -15,9 +15,12 @@ import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
+  Node,
+  Normalization,
   SerializationVersion,
   SubmittedTransaction,
   Transaction,
+  Validation,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*
@@ -200,6 +203,39 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
         ValueRecord(None, ImmArray.empty),
       )
       preprocessApi(command) shouldBe a[Left[?, ?]]
+    }
+
+    /* replay */
+    "be able to replay a transaction whose root exercises an interface choice" in {
+      forAll(
+        Table[Identifier, ContractId, String](
+          ("interface", "contract", "choice"),
+          (idI1, cid1, "C1"),
+          (idI1, cid2, "C1"),
+          (idI2, cid2, "C2"),
+        )
+      ) { (iface, cid, choice) =>
+        val command =
+          ApiCommand.Exercise(iface.toRef, cid, choice, ValueRecord(None, ImmArray.empty))
+        val (recorded, _) = runApi(command).value
+        inside(recorded.nodes(recorded.roots.head)) { case exe: Node.Exercise =>
+          exe.interfaceId shouldBe Some(iface)
+        }
+        val (replayed, _) = consume(
+          engine.replay(
+            submitters = Set(party),
+            tx = recorded,
+            ledgerEffectiveTime = let,
+            participantId = participant,
+            preparationTime = let,
+            submissionSeed = submissionSeed,
+            contractIdVersion = contractIdVersion,
+            interpretationConfig = interpreationConfig,
+            packageResolution = packageNameMap,
+          )
+        ).value
+        Validation.isReplayedBy(Normalization.normalizeTx(recorded), replayed) shouldBe Right(())
+      }
     }
   }
 }

@@ -84,7 +84,7 @@ trait SyncCryptoTest
         enableTransparencyChecks = false,
         protocolVersion = testedProtocolVersion,
         serial = NonNegativeInt.zero,
-        synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+        synchronizerLimits = SynchronizerLimits.default,
       )
       .value
 

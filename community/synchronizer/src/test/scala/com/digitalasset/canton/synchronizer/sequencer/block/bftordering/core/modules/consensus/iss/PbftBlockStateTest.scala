@@ -36,6 +36,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level.{DEBUG, WARN}
@@ -725,7 +726,10 @@ class PbftBlockStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       val cryptoEvidence = prepare.message.getCryptographicEvidence
 
       assertNoLogs(blockState.processMessage(prepare)) shouldBe true
-      assertNoLogs(blockState.advance()) shouldBe empty
+      assertNoLogs(blockState.advance()) should contain only RequestMissingPrePrepare(
+        prepare.message.blockMetadata,
+        NonEmpty.mk(Seq, prepare.from),
+      )
 
       // after processing our pre-prepare, we should only see a send result (and no sign result) for the Prepare,
       // since we are using the recovered (pre-existing) prepare

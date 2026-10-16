@@ -27,7 +27,6 @@ import com.digitalasset.canton.store.SequencedEventStore.CounterAndTimestamp
 import com.digitalasset.canton.store.db.DbSequencedEventStore.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -76,15 +75,14 @@ class DbSequencedEventStore(
             .fromTrustedByteArray(eventBytes)
             .flatMap(
               _.deserializeContent(
-                SequencedEvent.fromByteString(
-                  ProtocolVersionValidation.PV(protocolVersion),
-                  // No decompression nor size bound needed: the database is trusted.
+                // No decompression bound needed: the database is trusted. Without validation, the
+                // limits are not read.
+                SequencedEvent.fromTrustedByteString(
                   SequencedEventDeserializationContext(
                     DecompressionPolicy.MaxValueUnsafe,
-                    SynchronizerLimits.max,
-                  ),
-                  _,
-                )
+                    SynchronizerLimits.default,
+                  )
+                )(_)
               )
             )
             .valueOr(err =>

@@ -9,6 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.digitalasset.base.error.*
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -343,6 +344,7 @@ class AdminWorkflowServices(
                     client.updateService.getUpdatesSource(
                       begin = subscribeOffset,
                       eventFormat = service.eventFormat,
+                      transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
                     ),
                   consumingFlow = Flow[GetUpdatesResponse]
                     .map(_.update)

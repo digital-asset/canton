@@ -1396,7 +1396,10 @@ object LedgerApiCommands {
   object UpdateService {
 
     sealed trait UpdateWrapper {
+      def commandId: Option[String]
       def updateId: String
+      def paidTrafficCost: Option[Long]
+
       def isUnassignment = this match {
         case _: UnassignedWrapper => true
         case _ => false
@@ -1413,12 +1416,18 @@ object LedgerApiCommands {
     }
     final case class TransactionWrapper(transaction: Transaction) extends UpdateWrapper {
       override def updateId: String = transaction.updateId
+      override def commandId: Option[String] = Some(transaction.commandId)
+
+      override def paidTrafficCost: Option[Long] = transaction.paidTrafficCost
 
       override def synchronizerId: String = transaction.synchronizerId
     }
     final case class TopologyTransactionWrapper(topologyTransaction: TopologyTransaction)
         extends UpdateWrapper {
       override def updateId: String = topologyTransaction.updateId
+      override def commandId: Option[String] = None
+
+      override def paidTrafficCost: Option[Long] = None
 
       override def synchronizerId: String = topologyTransaction.synchronizerId
 
@@ -1429,6 +1438,9 @@ object LedgerApiCommands {
     }
     sealed trait ReassignmentWrapper extends UpdateWrapper {
       override def updateId: String = reassignment.updateId
+      override def commandId: Option[String] = Some(reassignment.commandId)
+
+      override def paidTrafficCost: Option[Long] = reassignment.paidTrafficCost
 
       def reassignment: Reassignment
     }

@@ -17,6 +17,11 @@ import scala.util.{Failure, Try}
 
 /** @param divulgeesToDivulgerKeyMap
   *   map whose keys are sorted divulgees lists
+  * @param randomnessProvider
+  *   used for choices made while *generating* commands
+  * @param submissionRandomnessProvider
+  *   used for choices made while *submitting* commands. Must be independent of
+  *   `randomnessProvider`, as generation and submission run concurrently.
   */
 final class FooCommandGenerator(
     config: FooSubmissionConfig,
@@ -25,6 +30,7 @@ final class FooCommandGenerator(
     names: Names,
     partySelecting: RandomPartySelecting,
     randomnessProvider: RandomnessProvider,
+    submissionRandomnessProvider: RandomnessProvider,
 ) extends SimpleCommandGenerator {
 
   private val packageRef: Ref.PackageRef = TestDars.benchtoolDarPackageRef
@@ -77,7 +83,7 @@ final class FooCommandGenerator(
       names.benchtoolUserId
     )(userIdsDistribution =>
       userIdsDistribution
-        .choose(randomnessProvider.randomDouble())
+        .choose(submissionRandomnessProvider.randomDouble())
         .userId
     )
 

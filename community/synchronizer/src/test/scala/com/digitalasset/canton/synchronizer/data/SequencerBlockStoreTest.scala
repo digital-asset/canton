@@ -368,8 +368,7 @@ trait SequencerBlockStoreTest
             t3,
             5L,
             Map.empty,
-            InternalSequencerPruningStatus(CantonTimestamp.Epoch, Set.empty)
-              .toSequencerPruningStatus(CantonTimestamp.now()),
+            SequencerPruningStatus(CantonTimestamp.Epoch, CantonTimestamp.now(), Set.empty),
             InFlightAggregations.fromMap(Map(aggregationId1 -> agg1)),
             None,
             protocolVersion = testedProtocolVersion,

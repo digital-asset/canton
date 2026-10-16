@@ -12,7 +12,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
-import com.digitalasset.canton.protocol.{SynchronizerLimits, v31, v32}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v32}
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.sequencing.{EnvelopeBox, RawSignedContentEnvelopeBox}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -56,8 +56,6 @@ sealed trait SequencedEvent[+B <: GenBatch[?]]
 
   @transient override protected lazy val companionObj: SequencedEvent.type = SequencedEvent
 
-  protected def toProtoV31: v31.SequencedEvent
-
   protected def toProtoV32: v32.SequencedEvent
 
   def trafficReceipt: Option[TrafficReceipt]
@@ -98,40 +96,19 @@ object SequencedEvent
   override def name: String = "SequencedEvent"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SequencedEvent)(
-      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
-      _.toProtoV31,
-    ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SequencedEvent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
-    ),
+    )
   )
 
   sealed private trait ProtoSequencedEvent {
     def batch: Option[ProtoBatch]
   }
-  private final case class ProtoSequencedEventV31(wrapped: v31.SequencedEvent)
-      extends ProtoSequencedEvent {
-    def batch: Option[ProtoBatchV31] = wrapped.batch.map(ProtoBatchV31.apply)
-  }
   private final case class ProtoSequencedEventV32(wrapped: v32.SequencedEvent)
       extends ProtoSequencedEvent {
     def batch: Option[ProtoBatchV32] = wrapped.batch.map(ProtoBatchV32.apply)
   }
-
-  private[sequencing] def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      context: SequencedEventDeserializationContext,
-      sequencedEventP: v31.SequencedEvent,
-  )(
-      bytes: ByteString
-  ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
-    fromProtoGeneric(
-      pvv,
-      ProtoSequencedEventV31(sequencedEventP),
-      decompressBatch(pvv, context),
-    )(bytes)
 
   private[sequencing] def fromProtoV32(
       pvv: ProtocolVersionValidation,
@@ -146,16 +123,6 @@ object SequencedEvent
       decompressBatch(pvv, context),
     )(bytes)
 
-  private[sequencing] def fromProtoV31Compressed(
-      pvv: ProtocolVersionValidation,
-      sequencedEventP: v31.SequencedEvent,
-  )(bytes: ByteString): ParsingResult[SequencedEvent[CompressedBatch]] =
-    fromProtoGeneric(
-      pvv,
-      ProtoSequencedEventV31(sequencedEventP),
-      pb => Right(CompressedBatch(pb)),
-    )(bytes)
-
   private[sequencing] def fromProtoV32Compressed(
       pvv: ProtocolVersionValidation,
       sequencedEventP: v32.SequencedEvent,
@@ -166,9 +133,7 @@ object SequencedEvent
       pb => Right(CompressedBatch(pb)),
     )(bytes)
 
-  // toProtoV31 is protected on the trait, so expose them for CompressedSequencedEvent.
-  private[sequencing] def serializeV31(event: SequencedEvent[GenBatch[?]]): v31.SequencedEvent =
-    event.toProtoV31
+  // toProtoV32 is protected on the trait, so expose it for CompressedSequencedEvent.
   private[sequencing] def serializeV32(event: SequencedEvent[GenBatch[?]]): v32.SequencedEvent =
     event.toProtoV32
 
@@ -201,16 +166,6 @@ object SequencedEvent
       topologyTimestampP,
       trafficConsumedP,
     ) = protoSequencedEvent match {
-      case ProtoSequencedEventV31(wrapped) =>
-        (
-          wrapped.previousTimestamp,
-          wrapped.timestamp,
-          wrapped.physicalSynchronizerId,
-          wrapped.messageId,
-          wrapped.deliverErrorReason,
-          wrapped.topologyTimestamp,
-          wrapped.trafficReceipt,
-        )
       case ProtoSequencedEventV32(wrapped) =>
         (
           wrapped.previousTimestamp,
@@ -404,14 +359,10 @@ object CompressedSequencedEvent
 
   // Keep in sync with SequencedEvent.versioningTable.
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SequencedEvent)(
-      supportedProtoVersionMemoizedPVV(_)(SequencedEvent.fromProtoV31Compressed),
-      SequencedEvent.serializeV31,
-    ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SequencedEvent)(
       supportedProtoVersionMemoizedPVV(_)(SequencedEvent.fromProtoV32Compressed),
       SequencedEvent.serializeV32,
-    ),
+    )
   )
 }
 
@@ -428,17 +379,6 @@ sealed abstract case class DeliverError private[sequencing] (
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type] =
     SequencedEvent.protocolVersionRepresentativeFor(synchronizerId.protocolVersion)
-
-  def toProtoV31: v31.SequencedEvent = v31.SequencedEvent(
-    previousTimestamp = previousTimestamp.map(_.toProtoPrimitive),
-    timestamp = timestamp.toProtoPrimitive,
-    physicalSynchronizerId = synchronizerId.toProtoPrimitive,
-    messageId = Some(messageId.toProtoPrimitive),
-    batch = None,
-    deliverErrorReason = Some(reason),
-    topologyTimestamp = None,
-    trafficReceipt = trafficReceipt.map(_.toProtoV30),
-  )
 
   def toProtoV32: v32.SequencedEvent = v32.SequencedEvent(
     previousTimestamp = previousTimestamp.map(_.toProtoPrimitive),
@@ -551,17 +491,6 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
     * only populated for the sender)
     */
   lazy val isReceipt: Boolean = messageIdO.isDefined
-
-  def toProtoV31: v31.SequencedEvent = v31.SequencedEvent(
-    previousTimestamp = previousTimestamp.map(_.toProtoPrimitive),
-    timestamp = timestamp.toProtoPrimitive,
-    physicalSynchronizerId = synchronizerId.toProtoPrimitive,
-    messageId = messageIdO.map(_.toProtoPrimitive),
-    batch = Some(batch.toProtoV31),
-    deliverErrorReason = None,
-    topologyTimestamp = None,
-    trafficReceipt = trafficReceipt.map(_.toProtoV30),
-  )
 
   protected def toProtoV32: v32.SequencedEvent = v32.SequencedEvent(
     previousTimestamp = previousTimestamp.map(_.toProtoPrimitive),

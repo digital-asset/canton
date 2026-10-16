@@ -48,7 +48,9 @@ object Reassignment {
     *   Stakeholders of the underlying contract.
     * @param assignmentExclusivity
     *   Before this time (measured on the target synchronizer), only the submitter of the
-    *   unassignment can initiate the assignment. Defined for reassigning participants.
+    *   unassignment can initiate the assignment. Defined for reassigning participants, up to
+    *   protocol version 36. Starting with protocol version 37, it is not set: any stakeholder can
+    *   submit the assignment as soon as the unassignment is completed.
     * @param reassignmentCounter
     *   The reassignment counter of the underlying contract.
     * @param nodeId

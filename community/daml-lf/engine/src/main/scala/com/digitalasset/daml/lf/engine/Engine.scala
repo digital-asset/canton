@@ -477,6 +477,7 @@ class Engine(
       case ExecutionMode.Conductor =>
         executeCommandsWithConductor(
           validating,
+          catchAll,
           submitters,
           commands,
           ledgerTime,
@@ -492,6 +493,7 @@ class Engine(
 
   private[engine] def executeCommandsWithConductor(
       validating: Boolean,
+      catchAll: Boolean,
       submitters: Set[Party],
       commands: ImmArray[speedy.Command],
       ledgerTime: Time.Timestamp,
@@ -520,12 +522,11 @@ class Engine(
       contractIdVersion = contractIdVersion,
       limits = config.transactionLimits,
       metricPlugins = metricPlugins,
+      transactionTraceMaxLength = config.transactionTraceMaxLength,
     )
 
-    def error(err: Error.Interpretation.Error): Result[Nothing] = {
-      val trace = conductor.transactionTrace(config.transactionTraceMaxLength)
-      Result.error(err, Option.when(trace.nonEmpty)(trace))
-    }
+    def error(err: Error.Interpretation.Error): Result[Nothing] =
+      Result.error(err, Some(conductor.transactionTrace(config.transactionTraceMaxLength)))
 
     // The call by-name is needed to ensure te `im.resume` are called inside the `try` block.
     def loop[X](upd: => Upd.Step[X]): Result[X] = try
@@ -596,7 +597,7 @@ class Engine(
         NameOf.qualifiedNameOfCurrentFunc,
         compiledPackages.compiler.unsafeCompile(commands),
       )
-      _ <- loop(conductor.handleCommands(commands.toSeq).start)
+      _ <- loop(conductor.handleCommands(commands.toSeq, catchAll = catchAll).start)
       txResult <- Result.done(conductor.finish)
       TxConductor.Result(
         tx,

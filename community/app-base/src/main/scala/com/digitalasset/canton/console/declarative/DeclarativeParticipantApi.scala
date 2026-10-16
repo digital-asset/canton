@@ -186,12 +186,12 @@ class DeclarativeParticipantApi(
 
     def proposeEnableMultiSynchronizerFeatureFlag(
         synchronizerId: SynchronizerId,
-        oldFeatureFlags: Seq[ParticipantTopologyFeatureFlag],
+        oldFeatureFlags: Set[ParticipantTopologyFeatureFlag],
     ): Either[String, SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate]] = {
       val mapping = SynchronizerTrustCertificate(
         participantId,
         synchronizerId,
-        featureFlags = (ParticipantTopologyFeatureFlag.EnableMultiSynchronizer +: oldFeatureFlags),
+        featureFlags = oldFeatureFlags + ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
       )
       for {
         nodeStatus <- getStatus.toRight("Unable to get status of node. Is the node started?")
@@ -217,7 +217,7 @@ class DeclarativeParticipantApi(
           synchronizerIds.traverse { sid =>
             for {
               current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
-              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Seq.empty)
+              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Set.empty)
               shouldUpdate = !currentFeatureFlags.contains(
                 ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
               )

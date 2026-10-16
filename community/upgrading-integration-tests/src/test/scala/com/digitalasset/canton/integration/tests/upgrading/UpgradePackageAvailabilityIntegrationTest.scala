@@ -61,6 +61,7 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
       participant3.topology.vetted_packages.propose_delta(
         participant3,
         removes = Seq(Ref.PackageId.assertFromString(v1.upgrade.Quote.PACKAGE_ID)),
+        store = daId,
       )
 
       // Participant 4 (dan) has only ever had V2 loaded

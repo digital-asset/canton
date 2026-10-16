@@ -38,6 +38,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
+  AcsReplicationStatus,
   ContractImportMode,
   PartyReplicationStatus,
   RepresentativePackageIdOverride,
@@ -46,6 +47,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseWriteRequest
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.canton.{LedgerParticipantId, SynchronizerAlias, config}
@@ -54,6 +56,7 @@ import io.grpc.Context
 
 import java.time.Instant
 import java.util.UUID
+import scala.concurrent.ExecutionContext
 
 class PartiesAdministrationGroup(
     runner: AdminCommandRunner,
@@ -115,6 +118,7 @@ class ParticipantPartiesAdministrationGroup(
     with FeatureFlagFilter {
 
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
+  private implicit def ec: ExecutionContext = consoleEnvironment.environment.executionContext
 
   @Help.Summary("List parties hosted by this participant")
   @Help.Description(
@@ -535,17 +539,19 @@ class ParticipantPartiesAdministrationGroup(
       serial: PositiveInt,
       participantPermission: ParticipantPermission,
   ): String = check(FeatureFlag.Preview) {
-    consoleEnvironment.run {
-      reference.adminCommand(
-        ParticipantAdminCommands.PartyManagement.AddPartyWithAcsAsync(
-          new java.io.File(importFilePath),
-          party,
-          synchronizerId,
-          sourceParticipant,
-          serial,
-          participantPermission,
+    TraceContext.withNewTraceContext("add_party_with_acs_async") { implicit traceContext =>
+      consoleEnvironment.run {
+        reference.adminCommand(
+          ParticipantAdminCommands.PartyManagement.AddPartyWithAcsAsync(
+            new java.io.File(importFilePath),
+            party,
+            synchronizerId,
+            sourceParticipant,
+            serial,
+            participantPermission,
+          )
         )
-      )
+      }
     }
   }
 
@@ -560,6 +566,22 @@ class ParticipantPartiesAdministrationGroup(
       consoleEnvironment.run {
         reference.adminCommand(
           ParticipantAdminCommands.PartyManagement.GetAddPartyStatus(addPartyRequestId)
+        )
+      }
+    }
+
+  @Help.Summary("Obtain status on a pending ACS replication", FeatureFlag.Preview)
+  @Help.Description(
+    """Retrieve status information on an ACS replication previously triggered either via
+      |the `add_party_async` or `get_remote_acs`
+      |endpoint by specifying the previously returned request id parameter.
+      """
+  )
+  def get_acs_replication_status(acsReplicationRequestId: String): AcsReplicationStatus =
+    check(FeatureFlag.Preview) {
+      consoleEnvironment.run {
+        reference.adminCommand(
+          ParticipantAdminCommands.PartyManagement.GetAcsReplicationStatus(acsReplicationRequestId)
         )
       }
     }
@@ -895,17 +917,19 @@ class ParticipantPartiesAdministrationGroup(
       representativePackageIdOverride: RepresentativePackageIdOverride =
         RepresentativePackageIdOverride.NoOverride,
   ): Unit =
-    consoleEnvironment.run {
-      reference.adminCommand(
-        ParticipantAdminCommands.PartyManagement.ImportPartyAcs(
-          new java.io.File(importFilePath),
-          synchronizerId,
-          if (workflowIdPrefix.nonEmpty) workflowIdPrefix else s"import-${UUID.randomUUID}",
-          contractImportMode,
-          representativePackageIdOverride,
-          party,
+    TraceContext.withNewTraceContext("import_party_acs") { implicit traceContext =>
+      consoleEnvironment.run {
+        reference.adminCommand(
+          ParticipantAdminCommands.PartyManagement.ImportPartyAcs(
+            new java.io.File(importFilePath),
+            synchronizerId,
+            if (workflowIdPrefix.nonEmpty) workflowIdPrefix else s"import-${UUID.randomUUID}",
+            contractImportMode,
+            representativePackageIdOverride,
+            party,
+          )
         )
-      )
+      }
     }
 
   @Help.Summary(

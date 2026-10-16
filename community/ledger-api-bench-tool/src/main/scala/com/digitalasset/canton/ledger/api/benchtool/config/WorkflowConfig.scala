@@ -178,6 +178,9 @@ object WorkflowConfig {
         parties: List[String],
         userId: String,
         beginOffsetExclusive: Option[Long],
+        // The Ledger API completion stream has no server-side end offset, so this is enforced
+        // client-side: the observer cancels the stream once this offset has been reached.
+        endOffsetInclusive: Option[Long] = None,
         objectives: Option[StreamConfig.AcsAndCompletionsObjectives],
         subscriptionDelay: Option[FiniteDuration] = None,
         override val maxItemCount: Option[Long],

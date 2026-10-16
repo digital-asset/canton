@@ -57,13 +57,13 @@ object SequencerTestUtils extends BaseTest {
       case Some(bytes) =>
         // Somehow ugly way to tweak the `deserializedFrom` attribute of Deliver
         SequencedEvent
-          .fromProtoV31(
+          .fromProtoV32(
             testedProtocolVersionValidation,
             SequencedEventDeserializationContext(
               defaultDecompressionPolicy,
-              SynchronizerLimits.defaultFor(testedProtocolVersion),
+              SynchronizerLimits.default,
             ),
-            deliver.toProtoV31,
+            SequencedEvent.serializeV32(deliver),
           )(bytes)
           .value
           .asInstanceOf[Deliver[Batch[ClosedUncompressedEnvelope]]]

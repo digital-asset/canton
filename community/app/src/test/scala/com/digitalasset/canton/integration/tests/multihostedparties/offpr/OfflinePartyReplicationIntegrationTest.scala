@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
-import com.digitalasset.canton.admin.api.client.data.FlagNotSet
+import com.digitalasset.canton.admin.api.client.data.{FlagNotSet, FlagSet}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,16 +13,25 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
+import com.digitalasset.canton.integration.tests.multihostedparties.hypr.PartyHostingStateTestHelpers.{
+  awaitHostingStates,
+  freezeParty,
+  proposeAsParticipant,
+  proposeAsParty,
+}
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarative
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.{
   AcsExportMissingTargetOnboardingMapping,
   EffectivePartyToParticipantMappingNotFound,
+  OnboardingClearanceMissingMapping,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.time.DelegatingSimClock
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{Party, PartyKind, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, Party, PartyKind, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, HasTempDirectory, SynchronizerAlias, config}
 
 import java.time.Duration
@@ -125,10 +134,19 @@ trait OfflinePartyReplicationIntegrationTestBase
       )
       .value
 
+  /** Adds the target to the party's hosts as Onboarding, with the target's and the party's
+    * authorization.
+    *
+    * @param otherHostingStates
+    *   The hosting states of the party's other entries that are not Active.
+    * @return
+    *   The source's ledger end before the target's entry becomes effective.
+    */
   protected[offpr] def targetAuthorizesHosting(
       party: Party,
       synchronizerId: PhysicalSynchronizerId,
       disconnectTarget: Boolean,
+      otherHostingStates: Map[ParticipantId, HostingState] = Map.empty,
   ): Long = {
     target.topology.party_to_participant_mappings
       .propose_delta(
@@ -136,6 +154,7 @@ trait OfflinePartyReplicationIntegrationTestBase
         adds = Seq(target.id -> targetPermission),
         store = synchronizerId,
         requiresPartyToBeOnboarded = true,
+        participantStates = otherHostingStates,
       )
 
     if (disconnectTarget) {
@@ -150,6 +169,7 @@ trait OfflinePartyReplicationIntegrationTestBase
       adds = Seq(target.id -> targetPermission),
       store = synchronizerId,
       requiresPartyToBeOnboarded = true,
+      participantStates = otherHostingStates,
     )
 
     sourceLedgerEnd
@@ -460,15 +480,17 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
 
   /** Missing Onboarding Flag Test Case:
     *   - Asserts that if Alice is authorized on the target participant but the `onboarding` flag is
-    *     set to `false`, the party ACS export explicitly aborts with an expected error.
+    *     set to `false`, the party ACS export and the onboarding flag clearance explicitly abort
+    *     with an expected error.
     *   - Reverses the invalid topology state by deactivating Alice on the target. This cleanup is
     *     strictly required to prepare the shared node state for the subsequent test.
     */
-  "Party activation on the target participant with missing onboarding flag aborts ACS export" in {
+  "Party activation on the target participant with missing onboarding flag aborts ACS export and onboarding flag clearance" in {
     implicit env =>
       import env.*
 
       val ledgerEndP1 = source.ledger_api.state.end()
+      val ledgerEndTarget = target.ledger_api.state.end()
 
       // Authorize Alice without onboarding flag set
       PartyToParticipantDeclarative.forParty(Set(source, target), daId)(
@@ -505,6 +527,16 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
           waitForActivationTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(1)),
         ),
         _.shouldBeCantonErrorCode(AcsExportMissingTargetOnboardingMapping.code),
+      )
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        target.parties.clear_party_onboarding_flag(
+          alice,
+          daId.logical,
+          ledgerEndTarget,
+          waitForActivationTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(1)),
+        ),
+        _.shouldBeCantonErrorCode(OnboardingClearanceMissingMapping.code),
       )
 
       // Undo activating Alice on the target participant without onboarding flag set; for the following test
@@ -598,4 +630,175 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
     assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 5)
   }
 
+}
+
+/** Setup:
+  *   - Alice is hosted on participant1 (source), Bob on participant2.
+  *   - Participant3 (target) is the target of the legacy offline party replication. Participant2
+  *     replicates Alice with the new flow and freezes her.
+  *
+  * Test Goal: Offline party replication keeps working while another target freezes the party. The
+  * ACS export and the onboarding flag clearance read the target's hosting state, not the hosting
+  * view, which is empty while any entry of the party is Freezing. The ACS export leaves out only
+  * the contracts shared with parties that the target hosts (Onboarding or Active).
+  *
+  * Test Steps:
+  *   - Export during a freeze: participant2 is Freezing for Alice when the target's Onboarding
+  *     entry becomes effective. The export of Alice's ACS succeeds.
+  *   - Clearance during a freeze: the target imports Alice's ACS, reconnects and requests the
+  *     onboarding flag clearance, which is accepted. The target becomes Active while participant2
+  *     stays Freezing. Relies on the state of the previous test.
+  *   - Excluded stakeholders: Carol (participant1) shares one contract each with Bob, Charlie, Dave
+  *     and Erin (participant2). The target is Nominated for Bob, Freezing for Charlie, Onboarding
+  *     for Dave and Active for Erin. Carol's export to the target includes only the contracts
+  *     shared with Bob and Charlie.
+  */
+final class OfflinePartyReplicationDuringFreezeIntegrationTest
+    extends OfflinePartyReplicationIntegrationTestBase {
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .withSetup { implicit env =>
+        import env.*
+        source = participant1
+        target = participant3
+      }
+
+  "Export Alice's ACS while another target freezes her" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+    implicit env =>
+      import env.*
+
+      IouSyntax.createIou(source)(alice, bob, 1.95).discard
+
+      freezeParty(alice, source, participant2, daId, participants.local).discard
+
+      val beforeActivationOffset = targetAuthorizesHosting(
+        alice,
+        daId,
+        disconnectTarget = true,
+        otherHostingStates = Map(participant2.id -> HostingState.Freezing),
+      )
+
+      source.parties.export_party_acs(
+        party = alice,
+        synchronizerId = daId.logical,
+        targetParticipantId = target.id,
+        beginOffsetExclusive = beforeActivationOffset,
+        exportFilePath = acsSnapshotPath,
+      )
+
+      repair.acs.read_from_file(acsSnapshotPath) should have size 1
+  }
+
+  "Clear Alice's onboarding flag while another target freezes her" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+    implicit env =>
+      import env.*
+      val clock = env.environment.simClock.value
+
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
+      // The target receives its activation only after reconnecting
+      val targetLedgerEnd = target.ledger_api.state.end()
+
+      // Advance time to allow topology transactions to be processed
+      clock.advance(Duration.ofSeconds(30))
+      target.synchronizers.reconnect(daName)
+      source.health.ping(target)
+
+      target.parties.clear_party_onboarding_flag(
+        alice,
+        daId.logical,
+        targetLedgerEnd,
+      ) shouldBe a[FlagSet]
+
+      // Pass the decision deadline, after which the target clears its onboarding flag
+      advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
+
+      awaitHostingStates(
+        alice,
+        daId,
+        participants.local,
+        Map(
+          source.id -> HostingState.Active,
+          participant2.id -> HostingState.Freezing,
+          target.id -> HostingState.Active,
+        ),
+      ).discard
+  }
+
+  "Exclude from the ACS export only the contracts shared with parties the target hosts" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+    implicit env =>
+      import env.*
+
+      val carol = source.parties.testing.enable(
+        "Carol",
+        synchronizeParticipants = Seq(participant2, target),
+      )
+      def enableOnParticipant2(name: String): Party =
+        participant2.parties.testing.enable(name, synchronizeParticipants = Seq(source, target))
+      val charlie = enableOnParticipant2("Charlie")
+      val dave = enableOnParticipant2("Dave")
+      val erin = enableOnParticipant2("Erin")
+
+      // The party alone nominates the target, but needs the target to add it as Onboarding or Active
+      proposeAsParty(bob, participant2, target, daId, Map(target.id -> HostingState.Nominated))
+      proposeAsParty(charlie, participant2, target, daId, Map(target.id -> HostingState.Nominated))
+      addHost(dave, participant2, target, Map(target.id -> HostingState.Onboarding))
+      addHost(erin, participant2, target, Map.empty)
+      Seq(
+        bob -> HostingState.Nominated,
+        charlie -> HostingState.Nominated,
+        dave -> HostingState.Onboarding,
+        erin -> HostingState.Active,
+      ).foreach { case (party, targetState) =>
+        awaitHostingStates(
+          party,
+          daId,
+          participants.local,
+          Map(participant2.id -> HostingState.Active, target.id -> targetState),
+        ).discard
+      }
+
+      Seq(bob, charlie, dave, erin).foreach(owner =>
+        IouSyntax.createIou(source)(carol, owner).discard
+      )
+
+      proposeAsParticipant(charlie, target, daId, Map(target.id -> HostingState.Freezing))
+      awaitHostingStates(
+        charlie,
+        daId,
+        participants.local,
+        Map(participant2.id -> HostingState.Active, target.id -> HostingState.Freezing),
+      ).discard
+
+      val beforeActivationOffset = targetAuthorizesHosting(carol, daId, disconnectTarget = false)
+
+      source.parties.export_party_acs(
+        party = carol,
+        synchronizerId = daId.logical,
+        targetParticipantId = target.id,
+        beginOffsetExclusive = beforeActivationOffset,
+        exportFilePath = acsSnapshotPath,
+      )
+
+      repair.acs
+        .read_from_file(acsSnapshotPath)
+        .flatMap(_.getCreatedEvent.observers)
+        .toSet shouldBe Set(bob.toLf, charlie.toLf)
+  }
+
+  /** Adds `participant` with Observation permission to the party's hosts, with the participant's
+    * and the party's authorization.
+    *
+    * @param hostingStates
+    *   The hosting states of the party's entries that are not Active after the change.
+    */
+  private def addHost(
+      party: Party,
+      partyHost: LocalParticipantReference,
+      participant: LocalParticipantReference,
+      hostingStates: Map[ParticipantId, HostingState],
+  )(implicit env: TestConsoleEnvironment): Unit = {
+    proposeAsParticipant(party, participant, env.daId, hostingStates)
+    proposeAsParty(party, partyHost, participant, env.daId, hostingStates)
+  }
 }

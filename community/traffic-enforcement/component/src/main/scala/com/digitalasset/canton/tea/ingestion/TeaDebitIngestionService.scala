@@ -5,6 +5,7 @@ package com.digitalasset.canton.tea.ingestion
 
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.client.services.completions.CompletionServiceClient
@@ -12,10 +13,8 @@ import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.tea.projection.{
+  AccountDelta,
   AccountId,
-  DeltaEvent,
-  EventSource,
-  OffsetDeltaEvent,
   ProjectionEvent,
   TrafficDelta,
 }
@@ -76,50 +75,15 @@ final class TeaDebitIngestionService(
           s"Received a completion: offset=${c.offset}, actAs=${c.actAs}, paidTrafficCost=${c.paidTrafficCost}"
         )
 
-        val synchronizerTime = c.synchronizerTime.getOrElse(
-          throw new IllegalStateException(s"Empty synchronizer time on completion $c")
-        )
-        val recordTime = synchronizerTime.recordTime.getOrElse(
-          throw new IllegalStateException(s"Empty recordTime time on completion $c")
-        )
-        val cantonTimestampRecordTime = CantonTimestamp
-          .fromProtoTimestamp(recordTime)
-          .valueOr(err => throw new IllegalStateException(s"Invalid recordTime $err"))
-
-        val offsetDeltaEvent = NonNegativeLong
-          .create(c.paidTrafficCost)
-          .getOrElse(
-            throw new IllegalStateException(
-              s"Negative paid traffic cost received on completion: ${c.paidTrafficCost}"
-            )
-          )
-          // Only record non zero cost to avoid spamming the TEA if traffic control is disabled
-          .toPositiveNumeric
-          .map { positiveDebit =>
-            val deltaEvent = DeltaEvent(
-              delta = TrafficDelta.debitBalanceDelta(positiveDebit.toNonNegative.value),
-              timestamp = cantonTimestampRecordTime,
-              eventSource = EventSource.LedgerAPICompletions,
-            )
-
-            OffsetDeltaEvent(deltaEvent, c.offset)
-          }
-
-        if (offsetDeltaEvent.isEmpty) {
-          logger.debug("Skipping completion because the paid traffic cost is 0")
-        }
-
         c.actAs.toList match {
-          case one :: Nil =>
-            AccountId.create(one) match {
-              case Left(err) =>
-                logger.warn(
-                  s"actAs $one is not a valid AccountId. Completion will be skipped: $err"
-                )
-                None
-              case Right(accountId) =>
-                offsetDeltaEvent.map(e => Traced(ProjectionEvent(accountId, e)))
-            }
+          case head :: Nil =>
+            AccountId
+              .create(head)
+              .leftMap { err =>
+                logger.warn(s"actAs $head is not a valid AccountId. Completion skipped: $err")
+              }
+              .toOption
+              .flatMap(doDecode(c, _))
           case Nil =>
             logger.error(
               s"No actAs for completion $c. This shouldn't happen. Cost won't be deducted."
@@ -132,4 +96,40 @@ final class TeaDebitIngestionService(
         }
       case _ => None
     }
+
+  private def doDecode(completion: Completion, accountId: AccountId)(implicit tc: TraceContext) = {
+    val synchronizerTime = completion.synchronizerTime.getOrElse(
+      throw new IllegalStateException(s"Empty synchronizer time on completion $completion")
+    )
+    val recordTime = synchronizerTime.recordTime.getOrElse(
+      throw new IllegalStateException(s"Empty recordTime time on completion $completion")
+    )
+    val cantonTimestampRecordTime = CantonTimestamp
+      .fromProtoTimestamp(recordTime)
+      .valueOr(err => throw new IllegalStateException(s"Invalid recordTime $err"))
+
+    val maybeAccountDelta = NonNegativeLong
+      .create(completion.paidTrafficCost)
+      .getOrElse(
+        throw new IllegalStateException(
+          s"Negative paid traffic cost received on completion: ${completion.paidTrafficCost}"
+        )
+      )
+      // Only record non-zero cost to avoid spamming the TEA if traffic control is disabled
+      .toPositiveNumeric
+      .map { positiveDebit =>
+        AccountDelta(
+          delta = TrafficDelta.debitBalanceDelta(positiveDebit.toNonNegative.value),
+          account = accountId,
+        )
+      }
+
+    if (maybeAccountDelta.isEmpty) {
+      logger.debug("Skipping completion because the paid traffic cost is 0")
+    }
+
+    maybeAccountDelta.map(e =>
+      Traced(ProjectionEvent.Single(completion.offset, cantonTimestampRecordTime, e))
+    )
+  }
 }

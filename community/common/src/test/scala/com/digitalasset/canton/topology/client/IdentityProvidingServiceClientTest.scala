@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import cats.syntax.either.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -24,16 +25,18 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest with F
 
   "party topology snapshot client" should {
     lazy val topology = Map(
-      party1.toLf -> PartyInfo.nonConsortiumPartyInfo(
+      party1.toLf -> PartyInfo.forTesting(
+        PositiveInt.one,
         Map(
           participant1 -> ParticipantAttributes(ParticipantPermission.Submission),
           participant2 -> ParticipantAttributes(ParticipantPermission.Observation),
-        )
+        ),
       ),
-      party2.toLf -> PartyInfo.nonConsortiumPartyInfo(
+      party2.toLf -> PartyInfo.forTesting(
+        PositiveInt.one,
         Map(
           participant2 -> ParticipantAttributes(ParticipantPermission.Observation)
-        )
+        ),
       ),
     )
     lazy val client = new PartyTopologySnapshotClient
@@ -73,6 +76,13 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest with F
             party -> topology.getOrElse(party, PartyInfo.EmptyPartyInfo)
           }.toMap
         )
+
+      override def activeParticipantsOfPartiesWithInfoIgnoringFreeze(
+          parties: Seq[LfPartyId]
+      )(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]] =
+        activeParticipantsOfPartiesWithInfo(parties)
 
       override def canNotSubmit(
           participant: ParticipantId,

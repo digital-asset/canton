@@ -16,7 +16,9 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.Database
+import com.digitalasset.canton.synchronizer.sequencer.SequencerMemberStatus.Active
 import com.digitalasset.canton.synchronizer.sequencer.{
+  SequencerMemberStatus,
   SequencerPruningStatus,
   SequencerReaderConfig,
 }
@@ -71,7 +73,13 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   ): Option[CantonTimestamp] =
     status.members
       .filterNot(_.member == participantId)
-      .flatMap(_.lastAcknowledged.toList)
+      .flatMap {
+        case SequencerMemberStatus.Onboarding(_) => Nil
+        case SequencerMemberStatus.Active(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+        case SequencerMemberStatus.Disabled(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+      }
       .minOption
 
   private def onboardParticipant(participant: LocalParticipantReference)(implicit
@@ -111,8 +119,7 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
     logger.info(s"Waiting for acknowledgement bound at $acknowledgementBound")
     eventually(timeUntilSuccess = 60.seconds) {
       val status = sequencer.pruning.status()
-      val members =
-        status.members.filter(_.enabled)
+      val members = status.members.collect { case m: Active => m }
 
       forAll(members) { member =>
         assert(member.lastAcknowledged.exists(_ >= acknowledgementBound))
@@ -222,8 +229,8 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
       for {
         earliestAck <- earliestAckExcludingParticipant(status, participant3.id)
         ackParticipant3 <- status.members.collectFirst {
-          case memberStatus if memberStatus.member == participant3.id =>
-            memberStatus.safePruningTimestamp
+          case member: Active if member.member == participant3.id =>
+            member.safePruningTimestamp
         }
       } yield {
         assert(ackParticipant3.isBefore(earliestAck))

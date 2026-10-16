@@ -1,0 +1,48 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v33;
+
+import "com/digitalasset/canton/protocol/v30/common_stable.proto";
+import "com/digitalasset/canton/protocol/v30/sequencing.proto";
+import "com/digitalasset/canton/protocol/v32/sequencing.proto";
+import "scalapb/scalapb.proto";
+
+// Compared to v32:
+//  - Removed topology_timestamp field
+message SubmissionRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // Sender of the request.
+  // This request must be wrapped in a SignedContent and
+  // the signature therein must validate under one of the sender's public keys.
+  // The request metadata must contain a valid authentication token belonging to the sender.
+  // (Details in SequencerAuthenticationServerInterceptor.)
+  // TARGET STATE: The sender must be authorized (cf. TopologySnapshot.isMemberKnown)
+  // CURRENT STATE: The sender authorization check might have a few gaps (e.g., see MemberAuthenticationService.isActive)
+  //   and/or may use the wrong snapshot.
+  string sender = 1;
+
+  // Will be included in the receipt of the request.
+  // The sender should not reuse a message_id until max_sequencing_time,
+  // because otherwise it will be unable to correlate receipts with requests.
+  string message_id = 2;
+
+  // The payload, mandatory
+  // At most one recipient of an envelope may be (a) a mediator, (b) a mediator group, or (c) all synchronizer members.
+  v32.CompressedBatch batch = 4;
+
+  // Maximum sequencing time for the request.
+  // If the request can't be sequenced until the specified time, the sequencer will reject it.
+  // After max_sequencing_time, no event corresponding to the request will be emitted.
+  // in microseconds of UTC time since Unix epoch
+  int64 max_sequencing_time = 5;
+
+  // Optional rule used to aggregate requests.
+  v30.AggregationRule aggregation_rule = 6;
+
+  // Optional submission cost computed by the sender. Must be provided if traffic control is enabled on the receiving synchronizer.
+  v30.SequencingSubmissionCost submission_cost = 7;
+}

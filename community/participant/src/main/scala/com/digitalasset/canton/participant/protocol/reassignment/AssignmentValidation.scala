@@ -230,7 +230,6 @@ private[reassignment] class AssignmentValidation(
     val assignmentRequestTs = parsedRequest.requestTimestamp
 
     for {
-      // TODO(i26479): Check that reassignmentData.unassignmentRequest.targetTimestamp is in the past
       exclusivityTimeoutError <- AssignmentValidation.checkExclusivityTimeout(
         reassignmentCoordination,
         targetPsid,
@@ -324,8 +323,9 @@ private[reassignment] sealed trait AssignmentProcessorError extends Reassignment
 
 object AssignmentValidation {
 
-  /** Checks whether the submitter is either the initiator of the unassignment or the exclusivity
-    * timeout has elapsed.
+  /** Up to protocol version 36, checks that the target timestamp of the unassignment is before the
+    * assignment request timestamp, and that the submitter is either the initiator of the
+    * unassignment or the exclusivity timeout has elapsed.
     */
   def checkExclusivityTimeout(
       reassignmentCoordination: ReassignmentCoordination,
@@ -342,7 +342,9 @@ object AssignmentValidation {
     ReassignmentValidationError
   ]] = {
     val targetTimestamp = unassignmentData.targetTimestamp
-    if (targetTimestamp.unwrap >= requestTimestamp)
+    if (!ReassignmentValidation.isAssignmentExclusivityEnforced(targetPsid.unwrap))
+      EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](None)
+    else if (targetTimestamp.unwrap >= requestTimestamp)
       EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](
         Some(
           TargetTimestampAfterAssignmentRequest(

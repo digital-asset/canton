@@ -59,11 +59,9 @@ class GrpcSequencerConnectionService(
       request: v30.GetConnectionRequest
   ): Future[v30.GetConnectionResponse] =
     TraceContextGrpc.withGrpcTraceContext { implicit traceContext =>
-      CantonGrpcUtil.shutdownAsGrpcError(
-        fetchConnections().map { sequencerConnectionsO =>
-          v30.GetConnectionResponse(sequencerConnectionsO.map(_.toProtoV30))
-        }
-      )
+      fetchConnections().map { sequencerConnectionsO =>
+        v30.GetConnectionResponse(sequencerConnectionsO.map(_.toProtoV30))
+      }.asGrpcFuture
     }
 
   override def setConnection(request: v30.SetConnectionRequest): Future[v30.SetConnectionResponse] =

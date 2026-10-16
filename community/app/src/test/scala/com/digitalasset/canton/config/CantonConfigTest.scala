@@ -760,7 +760,18 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           ),
           "deprecated path",
         )
-      )
+      ) ++ Seq(
+        "enable-deprecated-endpoints-34",
+        "enable-deprecated-parameters-34",
+        "enable-deprecated-endpoints-35",
+      ).map { flag =>
+        (
+          (_: LogEntry).message should include(
+            s"Config path 'features.deprecated.$flag' is deprecated since 3.7.0"
+          ),
+          s"deprecated path 'features.deprecated.$flag'",
+        )
+      }
       loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
         {
           val parsed = CantonConfig.parseAndLoad(

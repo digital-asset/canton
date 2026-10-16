@@ -337,11 +337,13 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         BatchAggregatorConfig.defaultsForTesting,
         env.sequencerStore,
       ),
+      env.sequencerStore,
       sequencerTrafficConfig,
       futureSupervisor,
       SequencerMetrics.noop("reference-sequencer-traffic-control"),
       timeouts,
       lsuSequencingBounds = None,
+      testedProtocolVersion,
       this.loggerFactory,
     ) {
       override def getTrafficPurchasedAt(

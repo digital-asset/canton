@@ -47,6 +47,18 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       nodes: SynchronizerNodes,
       successorPsid: PhysicalSynchronizerId,
       sequencerLsuStateTsOverride: Option[CantonTimestamp] = None,
+  ): File =
+    exportNodesData(nodes.sequencers, nodes.mediators, successorPsid, sequencerLsuStateTsOverride)
+
+  /** Export nodes data for the specified nodes, which can be local or remote.
+    * @return
+    *   Directory containing the data
+    */
+  protected def exportNodesData(
+      sequencers: Seq[SequencerReference],
+      mediators: Seq[MediatorReference],
+      successorPsid: PhysicalSynchronizerId,
+      sequencerLsuStateTsOverride: Option[CantonTimestamp],
   ): File = {
     val exportDirectory: File = File.newTemporaryDirectory(s"$testName-$successorPsid")
 
@@ -54,11 +66,11 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       TraceContext.empty
     )
 
-    val sequencers = nodes.sequencers
+    val nodes: Seq[InstanceReference] = sequencers ++ mediators
 
-    nodes.all.foreach(writeUidToFile)
-    nodes.all.foreach(writeKeysToFile)
-    nodes.all.foreach(writeAuthorizeStoreToFile)
+    nodes.foreach(writeUidToFile)
+    nodes.foreach(writeKeysToFile)
+    nodes.foreach(writeAuthorizeStoreToFile)
     sequencers.foreach(writeSequencerGenesisState)
 
     // Helpers

@@ -27,6 +27,8 @@ sealed trait UnlessShutdown[+A] extends Product with Serializable {
 
   def forall(p: A => Boolean): Boolean
 
+  def exists(p: A => Boolean): Boolean
+
   /** Monadically chain two outcome computations. Abortion due to shutdown propagates. */
   def flatMap[B](f: A => UnlessShutdown[B]): UnlessShutdown[B]
 
@@ -61,6 +63,7 @@ object UnlessShutdown {
     override def map[B](f: A => B): Outcome[B] = Outcome(f(result))
     override def flatMap[B](f: A => UnlessShutdown[B]): UnlessShutdown[B] = f(result)
     override def forall(p: A => Boolean): Boolean = p(this.result)
+    override def exists(p: A => Boolean): Boolean = p(this.result)
     override def traverse[F[_], B](f: A => F[B])(implicit F: Applicative[F]): F[UnlessShutdown[B]] =
       F.map(f(result))(Outcome(_))
     override def toRight[L](aborted: => L): Either[L, A] = Right(result)
@@ -76,6 +79,7 @@ object UnlessShutdown {
     override def map[B](f: Nothing => B): AbortedDueToShutdown = this
     override def flatMap[B](f: Nothing => UnlessShutdown[B]): AbortedDueToShutdown = this
     override def forall(p: Nothing => Boolean): Boolean = true
+    override def exists(p: Nothing => Boolean): Boolean = false
     override def traverse[F[_], B](f: Nothing => F[B])(implicit
         F: Applicative[F]
     ): F[UnlessShutdown[B]] = F.pure(this)

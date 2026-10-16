@@ -46,6 +46,10 @@ private[events] class BufferedUpdateReader(
       (LookupKey, InternalUpdateFormat),
       GetUpdateResponse,
     ],
+    lastOffsetBeforeOrFirstAtReader: BufferedUpdatePointwiseReader[
+      (SynchronizerId, CantonTimestamp),
+      Offset,
+    ],
     lfValueTranslation: LfValueTranslation,
 )(val loggerFactory: NamedLoggerFactory)(implicit executionContext: ExecutionContext)
     extends LedgerDaoUpdateReader
@@ -105,10 +109,8 @@ private[events] class BufferedUpdateReader(
       recordTime: CantonTimestamp,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[Option[Offset]] = delegate.highestOffsetBeforeOrFirstAt(
-    synchronizerId,
-    recordTime,
-  )
+  ): Future[Option[Offset]] =
+    lastOffsetBeforeOrFirstAtReader.fetch((synchronizerId, recordTime))
 }
 
 private[platform] object BufferedUpdateReader {
@@ -187,10 +189,31 @@ private[platform] object BufferedUpdateReader {
           ),
       )
 
+    val recordTimeToOffsetReader = new BufferedUpdatePointwiseReader[
+      (SynchronizerId, CantonTimestamp),
+      Offset,
+    ](
+      fetchFromPersistence = { case ((synchronizer, recordTime), loggingContext) =>
+        delegate.highestOffsetBeforeOrFirstAt(synchronizer, recordTime)(loggingContext)
+      },
+      fetchFromBuffer = { case (synchronizer, recordTime) =>
+        updatesBuffer.lookupLastOffsetBeforeOrFirstAtRecordTime(
+          synchronizer.unwrap.toProtoPrimitive,
+          recordTime.underlying,
+        )
+      },
+      toApiResponse = (
+          transactionLogUpdate: TransactionLogUpdate,
+          _: (SynchronizerId, CantonTimestamp),
+          _: LoggingContextWithTrace,
+      ) => Future.successful(Some(transactionLogUpdate.offset)),
+    )
+
     new BufferedUpdateReader(
       delegate = delegate,
       bufferedUpdatesReader = updatesStreamReader,
       bufferedUpdateReader = updatePointwiseReader,
+      lastOffsetBeforeOrFirstAtReader = recordTimeToOffsetReader,
       lfValueTranslation = lfValueTranslation,
     )(loggerFactory)
   }

@@ -59,7 +59,7 @@ class AvailabilityModuleUpdateTopologyTest
 
       availability.receive(
         Availability.Consensus
-          .UpdateTopologyDuringStateTransfer(newMembership, newEpochNumber, newCryptoProvider)
+          .UpdateTopology(newMembership, newEpochNumber, newCryptoProvider)
       )
 
       // make sure new values are different
@@ -138,7 +138,7 @@ class AvailabilityModuleUpdateTopologyTest
       suppressProblemLogs(
         availability.receive(
           Availability.Consensus
-            .UpdateTopologyDuringStateTransfer(
+            .UpdateTopology(
               newMembershipOutdated,
               newEpochNumber,
               newCryptoProvider,

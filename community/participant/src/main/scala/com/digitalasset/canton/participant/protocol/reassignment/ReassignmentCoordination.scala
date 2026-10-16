@@ -169,8 +169,8 @@ class ReassignmentCoordination(
       _ <- EitherT.right[UnknownPhysicalSynchronizer](timeout.getOrElse(onImmediate))
     } yield ()
 
-  /** Submits an assignment. Used by the [[UnassignmentProcessingSteps]] to automatically trigger
-    * the submission of an assignment after the exclusivity timeout.
+  /** Submits an assignment. Used by [[AutomaticAssignment]] to submit an assignment on this
+    * participant's own initiative.
     */
   private[reassignment] def assign(
       targetSynchronizerId: Target[PhysicalSynchronizerId],
@@ -258,7 +258,7 @@ class ReassignmentCoordination(
       .fromEither[FutureUnlessShutdown](getStaticSynchronizerParameter(targetPsid))
     topoClient <- EitherT
       .fromEither[FutureUnlessShutdown](getTopologyClient(targetPsid, staticSynchronizerParameters))
-    // TODO(i26479): we could not fail even if the participant is disconnected from the target synchronizer
+    // TODO(i33643): we could validate unassignments against the stored target topology when disconnected from the target
     timestamp <- topoClient.traverseSingleton { case (_, client) =>
       EitherT.rightT[FutureUnlessShutdown, UnknownPhysicalSynchronizer](
         client.approximateTimestamp

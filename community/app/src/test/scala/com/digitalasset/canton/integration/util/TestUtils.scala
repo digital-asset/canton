@@ -110,6 +110,7 @@ object TestUtils extends FutureHelpers {
         sequencerClient
           .send(
             messageId = TimeProof.mkTimeProofRequestMessageId,
+            currentSnapshotApproximation = None,
             batch = Batch(Nil, BaseTest.testedProtocolVersion),
             callback = sendCallback,
           )(

@@ -493,7 +493,7 @@ trait EventStorageBackend {
   def lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
       synchronizerId: SynchronizerId,
       beforeOrAtRecordTime: Timestamp,
-  )(connection: Connection): Option[Offset]
+  )(connection: Connection): Vector[(Offset, Timestamp)]
 
   def lastRecordTimeBeforeOrAtSynchronizerOffset(
       synchronizerId: SynchronizerId,

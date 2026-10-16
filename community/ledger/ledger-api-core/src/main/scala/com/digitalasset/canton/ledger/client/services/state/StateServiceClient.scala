@@ -13,6 +13,7 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsResponse,
   GetConnectedSynchronizersRequest,
   GetConnectedSynchronizersResponse,
+  GetLatestPrunedOffsetsRequest,
   GetLedgerEndRequest,
   GetLedgerEndResponse,
 }
@@ -83,6 +84,14 @@ class StateServiceClient(
       token: Option[String] = None
   )(implicit traceContext: TraceContext): Future[Long] =
     getLedgerEnd(Seq(), token).map(_.offset)
+
+  def getParticipantPrunedUpToOffset(
+      token: Option[String] = None
+  )(implicit traceContext: TraceContext): Future[Long] =
+    LedgerClient
+      .stubWithTracing(service, token.orElse(getDefaultToken()))
+      .getLatestPrunedOffsets(GetLatestPrunedOffsetsRequest())
+      .map(_.participantPrunedUpToInclusive)
 
   def getConnectedSynchronizers(
       party: String,

@@ -33,18 +33,18 @@ class JobTestScheduler(
 
   override def initializeSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[JobSchedule]] = Future.successful(schedule.get)
+  ): FutureUnlessShutdown[Option[JobSchedule]] = FutureUnlessShutdown.pure(schedule.get)
 
   override def close(): Unit = stop()(TraceContext.todo)
 
   def setSchedule(newSchedule: PruningCronSchedule)(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
+  ): FutureUnlessShutdown[Unit] =
     updateAndRestart(schedule.set(Some(newSchedule)))
 
   private def updateAndRestart[T](
       update: => T
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     update
     reactivateSchedulerIfActive()
   }

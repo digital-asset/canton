@@ -39,6 +39,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -1029,6 +1030,120 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           check(upgradeSuccess, Seq(None))
 
         }
+      }
+
+      "let the party alone nominate a participant and only the nominee move itself forward" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+        val store =
+          new InMemoryTopologyStore(
+            TopologyStoreId.AuthorizedStore,
+            predecessor = None,
+            testedProtocolVersion,
+            loggerFactory,
+            timeouts,
+          )
+        val validator = mk(store)
+        import Factory.*
+        import HostingParticipant.HostingState
+
+        def ptp(participant6State: Option[HostingState]) = PartyToParticipant.tryCreate(
+          party1b, // lives in the namespace of p1, corresponding to `SigningKeys.key1`
+          threshold = PositiveInt.one,
+          HostingParticipant(participant1, ParticipantPermission.Submission) +:
+            participant6State
+              .map(state =>
+                HostingParticipant(participant6, ParticipantPermission.Observation, state)
+              )
+              .toList,
+        )
+
+        val hosted = mkAdd(ptp(None), SigningKeys.key1, serial = PositiveInt.one)
+        val nominated =
+          mkAdd(ptp(Some(HostingState.Nominated)), SigningKeys.key1, serial = PositiveInt.two)
+        val freezingSignedByParty =
+          mkAdd(ptp(Some(HostingState.Freezing)), SigningKeys.key1, serial = PositiveInt.three)
+        val freezingSignedByNominee =
+          mkAdd(ptp(Some(HostingState.Freezing)), SigningKeys.key6, serial = PositiveInt.three)
+
+        val ptpMappingHash = hosted.mapping.uniqueKey
+        for {
+          _ <- store.update(
+            SequencedTime(ts(0)),
+            EffectiveTime(ts(0)),
+            removals = Map.empty,
+            additions = List(ns1k1_k1, ns6k6_k6).map(
+              ValidatedTopologyTransaction(_)
+            ),
+          )
+          nominationResult <- validate(
+            validator,
+            ts(1),
+            List(nominated),
+            inStore = Map(ptpMappingHash -> hosted),
+            expectFullAuthorization = true,
+          )
+          freezingByPartyResult <- validate(
+            validator,
+            ts(2),
+            List(freezingSignedByParty),
+            inStore = Map(ptpMappingHash -> nominated),
+            expectFullAuthorization = true,
+          )
+          freezingByNomineeResult <- validate(
+            validator,
+            ts(2),
+            List(freezingSignedByNominee),
+            inStore = Map(ptpMappingHash -> nominated),
+            expectFullAuthorization = true,
+          )
+        } yield {
+          check(nominationResult, Seq(None))
+          check(
+            freezingByPartyResult,
+            Seq(Some(_ == NotFullyAuthorized(ReferencedAuthorizations(Set(ns6))))),
+          )
+          check(freezingByNomineeResult, Seq(None))
+        }
+      }
+
+      "let the synchronizer owner remove the whole mapping" in {
+        val store =
+          new InMemoryTopologyStore(
+            SynchronizerStore(Factory.physicalSynchronizerId1), // owned by ns1
+            predecessor = None,
+            testedProtocolVersion,
+            loggerFactory,
+            timeouts,
+          )
+        val validator = mk(store)
+        import Factory.*
+
+        // party6 and participant6 live in ns6, so only the synchronizer owner's namespace authorizes key1
+        val mapping = PartyToParticipant.tryCreate(
+          party6,
+          threshold = PositiveInt.one,
+          Seq(HostingParticipant(participant6, ParticipantPermission.Submission)),
+        )
+        val hosted = mkAdd(mapping, SigningKeys.key6, serial = PositiveInt.one)
+        val removedBySynchronizerOwner =
+          mkRemove(mapping, NonEmpty(Set, SigningKeys.key1), serial = PositiveInt.two)
+
+        for {
+          _ <- store.update(
+            SequencedTime(ts(0)),
+            EffectiveTime(ts(0)),
+            removals = Map.empty,
+            additions = List(ns1k1_k1, ns6k6_k6).map(
+              ValidatedTopologyTransaction(_)
+            ),
+          )
+          removalResult <- validate(
+            validator,
+            ts(1),
+            List(removedBySynchronizerOwner),
+            inStore = Map(mapping.uniqueKey -> hosted),
+            expectFullAuthorization = true,
+          )
+        } yield check(removalResult, Seq(None))
       }
 
       "allow participants to unilaterally disassociate themselves from parties" in {

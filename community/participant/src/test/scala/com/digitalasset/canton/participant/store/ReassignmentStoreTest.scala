@@ -1043,7 +1043,7 @@ trait ReassignmentStoreTest extends AsyncWordSpec with FailOnShutdown with BaseT
           synchronizers = Set(sourceSynchronizer1.value),
           Map(
             // Only Bob listed
-            bob -> PartyInfo(
+            bob -> PartyInfo.forTesting(
               PositiveInt.one,
               Map(
                 DefaultTestIdentities.participant1 -> ParticipantAttributes(

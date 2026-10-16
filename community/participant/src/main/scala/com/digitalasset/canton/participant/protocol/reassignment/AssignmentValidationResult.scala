@@ -59,6 +59,9 @@ final case class AssignmentValidationResult private[reassignment] (
     //   Case 2: once the unassignment is complete, its data becomes available in the reassignment cache,
     //           so the data only becomes available after the check. We tolerate the inactive flag here
     //           so that we approve.
+    // On a non-reassigning participant, the reassignmentId is always flagged as inactive, as the
+    // participant does not store the unassignment data. Since isAssignmentCompleted is false there,
+    // only the contract activeness is taken into account.
     // The only inactive case we must not tolerate is an actually completed assignment, hence the
     // isAssignmentCompleted guard. The contract activeness must still be successful on its own.
     // TODO(#12871): Once the reassignment store becomes prunable, a completed-and-pruned
@@ -72,6 +75,8 @@ final case class AssignmentValidationResult private[reassignment] (
 
     commonValidationResult.activenessResult.isSuccessful || isReassignmentActive
   }
+
+  override protected def requestDescription: String = "Assignment request"
 
   private[reassignment] def commitSet(storedInReassignmentStore: Boolean) =
     CommitSet.createForAssignment(

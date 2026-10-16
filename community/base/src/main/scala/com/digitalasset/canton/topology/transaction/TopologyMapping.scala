@@ -7,7 +7,6 @@ import cats.Monoid
 import cats.instances.order.*
 import cats.syntax.apply.*
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
@@ -29,6 +28,8 @@ import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   SequencingParameters,
+  SynchronizerLimits,
+  TopologyLimits,
   v30,
   v31,
 }
@@ -42,6 +43,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.transaction.TopologyMapping.RequiredAuth.*
@@ -53,7 +55,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.{
 }
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError, SequencerAlias}
 import com.digitalasset.nonempty.NonEmpty
@@ -402,6 +404,7 @@ object TopologyMapping {
   @nowarn("cat=deprecation")
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      synchronizerLimits: SynchronizerLimits,
       proto: v30.TopologyMapping,
   ): ParsingResult[TopologyMapping] =
     proto.mapping match {
@@ -410,11 +413,11 @@ object TopologyMapping {
       case v30.TopologyMapping.Mapping.NamespaceDelegation(value) =>
         NamespaceDelegation.fromProtoV30(pvv, value)
       case v30.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(value) =>
-        DecentralizedNamespaceDefinition.fromProtoV30(pvv, value)
+        DecentralizedNamespaceDefinition.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v30.TopologyMapping.Mapping.OwnerToKeyMapping(value) =>
-        OwnerToKeyMapping.fromProtoV30(pvv, value)
+        OwnerToKeyMapping.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v30.TopologyMapping.Mapping.PartyToKeyMapping(value) =>
-        PartyToKeyMapping.fromProtoV30(pvv, value)
+        PartyToKeyMapping.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v30.TopologyMapping.Mapping.SynchronizerTrustCertificate(value) =>
         SynchronizerTrustCertificate.fromProtoV30(pvv, value)
       case v30.TopologyMapping.Mapping.PartyHostingLimits(value) =>
@@ -424,7 +427,7 @@ object TopologyMapping {
       case v30.TopologyMapping.Mapping.VettedPackages(value) =>
         VettedPackages.fromProtoV30(pvv, value)
       case v30.TopologyMapping.Mapping.PartyToParticipant(value) =>
-        PartyToParticipant.fromProtoV30(pvv, value)
+        PartyToParticipant.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v30.TopologyMapping.Mapping.SynchronizerParametersState(value) =>
         SynchronizerParametersState.fromProtoV30(pvv, value)
       case v30.TopologyMapping.Mapping.SequencingDynamicParametersState(value) =>
@@ -442,6 +445,7 @@ object TopologyMapping {
   @nowarn("cat=deprecation")
   def fromProtoV31(
       pvv: ProtocolVersionValidation,
+      synchronizerLimits: SynchronizerLimits,
       proto: v31.TopologyMapping,
   ): ParsingResult[TopologyMapping] =
     proto.mapping match {
@@ -450,11 +454,11 @@ object TopologyMapping {
       case v31.TopologyMapping.Mapping.NamespaceDelegation(value) =>
         NamespaceDelegation.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(value) =>
-        DecentralizedNamespaceDefinition.fromProtoV30(pvv, value)
+        DecentralizedNamespaceDefinition.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v31.TopologyMapping.Mapping.OwnerToKeyMapping(value) =>
-        OwnerToKeyMapping.fromProtoV30(pvv, value)
+        OwnerToKeyMapping.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v31.TopologyMapping.Mapping.PartyToKeyMapping(value) =>
-        PartyToKeyMapping.fromProtoV30(pvv, value)
+        PartyToKeyMapping.fromProtoV30(pvv, synchronizerLimits.topologyLimits, value)
       case v31.TopologyMapping.Mapping.SynchronizerTrustCertificate(value) =>
         SynchronizerTrustCertificate.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.PartyHostingLimits(value) =>
@@ -464,7 +468,7 @@ object TopologyMapping {
       case v31.TopologyMapping.Mapping.VettedPackages(value) =>
         VettedPackages.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.PartyToParticipant(value) =>
-        PartyToParticipant.fromProtoV31(pvv, value)
+        PartyToParticipant.fromProtoV31(pvv, synchronizerLimits.topologyLimits, value)
       case v31.TopologyMapping.Mapping.SynchronizerParametersState(value) =>
         SynchronizerParametersState.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.SequencingDynamicParametersState(value) =>
@@ -514,6 +518,11 @@ sealed trait DelegationRestriction extends Product with Serializable {
 }
 object DelegationRestriction {
 
+  /** The largest number of mappings a [[CanSignSpecificMappings]] restriction can list. Related to
+    * the known codes in `Code.all`, with a generous margin for codes added later.
+    */
+  val MaxMappings: PositiveInt = PositiveInt.tryCreate(50)
+
   /** If no mapping restrictions are specified, returns None. */
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -536,7 +545,7 @@ object DelegationRestriction {
             mappings,
             "mappings",
             pvv,
-            ProtoValidation.MaxCollectionSize,
+            ValidationParam(ProtocolVersion.nextValidationBoundPV -> MaxMappings),
           )
           .flatMap(ProtoConverter.parseRequiredNonEmpty(Code.fromProtoV30, "mappings", _))
           .map(restrictions => Some(CanSignSpecificMappings(restrictions.toSet)))
@@ -808,7 +817,10 @@ final case class DecentralizedNamespaceDefinition private (
     v30.DecentralizedNamespaceDefinition(
       decentralizedNamespace = namespace.fingerprint.unwrap,
       threshold = threshold.unwrap,
-      owners = owners.toSeq.map(_.toProtoPrimitive.toProtoUnvalidated),
+      // Sorted, so that the serialization of a definition does not depend on the set's order
+      owners = owners.toSeq
+        .sorted(Namespace.namespaceOrder.toOrdering)
+        .map(_.toProtoPrimitive.toProtoUnvalidated),
     )
 
   override def toProtoV30: Either[String, v30.TopologyMapping] =
@@ -888,6 +900,7 @@ object DecentralizedNamespaceDefinition
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      topologyLimits: TopologyLimits,
       value: v30.DecentralizedNamespaceDefinition,
   ): ParsingResult[DecentralizedNamespaceDefinition] = {
     val v30.DecentralizedNamespaceDefinition(decentralizedNamespaceP, thresholdP, ownersP) = value
@@ -902,7 +915,9 @@ object DecentralizedNamespaceDefinition
         ownersP,
         "owners",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(
+          ProtocolVersion.nextValidationBoundPV -> topologyLimits.maxOwnersPerDecentralizedNamespace
+        ),
       )(
         Fingerprint.fromProtoPrimitive
       )
@@ -948,29 +963,18 @@ sealed trait KeyMapping extends TopologyMapping with Product with Serializable {
 }
 
 object KeyMapping {
-  val MaxKeys: Int = 20
+  val MaxKeys: PositiveInt = PositiveInt.tryCreate(20)
 
-  def validateKeysSizeSet(
-      keys: NonEmpty[Set[SigningPublicKey]],
-      maxKeys: Int,
-  ): Either[String, Unit] =
-    Either.cond(
-      keys.sizeIs <= maxKeys,
-      (),
-      s"At most $maxKeys key(s) can be specified, got ${keys.size}.",
+  /** The bound on the keys of a key mapping, shared by its deserialization and the topology checks.
+    *
+    * @param maxSigningKeysPerEntity
+    *   the synchronizer's `topologyLimits.maxSigningKeysPerEntity`
+    */
+  def maxKeys(maxSigningKeysPerEntity: PositiveInt): ValidationParam[PositiveInt] =
+    ValidationParam(
+      ProtocolVersion.v35 -> MaxKeys,
+      ProtocolVersion.nextValidationBoundPV -> maxSigningKeysPerEntity,
     )
-
-  def validateKeysSize(
-      keys: NonEmpty[Seq[PublicKey]],
-      maxKeys: Int,
-  ): Either[String, Unit] =
-    for {
-      _ <- Either.cond(
-        keys.sizeIs <= maxKeys,
-        (),
-        s"At most $maxKeys key(s) can be specified, got ${keys.size}.",
-      )
-    } yield ()
 }
 
 /** A key owner (participant, mediator, sequencer) to key mapping
@@ -1055,7 +1059,7 @@ object OwnerToKeyMapping
     ),
   )
 
-  val MaxKeys: Int = KeyMapping.MaxKeys
+  val MaxKeys: PositiveInt = KeyMapping.MaxKeys
 
   @VisibleForTesting
   val keysUnsafe: Lens[OwnerToKeyMapping, NonEmpty[Seq[PublicKey]]] =
@@ -1074,7 +1078,6 @@ object OwnerToKeyMapping
         (),
         s"All keys must be unique. Duplicate keys: $duplicateKeys",
       )
-      _ <- KeyMapping.validateKeysSize(keys, MaxKeys)
     } yield OwnerToKeyMapping(member, keys)
   }
 
@@ -1084,6 +1087,7 @@ object OwnerToKeyMapping
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      topologyLimits: TopologyLimits,
       value: v30.OwnerToKeyMapping,
   ): ParsingResult[OwnerToKeyMapping] = {
     val v30.OwnerToKeyMapping(memberP, keysP) = value
@@ -1092,7 +1096,12 @@ object OwnerToKeyMapping
         Member.fromProtoPrimitive
       )
       keysSeqP <- ProtoValidation
-        .validateLength(keysP, "public_keys", pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(
+          keysP,
+          "public_keys",
+          pvv,
+          KeyMapping.maxKeys(topologyLimits.maxSigningKeysPerEntity),
+        )
       keys <- ProtoConverter
         .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV30, "public_keys", keysSeqP)
       otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
@@ -1211,20 +1220,16 @@ object PartyToKeyMapping
     paramIfDefined("threshold", x => Option.when(x.threshold > PositiveInt.one)(x.threshold)),
   )
 
-  val MaxKeys: Int = KeyMapping.MaxKeys
+  val MaxKeys: PositiveInt = KeyMapping.MaxKeys
 
   def create(
       partyId: PartyId,
       threshold: PositiveInt,
       signingKeys: NonEmpty[Seq[SigningPublicKey]],
-  ): Either[String, PartyToKeyMapping] = {
-    val signingKeysWithThreshold = SigningKeysWithThreshold(signingKeys.toSet, threshold)
-    for {
-      // The toSet removes duplicate signing keys before creating the SigningKeysWithThreshold
-      // This is on purpose here because legacy existing P2Ks may have duplicate keys and we must be able to deserialize them
-      _ <- KeyMapping.validateKeysSizeSet(signingKeysWithThreshold.keys, MaxKeys)
-    } yield PartyToKeyMapping(partyId, signingKeysWithThreshold)
-  }
+  ): Either[String, PartyToKeyMapping] =
+    // The toSet removes duplicate signing keys before creating the SigningKeysWithThreshold
+    // This is on purpose here because legacy existing P2Ks may have duplicate keys and we must be able to deserialize them
+    Right(PartyToKeyMapping(partyId, SigningKeysWithThreshold(signingKeys.toSet, threshold)))
 
   def tryCreate(
       partyId: PartyId,
@@ -1240,6 +1245,7 @@ object PartyToKeyMapping
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      topologyLimits: TopologyLimits,
       value: v30.PartyToKeyMapping,
   ): ParsingResult[PartyToKeyMapping] = {
     val v30.PartyToKeyMapping(partyP, thresholdP, signingKeysP) = value
@@ -1248,7 +1254,12 @@ object PartyToKeyMapping
         PartyId.fromProtoPrimitive
       )
       signingKeysSeqP <- ProtoValidation
-        .validateLength(signingKeysP, "signing_keys", pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(
+          signingKeysP,
+          "signing_keys",
+          pvv,
+          KeyMapping.maxKeys(topologyLimits.maxSigningKeysPerEntity),
+        )
       signingKeysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV30,
@@ -1275,7 +1286,7 @@ object PartyToKeyMapping
 final case class SynchronizerTrustCertificate(
     participantId: ParticipantId,
     synchronizerId: SynchronizerId,
-    featureFlags: Seq[ParticipantTopologyFeatureFlag] = Seq.empty,
+    featureFlags: Set[ParticipantTopologyFeatureFlag] = Set.empty,
 ) extends TopologyMapping {
 
   override def companion: SynchronizerTrustCertificate.type = SynchronizerTrustCertificate
@@ -1287,7 +1298,8 @@ final case class SynchronizerTrustCertificate(
     v30.SynchronizerTrustCertificate(
       participantUid = participantId.uid.toProtoPrimitive,
       synchronizerId = synchronizerId.toProtoPrimitive,
-      featureFlags = featureFlags.map(_.toProtoV30),
+      // Sorted, so that the serialization of a certificate does not depend on the set's order
+      featureFlags = featureFlags.toSeq.sortBy(_.value).map(_.toProtoV30),
     )
 
   override def toProtoV30: Either[String, v30.TopologyMapping] =
@@ -1332,7 +1344,7 @@ object SynchronizerTrustCertificate
     param("synchronizerId", _.synchronizerId),
     paramIfNonEmpty(
       "featureFlags",
-      _.featureFlags.map(_.toString.unquoted),
+      _.featureFlags.toSeq.sortBy(_.value).map(_.toString.unquoted),
     ),
   )
   final case class ParticipantTopologyFeatureFlag private (value: Int)(
@@ -1362,7 +1374,7 @@ object SynchronizerTrustCertificate
         v30.Enums.ParticipantFeatureFlag.PARTICIPANT_FEATURE_FLAG_ENABLE_MULTI_SYNCHRONIZER.value
       )(Some("EnableMultiSynchronizer"))
 
-    val knownTopologyFeatureFlags: Seq[ParticipantTopologyFeatureFlag] = Seq(
+    val all: Seq[ParticipantTopologyFeatureFlag] = Seq(
       ExternalSigningLocalContractsInSubview,
       EnableMultiSynchronizer,
     )
@@ -1370,7 +1382,7 @@ object SynchronizerTrustCertificate
     def fromProtoV30(
         valueP: v30.Enums.ParticipantFeatureFlag
     ): Option[ParticipantTopologyFeatureFlag] =
-      knownTopologyFeatureFlags
+      all
         .find(_.value == valueP.value)
         .orElse(
           Option
@@ -1379,6 +1391,12 @@ object SynchronizerTrustCertificate
             )
         )
   }
+
+  /** The largest number of feature flags a certificate can carry, unknown flags included. Related
+    * to the known flags in `ParticipantTopologyFeatureFlag.all`, with a generous margin for flags
+    * added later.
+    */
+  val MaxFeatureFlags: PositiveInt = PositiveInt.tryCreate(50)
 
   def uniqueKey(participantId: ParticipantId, synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(
@@ -1407,9 +1425,9 @@ object SynchronizerTrustCertificate
           valueP.featureFlags,
           "feature_flags",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(ProtocolVersion.nextValidationBoundPV -> MaxFeatureFlags),
         )
-      featureFlags = featureFlagsP.flatMap(ParticipantTopologyFeatureFlag.fromProtoV30)
+      featureFlags = featureFlagsP.flatMap(ParticipantTopologyFeatureFlag.fromProtoV30).toSet
     } yield SynchronizerTrustCertificate(
       participantId,
       synchronizerId,
@@ -1912,12 +1930,12 @@ object VettedPackages
 final case class HostingParticipant(
     participantId: ParticipantId,
     permission: ParticipantPermission,
-    state: HostingParticipant.HostingState,
+    state: HostingState,
 ) {
-  def onboarding: Boolean = state == HostingParticipant.HostingState.Onboarding
+  def onboarding: Boolean = state == HostingState.Onboarding
   def canConfirm: Boolean = permission.canConfirm && !onboarding
 
-  // Only ONBOARDING and ACTIVE are representable in v30; PartyToParticipant.canBeSerializedTo rejects the others.
+  // Only Onboarding and Active are representable in v30; PartyToParticipant.canBeSerializedTo rejects the others.
   def toProtoV30: v30.PartyToParticipant.HostingParticipant =
     v30.PartyToParticipant.HostingParticipant(
       participantUid = participantId.uid.toProtoPrimitive,
@@ -1952,24 +1970,64 @@ object HostingParticipant {
 
   sealed trait HostingState extends Product with Serializable {
     def toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState
+
+    /** Whether an entry in this state makes its participant a host of the party, i.e. a participant
+      * that receives the party's events. Only Onboarding and Active entries do. A Nominated or
+      * Freezing entry lists a participant that the party has only named, or that is still importing
+      * the party's contracts.
+      *
+      * The single rule from which both hosting views and the Ledger API topology events derive the
+      * party's hosts, so that they agree. A Freezing entry also freezes the party; only the default
+      * hosting view applies the freeze.
+      */
+    def canHost: Boolean
   }
 
   object HostingState {
+
+    /** The party has named the participant as a future host. Replicating the party's contracts to
+      * the participant has not started.
+      */
     case object Nominated extends HostingState {
       lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
         v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED
+      override def canHost: Boolean = false
     }
+
+    /** The participant is importing the party's contracts. Meanwhile, the party is frozen: the
+      * default hosting view gives it no hosts, so no request with the party as a stakeholder can be
+      * committed, and its contracts do not change during the import.
+      */
     case object Freezing extends HostingState {
       lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
         v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_FREEZING
+      override def canHost: Boolean = false
     }
+
+    /** The participant hosts the party but does not confirm for it, and ACS commitments leave it
+      * out. Same meaning as the v30 onboarding flag, as used by offline party replication: clearing
+      * the flag moves the entry to Active once the decision timeout has elapsed since the entry
+      * became Onboarding, so that every request in flight at that time is decided.
+      */
     case object Onboarding extends HostingState {
       lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
         v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ONBOARDING
+      override def canHost: Boolean = true
     }
+
+    /** The participant hosts the party and, with Confirmation or Submission permission, confirms
+      * for it.
+      */
     case object Active extends HostingState {
       lazy val toProtoV31: v31.PartyToParticipant.HostingParticipant.HostingState =
         v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE
+      override def canHost: Boolean = true
+    }
+
+    /** The order of the forward moves. Moving an entry to a lower state is a backward move. */
+    implicit val orderingHostingState: Ordering[HostingState] = {
+      val order = Seq[HostingState](Nominated, Freezing, Onboarding, Active).zipWithIndex.toMap
+      Ordering.by[HostingState, Int](order)
     }
 
     def fromProtoV31(
@@ -2036,8 +2094,7 @@ final case class PartyToParticipant private (
     if (protoVersion.v >= 31) ().asRight
     else {
       val notRepresentableInV30 = participants.filter(p =>
-        p.state == HostingParticipant.HostingState.Nominated ||
-          p.state == HostingParticipant.HostingState.Freezing
+        p.state == HostingState.Nominated || p.state == HostingState.Freezing
       )
       Either.cond(
         notRepresentableInV30.isEmpty,
@@ -2127,7 +2184,7 @@ final case class PartyToParticipant private (
   /*
    * See topology.proto for the specification of the authorization rules.
    */
-  def requiredAuthInternal(
+  private def requiredAuthInternal(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]],
       legacyPermissionUpgradeRequirements: Boolean,
   ): RequiredAuth = {
@@ -2160,11 +2217,22 @@ final case class PartyToParticipant private (
     val currentParticipantIds = current.participants.map(_.participantId).toSet
     val prevParticipantIds = prevParticipants.map(_.participantId).toSet
 
-    // added participants need to be authorized by the party and the respective participants
-    val addedParticipants = currentParticipantIds -- prevParticipantIds
+    // TODO(#35499): Update comment when ProtocolVersion.offPRWithSequencerChannels becomes stable
+    // Adding a participant requires the authorization of the party and of the added participant.
+    // Exception: the party alone adds a participant in the Nominated state, because a Nominated
+    // participant does not host the party yet and consents with its first forward move, which
+    // requires its own authorization. No protocol-version gate is needed: protocol versions before
+    // ProtocolVersion.offPRWithSequencerChannels cannot serialize Nominated, so there the exception
+    // never applies and the rule is unchanged.
+    val addedParticipants =
+      current.participants.filterNot(p => prevParticipantIds.contains(p.participantId))
     val addedParticipantsAuth =
       Option.when(addedParticipants.nonEmpty)(
-        RequiredNamespaces(Set(partyId.namespace) ++ addedParticipants.map(_.namespace))
+        RequiredNamespaces(
+          Set(partyId.namespace) ++ addedParticipants
+            .filterNot(_.state == HostingState.Nominated)
+            .map(_.participantId.namespace)
+        )
       )
 
     // removing a participant requires the authorization of either the party or the participant
@@ -2180,7 +2248,7 @@ final case class PartyToParticipant private (
     val previousPermissions = prevParticipants.map(h => h.participantId -> h.permission).toMap
 
     // permission upgrades require the authorization of the party and the participant.
-    // if legacyPermissionUpgradeRequirements is true, only the the party's authorization is required.
+    // if legacyPermissionUpgradeRequirements is true, only the party's authorization is required.
     // permission downgrades require the authorization of the party or the participant.
     val permissionChangesAuth =
       currentParticipantIds.flatMap { pid =>
@@ -2193,22 +2261,17 @@ final case class PartyToParticipant private (
         }
       }
 
-    // clearing the onboarding flag can only be done by the participant.
-    // setting the flag can only be done by party.
-    val onboardingFlagChangesAuth = {
-      val currentFlags = current.participants.map(p => p.participantId -> p.onboarding).toMap
-      val previousFlags = prevParticipants.map(p => p.participantId -> p.onboarding).toMap
-
-      // detect only changes to the onboarding flags. the required authorization for the addition or removal
-      // of a participant is handled above.
-      currentFlags.flatMap { case (pid, onboarding) =>
-        previousFlags.get(pid).flatMap { prevOnboarding =>
-          (prevOnboarding, onboarding) match {
-            case (_prev @ true, _curr @ false) => Some(RequiredNamespaces(pid))
-            case (_prev @ false, _curr @ true) =>
-              Some(RequiredNamespaces(partyId))
-            case _ => None
-          }
+    // moving a participant's hosting state forward requires the participant's authorization,
+    // moving it backward the party's (e.g. setting the onboarding flag again on protocol versions
+    // without the Nominated and Freezing states). From ProtocolVersion.offPRWithSequencerChannels on,
+    // the topology mapping checks reject backward moves.
+    // the required authorization for the addition or removal of a participant is handled above.
+    val hostingStateChangesAuth = {
+      val previousStates = prevParticipants.map(p => p.participantId -> p.state).toMap
+      current.participants.flatMap { p =>
+        previousStates.get(p.participantId).collect {
+          case prevState if prevState < p.state => RequiredNamespaces(p.participantId)
+          case prevState if prevState > p.state => RequiredNamespaces(partyId)
         }
       }
     }
@@ -2217,7 +2280,7 @@ final case class PartyToParticipant private (
     // because we can optimize nested
     val allAuthorizations =
       confirmationThresholdAuth.toList.toVector ++ partySigningKeysAuth ++
-        addedParticipantsAuth ++ onboardingFlagChangesAuth ++ removedParticipantsAuth ++
+        addedParticipantsAuth ++ hostingStateChangesAuth ++ removedParticipantsAuth ++
         permissionChangesAuth
     // all detected individual authorizations are required for the transaction to become authorized
     val combinedAuthO = allAuthorizations.reduceOption(_.and(_))
@@ -2227,7 +2290,7 @@ final case class PartyToParticipant private (
     // * all added signing keys (for safety)
     combinedAuthO.getOrElse(
       RequiredNamespaces(
-        Set(partyId.namespace) ++ addedParticipants.map(_.namespace),
+        Set(partyId.namespace) ++ addedParticipants.map(_.participantId.namespace),
         extraKeys = addedSigningKeys,
       )
     )
@@ -2262,10 +2325,10 @@ object PartyToParticipant
       _.participants
         .map { c =>
           val stateSuffix = c.state match {
-            case HostingParticipant.HostingState.Active => ""
-            case HostingParticipant.HostingState.Onboarding => "(onboarding)"
-            case HostingParticipant.HostingState.Nominated => "(nominated)"
-            case HostingParticipant.HostingState.Freezing => "(freezing)"
+            case HostingState.Active => ""
+            case HostingState.Onboarding => "(onboarding)"
+            case HostingState.Nominated => "(nominated)"
+            case HostingState.Freezing => "(freezing)"
           }
           (c.participantId, (c.permission.toString + stateSuffix).unquoted)
         }
@@ -2282,8 +2345,6 @@ object PartyToParticipant
       _.partySigningKeysWithThreshold.map(_.threshold).filter(_ > PositiveInt.one),
     ),
   )
-
-  val MaxKeys: Int = KeyMapping.MaxKeys
 
   def create(
       partyId: PartyId,
@@ -2306,22 +2367,13 @@ object PartyToParticipant
       .distinct
       .flatMap(deduplicateParticipantsWithDifferentPermissionsMap.get)
 
-    val keysValid = partySigningKeysWithThreshold
-      .traverse_(signingKeysWithThreshold =>
-        KeyMapping.validateKeysSizeSet(
-          signingKeysWithThreshold.keys,
-          MaxKeys,
-        )
+    Right(
+      PartyToParticipant(
+        partyId,
+        threshold,
+        deduplicateParticipantsWithDifferentPermissions,
+        partySigningKeysWithThreshold,
       )
-      .leftMap(err => s"Invalid PartyToParticipant: $err")
-
-    for {
-      _ <- keysValid
-    } yield PartyToParticipant(
-      partyId,
-      threshold,
-      deduplicateParticipantsWithDifferentPermissions,
-      partySigningKeysWithThreshold,
     )
   }
 
@@ -2354,6 +2406,7 @@ object PartyToParticipant
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      topologyLimits: TopologyLimits,
       value: v30.PartyToParticipant,
   ): ParsingResult[PartyToParticipant] =
     for {
@@ -2366,10 +2419,13 @@ object PartyToParticipant
           value.participants,
           "participants",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(
+            ProtocolVersion.nextValidationBoundPV -> topologyLimits.maxHostingParticipantsPerParty
+          ),
         )((element, _) => HostingParticipant.fromProtoV30(pvv, element))
       partySigningKeys <- value.partySigningKeys.traverse(protoValue =>
-        SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
+        SigningKeysWithThreshold
+          .fromProtoV30(pvv, topologyLimits.maxSigningKeysPerEntity, protoValue)
       )
       partyToParticipant <- PartyToParticipant
         .create(partyId, threshold, participants, partySigningKeys)
@@ -2378,6 +2434,7 @@ object PartyToParticipant
 
   def fromProtoV31(
       pvv: ProtocolVersionValidation,
+      topologyLimits: TopologyLimits,
       value: v31.PartyToParticipant,
   ): ParsingResult[PartyToParticipant] =
     for {
@@ -2390,10 +2447,13 @@ object PartyToParticipant
           value.participants,
           "participants",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(
+            ProtocolVersion.nextValidationBoundPV -> topologyLimits.maxHostingParticipantsPerParty
+          ),
         )((element, _) => HostingParticipant.fromProtoV31(pvv, element))
       partySigningKeys <- value.partySigningKeys.traverse(protoValue =>
-        SigningKeysWithThreshold.fromProtoV30(pvv, protoValue)
+        SigningKeysWithThreshold
+          .fromProtoV30(pvv, topologyLimits.maxSigningKeysPerEntity, protoValue)
       )
       partyToParticipant <- PartyToParticipant
         .create(partyId, threshold, participants, partySigningKeys)
@@ -2945,8 +3005,8 @@ object LsuAnnouncement
   /** Starting with this protocol version, logical synchronizer upgrades to a lower protocol version
     * (downgrades) are forbidden.
     */
-  // TODO(#35499): Change to v37 or whereever the new topology mapping lands
-  lazy val minimumProtocolVersionForbiddingDowngrade: ProtocolVersion = ProtocolVersion.dev
+  lazy val minimumProtocolVersionForbiddingDowngrade: ProtocolVersion =
+    ProtocolVersion.offPRWithSequencerChannels
 
   /** Returns true iff upgrading from `current` to `successor` is a protocol version downgrade that
     * is forbidden, i.e., `successor` is a successor of `current` (higher serial), the current

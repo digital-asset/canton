@@ -229,6 +229,7 @@ class ConnectedSynchronizer(
       parameters.loggingConfig,
       testingConfig.useLegacyContractIdVersionV11,
       loggerFactory,
+      metrics.transactionProcessing.transactionViewMetrics,
     )
 
   private val damle =
@@ -280,6 +281,7 @@ class ConnectedSynchronizer(
     timeouts,
     Source(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig = testingConfig,
@@ -301,6 +303,7 @@ class ConnectedSynchronizer(
     timeouts,
     Target(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig,
@@ -971,7 +974,6 @@ class ConnectedSynchronizer(
           "Failed to complete outstanding assignments on startup. " +
             "You may have to complete the assignments manually.",
         )
-        ()
       }).value
     }
 
@@ -1064,6 +1066,9 @@ class ConnectedSynchronizer(
                 data.submitterMetadata,
                 participantId,
                 data.targetTimestamp,
+                data.unassignmentTs,
+                parameters.reassignmentsConfig,
+                clock,
               )
             )
             eitherF.leftMap(err => data.reassignmentId -> err).value

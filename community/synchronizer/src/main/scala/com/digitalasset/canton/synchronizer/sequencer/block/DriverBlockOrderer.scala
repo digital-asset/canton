@@ -56,8 +56,10 @@ class DriverBlockOrderer(
 
   override def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
-    driver.acknowledge(signedAcknowledgeRequest.toByteString)
+  ): EitherT[Future, SequencerDeliverError, Unit] =
+    EitherT.right(
+      driver.acknowledge(signedAcknowledgeRequest.toByteString)
+    )
 
   override def health(implicit
       traceContext: TraceContext
