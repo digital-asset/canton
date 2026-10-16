@@ -9,6 +9,7 @@ import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.auth.{AuthInterceptor, ClaimSet}
 import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.ledger.error.{JsonApiErrors, LedgerApiErrors}
@@ -16,6 +17,7 @@ import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
 import com.digitalasset.canton.tracing.{HeaderName, TraceContext, W3CTraceContext}
+import com.digitalasset.canton.version.ApiDeprecation
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error.Preprocessing
 import com.digitalasset.daml.lf.language.Ast.TVar
@@ -37,6 +39,7 @@ import sttp.model.{Header, StatusCode}
 import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
+import sttp.tapir.server.ServerEndpoint
 import sttp.tapir.server.ServerEndpoint.Full
 
 import java.util.concurrent.TimeUnit
@@ -47,6 +50,10 @@ import scala.util.{Failure, Success, Try}
 
 trait Endpoints extends NamedLogging {
   type CustomError = (StatusCode, JsCantonError)
+
+  /** The server side of a websocket endpoint: the errors of the stream are sent in-band as `Left`.
+    */
+  type WsFlow[I, O] = Flow[I, Either[JsCantonError, O], Any]
 
   protected def requestLogger: ApiRequestLogger
 
@@ -65,19 +72,7 @@ trait Endpoints extends NamedLogging {
       traceContext: TraceContext
   ): Try[Either[JsCantonError, R]] => Try[Either[CustomError, R]] = {
     case Success(Right(value)) => Success(Right(value))
-    case Success(Left(error)) =>
-      Success(
-        Left(
-          (
-            error.grpcCodeValue
-              .map(Status.fromCodeValue(_))
-              .map(_.getCode)
-              .getOrElse(Status.Code.UNKNOWN)
-              .asSttpStatus,
-            error,
-          )
-        )
-      )
+    case Success(Left(error)) => Success(Left(toCustomError(error)))
     case Failure(t: Throwable) if handleError.isDefinedAt(t) =>
       Success(handleError(traceContext)(t))
     case Failure(unhandled) =>
@@ -93,6 +88,16 @@ trait Endpoints extends NamedLogging {
           )
       }
   }
+
+  /** Pairs the error with the HTTP status derived from its gRPC status code. */
+  protected def toCustomError(error: JsCantonError): CustomError =
+    (
+      error.grpcCodeValue
+        .map(Status.fromCodeValue(_).getCode)
+        .getOrElse(Status.Code.UNKNOWN)
+        .asSttpStatus,
+      error,
+    )
 
   def json[R: Decoder: Encoder: Schema, P](
       endpoint: Endpoint[CallerContext, P, CustomError, Unit, Any],
@@ -112,20 +117,13 @@ trait Endpoints extends NamedLogging {
       )
 
   protected def websocket[HI, I, O](
-      endpoint: Endpoint[
-        CallerContext,
-        HI,
-        CustomError,
-        Flow[I, Either[JsCantonError, O], Any],
-        PekkoStreams & WebSockets,
-      ],
+      endpoint: Endpoint[CallerContext, HI, CustomError, WsFlow[I, O], PekkoStreams & WebSockets],
       service: CallerContext => TracedInput[HI] => Flow[I, O, Any],
   )(implicit
       authInterceptor: AuthInterceptor
-  ): Full[CallerContext, CallerContext, HI, CustomError, Flow[
+  ): Full[CallerContext, CallerContext, HI, CustomError, WsFlow[
     I,
-    Either[JsCantonError, O],
-    Any,
+    O,
   ], PekkoStreams & WebSockets, Future] =
     endpoint
       // .in(header(wsSubprotocol))  We send wsSubprotocol header, but we do not enforce it
@@ -259,6 +257,112 @@ trait Endpoints extends NamedLogging {
             .transform(handleErrorResponse(caller.traceContext()))
         }
       )
+
+  protected implicit class GatedOps[I, O, R](
+      serverEndpoint: Full[CallerContext, CallerContext, I, CustomError, O, R, Future]
+  ) {
+
+    /** Rejects the requests to the server endpoint with `DEPRECATED_API_DISABLED` while the
+      * deprecation its endpoint is marked with (`Endpoints.DeprecationOps.deprecatedSince`) is
+      * disabled in the gate. The check runs after the authentication and before the request body is
+      * decoded.
+      *
+      * Fails if the endpoint is not marked as deprecated (the deprecation wave is declared once, on
+      * the endpoint). Endpoints marked as deprecated but not gated are documented as deprecated
+      * without being gated.
+      *
+      * Gate websocket endpoints with [[GatedWebsocketOps.gatedWebsocket]] instead: rejecting the
+      * upgrade request with an HTTP error leaves most websocket clients without the error details.
+      * The gRPC counterpart is `DeprecatedApiGate.GatedFutureOps.gated`.
+      */
+    def gated(
+        deprecatedApiGate: DeprecatedApiGate
+    ): Full[CallerContext, CallerContext, I, CustomError, O, R, Future] = {
+      val deprecation = deprecationOf(serverEndpoint)
+      ServerEndpoint(
+        serverEndpoint.endpoint,
+        monad =>
+          caller =>
+            serverEndpoint
+              .securityLogic(monad)(caller)
+              .map(_.flatMap { authenticatedCaller =>
+                implicit val traceContext: TraceContext = authenticatedCaller.traceContext()
+                disabledDeprecationError(deprecatedApiGate, deprecation, serverEndpoint.endpoint)
+                  .map(toCustomError)
+                  .toLeft(authenticatedCaller)
+              }),
+        serverEndpoint.logic,
+      )
+    }
+  }
+
+  protected implicit class GatedWebsocketOps[HI, I, O](
+      serverEndpoint: Full[CallerContext, CallerContext, HI, CustomError, WsFlow[
+        I,
+        O,
+      ], PekkoStreams & WebSockets, Future]
+  ) {
+
+    /** [[GatedOps.gated]] for websocket endpoints: the websocket is established and the rejection
+      * is sent in-band as the first (and only) message, like the errors of the stream itself, as
+      * most websocket clients cannot read the body of a rejected upgrade.
+      */
+    def gatedWebsocket(
+        deprecatedApiGate: DeprecatedApiGate
+    ): Full[CallerContext, CallerContext, HI, CustomError, WsFlow[
+      I,
+      O,
+    ], PekkoStreams & WebSockets, Future] = {
+      val deprecation = deprecationOf(serverEndpoint)
+      ServerEndpoint(
+        serverEndpoint.endpoint,
+        serverEndpoint.securityLogic,
+        monad =>
+          caller =>
+            input => {
+              implicit val traceContext: TraceContext = caller.traceContext()
+              disabledDeprecationError(
+                deprecatedApiGate,
+                deprecation,
+                serverEndpoint.endpoint,
+              ) match {
+                case Some(error) =>
+                  val rejection: WsFlow[I, O] =
+                    Flow.fromSinkAndSourceCoupled(Sink.ignore, Source.single(Left(error)))
+                  Future.successful(Right(rejection))
+                case None => serverEndpoint.logic(monad)(caller)(input)
+              }
+            },
+      )
+    }
+  }
+
+  private def deprecationOf(serverEndpoint: ServerEndpoint[?, Future]): ApiDeprecation =
+    serverEndpoint.endpoint
+      .attribute(DeprecationAttribute)
+      .getOrElse(
+        throw new IllegalArgumentException(
+          s"${methodAndPath(serverEndpoint.endpoint)} is gated but not marked with deprecatedSince"
+        )
+      )
+
+  /** The `DEPRECATED_API_DISABLED` error to answer requests to the endpoint with, if the
+    * deprecation is disabled.
+    */
+  private def disabledDeprecationError(
+      deprecatedApiGate: DeprecatedApiGate,
+      deprecation: ApiDeprecation,
+      endpoint: EndpointMetaOps,
+  )(implicit traceContext: TraceContext): Option[JsCantonError] =
+    deprecatedApiGate
+      .rejection(deprecation, methodAndPath(endpoint))
+      .map(JsCantonError.fromErrorCode(_))
+
+  /** `METHOD /path` of the endpoint (`showShort` renders named endpoints as `[name]` instead). */
+  private def methodAndPath(endpoint: EndpointMetaOps): String = {
+    val method = endpoint.method.map(_.toString).getOrElse("*")
+    s"$method ${endpoint.showPathTemplate(showQueryParam = None)}"
+  }
 
   private def validateJwtToken(endpointInfo: EndpointMetaOps)(caller: CallerContext)(implicit
       authInterceptor: AuthInterceptor
@@ -551,19 +655,13 @@ object Endpoints {
 
       override def validator: Validator[StreamList[Input]] = Validator.pass
     })
-    .description(
-      endpoint.info.description match {
-        case Some(desc) =>
-          s"$desc\n" + """
-                              |Notice: This endpoint should be used for small results set.
-                              |When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
-                              |there will be an error (`413 Content Too Large`) returned.
-                              |Increasing this limit may lead to performance issues and high memory consumption.
-                              |Consider using websockets (asyncapi) for better efficiency with larger results.
-                              |""".stripMargin.trim
-        case None =>
-          throw new IllegalArgumentException(s"Description for ${endpoint.info} is missing")
-      }
+    .appendDescription(
+      """Notice: This endpoint should be used for small results set.
+        |When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        |there will be an error (`413 Content Too Large`) returned.
+        |Increasing this limit may lead to performance issues and high memory consumption.
+        |Consider using websockets (asyncapi) for better efficiency with larger results.
+        |""".stripMargin.trim
     )
 
   private def addPagedListParams[Input, Output, R](
@@ -592,6 +690,26 @@ object Endpoints {
       override def validator: Validator[PagedList[Input]] = Validator.pass
     })
 
+  implicit class DescriptionOps[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R]
+  ) {
+
+    /** Appends `addition` to the description of the endpoint, which must already be set (a later
+      * `.description(...)` would replace the addition). Fails while the endpoint is defined.
+      */
+    def appendDescription(
+        addition: String,
+        separator: String = "\n",
+    ): Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R] =
+      endpoint.info.description match {
+        case Some(description) => endpoint.description(s"$description$separator$addition")
+        case None =>
+          throw new IllegalArgumentException(
+            s"Set the description of ${endpoint.showShort} before appending to it"
+          )
+      }
+  }
+
   implicit class StreamListOps[Input, Output, R](
       endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Seq[
         Output
@@ -619,6 +737,31 @@ object Endpoints {
         methodDescriptor: io.grpc.MethodDescriptor[?, ?]
     ): Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R] =
       endpoint.description(createProtoRef(methodDescriptor))
+  }
+
+  /** Endpoint attribute set by [[DeprecationOps.deprecatedSince]] and read by the `gated` and
+    * `gatedWebsocket` extension methods of the [[Endpoints]] helpers.
+    */
+  val DeprecationAttribute: AttributeKey[ApiDeprecation] = AttributeKey[ApiDeprecation]
+
+  implicit class DeprecationOps[Input, Output, R](
+      endpoint: Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R]
+  ) {
+
+    /** Marks the endpoint as deprecated by `deprecation` and superseded by `useInstead`:
+      *   - the endpoint is flagged as deprecated in the OpenAPI/AsyncAPI documentation and the
+      *     deprecation notice is appended to its description (which must already be set),
+      *   - the server endpoint can be gated with `gated` or `gatedWebsocket` where its logic is
+      *     wired, which rejects requests while the deprecation is disabled.
+      */
+    def deprecatedSince(
+        deprecation: ApiDeprecation,
+        useInstead: String,
+    ): Endpoint[CallerContext, Input, (StatusCode, JsCantonError), Output, R] =
+      endpoint
+        .deprecated()
+        .appendDescription(deprecation.documentationNotice(useInstead), separator = "\n\n")
+        .attribute(DeprecationAttribute, deprecation)
   }
 
 }

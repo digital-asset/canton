@@ -4,19 +4,25 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
+import com.google.protobuf.{ByteString, StringValue}
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.{Status, StatusRuntimeException}
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.{ByteArrayInputStream, OutputStream}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, OutputStream}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.collection.mutable
 import scala.concurrent.{Future, Promise, blocking}
 import scala.util.Success
 
-final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+final class GrpcStreamingUtilsTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with HasActorSystem {
   // we need to use the same value as in GrpcStreamingUtils since it's not configurable
   val defaultChunkSize = GrpcStreamingUtils.defaultChunkSize
   private def load(
@@ -198,6 +204,88 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
 
       // The responseObserver's onError MUST NOT be called. If it is, the gRPC library throws "IllegalStateException: call already closed".
       onErrorCalled.get() shouldBe false
+    }
+  }
+
+  "streamChunkedFromClient" should {
+    "parse delimited messages split across chunks" in {
+      val messages = Seq("first", "second", "third")
+      val out = new ByteArrayOutputStream()
+      messages.foreach(StringValue.of(_).writeDelimitedTo(out))
+      // chunk boundaries fall in the middle of the messages
+      val chunks = out.toByteArray.grouped(3).map(ByteString.copyFrom).toSeq
+
+      val response = Promise[Seq[String]]()
+      val responseObserver = new StreamObserver[Seq[String]] {
+        override def onNext(value: Seq[String]): Unit = response.success(value)
+        override def onError(t: Throwable): Unit = response.failure(t)
+        override def onCompleted(): Unit = ()
+      }
+
+      val requestObserver =
+        GrpcStreamingUtils.streamChunkedFromClient[ByteString, Seq[String], Unit, String](
+          responseObserver = responseObserver,
+          responseIfNoRequests = Success(Seq.empty),
+          getBytes = identity,
+          parseMessage =
+            in => Option(StringValue.parseDelimitedFrom(in)).map(v => Right(v.getValue)),
+        )(contextFromFirstRequest = _ => Success(()))(action =
+          (_, source) => FutureUnlessShutdown.outcomeF(source.runWith(Sink.seq))
+        )
+
+      chunks.foreach(requestObserver.onNext)
+      requestObserver.onCompleted()
+
+      response.future.futureValue shouldBe messages
+    }
+  }
+
+  "streamFromClient" should {
+    "report an error to the response observer immediately" in {
+      val messages = Seq("first", "second", "third")
+      val out = new ByteArrayOutputStream()
+      messages.foreach(StringValue.of(_).writeDelimitedTo(out))
+      // chunk boundaries fall in the middle of the messages
+      val chunks = out.toByteArray.grouped(3).map(ByteString.copyFrom).toSeq
+
+      val expectedException = new RuntimeException("failure in the middle of streaming requests")
+      val onErrorCounts = new AtomicInteger(0)
+      val responseObserver = new StreamObserver[Seq[String]] {
+        override def onNext(value: Seq[String]): Unit =
+          fail("processing the requests should not succeed")
+        override def onError(t: Throwable): Unit =
+          if (onErrorCounts.incrementAndGet() == 1) {
+            t shouldBe a[StatusRuntimeException]
+            val status = t.asInstanceOf[StatusRuntimeException].getStatus
+            status.getCode shouldBe Status.INVALID_ARGUMENT.getCode
+            status.getCause shouldBe expectedException
+          } else {
+            fail("called onError twice")
+          }
+        override def onCompleted(): Unit = ()
+      }
+      val counter = new AtomicInteger(0)
+
+      val requestObserver =
+        GrpcStreamingUtils.streamFromClient[ByteString, Seq[String], Unit](
+          responseObserver = responseObserver,
+          extractChunkBytes = bytes => {
+            if (counter.incrementAndGet() >= 2)
+              throw expectedException
+            else bytes
+          },
+          extractContext = _ => (),
+          processFullRequest = (_, _) => {
+            fail(
+              "the input shouldn't get fully consumed to the point where the entire input has been processed"
+            )
+          },
+        )
+
+      chunks.foreach(requestObserver.onNext)
+      eventually() {
+        onErrorCounts.get() shouldBe 1
+      }
     }
   }
 

@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.{
   HasCycleUtils,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -186,7 +187,7 @@ trait AcsCommitmentRestartIntegrationTest
       _.moveLedgerEndBackToScratch().futureValueUS
     )
     val stop = simClock.uniqueTime()
-    loggerFactory.assertLogs(
+    loggerFactory.assertLogsUnorderedOptional(
       {
         participant1.start()
         participant1.synchronizers.reconnect(daName)
@@ -195,7 +196,7 @@ trait AcsCommitmentRestartIntegrationTest
         participant2.health.ping(participant1)
       },
       // this warning message is a byproduct of re-processing all the messages for the synchronizer, as starting points moved back to scratch
-      _.warningMessage should startWith regex "Response message for request .* timed out at",
+      (LogEntryOptionality.Optional, _.warningMessage should include("timed out")),
     )
 
     // participant 1 doesn't publish the changes
@@ -320,6 +321,12 @@ trait AcsCommitmentRestartIntegrationTest
     participant1.ledger_api.javaapi.commands
       .submit(Seq(participant1.adminParty), createIouCmd)
 
+    // Make sure both participants are synced with respect to time
+    participant1.testing.fetch_synchronizer_times()
+    participant2.testing.fetch_synchronizer_times()
+    participant1.health.ping(participant1)
+    participant2.health.ping(participant2)
+
     eventually() {
       val commitmentsFromP1 = participant2.commitments.received(
         daName,
@@ -330,8 +337,6 @@ trait AcsCommitmentRestartIntegrationTest
       commitmentsFromP1 should have size 1
     }
 
-    // last checkpoint should be at interval boundary `reconciliationIntervalTick`, and we should replay just one change after
-    // crash the participant
     participant1.stop()
     loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(
       {
@@ -344,7 +349,8 @@ trait AcsCommitmentRestartIntegrationTest
         }
       },
       logs => {
-        forAtLeast(1, logs)(m => m.message should startWith regex s"Replaying 1 ACS changes.*")
+        // 1 + the remaining 2 from the previous reconciliation interval
+        forAtLeast(1, logs)(m => m.message should startWith(s"Replaying 3 ACS changes"))
       },
     )
   }

@@ -414,7 +414,7 @@ class DigestProcessorManagerTest
         synchronizerId: SynchronizerId
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Boolean] = FutureUnlessShutdown.pure(false)
+    ): FutureUnlessShutdown[Option[Boolean]] = FutureUnlessShutdown.pure(Some(false))
 
     override def createConsistencyCheckProcessor(
         synchronizerAlias: SynchronizerAlias,

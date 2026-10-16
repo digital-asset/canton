@@ -37,6 +37,7 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
             .replace(20000)
         }
       )
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
@@ -77,6 +78,7 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(ConfigTransforms.setTinyCache)
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
@@ -122,6 +124,7 @@ abstract class LedgerApiCachesDisabledConformanceTest(shard: Int)
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(ConfigTransforms.disableCache)
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 
@@ -160,6 +163,7 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
             )
         },
         c => c.focus(_.parameters.clock).replace(ClockConfig.SimClock),
+        ConfigTransforms.enableAllDeprecatedApis,
       )
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
@@ -265,6 +269,7 @@ trait LedgerApiTlsConformanceBase extends SingleVersionLedgerApiConformanceBase 
             .replace(Some(tls.copy(minimumServerProtocolVersion = Some(minTlsVersion.version))))
         )
       )
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup(setupLedgerApiConformanceEnvironment)
       .withTrafficControl(TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger))
 }

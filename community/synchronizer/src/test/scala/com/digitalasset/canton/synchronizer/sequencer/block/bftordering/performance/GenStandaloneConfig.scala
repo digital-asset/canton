@@ -15,7 +15,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultPbftViewChangeTimeout,
+  DefaultPbftViewChangeTimeoutStep,
+  DefaultPbftViewChangeTimeoutUpperBound,
   DefaultSegmentLength,
+  DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
 }
 import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import pureconfig.ConfigWriter
@@ -76,9 +79,13 @@ object GenStandaloneConfig extends App {
       signingPrivateKeyProtoFile = privKeyFile.toJava,
       signingPublicKeyProtoFile = pubKeyFile.toJava,
       pbftViewChangeTimeout = DefaultPbftViewChangeTimeout.toConfig.underlying,
+      pbftViewChangeTimeoutStep = DefaultPbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound = DefaultPbftViewChangeTimeoutUpperBound,
       blacklistLeaderSelectionPolicyConfig = DefaultLeaderSelectionPolicyConfig,
       maxRequestsInBatch = DefaultMaxRequestsInBatch,
       maxBatchesPerBlockProposal = DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultStricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
       segmentLength = DefaultSegmentLength.length.value,
       peers = (1 to numNodes)
         .filter(_ != i)

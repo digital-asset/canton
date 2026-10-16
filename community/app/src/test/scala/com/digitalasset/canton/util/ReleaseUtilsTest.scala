@@ -43,4 +43,28 @@ final class ReleaseUtilsTest extends AnyFlatSpec with Matchers with Inspectors w
     )
   }
 
+  behavior of "ignored bundle detection"
+
+  it should "reject the auxiliary bundles published alongside a release" in {
+    forAll(
+      List(
+        "3.6.0-snapshot.20260929.20331.0.v07b3f95b-api",
+        "3.6.0-snapshot.20260929.20331.0.v07b3f95b-protobuf",
+        "3.6.0-snapshot.20260929.20331.0.v07b3f95b-docs",
+        "3.5.2-api",
+      )
+    )(ReleaseUtils.isIgnoredBundle(_) shouldBe true)
+  }
+
+  it should "accept actual releases" in {
+    forAll(
+      List(
+        "3.6.0-snapshot.20260929.20331.0.v07b3f95b",
+        "3.5.2",
+        "3.5.3-rc1",
+        "3.4.12-ad-hoc.100000000.20240215.12560.0.vb11aba02",
+      )
+    )(ReleaseUtils.isIgnoredBundle(_) shouldBe false)
+  }
+
 }

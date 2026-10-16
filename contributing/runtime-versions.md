@@ -10,7 +10,7 @@ versions from our list of supported versions.
 All supported versions are supported.
 
 As of June 2026, it means:
-- Default: 17 (we have not yet updated to 18 in earnest yet; should be done for 3.6)
+- Default: 17
 - Supported: 14 to 18
 - Additional nightly tests: 14, 15, 16, and 18.
 

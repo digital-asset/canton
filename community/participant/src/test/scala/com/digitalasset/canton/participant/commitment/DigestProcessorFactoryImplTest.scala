@@ -41,14 +41,15 @@ class DigestProcessorFactoryImplTest extends AnyWordSpec with BaseTest with AcsD
   "reinitializationTimepoint" should {
     "give back proper reinit time" in {
       val store = mockLedgerApiStore(hasLedgerEnd = true)
-      val reinitTp = DigestProcessorFactoryImpl.reinitializationTimepoint(store, testSynchronizerId)
+      val reinitTp =
+        DigestProcessorFactoryImpl.tryReinitializationTimepoint(store, testSynchronizerId)
       reinitTp shouldEqual reinitTimepoint
     }
 
     s"fail when the ledger end is not set" in {
       val store = mockLedgerApiStore(hasLedgerEnd = false)
       loggerFactory.assertInternalError[IllegalStateException](
-        DigestProcessorFactoryImpl.reinitializationTimepoint(store, testSynchronizerId),
+        DigestProcessorFactoryImpl.tryReinitializationTimepoint(store, testSynchronizerId),
         _.getMessage should include(
           s"There is no suitable last offset for synchronizer $testSynchronizerId in the Ledger"
         ),
@@ -60,7 +61,7 @@ class DigestProcessorFactoryImplTest extends AnyWordSpec with BaseTest with AcsD
       val otherSynchronizer =
         SynchronizerId(UniqueIdentifier.tryCreate("other", DefaultTestIdentities.namespace))
       loggerFactory.assertInternalError[IllegalStateException](
-        DigestProcessorFactoryImpl.reinitializationTimepoint(store, otherSynchronizer),
+        DigestProcessorFactoryImpl.tryReinitializationTimepoint(store, otherSynchronizer),
         _.getMessage should include(
           s"There is no suitable last offset for synchronizer $otherSynchronizer in the Ledger"
         ),

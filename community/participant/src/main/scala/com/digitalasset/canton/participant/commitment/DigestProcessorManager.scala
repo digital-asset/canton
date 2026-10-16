@@ -26,7 +26,6 @@ import com.digitalasset.canton.util.{
   DelayUtil,
   ErrorUtil,
   FutureUnlessShutdownUtil,
-  MonadUtil,
   SimpleExecutionQueue,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -137,9 +136,18 @@ class DigestProcessorManager(
   def reinitializeIfEmptyAndStartRunningDigestProcessor()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    MonadUtil.whenM(digestProcessorFactory.needsReinitialization(synchronizerId))(
-      startReinitializationDigestProcessor().void
-    )
+    for {
+      needsReinitializationO <- digestProcessorFactory.needsReinitialization(synchronizerId)
+      _ <- needsReinitializationO match {
+        case None =>
+          // do nothing, as the persistent state is not yet initialized
+          FutureUnlessShutdown.unit
+
+        case Some(needsReinitialization) =>
+          if (needsReinitialization) startReinitializationDigestProcessor().void
+          else startRunningDigestProcessor()
+      }
+    } yield ()
 
   /** Starts digest reinitialization for this manager's `synchronizerId`.
     *

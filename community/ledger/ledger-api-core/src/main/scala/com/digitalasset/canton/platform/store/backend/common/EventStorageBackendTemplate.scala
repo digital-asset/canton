@@ -453,12 +453,16 @@ object EventStorageBackendTemplate {
       ).mapN(DeactivatedContractInfo.apply)
   }
 
-  val EventSequentialIdFirstLast: RowParser[EventSeqIdRange] =
+  // updates without events (e.g. fetch-only transactions) are stored as first = last + 1,
+  // hence there is no event sequential id range
+  val EventSequentialIdFirstLast: RowParser[Option[EventSeqIdRange]] =
     long("event_sequential_id_first") ~ long("event_sequential_id_last") map {
       case event_sequential_id_first ~ event_sequential_id_last =>
-        EventSeqIdRange(
-          startInclusive = event_sequential_id_first,
-          endInclusive = event_sequential_id_last,
+        Option.when(event_sequential_id_first <= event_sequential_id_last)(
+          EventSeqIdRange(
+            startInclusive = event_sequential_id_first,
+            endInclusive = event_sequential_id_last,
+          )
         )
     }
 
@@ -1080,28 +1084,42 @@ abstract class EventStorageBackendTemplate(
     // cap the upper bound to the ledger end so that events beyond it are never considered; when
     // there is no ledger end there are no events at all, hence an empty range
     ledgerEndCache().map(_.lastOffset).flatMap { ledgerEndOffset =>
-      val endInclusive =
-        if (ledgerEndOffset < offsetRange.endInclusive) ledgerEndOffset
-        else offsetRange.endInclusive
-      SQL"""
-       SELECT
-          MIN(event_sequential_id_first) min_event_sequential_id_first,
-          MAX(event_sequential_id_last) max_event_sequential_id_last
-       FROM
-          lapi_update_meta
-       WHERE
-          ${QueryStrategy.offsetIsBetween(
-          "event_offset",
-          offsetRange.copy(endInclusive = endInclusive),
-        )}
-          -- skip eventless updates (topology-only / empty tx) that store first = last + 1
-          AND event_sequential_id_first <= event_sequential_id_last
-       HAVING COUNT(*) > 0
-     """.as(
-        (long("min_event_sequential_id_first") ~ long("max_event_sequential_id_last")).map {
-          case first ~ last => EventSeqIdRange(startInclusive = first, endInclusive = last)
-        }.singleOpt
-      )(connection)
+      // a range starting after the ledger end has no visible events
+      if (ledgerEndOffset < offsetRange.startInclusive) None
+      else {
+        val endInclusive =
+          if (ledgerEndOffset < offsetRange.endInclusive) ledgerEndOffset
+          else offsetRange.endInclusive
+        val cappedOffsetRange = offsetRange.copy(endInclusive = endInclusive)
+        SQL"""
+          SELECT
+            (
+              SELECT event_sequential_id_first
+              FROM lapi_update_meta
+              WHERE
+                ${QueryStrategy.offsetIsBetween("event_offset", cappedOffsetRange)}
+              ORDER BY event_offset ASC
+              ${QueryStrategy.limitClause(Some(1))}
+            ) start_inclusive_event_sequential_id,
+            (
+              SELECT event_sequential_id_last
+              FROM lapi_update_meta
+              WHERE
+                ${QueryStrategy.offsetIsBetween("event_offset", cappedOffsetRange)}
+              ORDER BY event_offset DESC
+              ${QueryStrategy.limitClause(Some(1))}
+            ) end_inclusive_event_sequential_id
+        """.as(
+          (long("start_inclusive_event_sequential_id").? ~
+            long("end_inclusive_event_sequential_id").?).map {
+            // updates without events (e.g. fetch-only transactions) are stored
+            // as first = last + 1
+            case Some(start) ~ Some(end) if start <= end =>
+              Some(EventSeqIdRange(startInclusive = start, endInclusive = end))
+            case _ => None
+          }.single
+        )(connection)
+      }
     }
 
   override def activeContractBatch(

@@ -413,26 +413,28 @@ final class BlockChunkProcessor(
         s"ticking topology at $tickSequencingTimestamp; " +
         s"last sequencer event timestamp: ${state.latestSequencerEventTimestamp}"
     )
-    // We bypass validation here to make sure that the topology tick is always received by the sequencer runtime.
     for {
-      snapshot <-
-        SyncCryptoClient.getSnapshotForTimestamp(
-          synchronizerSyncCryptoApi,
-          tickSequencingTimestamp,
-          state.latestSequencerEventTimestamp,
-          warnIfApproximate = false,
-        )
-      _ = logger.debug(
-        s"Obtained topology snapshot for topology tick at $tickSequencingTimestamp after processing block $height"
-      )
       recipients <- groupRecipient match {
         case Right(sequencersOfSynchronizer) =>
-          GroupAddressResolver
-            .resolveSequencersOfSynchronizers(
-              Set(sequencersOfSynchronizer),
-              snapshot.ipsSnapshot,
+          for {
+            // We bypass validation here to make sure that the topology tick is always received by the sequencer runtime.
+            snapshot <-
+              SyncCryptoClient.getSnapshotForTimestamp(
+                synchronizerSyncCryptoApi,
+                tickSequencingTimestamp,
+                state.latestSequencerEventTimestamp,
+                warnIfApproximate = false,
+              )
+            _ = logger.debug(
+              s"Obtained topology snapshot for topology tick at $tickSequencingTimestamp after processing block $height"
             )
-            .map(_.map[MemberRecipientOrBroadcast](MemberRecipient.apply))
+            sequencerRecipients <- GroupAddressResolver
+              .resolveSequencersOfSynchronizers(
+                Set(sequencersOfSynchronizer),
+                snapshot.ipsSnapshot,
+              )
+              .map(_.map[MemberRecipientOrBroadcast](MemberRecipient.apply))
+          } yield sequencerRecipients
         case Left(_) =>
           FutureUnlessShutdown.pure(
             Set[MemberRecipientOrBroadcast](AllMembersOfSynchronizer)

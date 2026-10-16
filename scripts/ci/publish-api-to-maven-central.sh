@@ -86,7 +86,14 @@ EOF
 }
 
 central_curl() {
-  curl -s -u "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" "$@"
+  local token
+  token=$(printf '%s:%s' "${MAVEN_USERNAME}" "${MAVEN_PASSWORD}" | base64 -w 0)
+  curl -s --oauth2-bearer "${token}" "$@"
+}
+
+already_published() {
+  local url="https://repo1.maven.org/maven2/${group_path}/${artifact_id}/${current_version}/${artifact_id}-${current_version}.pom"
+  curl -sfI "$url" >/dev/null 2>&1
 }
 
 # Prepare a single artifact file with its checksums and GPG signature,
@@ -129,7 +136,7 @@ upload_bundle() {
   response=$(central_curl \
     -X POST \
     -F "bundle=@${bundle_zip}" \
-    "${central_api_url}/upload")
+    "${central_api_url}/upload?publishingType=AUTOMATIC")
 
   # The response body is the deployment ID (plain text)
   local deployment_id
@@ -145,12 +152,12 @@ upload_bundle() {
 
 wait_for_deployment() {
   local deployment_id="$1"
-  local max_attempts=60
+  local max_attempts=240
   local attempt=0
 
   while (( attempt < max_attempts )); do
     local response
-    response=$(central_curl "${central_api_url}/status?id=${deployment_id}")
+    response=$(central_curl  -X POST "${central_api_url}/status?id=${deployment_id}")
     local state
     state=$(echo "$response" | grep -oP '"deploymentState"\s*:\s*"\K[^"]+' || true)
 
@@ -173,6 +180,11 @@ wait_for_deployment() {
 
 info "Publishing API artifacts to Maven Central via Central Portal"
 
+if already_published; then
+  info "Version ${current_version} is already published to Maven Central, skipping"
+  exit 0
+fi
+
 # 1. Prepare bundle directory with all artifacts
 bundle_dir="$(mktemp -d)"
 trap 'rm -rf "${bundle_dir}"' EXIT
@@ -182,7 +194,7 @@ prepare_artifact "${bundle_dir}" "${release_dir}/canton-open-source-${current_ve
 prepare_artifact "${bundle_dir}" "${release_dir}/canton-open-source-${current_version}-api.tar.gz" "tar.gz"
 
 # 2. Create the bundle zip
-bundle_zip="$(mktemp --suffix=.zip)"
+bundle_zip="$(mktemp -d)/canton-api-bundle.zip"
 (cd "${bundle_dir}" && zip -r "${bundle_zip}" .)
 
 # 3. Upload the bundle

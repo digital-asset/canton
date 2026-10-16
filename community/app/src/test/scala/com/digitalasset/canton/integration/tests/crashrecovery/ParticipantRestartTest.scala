@@ -1136,7 +1136,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
         action = "retries on timeouts and connection issues",
       ),
       outcome = "bong can progress whenever the participant is running",
-    ) ignore { implicit env =>
+    ) in { implicit env =>
       import env.*
 
       console.set_command_timeout(
@@ -1229,12 +1229,15 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
           .filter(_._1) shouldBe empty
       }
 
-      eventually(20.seconds) {
-        val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
-        if (!optSafeTs.exists(_.toInstant > afterRestartTs))
-          fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
-        else {
-          logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+      // TODO(#34818): Enable this test to also run for PV36 onwards
+      if (testedProtocolVersion <= ProtocolVersion.v35) {
+        eventually(20.seconds) {
+          val optSafeTs = stateInspection1.noOutstandingCommitmentsTs(daName, CantonTimestamp.now())
+          if (!optSafeTs.exists(_.toInstant > afterRestartTs))
+            fail(s"Safe pruning point $optSafeTs before $afterRestartTs")
+          else {
+            logger.info(s"Safe pruning point $optSafeTs moved after $afterRestartTs")
+          }
         }
       }
 

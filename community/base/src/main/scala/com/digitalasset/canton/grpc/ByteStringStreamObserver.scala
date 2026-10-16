@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.grpc
 
+import cats.syntax.either.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.util.TryUtil
 import com.google.protobuf.ByteString
+import io.grpc.Status
 import io.grpc.stub.StreamObserver
 
 import java.util.concurrent.atomic.AtomicReference
@@ -36,27 +37,32 @@ class ByteStringStreamObserverWithContext[T, Context](
   def result: Future[Option[(ByteString, Context)]] =
     requestComplete.future
 
-  private def setOrCheck(current: Context): Try[Unit] =
+  private def setOrCheck(current: Context): Either[Status, Unit] =
     if (!context.compareAndSet(None, Some(current))) {
       val previous = context.get()
       if (previous.contains(current)) {
-        TryUtil.unit
+        Either.unit
       } else {
-        Failure(new IllegalStateException(s"Context cannot be changed from: $previous to $current"))
+        Left(
+          Status.INVALID_ARGUMENT
+            .withDescription(s"Context cannot be changed from: $previous to $current")
+        )
       }
     } else {
-      TryUtil.unit
+      Either.unit
     }
 
-  override def onNext(value: T): Unit = {
+  override def onNext(value: T): Unit = if (!requestComplete.isCompleted) {
     val processRequest =
       for {
         _ <- setOrCheck(extractContext(value))
-        _ <- Try(byteBuffer.getAndUpdate(b1 => b1.concat(converter(value))).discard)
+        _ <- Try(byteBuffer.getAndUpdate(b1 => b1.concat(converter(value))).discard).toEither
+          .leftMap(throwable => Status.INVALID_ARGUMENT.withCause(throwable))
       } yield ()
     processRequest match {
-      case Failure(exception) => requestComplete.failure(exception)
-      case Success(_) => () // Nothing to do, just move on to the next request
+      case Left(exception) =>
+        requestComplete.tryFailure(exception.asRuntimeException()).discard
+      case Right(_) => () // Nothing to do, just move on to the next request
     }
   }
 

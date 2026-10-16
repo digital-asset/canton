@@ -8,7 +8,11 @@ import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
 }
 import com.digitalasset.canton.integration.tests.ledgerapi.ProtocolType
-import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvironments}
+import com.digitalasset.canton.integration.{
+  ConfigTransforms,
+  EnvironmentDefinition,
+  IsolatedEnvironments,
+}
 import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.version.ReleaseVersion
 
@@ -27,6 +31,7 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.enableAllDeprecatedApis)
       .withSetup { implicit env =>
         import env.*
 

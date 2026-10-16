@@ -97,6 +97,7 @@ object DbSequencerStoreTest {
           "sequencer_payloads",
           "sequencer_watermarks",
           "sequencer_events",
+          "sequencer_event_recipients",
           "sequencer_acknowledgements",
           "sequencer_lower_bound",
           "seq_traffic_control_consumed_journal",

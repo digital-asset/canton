@@ -620,7 +620,7 @@ private final class LedgerServicesJson(
     override def getActiveContractsPage(
         request: GetActiveContractsPageRequest
     ): Future[GetActiveContractsPageResponse] =
-      clientCall(JsStateService.activeContractsPageEndpoint, request)
+      clientCall(JsStateService.queryActiveContractsPageEndpoint, request)
         .flatMap(protocolConverters.GetActiveContractsPageResponse.fromJson)
 
     override def getConnectedSynchronizers(

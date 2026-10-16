@@ -36,11 +36,13 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 import com.digitalasset.canton.http.json.v2.JsUpdateServiceConverters.toUpdateFormat
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.toTransactionTree
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import com.google.protobuf.ByteString
 import io.circe.Codec
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
@@ -61,6 +63,7 @@ class JsUpdateService(
     protocolConverters: ProtocolConverters,
     override protected val requestLogger: ApiRequestLogger,
     val loggerFactory: NamedLoggerFactory,
+    deprecatedApiGate: DeprecatedApiGate,
 )(implicit
     val executionContext: ExecutionContext,
     esf: ExecutionSequencerFactory,
@@ -88,29 +91,29 @@ class JsUpdateService(
     websocket(
       JsUpdateService.getUpdatesFlatEndpoint,
       getUpdates,
-    ),
+    ).gatedWebsocket(deprecatedApiGate),
     asList(
       JsUpdateService.getUpdatesFlatListEndpoint,
       getUpdates,
       timeoutOpenEndedStream = (r: LegacyDTOs.GetUpdatesRequest) => r.endInclusive.isEmpty,
-    ),
+    ).gated(deprecatedApiGate),
     websocket(
       JsUpdateService.getUpdatesTreeEndpoint,
       getTrees,
-    ),
+    ).gatedWebsocket(deprecatedApiGate),
     asList(
       JsUpdateService.getUpdatesTreeListEndpoint,
       getTrees,
       timeoutOpenEndedStream = (r: LegacyDTOs.GetUpdatesRequest) => r.endInclusive.isEmpty,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsUpdateService.getTransactionTreeByOffsetEndpoint,
       getTreeByOffset,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsUpdateService.getTransactionByOffsetEndpoint,
       getTransactionByOffset,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsUpdateService.getUpdateByOffsetEndpoint,
       getUpdateByOffset,
@@ -118,7 +121,7 @@ class JsUpdateService(
     withServerLogic(
       JsUpdateService.getTransactionByIdEndpoint,
       getTransactionById,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsUpdateService.getUpdateByIdEndpoint,
       getUpdateById,
@@ -126,7 +129,7 @@ class JsUpdateService(
     withServerLogic(
       JsUpdateService.getTransactionTreeByIdEndpoint,
       getTransactionTreeById,
-    ),
+    ).gated(deprecatedApiGate),
     withServerLogic(
       JsUpdateService.getUpdateByHashEndpoint,
       getUpdateByHash,
@@ -156,7 +159,9 @@ class JsUpdateService(
         )
       )
       .flatMap((r: update_service.GetUpdateResponse) =>
-        protocolConverters.GetTransactionTreeResponseLegacy.toJson(toGetTransactionTreeResponse(r))
+        protocolConverters.GetTransactionTreeResponseLegacy.toJson(
+          toGetTransactionTreeResponse(r)
+        )
       )
       .resultToRight
   }
@@ -302,7 +307,7 @@ class JsUpdateService(
   ): TracedInput[LegacyDTOs.GetTransactionByIdRequest] => Future[
     Either[JsCantonError, JsGetTransactionResponse]
   ] = { req =>
-    implicit val tc = caller.traceContext()
+    implicit val tc: TraceContext = caller.traceContext()
     updateServiceClient(caller.token())
       .getUpdateById(
         update_service.GetUpdateByIdRequest(
@@ -327,7 +332,7 @@ class JsUpdateService(
     Either[JsCantonError, JsGetTransactionTreeResponse]
   ] =
     req => {
-      implicit val tc = caller.traceContext()
+      implicit val tc: TraceContext = caller.traceContext()
       updateServiceClient(caller.token())
         .getUpdateById(
           update_service.GetUpdateByIdRequest(
@@ -352,7 +357,7 @@ class JsUpdateService(
       caller: CallerContext
   ): TracedInput[Unit] => Flow[LegacyDTOs.GetUpdatesRequest, JsGetUpdatesResponse, NotUsed] =
     _ => {
-      implicit val tc = caller.traceContext()
+      implicit val tc: TraceContext = caller.traceContext()
       Flow[LegacyDTOs.GetUpdatesRequest].map { request =>
         toGetUpdatesRequest(request, forTrees = false)
       } via
@@ -397,7 +402,12 @@ class JsUpdateService(
   private def toGetUpdatesRequest(
       req: LegacyDTOs.GetUpdatesRequest,
       forTrees: Boolean,
-  )(implicit traceContext: TraceContext): update_service.GetUpdatesRequest =
+  )(implicit traceContext: TraceContext): update_service.GetUpdatesRequest = {
+    if (req.filter.isDefined || req.verbose)
+      deprecatedApiGate.requireEnabled(
+        ApiDeprecation.Canton34.Parameters,
+        "The fields filter/verbose of the /v2/updates requests",
+      )
     (req.updateFormat, req.filter, req.verbose) match {
       case (Some(_), Some(_), _) =>
         throw RequestValidationErrors.InvalidArgument
@@ -432,6 +442,7 @@ class JsUpdateService(
           descendingOrder = req.descendingOrder,
         )
     }
+  }
 
   private def toGetUpdateTreesResponse(
       update: update_service.GetUpdatesResponse
@@ -487,21 +498,17 @@ object JsUpdateService extends DocumentationEndpoints {
         CodecFormat.Json,
       ](PekkoStreams)
     )
-    .deprecated()
-    .description(
-      "Get flat transactions update stream. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead."
-    )
+    .description("Get flat transactions update stream.")
+    .deprecatedSince(ApiDeprecation.Canton34.Endpoints, useInstead = "/v2/updates")
 
   val getUpdatesFlatListEndpoint =
     updates.post
       .in(sttp.tapir.stringToPath("flats"))
       .in(jsonBody[LegacyDTOs.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdatesResponse]])
-      .deprecated()
-      .description(
-        "Query flat transactions update list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead."
-      )
+      .description("Query flat transactions update list (blocking call).")
       .inStreamListParamsAndDescription()
+      .deprecatedSince(ApiDeprecation.Canton34.Endpoints, useInstead = "POST /v2/updates")
 
   val getUpdatesTreeEndpoint = updates.get
     .in(sttp.tapir.stringToPath("trees"))
@@ -513,20 +520,16 @@ object JsUpdateService extends DocumentationEndpoints {
         CodecFormat.Json,
       ](PekkoStreams)
     )
-    .deprecated()
-    .description(
-      "Get update transactions tree stream. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead."
-    )
+    .description("Get update transactions tree stream.")
+    .deprecatedSince(ApiDeprecation.Canton34.Endpoints, useInstead = "/v2/updates")
 
   val getUpdatesTreeListEndpoint =
     updates.post
       .in(sttp.tapir.stringToPath("trees"))
       .in(jsonBody[LegacyDTOs.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdateTreesResponse]])
-      .deprecated()
-      .description(
-        "Query update transactions tree list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead."
-      )
+      .description("Query update transactions tree list (blocking call).")
+      .deprecatedSince(ApiDeprecation.Canton34.Endpoints, useInstead = "POST /v2/updates")
       .inStreamListParamsAndDescription()
 
   val getTransactionTreeByOffsetEndpoint = updates.get
@@ -534,9 +537,10 @@ object JsUpdateService extends DocumentationEndpoints {
     .in(path[Long]("offset"))
     .in(query[List[String]]("parties"))
     .out(jsonBody[JsGetTransactionTreeResponse])
-    .deprecated()
-    .description(
-      "Get transaction tree by offset. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset instead."
+    .description("Get transaction tree by offset.")
+    .deprecatedSince(
+      ApiDeprecation.Canton34.Endpoints,
+      useInstead = "POST /v2/updates/update-by-offset",
     )
 
   val getTransactionTreeByIdEndpoint = updates.get
@@ -544,9 +548,10 @@ object JsUpdateService extends DocumentationEndpoints {
     .in(path[String]("update-id"))
     .in(query[List[String]]("parties"))
     .out(jsonBody[JsGetTransactionTreeResponse])
-    .deprecated()
-    .description(
-      "Get transaction tree by id. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates/update-by-id instead."
+    .description("Get transaction tree by id.")
+    .deprecatedSince(
+      ApiDeprecation.Canton34.Endpoints,
+      useInstead = "POST /v2/updates/update-by-id",
     )
 
   val getTransactionByIdEndpoint =
@@ -554,9 +559,10 @@ object JsUpdateService extends DocumentationEndpoints {
       .in(sttp.tapir.stringToPath("transaction-by-id"))
       .in(jsonBody[LegacyDTOs.GetTransactionByIdRequest])
       .out(jsonBody[JsGetTransactionResponse])
-      .deprecated()
-      .description(
-        "Get transaction by id. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates/update-by-id instead."
+      .description("Get transaction by id.")
+      .deprecatedSince(
+        ApiDeprecation.Canton34.Endpoints,
+        useInstead = "POST /v2/updates/update-by-id",
       )
 
   val getTransactionByOffsetEndpoint =
@@ -564,9 +570,10 @@ object JsUpdateService extends DocumentationEndpoints {
       .in(sttp.tapir.stringToPath("transaction-by-offset"))
       .in(jsonBody[LegacyDTOs.GetTransactionByOffsetRequest])
       .out(jsonBody[JsGetTransactionResponse])
-      .deprecated()
-      .description(
-        "Get transaction by offset. Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset instead."
+      .description("Get transaction by offset.")
+      .deprecatedSince(
+        ApiDeprecation.Canton34.Endpoints,
+        useInstead = "POST /v2/updates/update-by-offset",
       )
 
   val getUpdateByOffsetEndpoint =
