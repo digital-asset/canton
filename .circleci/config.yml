@@ -3033,13 +3033,9 @@ parameters:
             - variations-test
             - none
         type: enum
-    pv_for_run_many_times:
+    protocol_version:
         default: ""
-        enum:
-            - ""
-            - "35"
-            - dev
-        type: enum
+        type: string
     test_to_run_many_times:
         default: ""
         type: string
@@ -4056,7 +4052,7 @@ workflows:
                     - gcp_kms_testing
                     - da-images
                 parallel_runners: 10
-                protocol_version: << pipeline.parameters.pv_for_run_many_times >>
+                protocol_version: << pipeline.parameters.protocol_version >>
                 requires:
                     - compile
                 test_repetitions_per_runner: 5
