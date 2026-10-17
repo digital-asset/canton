@@ -50,6 +50,7 @@ Canton documentation
   sdk/sdlc-howtos/applications/develop/best-practices-multi-synchronizer
   sdk/explanations/external-signing/external_signing_overview
   sdk/explanations/external-signing/external_signing_hashing_algorithm
+  sdk/explanations/external-call/external_call_overview
   sdk/explanations/json-api/index
   sdk/explanations/json-api/migration_v2
   sdk/explanations/json-api/production-setup
