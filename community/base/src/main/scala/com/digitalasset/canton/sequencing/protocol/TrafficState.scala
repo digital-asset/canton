@@ -106,14 +106,7 @@ object TrafficState extends PrettyPrintingCompanion[TrafficState] {
       )
       .andThen(_.mapN(TrafficState.apply))
 
-  def empty: TrafficState = TrafficState(
-    NonNegativeLong.zero,
-    NonNegativeLong.zero,
-    NonNegativeLong.zero,
-    NonNegativeLong.zero,
-    CantonTimestamp.Epoch,
-    Option.empty,
-  )
+  def empty: TrafficState = empty(CantonTimestamp.Epoch)
 
   def empty(timestamp: CantonTimestamp): TrafficState = TrafficState(
     NonNegativeLong.zero,

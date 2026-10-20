@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.Target
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -179,7 +180,7 @@ private[reassignment] class AssignmentValidation(
       )
 
       contractSerializationResult <- ReassignmentValidation
-        .checkMaxSerializationVersion(
+        .validateMaxSerializationVersion(
           parsedRequest.fullViewTree.reassignmentRef,
           parsedRequest.fullViewTree.targetSynchronizer,
           parsedRequest.fullViewTree.contracts,
@@ -205,16 +206,19 @@ private[reassignment] class AssignmentValidation(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[ReassignmentValidationError]] =
-    ReassignmentValidation
-      .checkPackagesVetted(
-        stakeholders = fullTree.contracts.stakeholders,
-        contractIds = fullTree.contracts.contractIds.toSet,
-        packageIds = fullTree.contracts.targetPackageIds.unwrap,
-        topologySnapshot = targetTopology,
-        synchronizerId = fullTree.targetSynchronizer.unwrap,
-      )
-      .value
-      .map(_.swap.toOption)
+    if (fullTree.targetSynchronizer.unwrap.protocolVersion > ProtocolVersion.v36)
+      ReassignmentValidation
+        .checkPackagesVetted(
+          stakeholders = fullTree.contracts.stakeholders,
+          contractIds = fullTree.contracts.contractIds.toSet,
+          packageIds = fullTree.contracts.targetPackageIds.unwrap,
+          topologySnapshot = targetTopology,
+          synchronizerId = fullTree.targetSynchronizer.unwrap,
+        )
+        .value
+        .map(_.swap.toOption)
+    else
+      FutureUnlessShutdown.pure(None)
 
   def performValidationForReassigningParticipants(
       parsedRequest: ParsedReassignmentRequest[FullAssignmentTree],
@@ -230,7 +234,6 @@ private[reassignment] class AssignmentValidation(
     val assignmentRequestTs = parsedRequest.requestTimestamp
 
     for {
-      // TODO(i26479): Check that reassignmentData.unassignmentRequest.targetTimestamp is in the past
       exclusivityTimeoutError <- AssignmentValidation.checkExclusivityTimeout(
         reassignmentCoordination,
         targetPsid,
@@ -324,8 +327,9 @@ private[reassignment] sealed trait AssignmentProcessorError extends Reassignment
 
 object AssignmentValidation {
 
-  /** Checks whether the submitter is either the initiator of the unassignment or the exclusivity
-    * timeout has elapsed.
+  /** Up to protocol version 36, checks that the target timestamp of the unassignment is before the
+    * assignment request timestamp, and that the submitter is either the initiator of the
+    * unassignment or the exclusivity timeout has elapsed.
     */
   def checkExclusivityTimeout(
       reassignmentCoordination: ReassignmentCoordination,
@@ -342,7 +346,9 @@ object AssignmentValidation {
     ReassignmentValidationError
   ]] = {
     val targetTimestamp = unassignmentData.targetTimestamp
-    if (targetTimestamp.unwrap >= requestTimestamp)
+    if (!ReassignmentValidation.isAssignmentExclusivityEnforced(targetPsid.unwrap))
+      EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](None)
+    else if (targetTimestamp.unwrap >= requestTimestamp)
       EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](
         Some(
           TargetTimestampAfterAssignmentRequest(

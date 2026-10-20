@@ -37,5 +37,9 @@ object CommonMockMetrics {
           )(MetricsContext.Empty)
         ),
       )
-
+  object transactionViewMetrics
+      extends TransactionViewMetrics(
+        new TransactionViewHistograms(prefix)(new HistogramInventory()),
+        NoOpMetricsFactory,
+      )(MetricsContext.Empty)
 }

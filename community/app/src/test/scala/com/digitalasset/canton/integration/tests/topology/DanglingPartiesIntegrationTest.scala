@@ -22,6 +22,7 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.TopologyManagerError.InvalidOwnerToKeyMappingRemoval
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   ParticipantPermission,
@@ -108,17 +109,17 @@ class DanglingPartiesIntegrationTest
                     HostingParticipant(
                       p1,
                       ParticipantPermission.Submission,
-                      HostingParticipant.HostingState.Active,
+                      HostingState.Active,
                     ),
                     HostingParticipant(
                       p2,
                       ParticipantPermission.Confirmation,
-                      HostingParticipant.HostingState.Active,
+                      HostingState.Active,
                     ),
                     HostingParticipant(
                       p3,
                       ParticipantPermission.Confirmation,
-                      HostingParticipant.HostingState.Active,
+                      HostingState.Active,
                     ),
                   ) if (participant1.id == p1 && participant2.id == p2 && participant3.id == p3) =>
             }

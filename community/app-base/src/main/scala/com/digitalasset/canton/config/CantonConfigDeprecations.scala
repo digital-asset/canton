@@ -162,6 +162,21 @@ trait CantonParticipantNodeDeprecations {
           to = Seq("traffic-accounting"),
         ),
       )
+
+      override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
+        DeprecatedConfigPath[Boolean](
+          "features.deprecated.enable-deprecated-endpoints-34",
+          since = "3.7.0",
+        ),
+        DeprecatedConfigPath[Boolean](
+          "features.deprecated.enable-deprecated-parameters-34",
+          since = "3.7.0",
+        ),
+        DeprecatedConfigPath[Boolean](
+          "features.deprecated.enable-deprecated-endpoints-35",
+          since = "3.7.0",
+        ),
+      )
     }
 
   implicit val participantNodeParameterConfigReaderDeprecations

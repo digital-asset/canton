@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.metrics
 import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.{Histogram, LabeledMetricsFactory, Timer}
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricQualification, MetricsContext}
+import com.digitalasset.canton.metrics.{TransactionViewHistograms, TransactionViewMetrics}
 
 class TransactionProcessingHistograms(val prefix: MetricName)(implicit
     inventory: HistogramInventory
@@ -40,6 +41,7 @@ class TransactionProcessingHistograms(val prefix: MetricName)(implicit
       qualification = MetricQualification.Debug,
     )
 
+  private[metrics] val transactionViewHistograms = new TransactionViewHistograms(protocolPrefix)
 }
 
 class TransactionProcessingMetrics private[metrics] (
@@ -61,4 +63,6 @@ class TransactionProcessingMetrics private[metrics] (
 
   val protocolMessages = new ProtocolMessagesMetrics
 
+  val transactionViewMetrics =
+    new TransactionViewMetrics(histograms.transactionViewHistograms, factory)
 }

@@ -8,7 +8,7 @@ import com.digitalasset.canton.admin.grpc.{GrpcPruningScheduler, HasPruningSched
 import com.digitalasset.canton.admin.pruning.v30 as pruningProto
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30 as proto
 import com.digitalasset.canton.scheduler.PruningScheduler
@@ -61,7 +61,7 @@ class GrpcMediatorAdministrationService(
 
   override protected def ensureScheduler(implicit
       traceContext: TraceContext
-  ): Future[PruningScheduler] = Future.successful(pruningScheduler)
+  ): FutureUnlessShutdown[PruningScheduler] = FutureUnlessShutdown.pure(pruningScheduler)
 
   override def findPruningTimestamp(
       request: pruningProto.FindPruningTimestampRequest

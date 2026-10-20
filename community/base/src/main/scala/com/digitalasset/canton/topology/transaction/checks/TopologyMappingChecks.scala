@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.instances.order.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import cats.syntax.foldable.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, KeyPurpose, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -28,7 +27,6 @@ import com.digitalasset.canton.topology.store.TopologyTransactionRejection.Requi
   NoLsuAnnounced,
 }
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.transaction.PartyToParticipant.MaxKeys
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
@@ -373,10 +371,16 @@ class RequiredTopologyMappingChecks(
       case _otherwise => None
     }
 
+    val checkKeyCount = (toValidate.operation, toValidate.mapping) match {
+      case (TopologyChangeOp.Replace, keyMapping: KeyMapping) => checkKeyMappingKeyCount(keyMapping)
+      case _ => EitherTUtil.unitUS[TopologyTransactionRejection]
+    }
+
     for {
       _ <- checkFirstIsNotRemove
       _ <- checkReplaceIsNotMaxSerial
       _ <- checkRemoveDoesNotChangeMapping
+      _ <- checkKeyCount
       _ <- checkNoAnnouncedLsu(effective, toValidate)
       _ <- checkOpt.getOrElse(EitherTUtil.unitUS)
     } yield ()
@@ -586,6 +590,8 @@ class RequiredTopologyMappingChecks(
     *   - threshold is less than or equal to the number of confirming participants
     *   - new participants have a valid DTC
     *   - new participants have an OTK (valid keys are checked as part of OTK checks)
+    *   - from ProtocolVersion.offPRWithSequencerChannels on, no participant's hosting state moves
+    *     backward
     */
   private def checkPartyToParticipant(
       effective: EffectiveTime,
@@ -678,31 +684,69 @@ class RequiredTopologyMappingChecks(
         )
       } yield ()
 
-    def checkPartyKeys() =
-      if (protocolVersion > ProtocolVersion.v35)
-        EitherT.fromEither[FutureUnlessShutdown](
-          toValidate.mapping.partySigningKeysWithThreshold
-            .traverse_(signingKeysWithThreshold =>
-              KeyMapping.validateKeysSizeSet(
-                signingKeysWithThreshold.keys,
-                MaxKeys,
-              )
-            )
-            .leftMap(err =>
-              TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
-                err
-              )
-            )
+    /* Rejects moving a participant's hosting state backward in the order Nominated < Freezing <
+     * Onboarding < Active. Skipping states is a forward move; a restart is a removal followed by a
+     * new nomination.
+     *
+     * The authorization rules for hosting-state changes need no protocol-version gate, but this
+     * check does. Older protocol versions cannot serialize Nominated and Freezing, so on them the
+     * rules reduce to what those versions already required: the participant's authorization for
+     * Onboarding -> Active and the party's for Active -> Onboarding. This check, however, rejects
+     * Active -> Onboarding, which older protocol versions accept. Rejecting it there would make
+     * nodes on different releases disagree on the topology state.
+     */
+    def checkNoBackwardHostingStateMoves()
+        : EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
+      if (protocolVersion >= ProtocolVersion.offPRWithSequencerChannels) {
+        val previousStates = inStore.toList
+          .flatMap(_.mapping.participants)
+          .map(p => p.participantId -> p.state)
+          .toMap
+        val backwardMoves = mapping.participants.flatMap(p =>
+          previousStates
+            .get(p.participantId)
+            .filter(_ > p.state)
+            .map(previousState => s"${p.participantId}: $previousState -> ${p.state}")
         )
-      else EitherTUtil.unitUS
+        EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
+          backwardMoves.isEmpty,
+          RequiredMappingRejection.InvalidTopologyMapping(
+            s"Invalid hosting state transitions for party ${mapping.partyId}: " +
+              backwardMoves.mkString(", ")
+          ),
+        )
+      } else EitherTUtil.unitUS
 
     for {
       _ <- validateDuplicates
-      _ <- checkPartyKeys()
+      _ <- checkNoBackwardHostingStateMoves()
       _ <- checkParticipants()
       _ <- checkIsNotSelfSignedWithARevokedRootNSDKey()
     } yield ()
 
+  }
+
+  /** Rejects a key mapping with more keys than its deserialization accepts on this synchronizer. */
+  private def checkKeyMappingKeyCount(
+      mapping: KeyMapping
+  ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] = {
+    val maxKeysO = parameters.flatMap { params =>
+      KeyMapping
+        .maxKeys(params.synchronizerLimits.topologyLimits.maxSigningKeysPerEntity)
+        .forProtocolVersion(protocolVersion)
+    }
+    maxKeysO match {
+      case Some(maxKeys) =>
+        EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
+          mapping.mappedKeys.sizeIs <= maxKeys.unwrap,
+          RequiredMappingRejection.InvalidTopologyMapping(
+            s"At most $maxKeys key(s) can be specified, got ${mapping.mappedKeys.size}."
+          ),
+        )
+      // Only the node bootstrap validates without synchronizer parameters, on namespace
+      // delegations that carry no key count
+      case None => EitherTUtil.unitUS
+    }
   }
 
   /** Validate that OTK is no longer used by a synchronizer member */

@@ -1,0 +1,44 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.tea.v1;
+
+// Records which traffic account a command submission is charged to.
+// Internal to the participant: not exposed through the Ledger API.
+service SubmissionAccountingService {
+  // Store the account for a submission so its completion can be debited.
+  // Fails with TRAFFIC_ACCOUNT_VALIDATION_FAILED if the balance is below required_balance,
+  // and with TRAFFIC_CORRELATION_CONFLICT if the submission is already registered.
+  rpc RegisterSubmission(RegisterSubmissionRequest) returns (RegisterSubmissionResponse);
+}
+
+message RegisterSubmissionRequest {
+  message ChargedAccount {
+    // Must not be empty.
+    //
+    // Required
+    string account_id = 1;
+
+    // Minimum balance the account must have. If unset, the balance is not checked.
+    //
+    // Optional
+    optional int64 required_balance = 2;
+  }
+
+  // Hex encoding of the submission's change id hash.
+  //
+  // Required
+  string change_id_hash = 1;
+
+  // Required
+  string submission_id = 2;
+
+  // Account to charge. If unset, the submission is recorded as having no account.
+  //
+  // Optional
+  ChargedAccount account = 3;
+}
+
+message RegisterSubmissionResponse {}

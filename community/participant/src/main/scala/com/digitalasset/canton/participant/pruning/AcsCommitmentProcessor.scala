@@ -2275,6 +2275,7 @@ class AcsCommitmentProcessor private (
               sequencerClient
                 .send(
                   batch,
+                  currentSnapshotApproximation = None,
                   // ACS commitments are "best effort", so no need to amplify them
                   amplify = false,
                   callback = sendCallback,
@@ -3164,7 +3165,8 @@ object AcsCommitmentProcessor extends HasLoggerName {
         if (isActiveParticipant) {
           val allParties = runningCommitments.keySet.flatten
           snapshotForPartyLookup
-            .activeParticipantsOfParties(allParties.toSeq)
+            .activeParticipantsOfPartiesWithInfoIgnoringFreeze(allParties.toSeq)
+            .map(_.view.mapValues(_.participants.keySet).toMap)
             .flatMap { participantsOf =>
               FutureUnlessShutdown.outcomeF(
                 IterableUtil

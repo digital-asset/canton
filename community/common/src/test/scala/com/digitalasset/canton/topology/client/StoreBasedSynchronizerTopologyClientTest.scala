@@ -10,7 +10,6 @@ import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -316,7 +315,7 @@ trait StoreBasedTopologySnapshotTest
     "get correct synchronizer limits" in {
       val fixture = new Fixture()
 
-      val expectedSynchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val expectedSynchronizerLimits = testedSynchronizerLimits
       val synchronizerLimits = fixture.client.getSynchronizerLimits
 
       synchronizerLimits shouldBe expectedSynchronizerLimits

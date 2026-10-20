@@ -334,8 +334,8 @@ class ViewChangeMessageValidatorTest extends AnyWordSpec with BftSequencerBaseTe
       val cc = CommitCertificate(
         pp3,
         Seq(
-          commit(epochNumber, 1L, pp3.message.hash, view1),
-          commit(epochNumber, 2L, pp3.message.hash, view1, from = otherId),
+          commit(epochNumber, 1L, pp3.message.hash, view1, from = otherId),
+          commit(epochNumber, 2L, pp3.message.hash, view1),
         ),
       )
 
@@ -391,7 +391,7 @@ class ViewChangeMessageValidatorTest extends AnyWordSpec with BftSequencerBaseTe
         validator.validateViewChangeMessage(viewChangeMsg(view2, Seq[ConsensusCertificate](pc, cc)))
 
       result shouldBe Left(
-        s"prepare certificate for block 1 has the following errors: prepare from $myId has non-matching hash, commit certificate for block 3 has the following errors: commit from $myId has non-matching hash"
+        s"prepare certificate for block 1 has the following errors: prepare from $otherId has non-matching hash, commit certificate for block 3 has the following errors: commit from $otherId has non-matching hash"
       )
     }
   }

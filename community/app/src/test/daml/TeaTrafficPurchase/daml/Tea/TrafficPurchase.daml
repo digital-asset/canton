@@ -1,0 +1,73 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Simplified wallet contract that sells traffic, used to test `creditTraffic`
+-- composed into an application's purchase logic.
+--
+-- Mirrors the shape of a real wallet integration, but pays with a local `Token`
+-- instead of CIP-56 holdings, so it does not depend on the token standard.
+module Tea.TrafficPurchase where
+
+import Canton.Traffic.Credit (TrafficCredit, creditTraffic, mkAccountId)
+
+-- | A minimal fungible asset used as payment.
+template Token
+  with
+    issuer : Party
+    owner : Party
+    amount : Decimal
+  where
+    signatory issuer
+    observer owner
+    ensure amount > 0.0
+
+    choice Token_Transfer : ContractId Token
+      with
+        newOwner : Party
+      controller owner
+      do create this with owner = newOwner
+
+-- | Outcome of a purchase.
+data TrafficPurchasedResult = TrafficPurchasedResult with
+    trafficCredit : ContractId TrafficCredit
+      -- ^ Already archived, so it identifies the credit but cannot be fetched.
+    payment : ContractId Token
+      -- ^ The token now owned by the paymaster's receiver.
+  deriving (Show, Eq)
+
+-- | Sells traffic at a fixed rate, paid for with `Token`s of `issuer`.
+--
+-- Purchasers are not stakeholders: the paymaster discloses this contract to them.
+template TrafficPurchaser
+  with
+    paymaster : Party
+    paymasterReceiver : Party
+    issuer : Party
+    conversionRate : Decimal
+      -- ^ Traffic bytes per unit of token.
+  where
+    signatory paymaster
+    ensure conversionRate > 0.0
+
+    nonconsuming choice TrafficPurchaser_PurchaseCredits : TrafficPurchasedResult
+      with
+        purchaser : Party
+        targetAccount : Text
+        tokenCid : ContractId Token
+      controller purchaser
+      do
+        accountId <- either abort pure (mkAccountId targetAccount)
+
+        token <- fetch tokenCid
+        assertMsg "token is not owned by the purchaser" (token.owner == purchaser)
+        assertMsg "token is not issued by the accepted issuer" (token.issuer == issuer)
+
+        let trafficAmount = floor (token.amount * conversionRate)
+        assertMsg "purchase buys no traffic" (trafficAmount > 0)
+
+        payment <- exercise tokenCid Token_Transfer with newOwner = paymasterReceiver
+
+        -- Runs with the paymaster's authority, as the paymaster signs this contract
+        trafficCredit <- creditTraffic paymaster accountId trafficAmount
+
+        pure TrafficPurchasedResult with trafficCredit; payment

@@ -15,7 +15,7 @@ final class GeneratorsTopology(protocolVersion: ProtocolVersion) {
   import com.digitalasset.canton.Generators.*
 
   implicit val unrecognizedFeatureFlagArb: Arbitrary[ParticipantTopologyFeatureFlag] = Arbitrary {
-    Gen.oneOf(ParticipantTopologyFeatureFlag.knownTopologyFeatureFlags)
+    Gen.oneOf(ParticipantTopologyFeatureFlag.all)
   }
   implicit val fingerprintArb: Arbitrary[Fingerprint] = Arbitrary(
     string68Arb.arbitrary.map(Fingerprint.tryFromString)

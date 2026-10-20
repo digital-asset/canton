@@ -120,7 +120,6 @@ final class IndexServiceOwner(
             participantId,
             inMemoryState.ledgerEndCache,
             inMemoryState.stringInterningView,
-            loggerFactory,
           )
           .eventStorageBackend,
         metrics = metrics,
@@ -263,7 +262,7 @@ final class IndexServiceOwner(
       commandExecutionContext = commandExecutionContext,
       metrics = metrics,
       readStorageBackend = dbSupport.storageBackendFactory
-        .readStorageBackend(participantId, ledgerEndCache, stringInterning, loggerFactory),
+        .readStorageBackend(participantId, ledgerEndCache, stringInterning),
       parameterStorageBackend =
         dbSupport.storageBackendFactory.createParameterStorageBackend(stringInterning),
       ledgerEndCache = ledgerEndCache,

@@ -15,6 +15,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperations.RichIterable
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.topology.ForceFlag
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.util.FutureInstances.*
@@ -49,7 +50,12 @@ private[topology] class AddSequencer(
       sequencerToAdd.start()
       sequencerToAdd.health.wait_for_ready_for_initialization()
     }
-    val sequencerIdentity = sequencerToAdd.topology.transactions.identity_transactions()
+    // Sequencers no longer store their identity transactions in an authorized store, so
+    // `identity_transactions()` would return nothing: generate them for the synchronizer's
+    // protocol version.
+    val sequencerIdentity = sequencerToAdd.topology.transactions.generate_onboarding_transactions(
+      sequencerToInitializeFrom.physical_synchronizer_id.protocolVersion
+    )
 
     clue(topologyChangeName)(s"upload identity to ${referenceNode.name}")(
       referenceNode.topology.transactions
@@ -139,6 +145,20 @@ private[topology] class AddSequencer(
           ),
         )
 
+        // BFT sequencers can only be onboarded if the sequencer is active, i.e., once the new
+        // sequencer is part of the ordering topology. It is supposed to behave similar to
+        // `ConsoleMacros.onboard_new_sequencer`.
+        bootstrap.wait_for_sequencer_state_to_be_effective(
+          daId.logical,
+          sequencerToAdd,
+          sequencerToInitializeFrom,
+          isBftSequencer = sequencerToAdd.config.sequencer match {
+            case _: SequencerConfig.BftSequencer => true
+            case _ => false
+          },
+          commandTimeouts.bounded,
+        )
+
         val onboardingState =
           sequencerToInitializeFrom.setup.onboarding_state_for_sequencerV2(sequencerToAdd.id)
         sequencerToAdd.setup.assign_from_onboarding_stateV2(onboardingState)
@@ -214,6 +234,14 @@ class SequencerChaos(override val logger: TracedLogger) extends TopologyOperatio
 
 object SequencerChaos extends TopologyOperationsCompanion {
   override def acceptableLogEntries: Seq[String] = Seq(
-    "is already past the max sequencing time"
+    "is already past the max sequencing time",
+    // Synchronizer owners can be changed concurrently (e.g., by SynchronizerOwnerChaos). A proposal
+    // by a node that has just been removed as owner is either refused locally or rejected by the
+    // synchronizer; the change is then retried with the updated set of owners.
+    "TOPOLOGY_NO_APPROPRIATE_SIGNING_KEY_IN_STORE",
+    "No delegation found for keys",
+    // While the ordering topology changes, a BFT sequencer can be temporarily blacklisted by leader selection,
+    // in which case its mempool rejects client requests, including the sequencer's own periodic acknowledgements.
+    "periodic acknowledgement failed",
   )
 }

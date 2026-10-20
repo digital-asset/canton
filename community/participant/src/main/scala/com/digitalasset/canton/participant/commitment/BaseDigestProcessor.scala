@@ -286,7 +286,7 @@ trait BaseDigestProcessor extends NamedLogging {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfPartyId, Set[LedgerParticipantId]]] =
     topologySnapshot
-      .activeParticipantsOfPartiesWithInfo(parties.toSeq)
+      .activeParticipantsOfPartiesWithInfoIgnoringFreeze(parties.toSeq)
       .map { partyIdToPartyInfoMap =>
         val onboardingCompleted = partyIdToPartyInfoMap.view
           .mapValues(info =>

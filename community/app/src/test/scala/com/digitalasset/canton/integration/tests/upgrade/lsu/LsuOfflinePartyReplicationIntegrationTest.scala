@@ -65,7 +65,6 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   override protected def configTransforms: List[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
-    // TODO(#35499): OffPR with Squencer Channels - Switch dev / alpha to 37
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
@@ -463,7 +462,8 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
 
 /* Test: Recovering a party-to-participant mapping stuck due to different topology proto versions.
  *
- * - Scenario: Target proposes (v30) -> LSU -> Source proposes (v31).
+ * - Scenario: Target proposes -> LSU to a protocol version with another topology proto version
+ *   -> Source proposes.
  * - Issue: Signature hash mismatch. PTP proposal to authorize the new hosting is stuck for serial N.
  * - Recover: Fully authorize a different PTP for serial N (e.g. change participant permission).
  * - Restart OffPR proposing a new PTP on serial N+1.
@@ -476,9 +476,15 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
 final class LsuOffPRInterleavedLsuWithProtoVersionChange
     extends LsuOfflinePartyReplicationIntegrationTest {
 
+  private lazy val pvWithOtherTopologyProtoVersion: Option[ProtocolVersion] =
+    ProtocolVersion.supported.find(pv =>
+      pv > testedProtocolVersion &&
+        TopologyTransaction.protoVersionFor(pv) !=
+        TopologyTransaction.protoVersionFor(testedProtocolVersion)
+    )
+
   "Logical synchronizer upgrade" should {
-    // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
-    "allow to recover a stuck party-to-participant proposal" onlyRunLessThan ProtocolVersion.dev in {
+    "allow to recover a stuck party-to-participant proposal" onlyRunWhen pvWithOtherTopologyProtoVersion.nonEmpty in {
       implicit env =>
         import env.*
 
@@ -489,8 +495,7 @@ final class LsuOffPRInterleavedLsuWithProtoVersionChange
           newSynchronizerNodes = SynchronizerNodes(Seq(env.sequencer2), Seq(env.mediator2)),
           newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
           oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
-          // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
-          newPV = ProtocolVersion.dev, // results in a topology proto version change (v30 -> v31)
+          newPV = pvWithOtherTopologyProtoVersion.value,
           newSerial = env.daId.serial.increment.value.toNonNegative,
         )
         val lsid = fixture.currentPsid.logical
@@ -577,7 +582,7 @@ final class LsuOffPRInterleavedLsuWithProtoVersionChange
           }
         }
 
-        clue("Target proposes to host alice again (v31 schema) and disconnects") {
+        clue("Target proposes to host alice again (new schema) and disconnects") {
           participant2.topology.party_to_participant_mappings.propose_delta(
             party = alice,
             adds = Seq(participant2.id -> Submission),

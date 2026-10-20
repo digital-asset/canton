@@ -20,11 +20,32 @@ message TransactionEntry {
   int64 preparationTime = 5;
   bytes submissionSeed = 6;
   repeated MetricPlugin metricPlugins = 7;
+  // the seed contract IDs are derived from; empty in older recordings
+  bytes transactionSeed = 8;
+  ContractIdVersion contractIdVersion = 9;
+  map<string, string> packageResolution = 10;
+  // contracts read from the ledger, encoded with ContractInstanceCoder
+  repeated bytes inputContracts = 11;
+  // non-empty ledger answers to key lookups
+  repeated KeyLookup keyLookups = 12;
+  repeated string usedPackages = 13;
+}
+
+message KeyLookup {
+  // contracts with the same key, in the order the ledger returned them
+  repeated bytes contractIds = 1;
+}
+
+enum ContractIdVersion {
+  CONTRACT_ID_VERSION_UNSPECIFIED = 0;
+  CONTRACT_ID_VERSION_V1 = 1;
+  CONTRACT_ID_VERSION_V2 = 2;
 }
 
 message SubmissionEntry {
   oneof entry {
     TransactionEntry transaction = 1;
+    // a serialized Archive; must precede the transactions using it
     bytes archives = 2;
   }
 }

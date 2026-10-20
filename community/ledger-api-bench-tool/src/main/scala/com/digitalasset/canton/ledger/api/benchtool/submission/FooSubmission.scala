@@ -17,9 +17,14 @@ class FooSubmission(
     randomnessProvider: RandomnessProvider,
 ) {
 
+  // Command generation and command submission run concurrently (see `maxInFlightCommands`), so they
+  // must not share a randomness provider: otherwise their draws interleave depending on stream
+  // demand, and e.g. the user-id distribution stops being reproducible for a given seed.
+  private val submissionRandomnessProvider: RandomnessProvider = randomnessProvider.split()
+
   def performSubmission(submissionConfig: FooSubmissionConfig)(implicit
       ec: ExecutionContext
-  ): Future[Unit] = {
+  ): Future[Option[Long]] = {
     val (divulgerCmds, divulgeesToDivulgerKeyMap) = FooDivulgerCommandGenerator
       .makeCreateDivulgerCommands(
         divulgingParty = allocatedParties.signatory,
@@ -29,7 +34,8 @@ class FooSubmission(
       new RandomPartySelecting(
         config = submissionConfig,
         allocatedParties = allocatedParties,
-        randomnessProvider = randomnessProvider,
+        generationRandomnessProvider = randomnessProvider,
+        submissionRandomnessProvider = submissionRandomnessProvider,
       )
     for {
       _ <-
@@ -53,8 +59,9 @@ class FooSubmission(
         allocatedParties = allocatedParties,
         partySelecting = partySelecting,
         randomnessProvider = randomnessProvider,
+        submissionRandomnessProvider = submissionRandomnessProvider,
       )
-      _ <- submitter
+      lastOffsetO <- submitter
         .generateAndSubmit(
           generator = generator,
           config = submissionConfig,
@@ -62,6 +69,6 @@ class FooSubmission(
           maxInFlightCommands = maxInFlightCommands,
           submissionBatchSize = submissionBatchSize,
         )
-    } yield ()
+    } yield lastOffsetO
   }
 }

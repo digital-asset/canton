@@ -36,6 +36,7 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
     storage.update(
       DBIO.seq(
         sqlu"truncate table par_traffic_enforcement_event",
+        sqlu"truncate table par_traffic_enforcement_correlations",
         sqlu"truncate table par_traffic_enforcement_balance",
         // Double quotes to force H2 to use lower case table names
         sqlu"""truncate table "pekko_projection_offset_store"""",

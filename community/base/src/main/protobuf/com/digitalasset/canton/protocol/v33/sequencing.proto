@@ -1,0 +1,177 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v33;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/common_stable.proto";
+import "com/digitalasset/canton/protocol/v30/sequencing.proto";
+import "com/digitalasset/canton/protocol/v32/sequencing.proto";
+import "google/protobuf/duration.proto";
+import "scalapb/scalapb.proto";
+
+// Compared to v32:
+//  - Removed topology_timestamp field
+message SubmissionRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // Sender of the request.
+  // This request must be wrapped in a SignedContent and
+  // the signature therein must validate under one of the sender's public keys.
+  // The request metadata must contain a valid authentication token belonging to the sender.
+  // (Details in SequencerAuthenticationServerInterceptor.)
+  // TARGET STATE: The sender must be authorized (cf. TopologySnapshot.isMemberKnown)
+  // CURRENT STATE: The sender authorization check might have a few gaps (e.g., see MemberAuthenticationService.isActive)
+  //   and/or may use the wrong snapshot.
+  string sender = 1;
+
+  // Will be included in the receipt of the request.
+  // The sender should not reuse a message_id until max_sequencing_time,
+  // because otherwise it will be unable to correlate receipts with requests.
+  string message_id = 2;
+
+  // The payload, mandatory
+  // At most one recipient of an envelope may be (a) a mediator, (b) a mediator group, or (c) all synchronizer members.
+  v32.CompressedBatch batch = 4;
+
+  // Maximum sequencing time for the request.
+  // If the request can't be sequenced until the specified time, the sequencer will reject it.
+  // After max_sequencing_time, no event corresponding to the request will be emitted.
+  // in microseconds of UTC time since Unix epoch
+  int64 max_sequencing_time = 5;
+
+  // Optional rule used to aggregate requests.
+  v30.AggregationRule aggregation_rule = 6;
+
+  // Optional submission cost computed by the sender. Must be provided if traffic control is enabled on the receiving synchronizer.
+  v30.SequencingSubmissionCost submission_cost = 7;
+}
+
+// size limits on various collections, globally enforced on a synchronizer
+//
+// Differences with v32: none for now, bootstraps the next protocol version.
+message SynchronizerLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  TransactionProtocolLimits transaction_protocol_limits = 1;
+
+  TopologyLimits topology_limits = 2;
+
+  AcsCommitmentLimits acs_commitment_limits = 3;
+}
+
+// size limits on collections within topology transactions
+//
+// Differences with v32: none for now, bootstraps the next protocol version.
+message TopologyLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // maximum number of signing keys an entity can be mapped to, where an entity is a member in an
+  // owner to key mapping or a party in a party to key mapping
+  uint32 max_signing_keys_per_entity = 1;
+
+  // maximum number of owners of a decentralized namespace definition
+  uint32 max_owners_per_decentralized_namespace = 2;
+
+  // maximum number of participants hosting a party in a party to participant mapping
+  uint32 max_hosting_participants_per_party = 3;
+}
+
+// size limits on collections within the transaction protocol
+//
+// Differences with v32: none for now, bootstraps the next protocol version.
+message TransactionProtocolLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // maximum number of `actAs` entries in a transaction
+  uint32 max_act_as = 1;
+
+  // maximum number of envelopes in the batch
+  uint32 max_envelopes = 2;
+
+  // TODO(i35858): merge with max_envelopes
+  // maximum number of `Recipients` structures in the batch
+  uint32 max_recipients_per_batch = 3;
+
+  // maximum number of recipients trees in a `Recipients` structure
+  // Should only be more than one for mediator verdicts, where it then limits the maximum number of participants involved in a transaction.
+  uint32 max_recipients_trees = 4;
+
+  // maximum number of recipients in a level of a recipients tree
+  // TODO(i35860): check whether this can be merged up and if not look back on the current default value that is too generous
+  uint32 max_recipients_per_recipients_tree_level = 5;
+
+  // maximum number of children in a level of a recipients tree
+  uint32 max_children_per_recipients_tree_level = 6;
+
+  // maximum number of distinct recipients of a single envelope
+  uint32 max_recipients_per_envelope = 7;
+
+  // maximum depth of a recipients tree in a single envelope
+  uint32 max_recipients_tree_depth = 8;
+
+  // maximum number of root views in a transaction
+  // TODO(i35888): Remove and make local config instead
+  uint32 max_transaction_root_views = 9;
+
+  // maximum number of sub views per root view
+  // TODO(i35888): Remove and make local config instead
+  uint32 max_transaction_sub_views = 10;
+
+  // maximum depth of the view tree in a transaction
+  // TODO(i35845): investigate whether to update the semantics of this limit or remove it
+  uint32 max_transaction_tree_depth = 11;
+
+  // maximum number of signatures on a single envelope
+  uint32 max_signatures_per_envelope = 12;
+
+  // maximum number of confirming parties in a quorum
+  uint32 max_quorum_size = 13;
+}
+
+// size limits on messages and collections used in ACS commitments
+//
+// Differences with v32: none for now, bootstraps the next protocol version.
+message AcsCommitmentLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // Maximum allowed serialized byte size for an individual ACS commitment
+  uint32 max_acs_commitment_size_bytes = 1;
+
+  // Maximum allowed serialized byte size for an ACS commitment summary batch
+  uint32 max_acs_commitment_summary_size_bytes = 2;
+
+  // Maximum allowed addressed counterparticipants for an ACS commitment summary batch
+  uint32 max_addressed_counterparticipants = 3;
+
+  // Maximum allowed unsent digests for an ACS commitment summary batch
+  uint32 max_unsent_digests = 4;
+}
+
+// Differences with v32:
+// - none for now, bootstraps the next protocol version, uses v33.SynchronizerLimits instead of v32
+// TODO(i36918): mention in release notes when a change is made
+message StaticSynchronizerParameters {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.RequiredSigningSpecs required_signing_specs = 1;
+  com.digitalasset.canton.crypto.v30.RequiredEncryptionSpecs required_encryption_specs = 2;
+  repeated com.digitalasset.canton.crypto.v30.SymmetricKeyScheme required_symmetric_key_schemes = 3;
+  repeated com.digitalasset.canton.crypto.v30.HashAlgorithm required_hash_algorithms = 4;
+  repeated com.digitalasset.canton.crypto.v30.CryptoKeyFormat required_crypto_key_formats = 5;
+  repeated com.digitalasset.canton.crypto.v30.SignatureFormat required_signature_formats = 6;
+  int32 protocol_version = 7;
+
+  // Serial of the synchronizer. Must be non-negative.
+  int32 serial = 8;
+
+  // Flag to enable transparency checks.
+  bool enable_transparency_checks = 9;
+
+  google.protobuf.Duration topology_change_delay = 10;
+
+  // Size limits to be enforced on this synchronizer
+  com.digitalasset.canton.protocol.v33.SynchronizerLimits synchronizer_limits = 11;
+}

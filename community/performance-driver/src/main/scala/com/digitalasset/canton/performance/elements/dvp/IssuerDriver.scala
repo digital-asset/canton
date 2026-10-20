@@ -97,7 +97,11 @@ class IssuerDriver(
     registry.one(()).map(_._2) match {
       case Some(registryContract) if (!requests.hasPending) =>
         requests.allAvailable.take(role.numPending).foreach { request =>
-          val cmd = request.id.exerciseAcceptRequest(registryContract.id).commands.asScala.toSeq
+          val cmd = request.id
+            .exerciseAcceptRequest(registryContract.id, role.maxPerBatch)
+            .commands
+            .asScala
+            .toSeq
           val submissionF =
             submitCommand(
               "accept-request",

@@ -93,7 +93,7 @@ private[backend] trait StorageBackendTestsPruning
     val offset_2 = offset(2)
     val offset_3 = offset(4)
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     val initialPruningOffset = executeSql(backend.parameter.prunedUpToInclusive)
 
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset_1))
@@ -118,7 +118,7 @@ private[backend] trait StorageBackendTestsPruning
       offset = offset(1),
       submitters = Set(someParty),
     )
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     // Ingest a completion
     executeSql(ingest(Vector(completion), _))
     assertIndexDbDataSql(completion = Seq(PruningDto.Completion(1)))
@@ -205,7 +205,7 @@ private[backend] trait StorageBackendTestsPruning
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(9), 900L))
     assertIndexDbDataSql(
@@ -426,7 +426,7 @@ private[backend] trait StorageBackendTestsPruning
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(22), 2200L))
     populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
@@ -578,7 +578,7 @@ private[backend] trait StorageBackendTestsPruning
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
     executeSql(updateLedgerEnd(offset(22), 2200L))
@@ -771,7 +771,7 @@ private[backend] trait StorageBackendTestsPruning
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(22), 2200L))
     populateAchsFromActivateStakeholder(endInclusive = 1000L, activeAt = 1000L)
@@ -975,7 +975,7 @@ private[backend] trait StorageBackendTestsPruning
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(4), 400L))
 
@@ -1100,7 +1100,7 @@ private[backend] trait StorageBackendTestsPruning
       )
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(commitments ++ metas, _))
     executeSql(updateLedgerEnd(offset(7), 700L))
 

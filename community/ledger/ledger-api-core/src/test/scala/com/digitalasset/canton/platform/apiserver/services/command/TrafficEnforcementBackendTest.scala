@@ -30,8 +30,6 @@ import io.grpc.{Status, StatusRuntimeException}
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.concurrent.ExecutionContext
-
 class TrafficEnforcementBackendTest
     extends AsyncWordSpec
     with MockitoSugar
@@ -71,7 +69,7 @@ class TrafficEnforcementBackendTest
 
     "succeed when the singleton actAs party's account has sufficient balance" in {
       val client = mock[RichTrafficServiceClient]
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(
           EitherT.rightT[FutureUnlessShutdown, GrpcError](
             GetAccountResponse(accountId = alice, balance = 10L)
@@ -91,7 +89,7 @@ class TrafficEnforcementBackendTest
 
     "reject when the singleton actAs party's account has insufficient balance" in {
       val client = mock[RichTrafficServiceClient]
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(
           EitherT.rightT[FutureUnlessShutdown, GrpcError](
             GetAccountResponse(accountId = alice, balance = 5L)
@@ -186,7 +184,7 @@ class TrafficEnforcementBackendTest
           .Reject(new RuntimeException("db down"))
           .asGrpcError,
       )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -213,7 +211,7 @@ class TrafficEnforcementBackendTest
       val client = mock[RichTrafficServiceClient]
       val grpcError =
         GrpcError("get-account", "traffic-service", Status.UNAVAILABLE.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -245,7 +243,7 @@ class TrafficEnforcementBackendTest
           .Reject(new RuntimeException("db down"))
           .asGrpcError,
       )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -267,7 +265,7 @@ class TrafficEnforcementBackendTest
       val client = mock[RichTrafficServiceClient]
       val grpcError =
         GrpcError("get-account", "traffic-service", Status.DEADLINE_EXCEEDED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -289,7 +287,7 @@ class TrafficEnforcementBackendTest
       val client = mock[RichTrafficServiceClient]
       val grpcError =
         GrpcError("get-account", "traffic-service", Status.CANCELLED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -324,7 +322,7 @@ class TrafficEnforcementBackendTest
           .Wrap(ProtoDeserializationError.OtherError("malformed account id"))
           .asGrpcError,
       )
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(
@@ -352,7 +350,7 @@ class TrafficEnforcementBackendTest
       val client = mock[RichTrafficServiceClient]
       val grpcError =
         GrpcError("get-account", "traffic-service", Status.PERMISSION_DENIED.asRuntimeException())
-      when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+      when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, GetAccountResponse](grpcError))
       val backend =
         newBackend(

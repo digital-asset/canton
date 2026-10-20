@@ -7,7 +7,7 @@ import com.daml.metrics.api.noop.NoOpTimer
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltests.java.test
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend.DataSourceConfig
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
@@ -71,8 +71,7 @@ trait DbLockingSupport extends NamedLogging {
     val conn =
       ledgerApiStore.ledgerApiDbSupport.storageBackendFactory.createDataSourceStorageBackend
         .createDataSource(
-          dataSourceConfig = DataSourceConfig(ledgerApiStore.ledgerApiStorage.jdbcUrl),
-          loggerFactory = loggerFactory,
+          dataSourceConfig = DataSourceConfig(ledgerApiStore.ledgerApiStorage.jdbcUrl)
         )
         .getConnection
     conn.setAutoCommit(false)
@@ -84,7 +83,6 @@ trait DbLockingSupport extends NamedLogging {
       .createEventStorageBackend(
         ledgerEndCache = MutableLedgerEndCache(),
         stringInterning = new MockStringInterning,
-        loggerFactory = loggerFactory,
       )
 
   private val testDbLockMeta = DbLockMeta(
@@ -99,13 +97,13 @@ trait DbLockingSupport extends NamedLogging {
   def lockPruning(participant: LocalParticipantReference)(conn: Connection): Unit =
     eventStorageBackend(participant).lockExclusivelyPruningProcessingTable(testDbLockMeta)(
       conn,
-      ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty),
+      TraceContext.empty,
     )
 
   def lockContractPruning(participant: LocalParticipantReference)(conn: Connection): Unit =
     eventStorageBackend(participant).lockExclusivelyContractPruningProcessingTable(testDbLockMeta)(
       conn,
-      ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty),
+      TraceContext.empty,
     )
 
   def readLockContract(participant: LocalParticipantReference, internalContractId: Long)(
@@ -114,7 +112,7 @@ trait DbLockingSupport extends NamedLogging {
     eventStorageBackend(participant).readLockInternalContractIds(
       Set(internalContractId),
       testDbLockMeta,
-    )(conn, ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
+    )(conn, TraceContext.empty)
 
   def writeLockContract(participant: LocalParticipantReference, internalContractId: Long)(
       conn: Connection

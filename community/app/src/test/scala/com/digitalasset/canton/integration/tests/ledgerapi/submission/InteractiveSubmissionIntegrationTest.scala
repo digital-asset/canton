@@ -28,7 +28,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.console.commands.PartiesAdministration
-import com.digitalasset.canton.crypto.SigningKeyUsage
+import com.digitalasset.canton.crypto.{Signature, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.test.DummyFactory
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.UnknownInformees
@@ -39,6 +39,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.transaction.*
@@ -162,6 +163,28 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         keysCount = PositiveInt.three,
         keysThreshold = PositiveInt.two,
       )
+    }
+
+    "fail to execute a command on a local party without signature" in { implicit env =>
+      val localParty = cpn.parties.enable("localAlice")
+      val command = createCycleCommand(localParty, "a")
+      val prepared = cpn.ledger_api.interactive_submission.prepare(Seq(localParty), Seq(command))
+
+      List[Map[PartyId, Seq[Signature]]](
+        Map(localParty -> Seq.empty),
+        Map.empty,
+      ).foreach { signatureMap =>
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          cpn.ledger_api.interactive_submission.execute(
+            prepared.getPreparedTransaction,
+            signatureMap,
+            UUID.randomUUID().toString,
+            testedHashingSchemeVersion.toLedgerApiProto,
+          ),
+          _.shouldBeCantonErrorCode(CommandExecutionErrors.InteractiveSubmissionExecuteError),
+        )
+
+      }
     }
 
     "fail if providing more signatures than registered keys" in { implicit env =>

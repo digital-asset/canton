@@ -115,6 +115,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
               myId,
               NonEmpty.apply(Seq, 0L, 2L, 4L).map(BlockNumber(_)),
             ),
+            segmentIndex = 0,
             epoch,
             clock,
             completedBlocks = completedBlocks,
@@ -171,6 +172,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
               myId,
               NonEmpty.apply(Seq, 0L, 2L, 4L, 6L).map(BlockNumber(_)),
             ),
+            segmentIndex = 0,
             epoch,
             clock,
             completedBlocks = completedBlocks,
@@ -221,6 +223,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
               myId,
               NonEmpty.apply(Seq, 0L, 2L, 4L).map(BlockNumber(_)),
             ),
+            segmentIndex = 0,
             epoch,
             clock,
             completedBlocks = completedBlocks,
@@ -250,6 +253,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
       val segmentState =
         new SegmentState(
           segment = Segment(myId, NonEmpty.apply(Seq, 0L, 2L, 4L, 6L).map(BlockNumber(_))),
+          segmentIndex = 0,
           epoch,
           clock,
           completedBlocks = Seq.empty,
@@ -292,6 +296,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
       val segmentState =
         new SegmentState(
           segment = mySegment,
+          segmentIndex = 0,
           epoch,
           clock,
           completedBlocks = Seq.empty,
@@ -391,6 +396,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
   ) =
     new SegmentState(
       segment = Segment(myId, slots),
+      segmentIndex = 0,
       epoch,
       clock,
       completedBlocks = completedBlocks,

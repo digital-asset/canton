@@ -29,10 +29,14 @@ import com.digitalasset.canton.http.LfValue
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.ParticipantReferenceOps
+import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.{
+  AdminCommandOps,
+  ParticipantReferenceOps,
+}
 import com.digitalasset.canton.integration.util.GrpcServices.StateService
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
 }
@@ -52,7 +56,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Party, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.TestEngine
-import com.digitalasset.canton.{BaseTest, ReassignmentCounter, config}
+import com.digitalasset.canton.{BaseTest, ReassignmentCounter}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder
@@ -90,6 +94,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         // Ensure reassignments are not tripped up by some participants being a little behind.
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -110,12 +115,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
         // Disable automatic assignment so that we really control it
         synchronizers.foreach { case (synchronizerId, owners) =>
-          owners.foreach(
-            _.topology.synchronizer_parameters.propose_update(
-              synchronizerId = synchronizerId,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-          )
+          AutomaticAssignment.disable(owners, synchronizerId)
         }
 
         for {
@@ -843,6 +843,111 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
       IouSyntax.archive(participant1)(contract.contract, party)
     }
 
+    "honor the includeIncompleteReassignments flag" in { implicit env =>
+      import env.*
+      val party = party1a
+
+      val activeContract = create(daId, party, party)
+      val reassignedContract = create(daId, party, party)
+
+      val (out, _) = unassign(
+        cid = reassignedContract.cid,
+        source = daId,
+        target = acmeId,
+        submittingParty = party.toLf,
+        participantOverride = Some(participant1),
+      )
+      val ledgerEnd = participant1.ledger_api.state.end()
+      val ourContractIds =
+        Set(activeContract.createdEvent.contractId, reassignedContract.createdEvent.contractId)
+      def ours(entries: Seq[proto.state_service.GetActiveContractsResponse]) =
+        entries.filter(r =>
+          r.contractEntry.activeContract
+            .flatMap(_.createdEvent)
+            .orElse(r.contractEntry.incompleteUnassigned.flatMap(_.createdEvent))
+            .orElse(
+              r.contractEntry.incompleteAssigned
+                .flatMap(_.assignedEvent)
+                .flatMap(_.createdEvent)
+            )
+            .exists(ce => ourContractIds.contains(ce.contractId))
+        )
+      def entryKind(r: proto.state_service.GetActiveContractsResponse) =
+        r.contractEntry match {
+          case ContractEntry.ActiveContract(ac) =>
+            "active" -> ac.createdEvent.value.contractId
+          case ContractEntry.IncompleteUnassigned(iu) =>
+            "incompleteUnassigned" -> iu.createdEvent.value.contractId
+          case ContractEntry.IncompleteAssigned(ia) =>
+            "incompleteAssigned" -> ia.assignedEvent.value.createdEvent.value.contractId
+          case ContractEntry.Empty => fail("unexpected empty contract entry")
+        }
+
+      val withIncomplete = Set(
+        "active" -> activeContract.createdEvent.contractId,
+        "incompleteUnassigned" -> reassignedContract.createdEvent.contractId,
+      )
+      val withoutIncomplete = Set("active" -> activeContract.createdEvent.contractId)
+
+      // GetActiveContracts stream
+      def stream(includeIncompleteReassignments: Boolean) =
+        participant1
+          .runStreamingLapiAdminCommand(
+            StateService.getActiveContracts(
+              proto.state_service.GetActiveContractsRequest(
+                activeAtOffset = ledgerEnd,
+                eventFormat = Some(getEventFormat(List(party.toLf))),
+                streamContinuationToken = None,
+                includeIncompleteReassignments = includeIncompleteReassignments,
+              )
+            )
+          )
+          .tryResult
+
+      ours(stream(includeIncompleteReassignments = true)).map(entryKind).toSet shouldBe
+        withIncomplete
+      ours(stream(includeIncompleteReassignments = false)).map(entryKind).toSet shouldBe
+        withoutIncomplete
+
+      // GetActiveContractsPage, iterating over all pages with page size 1
+      def allPages(includeIncompleteReassignments: Boolean) = {
+        def request(pageToken: Option[com.google.protobuf.ByteString]) =
+          proto.state_service.GetActiveContractsPageRequest(
+            activeAtOffset = Some(ledgerEnd),
+            eventFormat = Some(getEventFormat(List(party.toLf))),
+            maxPageSize = Some(1),
+            pageToken = pageToken,
+            includeIncompleteReassignments = includeIncompleteReassignments,
+          )
+        @annotation.tailrec
+        def loop(
+            pageToken: Option[com.google.protobuf.ByteString],
+            acc: Vector[proto.state_service.GetActiveContractsResponse],
+        ): Vector[proto.state_service.GetActiveContractsResponse] = {
+          val page = participant1
+            .runLapiAdminCommand(StateService.getActiveContractsPage(request(pageToken)))
+            .tryResult
+          page.activeContracts.size should be <= 1
+          val newAcc = acc ++ page.activeContracts
+          page.nextPageToken match {
+            case Some(next) => loop(Some(next), newAcc)
+            case None => newAcc
+          }
+        }
+        loop(None, Vector.empty)
+      }
+
+      ours(allPages(includeIncompleteReassignments = true)).map(entryKind).toSet shouldBe
+        withIncomplete
+      ours(allPages(includeIncompleteReassignments = false)).map(entryKind).toSet shouldBe
+        withoutIncomplete
+
+      // Cleaning
+      val (_, _) = submitAssignments(out, party, Some(participant1))
+      IouSyntax.archive(participant1)(activeContract.contract, party)
+      IouSyntax.archive(participant1)(reassignedContract.contract, party)
+    }
+
     "return an error if validAt is bigger than ledgerEnd" in { implicit env =>
       import env.*
       val bigOffset = Long.MaxValue
@@ -854,6 +959,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
               activeAtOffset = bigOffset,
               eventFormat = Some(getEventFormat(List(party1a.toLf))),
               streamContinuationToken = None,
+              includeIncompleteReassignments = false,
             )
           )
         )

@@ -200,7 +200,7 @@ A successful unassignment yield an unassigned event which contains the following
 
 * unassign id: Opaque identifier which uniquely identifies the reassignment and is used to submit the assignment.
 * :ref:`reassignment counter<def-multi-sync-reassignment-counter>`: Number of times the contract was reassigned.
-* assignment exclusivity: Before this time (measured on the target Synchronizer), only the submitter of the unassignment can initiate the assignment.
+* assignment exclusivity: Before this time (measured on the target Synchronizer), only the submitter of the unassignment can initiate the assignment. Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
 The assign command consists of the following fields:
 

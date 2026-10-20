@@ -111,6 +111,7 @@ def make_resolver(
                 select_rota.names_for_week(values, row, cols, monday), id_by_name
             )
         except Exception as exc:
+            # failure-surfaced: adds rotation to failures below, drives the fix-me DM at the end of main()
             select_rota.log(f"warning: could not resolve rotation {rotation!r}: {exc!r}")
             slack_ids = []
         if not slack_ids:
@@ -177,10 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             values = select_rota.fetch_week_values(monday, sheet_id)
         except Exception as exc:
-            # A per-slot gap degrades to a placeholder and still gets written, but a whole-sheet
-            # read failure is a transient outage, not a rota gap. We compose the (all-placeholder)
-            # topics for the dry-run log, flag the run, and DM the maintainer, but do NOT overwrite
-            # the live topics, so a Sheets blip cannot wipe a good week's topics on all channels.
+            # failure-surfaced: sets exit_code = 1 below, does not overwrite live topics either
             select_rota.log(f"ERROR: could not read the rota sheet ({exc!r})")
             values, exit_code, sheet_read_failed = [], 1, True
 
@@ -212,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 select_rota.log("    done")
             except Exception as exc:
+                # failure-surfaced: sets exit_code = 1 below
                 select_rota.log(f"    ERROR: {exc!r}")
                 exit_code = 1
 
@@ -244,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
                     select_rota.send_dm(token, admin_id, message)
                     select_rota.log(f"    done: {admin_id}")
                 except Exception as exc:
+                    # silent-ok: this IS the notifier, logging is the only option left if it breaks
                     select_rota.log(f"    ERROR ({admin_id}): {exc!r}")
         elif args.apply:
             select_rota.log(f"    skipped: {SLACK_TOKEN_ENV} or the admin ids are not set")

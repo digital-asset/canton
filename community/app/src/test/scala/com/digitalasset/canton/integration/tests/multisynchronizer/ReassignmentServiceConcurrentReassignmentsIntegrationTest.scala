@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -15,6 +14,7 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
@@ -61,6 +61,7 @@ trait ReassignmentServiceConcurrentReassignmentsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
@@ -68,17 +69,8 @@ trait ReassignmentServiceConcurrentReassignmentsIntegrationTest
         import env.*
 
         // Disable automatic assignment so that we really control it
-        def disableAutomaticAssignment(
-            sequencer: LocalSequencerReference
-        ): Unit =
-          sequencer.topology.synchronizer_parameters
-            .propose_update(
-              sequencer.synchronizer_id,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-
-        disableAutomaticAssignment(sequencer1)
-        disableAutomaticAssignment(sequencer2)
+        AutomaticAssignment.disable(Seq(sequencer1), sequencer1.synchronizer_id)
+        AutomaticAssignment.disable(Seq(sequencer2), sequencer2.synchronizer_id)
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)

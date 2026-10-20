@@ -10,6 +10,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.protocol.LfInterpretationConfig
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.checker.{
   PropertyChecker,
@@ -20,6 +21,7 @@ import com.digitalasset.canton.testing.modelbased.projections.Projections
 import com.digitalasset.canton.testing.modelbased.runner.{CantonInterpreter, ReferenceInterpreter}
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
 import com.digitalasset.canton.topology.PartyKind
+import com.digitalasset.canton.version.InterpretationConfig
 
 import scala.concurrent.duration.DurationInt
 
@@ -93,7 +95,12 @@ abstract class ModelBasedCantonIntegrationTest
           generate = () => generator.generate(size = 50, distinctKeyToContractRatio = 0.3),
           shrink = Shrinker.shrinkScenario,
           property = (scenario: Concrete.Scenario, cancelled: () => Boolean) =>
-            runAndCompare(cantonInterpreter, scenario, cancelled),
+            runAndCompare(
+              InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+              cantonInterpreter,
+              scenario,
+              cancelled,
+            ),
           // After ~30 minutes, we hit the 1000 party limit of `submit` and fail. Leaving 10 minutes of buffer to
           // be on the safe side.
           timeout = 20.minutes,
@@ -118,12 +125,14 @@ object ModelBasedCantonIntegrationTest {
     * Right(()) on success, Left(errorMessage) on failure.
     */
   private def runAndCompare(
+      referenceInterpretationConfig: LfInterpretationConfig,
       cantonInterpreter: CantonInterpreter,
       scenario: Concrete.Scenario,
       cancelled: () => Boolean,
   )(implicit loggingContext: NamedLoggingContext, partyKind: PartyKind): Either[String, Unit] = {
-    val referenceResult = ReferenceInterpreter(loggingContext.loggerFactory)
-      .runAndProject(scenario)(loggingContext.traceContext)
+    val referenceResult =
+      ReferenceInterpreter(referenceInterpretationConfig, loggingContext.loggerFactory)
+        .runAndProject(scenario)(loggingContext.traceContext)
     val cantonResult = cantonInterpreter.runAndProject(scenario, cancelled)
 
     for {

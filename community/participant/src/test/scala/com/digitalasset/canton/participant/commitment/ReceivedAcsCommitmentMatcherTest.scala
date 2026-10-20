@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.store.{
   DelegatingAcsCommitmentPeriodStore,
 }
 import com.digitalasset.canton.platform.store.interning.{MockStringInterning, StringInterning}
+import com.digitalasset.canton.protocol.AcsCommitmentLimits
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -39,7 +40,6 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTestWordSpec,
   HasExecutionContext,
@@ -75,6 +75,8 @@ class ReceivedAcsCommitmentMatcherTest
   private val p2: LedgerParticipantId = DefaultTestIdentities.participant2.toLf
   private val p3: LedgerParticipantId = DefaultTestIdentities.participant3.toLf
   private val p4: LedgerParticipantId = DefaultTestIdentities.participant4.toLf
+
+  private val defaultMaxAcsSize = AcsCommitmentLimits.default.maxCommitmentSizeBytes
 
   class Fixture(
       participant: LedgerParticipantId
@@ -140,15 +142,19 @@ class ReceivedAcsCommitmentMatcherTest
         offset: Offset,
         recordTime: CantonTimestamp,
     )(implicit traceContext: TraceContext): OptionalAcsUpdateContainer = {
-      val commitment = AcsCommitment.create(
-        psid,
-        sender,
-        participant,
-        CommitmentPeriod.tryCreate(fromExclusive, toInclusive),
-        digest,
-        testedProtocolVersion,
-      )
-      val message = AcsCommitmentProtocolMessage(commitment, Signature.noSignature)
+      val commitment = AcsCommitment
+        .create(
+          psid,
+          sender,
+          participant,
+          CommitmentPeriod.tryCreate(fromExclusive, toInclusive),
+          digest,
+          testedProtocolVersion,
+        )
+        .value
+      val message = AcsCommitmentProtocolMessage
+        .create(commitment, Signature.noSignature, defaultMaxAcsSize)
+        .value
       val receivedAcsCommitments = ReceivedAcsCommitments(NonEmpty(Seq, message))
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
       OptionalAcsUpdateContainer(
@@ -185,7 +191,7 @@ class ReceivedAcsCommitmentMatcherTest
     CommitmentPeriod.tryCreate(from, to)
 
   "ReceivedAcsCommitmentMatcher" should {
-    "process a received ACS commitment and handle mismatch/mismatches" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "process a received ACS commitment and handle mismatch/mismatches" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -242,7 +248,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Mismatched, ts(25))
     }
 
-    "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "process matching after mismatching commitments" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -284,7 +290,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(8))
     }
 
-    "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "ignore parse errors" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -319,7 +325,7 @@ class ReceivedAcsCommitmentMatcherTest
     }
 
     // TODO(#34324) Change this so that they are not ignored
-    "ignore unexpected commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "ignore unexpected commitments" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -331,7 +337,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.NotDetermined, ts(3))
     }
 
-    "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "handle multiple envelopes in the same container" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -358,7 +364,9 @@ class ReceivedAcsCommitmentMatcherTest
         AcsCommitment.create(psid, p3, p1, cp, "P3:10-20", testedProtocolVersion)
       )
       val messages = (commitmentsP2 ++ commitmentsP3).map(cmt =>
-        AcsCommitmentProtocolMessage(cmt, Signature.noSignature)
+        AcsCommitmentProtocolMessage
+          .create(cmt.value, Signature.noSignature, defaultMaxAcsSize)
+          .value
       )
       val receivedAcsCommitments = ReceivedAcsCommitments(messages)
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
@@ -405,7 +413,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p3, CommitmentMetrics.MatchingStatusValues.Matched, ts(20))
     }
 
-    "tolerate overlapping and duplicate commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "tolerate overlapping and duplicate commitments" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -434,7 +442,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(20))
     }
 
-    "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "correctly process many queued commitments" in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -456,7 +464,7 @@ class ReceivedAcsCommitmentMatcherTest
       assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(count))
     }
 
-    "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "process commitments from different participants concurrently and sequentially per participant" in {
       val stringInterning = new MockStringInterning()
       val store = new InMemoryAcsCommitmentPeriodStore(
         Eval.now(stringInterning),
@@ -579,7 +587,7 @@ class ReceivedAcsCommitmentMatcherTest
       }
     }
 
-    "increase the watermark upon offset checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "increase the watermark upon offset checkpoints" in {
       val fixture = new Fixture(p1)
       import fixture.*
 

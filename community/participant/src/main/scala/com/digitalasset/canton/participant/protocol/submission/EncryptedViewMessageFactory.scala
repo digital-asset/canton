@@ -320,7 +320,6 @@ object EncryptedViewMessageFactory {
           informeeParticipants.forgetNE.to(LazyList),
           sessionKeyRandomness,
           cryptoSnapshot,
-          cryptoSnapshot.crypto.staticSynchronizerParameters.enableTransparencyChecks,
         ).map(_.values.toSeq)
       } yield ViewKeyData(sessionKeyRandomness, sessionKey, sessionKeyMap)
 
@@ -485,7 +484,6 @@ object EncryptedViewMessageFactory {
       participants: LazyList[ParticipantId],
       randomness: SecureRandomness,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      deterministicEncryption: Boolean,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -494,7 +492,12 @@ object EncryptedViewMessageFactory {
     AsymmetricEncrypted[SecureRandomness],
   ]] =
     cryptoSnapshot
-      .encryptFor(randomness, participants, deterministicEncryption)
+      .encryptFor(
+        randomness,
+        participants,
+        deterministicEncryption =
+          cryptoSnapshot.crypto.staticSynchronizerParameters.enableTransparencyChecks,
+      )
       .leftMap { case (member, error) =>
         UnableToDetermineKey(
           member,

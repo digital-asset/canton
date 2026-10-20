@@ -62,7 +62,7 @@ class ExceptionTest
         transactionSeed = crypto.Hash.hashPrivateKey("ExceptionTest.scala"),
         updateSE = sexpr,
         committers = Set(alice),
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         logger = MachineLogger(),
       )
     SpeedyTestLib

@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.Signature.noSignature
 import com.digitalasset.canton.crypto.{Hash, Signature}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType.BftSignedAvailabilityMessage
@@ -57,6 +58,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.DurationInt
 
 class AvailabilityModuleConsensusProposalRequestTest
     extends AnyWordSpec
@@ -311,7 +313,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             )
             // because in this case we have enough batches to reach the max batches per proposal,
             // we don't need to delay the creation of the proposal at all
-            ctx.lastDelayedMessage shouldBe (empty)
+            ctx.lastDelayedMessage shouldBe empty
 
             val batchIdsWithProofsOfAvailabilityReadyForOrdering =
               batchIdsWithDisseminationCompletions
@@ -330,7 +332,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             }
             ctx.sizeOfPipedMessages shouldBe 0
 
-            disseminationProtocolState.disseminationInProgressView should be(empty)
+            disseminationProtocolState.disseminationInProgressView shouldBe empty
             disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal shouldBe None
 
             availability.receive(
@@ -680,7 +682,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               Consensus.LocalAvailability
                 .ProposalCreated(BlockNumber.First, OrderingBlock(Seq(poa)))
             )
-            ctx.sizeOfPipedMessages shouldBe (0)
+            ctx.sizeOfPipedMessages shouldBe 1 // We'll try to complete dissemination while the batch isn't yet ordered
 
             availability.receive(Availability.Consensus.Ordered(Seq(poa.batchId)))
             disseminationProtocolState.disseminationCompleteView should be(empty)
@@ -777,7 +779,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             disseminationProtocolState.nextToBeProvidedToConsensus =
               NextToBeProvidedToConsensus(BlockNumber.First, Some(1))
             val availabilityStore = new FakeAvailabilityStore[ProgrammableUnitTestEnv](
-              TrieMap[BatchId, OrderingRequestBatch](AnotherBatchId -> ABatch)
+              TrieMap[BatchId, OrderingRequestBatch](ABatchId -> ABatch, AnotherBatchId -> ABatch)
             )
             val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
               disseminationProtocolState = disseminationProtocolState,
@@ -834,17 +836,24 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
 
             val selfMessages = ctx.runPipedMessages()
-            selfMessages should contain only Availability.LocalDissemination
-              .LocalBatchesStoredSigned(
-                Seq(
-                  LocalBatchStoredSigned(
-                    Traced(AnotherBatchId),
-                    ABatch,
-                    MembershipNodes0To3,
-                    signature = None,
+            selfMessages should contain only
+              Availability.LocalDissemination
+                .LocalBatchesStoredSigned(
+                  Seq(
+                    LocalBatchStoredSigned(
+                      Traced(ABatchId),
+                      ABatch,
+                      MembershipNodes0To3,
+                      signature = None,
+                    ),
+                    LocalBatchStoredSigned(
+                      Traced(AnotherBatchId),
+                      ABatch,
+                      MembershipNodes0To3,
+                      signature = None,
+                    ),
                   )
                 )
-              )
           }
       }
   }
@@ -902,7 +911,7 @@ class AvailabilityModuleConsensusProposalRequestTest
           disseminationProtocolState.disseminationCompleteView
             .map(_._1) should contain only ABatchId
 
-          ctx.sizeOfPipedMessages shouldBe 0 // We should not try to sign/store anything in this case
+          ctx.sizeOfPipedMessages shouldBe 1 // We'll try to complete dissemination while the batch isn't yet ordered
 
           consensusBuffer shouldBe Seq(
             Consensus.LocalAvailability.ProposalCreated(
@@ -1398,6 +1407,161 @@ class AvailabilityModuleConsensusProposalRequestTest
           )),
           count = 2,
         )
+      }
+    }
+
+  "it receives Consensus.CreateProposal (from local consensus), " +
+    "there are both in-progress and complete batches with expired patience, " +
+    "and the topology has not changed" should {
+
+      "trigger re-dissemination for both in-progress and complete batches" when {
+        "re-dissemination is enabled" in {
+          val disseminationProtocolState = new DisseminationProtocolState()
+          implicit val actorContext
+              : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext(resolveAwaits = false)
+
+          val longAgo = CantonTimestamp.Epoch
+
+          val longAgoInstant = longAgo.toInstant
+          val inProgressBatch =
+            ABatchId -> ADisseminationProgressNode0To3WithNode0Vote
+              .copy(sentToLast = Node1To3.map(TimestampedSend(_, longAgoInstant)))
+
+          val completeBatch =
+            AnotherBatchId -> DisseminationStatus
+              .InProgress(
+                membership = MembershipNodes0To3,
+                Traced(AnotherBatchId),
+                acks = Set(
+                  AvailabilityAck(from = Node0, Signature.noSignature),
+                  AvailabilityAck(from = Node1, Signature.noSignature),
+                ),
+                epochNumber = anEpochNumber,
+                stats = ABatch.stats,
+                sentToLast = Node2And3.map(TimestampedSend(_, longAgoInstant)),
+              )
+              .update()
+              .toEither
+              .getOrElse(fail("Batch should be complete with 2 acks in a 4-node topology"))
+
+          disseminationProtocolState.disseminationProgress.addOne(inProgressBatch)
+          disseminationProtocolState.disseminationProgress.addOne(completeBatch)
+
+          val availabilityStore =
+            new FakeAvailabilityStore[ProgrammableUnitTestEnv](
+              TrieMap[BatchId, OrderingRequestBatch](ABatchId -> ABatch, AnotherBatchId -> ABatch)
+            )
+
+          val clock =
+            new SimClock(
+              // 10s after the last sent timestamps, exceeding patience
+              start = longAgo.add(10.seconds),
+              loggerFactory = loggerFactory,
+            )
+          val availability =
+            createAndStartAvailability[ProgrammableUnitTestEnv](
+              disseminationProtocolState = disseminationProtocolState,
+              availabilityStore = availabilityStore,
+              consensus = fakeIgnoringModule,
+              customMembership = Some(MembershipNodes0To3),
+              clock = clock,
+              enableReDissemination = true,
+            )
+
+          // Send CreateProposal with the same topology
+          availability.receive(
+            Availability.Consensus
+              .CreateProposal(
+                BlockNumber.First,
+                EpochNumber.First,
+                MembershipNodes0To3,
+                failingCryptoProvider,
+              )
+          )
+
+          // Both the in-progress and complete batches should trigger re-dissemination
+          //  because their patience has expired and they miss acks
+          val selfSendMessages = actorContext.runPipedMessages()
+          selfSendMessages should have size 1
+          selfSendMessages.head should matchPattern {
+            case Availability.LocalDissemination.LocalBatchesStoredSigned(batches)
+                if batches.sizeIs == 2 && batches
+                  .map(_.batchId.value)
+                  .sorted == Seq(ABatchId, AnotherBatchId).sorted =>
+          }
+        }
+      }
+
+      "do not trigger re-dissemination for both in-progress and complete batches" when {
+        "re-dissemination is disabled (default)" in {
+          val disseminationProtocolState = new DisseminationProtocolState()
+          implicit val actorContext
+              : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext(resolveAwaits = false)
+
+          val longAgo = CantonTimestamp.Epoch
+
+          val longAgoInstant = longAgo.toInstant
+          val inProgressBatch =
+            ABatchId -> ADisseminationProgressNode0To3WithNode0Vote
+              .copy(sentToLast = Node1To3.map(TimestampedSend(_, longAgoInstant)))
+
+          val completeBatch =
+            AnotherBatchId -> DisseminationStatus
+              .InProgress(
+                membership = MembershipNodes0To3,
+                Traced(AnotherBatchId),
+                acks = Set(
+                  AvailabilityAck(from = Node0, Signature.noSignature),
+                  AvailabilityAck(from = Node1, Signature.noSignature),
+                ),
+                epochNumber = anEpochNumber,
+                stats = ABatch.stats,
+                sentToLast = Node2And3.map(TimestampedSend(_, longAgoInstant)),
+              )
+              .update()
+              .toEither
+              .getOrElse(fail("Batch should be complete with 2 acks in a 4-node topology"))
+
+          disseminationProtocolState.disseminationProgress.addOne(inProgressBatch)
+          disseminationProtocolState.disseminationProgress.addOne(completeBatch)
+
+          val availabilityStore =
+            new FakeAvailabilityStore[ProgrammableUnitTestEnv](
+              TrieMap[BatchId, OrderingRequestBatch](ABatchId -> ABatch, AnotherBatchId -> ABatch)
+            )
+
+          val clock =
+            new SimClock(
+              // 10s after the last sent timestamps, exceeding patience
+              start = longAgo.add(10.seconds),
+              loggerFactory = loggerFactory,
+            )
+          val availability =
+            createAndStartAvailability[ProgrammableUnitTestEnv](
+              disseminationProtocolState = disseminationProtocolState,
+              availabilityStore = availabilityStore,
+              consensus = fakeIgnoringModule,
+              customMembership = Some(MembershipNodes0To3),
+              clock = clock,
+            )
+
+          // Send CreateProposal with the same topology
+          availability.receive(
+            Availability.Consensus
+              .CreateProposal(
+                BlockNumber.First,
+                EpochNumber.First,
+                MembershipNodes0To3,
+                failingCryptoProvider,
+              )
+          )
+
+          // Both the in-progress and complete batches should not trigger re-dissemination
+          val selfSendMessages = actorContext.runPipedMessages()
+          selfSendMessages shouldBe empty
+        }
       }
     }
 

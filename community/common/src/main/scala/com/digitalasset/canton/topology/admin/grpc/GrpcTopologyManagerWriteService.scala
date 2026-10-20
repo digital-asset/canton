@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopologyStoreId
@@ -167,9 +168,11 @@ class GrpcTopologyManagerWriteService(
             .flatMap(ForceFlags.fromProtoV30)
           validatedMapping <- mapping match {
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
-              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
-            case v30.AuthorizeRequest.Proposal.Mapping.V31(value) =>
-              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("AuthorizeRequest.mapping", None)
           }
@@ -226,7 +229,11 @@ class GrpcTopologyManagerWriteService(
         ProtocolVersionValidation.AlwaysValidation,
         ProtoValidation.MaxCollectionSize,
       )((tx, _) =>
-        SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
+        SignedTopologyTransaction.fromProtoV30(
+          ProtocolVersionValidation.AlwaysValidation,
+          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          tx,
+        )
       )
       signingKeys <-
         ProtoValidation.validateThen(
@@ -291,7 +298,13 @@ class GrpcTopologyManagerWriteService(
             // Always validate the length and not dependent on the store's protocol version
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
-          )((tx, _) => SignedTopologyTransaction.fromProtoV30(protocolVersionValidation, tx))
+          )((tx, _) =>
+            SignedTopologyTransaction.fromProtoV30(
+              protocolVersionValidation,
+              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              tx,
+            )
+          )
           .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
       )
       _ = if (signedTxs.exists(_.selectMapping[PartyToKeyMapping].isDefined)) {
@@ -497,9 +510,11 @@ class GrpcTopologyManagerWriteService(
           op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
           mapping <- mappingPO match {
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
-              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
-            case v30.GenerateTransactionsRequest.Proposal.Mapping.V31(value) =>
-              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("mapping", None)
           }

@@ -164,15 +164,13 @@ class HADatabaseSequencerFactory(
       logger.info(
         s"Database Sequencer exclusive storage becoming ${if (onActive) "active" else "passive"}"
       )
-      FutureUnlessShutdown.outcomeF(
-        pruningScheduler
-          .restart()
-          .map(_ =>
-            logger.info(
-              "Restarted database sequencer pruning scheduler to failover-adapted schedule"
-            )
+      pruningScheduler
+        .restart()
+        .map(_ =>
+          logger.info(
+            "Restarted database sequencer pruning scheduler to failover-adapted schedule"
           )
-      )
+        )
     }
 
 }

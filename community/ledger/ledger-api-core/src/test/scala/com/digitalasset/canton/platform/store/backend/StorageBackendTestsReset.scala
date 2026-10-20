@@ -90,7 +90,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     ).flatten
 
     // Initialize and insert some data
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(ledgerEnd(11, 11L)))
 
@@ -251,7 +251,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
   // By advancing the ledger end to a large value, we can check whether these
   // queries now find any left-over data not cleaned by reset.
   private def advanceLedgerEndToMakeOldDataVisible(): Unit = {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(ledgerEnd(10000, 10000)))
     ()
   }

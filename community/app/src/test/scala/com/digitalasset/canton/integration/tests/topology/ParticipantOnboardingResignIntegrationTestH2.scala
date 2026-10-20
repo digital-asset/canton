@@ -4,14 +4,13 @@
 package com.digitalasset.canton.integration.tests.topology
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -32,7 +31,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 final class ParticipantOnboardingResignIntegrationTestH2
     extends CommunityIntegrationTest
     with SharedEnvironment {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   // TODO(i33912): Once ProtocolVersion.latest is updated to v36,
   // we should change this test to connect to a synchronizer using v35 by

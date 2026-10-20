@@ -11,8 +11,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -63,12 +63,12 @@ class ApiTrafficService(
       .asGrpcFuture
   }
 
-  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+  override def prune(request: PruneRequest): Future[PruneResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     client
-      .pruneEvents(request)
+      .prune(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(
           RichTrafficServiceClient.normalizeTeaError(grpcError)

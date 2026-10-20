@@ -64,6 +64,10 @@ final case class TransactionSnapshot(
       new TxNodeCount,
     )
 
+  // TODO(36670) Snapshots should record the interpretation config they were taken
+  //  with, and replay should use it. Until then, use the dev config.
+  private[this] val interpretationConfig = InterpretationConfig.Dev
+
   def replay(): Either[Error, Speedy.Metrics] =
     engine
       .replayAndCollectMetrics(
@@ -74,7 +78,7 @@ final case class TransactionSnapshot(
         preparationTime = preparationTime,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = interpretationConfig,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))
@@ -90,7 +94,7 @@ final case class TransactionSnapshot(
         preparationTime = preparationTime,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = interpretationConfig,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))

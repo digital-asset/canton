@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p
 
-import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -13,7 +14,11 @@ import com.digitalasset.canton.logging.{
   SuppressionRule,
   TracedLogger,
 }
-import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.metrics.{
+  BftOrderingMetrics,
+  SequencerHistograms,
+  SequencerMetrics,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
   PeerConnectionStatus,
   PeerEndpointHealth,
@@ -1171,6 +1176,68 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     }
 
     "it is queried about endpoints status" should {
+
+      "report the winning transport's direction in status and metrics for a configured endpoint" in {
+        Table("outgoing sender", false, true).forEvery { isOutgoingConnection =>
+          val metricsFactory = new InMemoryMetricsFactory
+          val metrics = new SequencerMetrics(
+            new SequencerHistograms(MetricName("test"))(new HistogramInventory),
+            metricsFactory,
+          ).bftOrdering
+          val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(p2pConnectionState = p2pConnectionState, metrics = metrics)
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+          val endpoint = otherInitialEndpointsTupled._1
+          val bftNodeId = endpointToTestBftNodeId(endpoint)
+          val sequencerId = endpointToTestSequencerId(endpoint)
+          val sender = mock[PeerSender]
+          when(sender.isOutgoingConnection).thenReturn(isOutgoingConnection)
+
+          // Match the manager's authentication sequence, after startup created outgoing refs.
+          p2pConnectionState.associateP2PEndpointIdToBftNodeId(endpoint.id, bftNodeId)
+          p2pConnectionState.addSenderIfMissing(bftNodeId, sender) shouldBe true
+          authenticate(p2pNetworkManager, endpoint)
+          context.extractSelfMessages().foreach(module.receive)
+
+          var status: Option[PeerNetworkStatus] = None
+          module.receive(
+            P2PNetworkOut.Admin.GetStatus(s => status = Some(s), Some(Seq(endpoint.id)))
+          )
+          status should contain(
+            PeerNetworkStatus(
+              Seq(
+                PeerConnectionStatus.PeerEndpointStatus(
+                  endpoint.id,
+                  isOutgoingConnection,
+                  PeerEndpointHealth(
+                    PeerEndpointHealthStatus.Authenticated(sequencerId),
+                    None,
+                  ),
+                )
+              )
+            )
+          )
+
+          val endpointLabel =
+            s"${endpoint.id.url} (${sequencerId.toProtoPrimitive}, outgoing = $isOutgoingConnection)"
+          val endpointStatusMetrics = metricsFactory.metrics.gauges.get(
+            MetricName("test", "sequencer", "bftordering", "p2p", "authenticated-endpoint")
+          )
+          endpointStatusMetrics.flatMap(
+            _.get(MetricsContext("endpoint" -> endpointLabel))
+          ) shouldNot be(empty)
+          endpointStatusMetrics
+            .getOrElse(Map.empty)
+            .keys
+            .flatMap(_.labels.get("endpoint"))
+            .filter(
+              _.startsWith(s"${endpoint.id.url} (")
+            ) should contain only endpointLabel
+        }
+      }
+
       "return it" in {
         val mempoolSpy =
           spy(fakeIgnoringModule[Mempool.Message])
@@ -1485,6 +1552,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         selfNode,
         loggerFactory,
       ),
+      metrics: BftOrderingMetrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
@@ -1503,6 +1571,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       isGenesis,
       connectToInitialNodes,
       p2pConnectionState,
+      metrics,
     )
 
   private def setupWithDefaultDepsExpectingSilence(
@@ -1523,6 +1592,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         selfNode,
         loggerFactory,
       ),
+      metrics: BftOrderingMetrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
@@ -1548,6 +1618,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         state,
         p2pEndpointsStore,
         isGenesis,
+        metrics,
       )
     module.ready(context.self)(TraceContext.createNew("p2p-network-out-module-test"))
     context.selfMessages should contain only P2PNetworkOut.Start
@@ -1567,6 +1638,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       state: P2PNetworkOutModule.State,
       p2pEndpointsStore: P2PEndpointsStore[ProgrammableUnitTestEnv],
       isGenesis: Boolean,
+      metrics: BftOrderingMetrics,
   ): (
       P2PNetworkOutModule[ProgrammableUnitTestEnv, FakeP2PNetworkManager],
       FakeP2PNetworkManager,
@@ -1590,7 +1662,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         new Random(4),
         simClock,
         p2pEndpointsStore,
-        SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+        metrics,
         dependencies,
         P2PNetworkOutModuleTest.this.loggerFactory,
         P2PNetworkOutModuleTest.this.timeouts,

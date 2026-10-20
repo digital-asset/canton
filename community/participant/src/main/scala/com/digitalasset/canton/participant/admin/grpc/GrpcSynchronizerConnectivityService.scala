@@ -40,9 +40,13 @@ import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerRegistryError,
   SynchronizerRegistryHelpers,
 }
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
+  TopologyTransactionDeserializationContext,
+}
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
   PhysicalSynchronizerId,
@@ -317,7 +321,13 @@ class GrpcSynchronizerConnectivityService(
 
       onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
         onboardingTransactionsPO
-          .traverse(SignedTopologyTransaction.fromByteString(expectedProtocolVersion, _))
+          .traverse(
+            SignedTopologyTransaction.fromByteString(
+              expectedProtocolVersion,
+              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              _,
+            )
+          )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       _ = logger.info(show"Registering new synchronizer $config")
@@ -369,7 +379,13 @@ class GrpcSynchronizerConnectivityService(
 
         onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
           onboardingTransactionsPO
-            .traverse(SignedTopologyTransaction.fromByteString(protocolVersionValidation, _))
+            .traverse(
+              SignedTopologyTransaction.fromByteString(
+                protocolVersionValidation,
+                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                _,
+              )
+            )
             .leftMap(ProtoDeserializationFailure.Wrap(_))
         )
         _ = logger.info(show"Registering new synchronizer $config")

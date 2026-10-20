@@ -701,7 +701,7 @@ def parse_evidence_marker(comment_body: str) -> Optional[dict]:
     try:
         return json.loads(match.group(1))
     except json.JSONDecodeError:
-        return None
+        return None  # silent-ok: a malformed marker just means this isn't one
 
 
 def evidence_label(test_count: int) -> str:

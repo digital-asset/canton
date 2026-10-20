@@ -19,8 +19,8 @@ object CreateSubscriptionError {
   final case class MemberRegisterError(e: SequencerWriteError[RegisterMemberError])
       extends CreateSubscriptionError
 
-  /** The member has been disabled and can no longer read. */
-  final case class MemberDisabled(member: Member) extends CreateSubscriptionError
+  /** The member is not active and can not read. */
+  final case class MemberNotActive(member: Member) extends CreateSubscriptionError
 
   /** The provided sequencer counter cannot be used for a subscription (currently will only occur if
     * counter <0)

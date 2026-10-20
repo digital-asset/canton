@@ -1,0 +1,105 @@
+import better.files.File
+import com.digitalasset.canton.console.{
+  CommandFailure,
+  InstanceReference,
+  MediatorReference,
+  SequencerReference,
+}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.google.protobuf.ByteString
+
+val exportDirectory = File(sys.props("all-the-lsus.export-dir"))
+val upgradeTime =
+  CantonTimestamp.assertFromInstant(Instant.parse(sys.props("all-the-lsus.upgrade-time")))
+val successorProtocolVersion = ProtocolVersion.tryCreate(sys.props("all-the-lsus.protocol-version"))
+
+def sequencerNamed(property: String): SequencerReference =
+  sequencers.all
+    .find(_.name == sys.props(property))
+    .getOrElse(sys.error(s"Unknown ${sys.props(property)}"))
+def mediatorNamed(property: String): MediatorReference =
+  mediators.all
+    .find(_.name == sys.props(property))
+    .getOrElse(sys.error(s"Unknown ${sys.props(property)}"))
+
+val oldSequencer = sequencerNamed("all-the-lsus.old-sequencer")
+val oldMediator = mediatorNamed("all-the-lsus.old-mediator")
+val newSequencer = sequencerNamed("all-the-lsus.new-sequencer")
+val newMediator = mediatorNamed("all-the-lsus.new-mediator")
+
+val currentPsid = oldSequencer.physical_synchronizer_id
+val successorPsid = PhysicalSynchronizerId(
+  currentPsid.logical,
+  NonNegativeInt.tryCreate(currentPsid.serial.unwrap + 1),
+  successorProtocolVersion,
+)
+val successorParameters =
+  StaticSynchronizerParameters.defaultsWithoutKMS(successorProtocolVersion, successorPsid.serial)
+
+// Announcement
+oldSequencer.topology.lsu.announcement.propose(successorPsid, upgradeTime)
+
+utils.retry_until_true(
+  Seq[InstanceReference](oldSequencer, oldMediator).forall(
+    _.topology.lsu.announcement
+      .list(store = Some(currentPsid))
+      .exists(_.item.successorSynchronizerId == successorPsid.opaque)
+  )
+)
+
+// Initialization of the new synchronizer nodes with the identity of the old ones
+def copyIdentity(oldNode: InstanceReference, newNode: InstanceReference): Unit = {
+  oldNode.keys.public.list().foreach { publicKey =>
+    newNode.keys.secret.upload(
+      oldNode.keys.secret.download(publicKey.id),
+      publicKey.name.map(_.toProtoPrimitive),
+    )
+  }
+
+  newNode.topology.init_id_from_uid(oldNode.id.uid)
+  newNode.health.wait_for_ready_for_node_topology()
+  newNode.topology.transactions.import_topology_snapshotV2(
+    oldNode.topology.transactions.export_topology_snapshotV2(
+      filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
+      filterNamespace = oldNode.id.uid.namespace.filterString,
+    ),
+    TopologyStoreId.Authorized,
+  )
+}
+
+oldSequencer.topology.transactions.sequencer_lsu_state(
+  outputFile = s"${exportDirectory / oldSequencer.name}-genesis-state"
+)
+
+copyIdentity(oldSequencer, newSequencer)
+newSequencer.setup.initialize_from_lsu_predecessor(
+  inputFile = (exportDirectory / s"${oldSequencer.name}-genesis-state").pathAsString,
+  synchronizerId = successorPsid.logical,
+  synchronizerParameters = successorParameters,
+)
+
+copyIdentity(oldMediator, newMediator)
+newMediator.setup.assign(
+  successorPsid,
+  SequencerConnections.single(newSequencer.sequencerConnection),
+)
+
+Seq[InstanceReference](newSequencer, newMediator).foreach(_.health.wait_for_initialized())
+
+// Sequencer successor
+oldSequencer.topology.lsu.sequencer_successors.propose_successor(
+  sequencerId = oldSequencer.id,
+  endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+  successorSynchronizerId = successorPsid,
+)
+
+// Traffic state, available once the upgrade time is reached
+utils.retry_until_true(NonNegativeDuration.ofMinutes(5))(CantonTimestamp.now() > upgradeTime)
+var trafficState: Option[ByteString] = None
+utils.retry_until_true(NonNegativeDuration.ofMinutes(5)) {
+  trafficState =
+    try Some(oldSequencer.traffic_control.get_lsu_state())
+    catch { case _: CommandFailure => None }
+  trafficState.nonEmpty
+}
+trafficState.foreach(newSequencer.traffic_control.set_lsu_state)

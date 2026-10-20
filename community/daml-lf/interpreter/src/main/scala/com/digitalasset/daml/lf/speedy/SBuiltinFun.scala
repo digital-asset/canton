@@ -31,9 +31,10 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.value.Value as V
 
 import java.nio.charset.StandardCharsets
-import java.security.spec.InvalidKeySpecException
+import java.security.spec.{InvalidKeySpecException, X509EncodedKeySpec}
 import java.security.{
   InvalidKeyException,
+  KeyFactory,
   NoSuchAlgorithmException,
   NoSuchProviderException,
   PublicKey,
@@ -810,8 +811,11 @@ private[lf] object SBuiltinFun {
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
+    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
+      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
+
+      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(byteEncodedPublicKey))
+    }
   }
 
   final case object SBSECP256K1ValidateKey extends SBuiltinFun(1) {
@@ -869,8 +873,11 @@ private[lf] object SBuiltinFun {
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
+    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
+      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
+
+      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(byteEncodedPublicKey))
+    }
   }
 
   final case object SBDecodeHex extends SBuiltinFun(1) {

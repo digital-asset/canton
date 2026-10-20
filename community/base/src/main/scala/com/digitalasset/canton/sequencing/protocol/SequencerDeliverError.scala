@@ -318,7 +318,7 @@ object SequencerErrors extends SequencerErrorGroup {
       )
 
   @Explanation("""The sequencer is currently unavailable.""")
-  @Resolution("""Retry quickly.""")
+  @Resolution("""Retry with backoff and jittering.""")
   case object Unavailable
       extends SequencerDeliverErrorCode(
         id = "SEQUENCER_UNAVAILABLE",

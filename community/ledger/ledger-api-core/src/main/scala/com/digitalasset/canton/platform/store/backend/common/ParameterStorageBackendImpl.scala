@@ -10,7 +10,7 @@ import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.Conversions.offset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsLastPointers,
@@ -35,7 +35,9 @@ import SimpleSqlExtensions.*
 private[backend] class ParameterStorageBackendImpl(
     queryStrategy: QueryStrategy,
     stringInterning: StringInterning,
-) extends ParameterStorageBackend {
+    val loggerFactory: NamedLoggerFactory,
+) extends ParameterStorageBackend
+    with NamedLogging {
   import Conversions.OffsetToStatement
 
   override def updateLedgerEnd(
@@ -157,11 +159,8 @@ private[backend] class ParameterStorageBackendImpl(
     }
 
   override def initializeParameters(
-      params: ParameterStorageBackend.IdentityParams,
-      loggerFactory: NamedLoggerFactory,
-  )(connection: Connection): Unit = {
-    val logger = loggerFactory.getTracedLogger(getClass)
-    implicit val traceContext: TraceContext = TraceContext.empty
+      params: ParameterStorageBackend.IdentityParams
+  )(connection: Connection)(implicit traceContext: TraceContext): Unit = {
     // Note: this method is the only one that inserts a row into the parameters table
     val previous = ledgerIdentity(connection)
     val participantId = params.participantId
@@ -413,18 +412,18 @@ private[backend] class ParameterStorageBackendImpl(
 
   override def clearAchsStateAndData()(implicit
       connection: Connection,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
   ): Unit =
     withoutNetworkTimeout {
-      errorLoggingContext.info("Cleaning lapi_achs_state")
+      logger.info("Cleaning lapi_achs_state")
       queryStrategy.cleanTable("lapi_achs_state")
-      errorLoggingContext.info("Cleaning lapi_filter_achs_stakeholder")
+      logger.info("Cleaning lapi_filter_achs_stakeholder")
       queryStrategy.cleanTable("lapi_filter_achs_stakeholder")
-    }(connection, errorLoggingContext.noTracingLogger)
+    }(connection, noTracingLogger)
 
   override def vacuumAndReindexAchsTables()(implicit
       connection: Connection,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
   ): Unit = {
     queryStrategy.vacuumAndReindexTable("lapi_achs_state")
     queryStrategy.vacuumAndReindexTable("lapi_filter_achs_stakeholder")

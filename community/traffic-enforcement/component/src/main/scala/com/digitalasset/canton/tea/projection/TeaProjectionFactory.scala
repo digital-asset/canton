@@ -44,17 +44,19 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
   protected def setApplyDeltaSpanAttributes(
       span: SpanWrapper,
       projectionEvent: ProjectionEvent,
+      accountDelta: AccountDelta,
       eventSource: EventSource,
   ): Unit = {
-    span.setAttribute(AccountIdAttribute, projectionEvent.account.unwrap)
-    span.setAttribute(DeltaAttribute, projectionEvent.event.deltaEvent.delta.toString)
+    span.setAttribute(AccountIdAttribute, accountDelta.account.unwrap)
+    span.setAttribute(DeltaAttribute, accountDelta.delta.toString)
     span.setAttribute(EventSourceAttribute, eventSource.toString)
-    span.setAttribute(OffsetAttribute, projectionEvent.event.offset.toString)
+    span.setAttribute(OffsetAttribute, projectionEvent.offset.toString)
   }
 
   /** Build a projection behavior for a single ingestion stream, reusing the shared storage. */
   def projection(
       projectionId: ProjectionId,
+      eventSource: EventSource,
       grpcSourceFactory: Option[Long] => Source[Traced[ProjectionEvent], ?],
   ): Behavior[ProjectionBehavior.Command]
 
@@ -88,7 +90,7 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
       ): Unit = {
         onEventCommitted()
         metrics.projectionTimestamp.updateValue(
-          envelope.value.event.deltaEvent.timestamp.toEpochMilli
+          envelope.value.timestamp.toEpochMilli
         )
         logger.trace(s"Processed event ${envelope.value} for projectionId $projectionId")(
           envelope.traceContext
@@ -98,8 +100,8 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           projectionId: ProjectionId,
           env: Traced[ProjectionEvent],
       ): Unit = {
-        metrics.projectionOffset.updateValue(env.value.event.offset)
-        logger.info(s"Stored offset ${env.value.event.offset} for projectionId $projectionId")(
+        metrics.projectionOffset.updateValue(env.value.offset)
+        logger.info(s"Stored offset ${env.value.offset} for projectionId $projectionId")(
           env.traceContext
         )
       }
@@ -145,9 +147,9 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           )
           grpcSourceFactory(maybeOffset).mapMaterializedValue(_ => NotUsed)
         }
-      override def extractOffset(record: Traced[ProjectionEvent]): Long = record.value.event.offset
+      override def extractOffset(record: Traced[ProjectionEvent]): Long = record.value.offset
       override def extractCreationTime(record: Traced[ProjectionEvent]): Long =
-        record.value.event.deltaEvent.timestamp.toEpochMilli
+        record.value.timestamp.toEpochMilli
     }
 }
 
@@ -162,7 +164,6 @@ object TeaProjectionFactory {
   /** Open the shared storage once, based on the configured storage backend. */
   def create(
       storage: Storage,
-      eventSource: EventSource,
       config: ProjectionConfig,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
@@ -180,7 +181,6 @@ object TeaProjectionFactory {
             db,
             loggerFactory,
             store,
-            eventSource,
             config,
             metrics,
             onEventCommitted,

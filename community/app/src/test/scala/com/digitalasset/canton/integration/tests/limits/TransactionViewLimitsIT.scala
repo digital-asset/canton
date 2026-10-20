@@ -110,73 +110,55 @@ class TransactionViewLimitsIT
         )
       }
 
-  "Transaction view limits should be enabled for submission" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-    implicit env =>
-      import env.*
+  "Transaction view limits should be enabled for submission" in { implicit env =>
+    import env.*
 
-      val createCmd1 = ledger_api_utils.create(
-        TransactionLimitTestsPkgId,
-        "TransactionLimitTests",
-        "T",
-        Map("owner" -> party1, "watcher" -> party1, "value" -> 0),
-      )
-      val createCmd2 = ledger_api_utils.create(
-        TransactionLimitTestsPkgId,
-        "TransactionLimitTests",
-        "T",
-        Map("owner" -> party1, "watcher" -> party1, "value" -> 1),
-      )
-      val cid =
-        getFirstContractId(participant1.ledger_api.commands.submit(Seq(party1), Seq(createCmd1)))
-      val twoViewCmd = ledger_api_utils.exercise(
-        TransactionLimitTestsPkgId,
-        "TransactionLimitTests",
-        "T",
-        "TwoViews",
-        Map("party" -> party2),
-        cid.coid,
-      )
-      val singleRootAndViewCmd = ledger_api_utils.exercise(
-        TransactionLimitTestsPkgId,
-        "TransactionLimitTests",
-        "T",
-        "SingleRootAndView",
-        Map.empty,
-        cid.coid,
-      )
+    val createCmd1 = ledger_api_utils.create(
+      TransactionLimitTestsPkgId,
+      "TransactionLimitTests",
+      "T",
+      Map("owner" -> party1, "watcher" -> party1, "value" -> 0),
+    )
+    val cid =
+      getFirstContractId(participant1.ledger_api.commands.submit(Seq(party1), Seq(createCmd1)))
+    val twoViewCmd = ledger_api_utils.exercise(
+      TransactionLimitTestsPkgId,
+      "TransactionLimitTests",
+      "T",
+      "TwoViews",
+      Map("party" -> party2),
+      cid.coid,
+    )
+    val singleRootAndViewCmd = ledger_api_utils.exercise(
+      TransactionLimitTestsPkgId,
+      "TransactionLimitTests",
+      "T",
+      "SingleRootAndView",
+      Map.empty,
+      cid.coid,
+    )
 
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.ledger_api.commands.submit(Seq(party1), Seq(createCmd1, createCmd2)),
-        entry => {
-          entry.shouldBeCantonErrorCode(TransactionProcessor.SubmissionErrors.MalformedRequest)
-          entry.errorMessage should include("Request failed for participant1")
-          entry.errorMessage should include(
-            "TransactionViewLimitError(Number of root views for a transaction exceeded 1)"
-          )
-        },
-      )
+    loggerFactory.assertThrowsAndLogs[CommandFailure](
+      participant1.ledger_api.commands.submit(Seq(party1), Seq(twoViewCmd)),
+      entry => {
+        entry.shouldBeCantonErrorCode(TransactionProcessor.SubmissionErrors.MalformedRequest)
+        entry.errorMessage should include("Request failed for participant1")
+        entry.errorMessage should include(
+          "TransactionViewLimitError(Number of subviews for a transaction exceeded 1)"
+        )
+      },
+    )
 
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.ledger_api.commands.submit(Seq(party1), Seq(twoViewCmd)),
-        entry => {
-          entry.shouldBeCantonErrorCode(TransactionProcessor.SubmissionErrors.MalformedRequest)
-          entry.errorMessage should include("Request failed for participant1")
-          entry.errorMessage should include(
-            "TransactionViewLimitError(Number of subviews for a transaction exceeded 1)"
-          )
-        },
-      )
+    val events =
+      participant1.ledger_api.commands.submit(Seq(party1), Seq(singleRootAndViewCmd)).events
 
-      val events =
-        participant1.ledger_api.commands.submit(Seq(party1), Seq(singleRootAndViewCmd)).events
-
-      inside(events) {
-        case Seq(create) if create.event.isCreated =>
-          val fields = create.getCreated.getCreateArguments.fields
-          inside(fields.find(_.label == "value").flatMap(_.value)) { case Some(value) =>
-            value.getInt64 shouldBe 42
-          }
-      }
+    inside(events) {
+      case Seq(create) if create.event.isCreated =>
+        val fields = create.getCreated.getCreateArguments.fields
+        inside(fields.find(_.label == "value").flatMap(_.value)) { case Some(value) =>
+          value.getInt64 shouldBe 42
+        }
+    }
   }
 
   private def getFirstContractId(tx: Transaction): ContractId =

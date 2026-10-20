@@ -38,11 +38,13 @@ import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
   MultiPartySubmissionRejected,
   TrafficUpdateOutOfBound,
   TransientFailure,
+  UnsafeToPrune,
 }
+import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCredit
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -64,7 +66,7 @@ import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 import scala.jdk.DurationConverters.*
 
-sealed trait ParticipantTrafficEnforcementTest
+trait ParticipantTrafficEnforcementTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils {
@@ -92,6 +94,9 @@ sealed trait ParticipantTrafficEnforcementTest
             trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
           )
         )
+        // TEA uses this as the pruning retention too; zero means tests can prune right up to now.
+        .focus(_.init.ledgerApi.maxDeduplicationDuration)
+        .replace(config.NonNegativeFiniteDuration.Zero)
     ),
     // Shorten network timeout so retries to the non-existent traffic service give up quickly
     _.focus(_.parameters.timeouts.processing.network)
@@ -167,7 +172,7 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
         )
 
         assertThrowsAndLogsCommandFailures(
-          participant1.ledger_api.traffic.prune_events(wallClock.now),
+          participant1.ledger_api.traffic.prune(wallClock.now),
           assertUnimplemented,
         )
       }
@@ -233,14 +238,31 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
 
         // Prune the first event
         val rsp = participant1.ledger_api.traffic
-          .prune_events(startTime)
+          .prune(startTime)
 
         rsp.prunedEventCount shouldBe 1
 
         val rsp2 = participant1.ledger_api.traffic
-          .prune_events(startTime)
+          .prune(startTime)
 
         rsp2.prunedEventCount shouldBe 0
+      }
+
+      "reject a prune inside the minimum pruning retention, with its own error code" in {
+        implicit env =>
+          import env.*
+
+          // The retention limit is zero in this test, so only a future value will fail.
+          val future = env.environment.simClock.value.now.plusSeconds(1)
+
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+            participant1.ledger_api.traffic.prune(future),
+            entries =>
+              inside(entries) { case Seq(clientEntry, consoleEntry) =>
+                clientEntry.warningMessage should include(UnsafeToPrune.id)
+                consoleEntry.shouldBeCantonErrorCode(UnsafeToPrune)
+              },
+          )
       }
 
       "reject an update_account with a delta that would take the balance out of bound, with its own error code" in {
@@ -392,7 +414,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         val encodedAccount = URLEncoder.encode(accountId, StandardCharsets.UTF_8)
         val accountUrl = s"http://localhost:$port/v2/traffic/accounts/$encodedAccount"
         val accountsUrl = s"http://localhost:$port/v2/traffic/accounts"
-        val pruneUrl = s"http://localhost:$port/v2/traffic/events/prune"
+        val pruneUrl = s"http://localhost:$port/v2/traffic/prune"
 
         def balance(): Long =
           decode[GetAccountResponse](httpGet(accountUrl)).value.balance
@@ -409,10 +431,10 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         }
 
         def prune(beforeOrAt: CantonTimestamp): Int = {
-          val requestBody = PruneEventsRequest(
+          val requestBody = PruneRequest(
             beforeOrAt = Some(beforeOrAt.toProtoTimestamp)
           ).asJson.noSpaces
-          decode[PruneEventsResponse](
+          decode[PruneResponse](
             httpPost(pruneUrl, requestBody)
           ).value.prunedEventCount
         }
@@ -531,7 +553,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           )
 
           loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-            participant1.ledger_api.traffic.prune_events(wallClock.now),
+            participant1.ledger_api.traffic.prune(wallClock.now),
             assertEntriesTeaUnavailable,
           )
 
@@ -591,6 +613,12 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
 
   "Participant" when {
     "traffic enforcement is enabled but enforce-cost-on-submissions=false" should {
+      "not upload the traffic credit package when top-up is disabled" in { implicit env =>
+        import env.*
+
+        participant1.packages.list().map(_.packageId) should not contain TrafficCredit.PACKAGE_ID
+      }
+
       "do not enforce traffic on submissions (allow negative balances) but still debit traffic from submitting party account" in {
         implicit env =>
           import env.*

@@ -70,6 +70,7 @@ import com.digitalasset.canton.networking.grpc.{
   CantonMutableHandlerRegistry,
   CantonServerBuilder,
 }
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.{DbMigrations, Storage, StorageFactory}
@@ -864,7 +865,7 @@ abstract class CantonNodeBootstrapImpl[
       val snapshotValidator = new InitialTopologySnapshotValidator(
         crypto.pureCrypto,
         temporaryTopologyStore,
-        parameters.batchingConfig.topologyCacheAggregator,
+        parameters.batchingConfig,
         config.topology,
         // there are no synchronizer parameters here, so we cannot pass them.
         // as we are only expecting namespace delegations that end up in the authorized store, this is fine
@@ -961,6 +962,7 @@ abstract class CantonNodeBootstrapImpl[
                 SignedTopologyTransaction
                   .fromByteString(
                     ProtocolVersionValidation.AlwaysValidation,
+                    TopologyTransactionDeserializationContext(TopologyLimits.default),
                     bytes,
                   )
                   .leftMap(_.message)
@@ -1016,23 +1018,17 @@ abstract class CantonNodeBootstrapImpl[
         transactions: Seq[PositiveSignedTopologyTransaction],
     )(implicit
         traceContext: TraceContext
-    ): EitherT[Future, String, Unit] =
+    ): EitherT[FutureUnlessShutdown, String, Unit] =
       validateTransactionsAndComputeUid(
         identifier,
         Option.when(namespace.nonEmpty)(namespace),
         transactions,
       )
         .flatMap { uid =>
-          completeWithExternal(
-            EitherT.right(
-              initializationStore
-                .setUid(uid)
-                .failOnShutdownToAbortException("CantonNodeBootstrapImpl.initializeWithProvidedId")
-                .map(_ => (uid, transactions))
-            )
+          completeWithExternalUS(
+            EitherT.right(initializationStore.setUid(uid).map(_ => (uid, transactions)))
           )
         }
-        .onShutdown(Left("Node has been shutdown"))
 
     override def getId: Option[UniqueIdentifier] = next.map(_.nodeId)
     override def isInitialized: Boolean = getId.isDefined

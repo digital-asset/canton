@@ -8,8 +8,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 class ViewMessageDecrypterV1Test extends BaseTestWordSpec with ViewMessageDecrypterTest {
   "A ViewMessageDecrypter version 1 (unique view hashes)" must {
-    if (testedProtocolVersion < ProtocolVersion.transparency) {
-      behave like viewMessageDecrypterTest()
+    if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId) {
+      behave like viewMessageDecrypterTest(enableTransparency = false)
     }
   }
 

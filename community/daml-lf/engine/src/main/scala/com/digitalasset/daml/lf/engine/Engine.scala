@@ -46,9 +46,8 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value, ValueCoder}
 import com.google.common.annotations.VisibleForTesting
 
-import java.nio.file.{Files, StandardOpenOption}
+import java.nio.file.Files
 import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
 
 /** Allows for evaluating [[com.digitalasset.daml.lf.command.ApiCommands]] and validating
   * [[com.digitalasset.daml.lf.transaction.Transaction]]s. <p>
@@ -140,6 +139,8 @@ class Engine(
       prefetchKeys: Seq[ApiContractKey],
   )(implicit traceContext: TraceContext): Result[(SubmittedTransaction, Tx.Metadata)] = {
     val preparationTime = cmds.ledgerEffectiveTime
+    val transactionSeed =
+      crypto.Hash.deriveTransactionSeed(submissionSeed, participantId, preparationTime)
     for {
       pkgResolution <- preprocessor.buildPackageResolution(packageMap, packagePreference)
       processedCmds <- preprocessor.preprocessApiCommands(pkgResolution, cmds.commands)
@@ -158,11 +159,13 @@ class Engine(
           commands = processedCmds,
           ledgerTime = cmds.ledgerEffectiveTime,
           preparationTime = preparationTime,
-          seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
+          seeding = InitialSeeding.TransactionSeed(transactionSeed),
           contractIdVersion = contractIdVersion,
           interpretationConfig = interpretationConfig,
           packageResolution = pkgResolution,
-          submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
+          submissionInfo = Some(
+            Engine.SubmissionInfo(participantId, submissionSeed, transactionSeed, submitters)
+          ),
           metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
             Seq(
               new metrics.FetchNodeCount,
@@ -477,6 +480,7 @@ class Engine(
       case ExecutionMode.Conductor =>
         executeCommandsWithConductor(
           validating,
+          catchAll,
           submitters,
           commands,
           ledgerTime,
@@ -492,6 +496,7 @@ class Engine(
 
   private[engine] def executeCommandsWithConductor(
       validating: Boolean,
+      catchAll: Boolean,
       submitters: Set[Party],
       commands: ImmArray[speedy.Command],
       ledgerTime: Time.Timestamp,
@@ -520,12 +525,11 @@ class Engine(
       contractIdVersion = contractIdVersion,
       limits = config.transactionLimits,
       metricPlugins = metricPlugins,
+      transactionTraceMaxLength = config.transactionTraceMaxLength,
     )
 
-    def error(err: Error.Interpretation.Error): Result[Nothing] = {
-      val trace = conductor.transactionTrace(config.transactionTraceMaxLength)
-      Result.error(err, Option.when(trace.nonEmpty)(trace))
-    }
+    def error(err: Error.Interpretation.Error): Result[Nothing] =
+      Result.error(err, Some(conductor.transactionTrace(config.transactionTraceMaxLength)))
 
     // The call by-name is needed to ensure te `im.resume` are called inside the `try` block.
     def loop[X](upd: => Upd.Step[X]): Result[X] = try
@@ -596,7 +600,7 @@ class Engine(
         NameOf.qualifiedNameOfCurrentFunc,
         compiledPackages.compiler.unsafeCompile(commands),
       )
-      _ <- loop(conductor.handleCommands(commands.toSeq).start)
+      _ <- loop(conductor.handleCommands(commands.toSeq, catchAll = catchAll).start)
       txResult <- Result.done(conductor.finish)
       TxConductor.Result(
         tx,
@@ -904,63 +908,57 @@ class Engine(
               machine.profile.writeSpeedscopeJson(profileFile)
             }
             val snapshotResult = config.snapshotDir.zip(submissionInfo).flatMap {
-              case (dir, Engine.SubmissionInfo(participantId, submissionSeed, submitters)) =>
+              case (
+                    dir,
+                    Engine
+                      .SubmissionInfo(participantId, submissionSeed, transactionSeed, submitters),
+                  ) =>
                 // Ensure OSes don't complain about filename characters - e.g. ':'
                 val snapshotFile =
                   dir.resolve(s"snapshot-${participantId.replaceAll("[^a-zA-Z0-9-_\\.]", "_")}.bin")
-                TransactionCoder
-                  .encodeTransaction(tx)
+                val metricPlugins =
+                  machine.metrics.totalCount[metrics.StepCount].map { stepCount =>
+                    Snapshot.MetricPlugin
+                      .newBuilder()
+                      .setName("StepCount")
+                      .setTotal(stepCount)
+                      .build()
+                  } ++
+                    machine.metrics.totalCount[metrics.TxNodeCount].map { txNodeCount =>
+                      Snapshot.MetricPlugin
+                        .newBuilder()
+                        .setName("TxNodeCount")
+                        .setTotal(txNodeCount)
+                        .build()
+                    } ++
+                    machine.metrics.totalCount[metrics.FetchNodeCount].map { fetchNodeCount =>
+                      Snapshot.MetricPlugin
+                        .newBuilder()
+                        .setName("FetchNodeCount")
+                        .setTotal(fetchNodeCount)
+                        .build()
+                    }
+                SnapshotRecorder
+                  .transactionEntry(
+                    tx = tx,
+                    participantId = participantId,
+                    submitters = submitters,
+                    ledgerTime = time,
+                    preparationTime = meta.preparationTime,
+                    submissionSeed = Some(submissionSeed),
+                    transactionSeed = transactionSeed,
+                    contractIdVersion = machine.contractIdVersion,
+                    packageResolution = machine.packageResolution,
+                    inputContracts = inputContracts,
+                    keyLookups = globalKeyMapping,
+                    usedPackages = deps,
+                    metricPlugins = metricPlugins.toSeq,
+                  )
                   .fold(
                     err => Some(("TransactionCoder.encodeTransaction", err)),
-                    encoded => {
-                      val metricPlugins =
-                        machine.metrics.totalCount[metrics.StepCount].map { stepCount =>
-                          Snapshot.MetricPlugin
-                            .newBuilder()
-                            .setName("StepCount")
-                            .setTotal(stepCount)
-                            .build()
-                        } ++
-                          machine.metrics.totalCount[metrics.TxNodeCount].map { txNodeCount =>
-                            Snapshot.MetricPlugin
-                              .newBuilder()
-                              .setName("TxNodeCount")
-                              .setTotal(txNodeCount)
-                              .build()
-                          } ++
-                          machine.metrics.totalCount[metrics.FetchNodeCount].map { fetchNodeCount =>
-                            Snapshot.MetricPlugin
-                              .newBuilder()
-                              .setName("FetchNodeCount")
-                              .setTotal(fetchNodeCount)
-                              .build()
-                          }
-                      val txEntry = Snapshot.TransactionEntry
-                        .newBuilder()
-                        .setRawTransaction(encoded.toByteString)
-                        .setParticipantId(participantId)
-                        .addAllSubmitters(submitters.map(_.toString).asJava)
-                        .setLedgerTime(time.micros)
-                        .setPreparationTime(meta.preparationTime.micros)
-                        .setSubmissionSeed(submissionSeed.bytes.toByteString)
-                        .addAllMetricPlugins(metricPlugins.asJava)
-                        .build()
-                      val txSubmission = Snapshot.SubmissionEntry
-                        .newBuilder()
-                        .setTransaction(txEntry)
-                        .build()
-
-                      txSubmission.writeDelimitedTo(
-                        Files.newOutputStream(
-                          snapshotFile,
-                          StandardOpenOption.CREATE,
-                          StandardOpenOption.WRITE,
-                          StandardOpenOption.APPEND,
-                        )
-                      )
-
+                    txEntry => {
+                      SnapshotRecorder.append(snapshotFile, txEntry)
                       machine.metrics.reset()
-
                       None
                     },
                   )
@@ -1383,6 +1381,7 @@ object Engine {
   private[engine] final case class SubmissionInfo(
       participantId: Ref.ParticipantId,
       submissionSeed: crypto.Hash,
+      transactionSeed: crypto.Hash,
       submitters: Set[Ref.Party],
   )
 

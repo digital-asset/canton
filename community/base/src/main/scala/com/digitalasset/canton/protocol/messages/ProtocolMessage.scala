@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.pretty.{
 }
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.{v30, v31, v32}
+import com.digitalasset.canton.protocol.{v30, v32}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, OpenEnvelope}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -120,8 +120,6 @@ object ProtocolMessage extends PrettyPrintingCompanion[ProtocolMessage] {
   * by the recipient(s).
   */
 trait UnsignedProtocolMessage extends ProtocolMessage {
-  protected[messages] def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent
-
   protected[messages] def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent
 }
 
@@ -215,7 +213,7 @@ object SignedProtocolMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(
-      ProtocolVersion.v35
+      ProtocolVersion.v36
     )(v30.SignedProtocolMessage)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,

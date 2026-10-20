@@ -272,6 +272,8 @@ def create_issue(
             try:
                 gh_issue_edit_cmd(idx, title, linked)
             except Exception as e:
+                # silent-ok: the evidence link is a nice-to-have, the issue itself
+                # already exists, already surfaced via the ::warning:: annotation
                 print(f"::warning::Could not link the evidence from issue #{idx}: {e}")
     return idx
 
@@ -435,6 +437,8 @@ def post_evidence_comment(idx: str, comment: str) -> Optional[str]:
         )
         return url
     except Exception as e:
+        # silent-ok: the evidence comment is a nice-to-have, already surfaced via the
+        # ::warning:: annotation, callers already handle a None return gracefully
         print(f"::warning::Could not post failure evidence to #{idx}: {e}")
         return None
 
@@ -601,6 +605,7 @@ def flake_predates_close(idx: str, commit_hash: str) -> bool:
             return False
         return _parse_iso(commit["committedDate"]) < _parse_iso(issue["closedAt"])
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        # silent-ok: deliberate fail-open classification helper, see the docstring above
         print(f"flake_predates_close: could not evaluate #{idx}/{commit_hash[:12]}: {exc}")
         return False
 
@@ -1711,6 +1716,7 @@ def _cause_rank(cause: str) -> int:
     try:
         return _CAUSE_PRECEDENCE.index(bucket)
     except ValueError:
+        # silent-ok: an unknown cause sorts last so it never overrides one we recognize
         return len(_CAUSE_PRECEDENCE)
 
 
@@ -1755,8 +1761,8 @@ def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
             f"Found failure evidence for {len(comments)} of {len(cause_by_title)} issue title(s)."
         )
     except Exception as e:
-        # The evidence is an add-on: a broken evidence.json must never stop the
-        # issues and their tables from being updated.
+        # silent-ok: the evidence is an add-on, a broken evidence.json must never
+        # stop the issues and their tables from being updated
         print(f"::warning::Could not render failure evidence, posting none: {e}")
         comments = {}
 

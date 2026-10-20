@@ -64,10 +64,11 @@ private[topology] class DecentralizedPartyChaos(
       globalReservations: Reservations,
   ): Unit = {
     val owners: List[LocalInstanceReference] =
-      env.participants.local.filter(_.is_initialized).toList
+      env.participants.local.filter(canUseNode).toList
     val nonOwners =
-      List[LocalInstanceReference]() ++ env.sequencers.local.filter(_.is_initialized).toList ++
-        env.mediators.local.filter(_.is_initialized).toList
+      List[LocalInstanceReference]() ++
+        env.sequencers.local.filter(canUseNode).toList ++
+        env.mediators.local.filter(canUseNode).toList
     val namespace = createNewNamespace(owners)
 
     decentralizedParty.set(Some(allocatePartyInNamespace(partyHint, owners, namespace)))

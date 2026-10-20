@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -351,8 +352,11 @@ class TestingIdentityFactoryTest
         .partyToParticipantTxs()
         .toSeq
         .flatMap { tx =>
+          // Bytes the testing topology just produced, so the limits are never read.
           TopologyTransaction
-            .fromTrustedByteString(())(tx.transaction.toByteStringChecked)
+            .fromTrustedByteString(
+              testedTopologyTransactionContext
+            )(tx.transaction.toByteStringChecked)
             .value
             .selectMapping[PartyToParticipant]
         }
@@ -360,7 +364,7 @@ class TestingIdentityFactoryTest
         .toMap
 
     def supportsAllHostingStates(pv: ProtocolVersion): Boolean =
-      TestingTopology.supportsAllHostingStates(pv).value
+      TestingTopology.supportsAllHostingStates(pv)
 
     val confirmingTopology = TestingTopology.from(topology =
       Map(
@@ -373,12 +377,13 @@ class TestingIdentityFactoryTest
 
     val onboardingTopology = TestingTopology(topology =
       Map(
-        party1.toLf -> PartyInfo.nonConsortiumPartyInfo(
+        party1.toLf -> PartyInfo.forTesting(
+          PositiveInt.one,
           Map(
             participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation),
             participant2 ->
               ParticipantAttributes(ParticipantPermission.Confirmation, onboarding = true),
-          )
+          ),
         )
       )
     )
@@ -398,7 +403,7 @@ class TestingIdentityFactoryTest
       storedHostingStates(topology) shouldBe states
     }
 
-    "store entries with onboarding = true as ONBOARDING" in {
+    "store entries with onboarding = true as Onboarding" in {
       storedHostingStates(onboardingTopology) shouldBe Map(
         participant1 -> HostingState.Active,
         participant2 -> HostingState.Onboarding,
@@ -419,14 +424,14 @@ class TestingIdentityFactoryTest
         .value should include("conflict with onboarding = true")
     }
 
-    "reject NOMINATED and FREEZING on a protocol version without them" onlyRunWhen (pv =>
+    "reject Nominated and Freezing on a protocol version without them" onlyRunWhen (pv =>
       !supportsAllHostingStates(pv)
     ) in {
       Seq(HostingState.Nominated, HostingState.Freezing).foreach { state =>
         confirmingTopology
           .withHostingStates(Map(party1.toLf -> Map(participant1 -> state)))
           .left
-          .value should include("require PartyToParticipant v31")
+          .value should include("Nominated and Freezing require protocol version")
       }
     }
   }

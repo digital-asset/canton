@@ -32,7 +32,7 @@ message CompressedBatch {
 }
 
 // Compared to v31:
-//  - Switch batch to v32
+//  - Switch batch to new CompressedBatch.v32
 message SubmissionRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
@@ -70,6 +70,7 @@ message SubmissionRequest {
   // (3) the sequencer must have signing keys registered in the topology snapshot.
   // If defined and invalid, the request is rejected.
   // If undefined or invalid, the topology snapshot at sequencing time will be used instead.
+  // DEPRECATED: Should always be empty
   optional int64 topology_timestamp = 6;
 
   // Optional rule used to aggregate requests.
@@ -82,7 +83,7 @@ message SubmissionRequest {
 }
 
 // Compared to v31:
-//  - Switch batch to v32
+//  - Switch batch to new CompressedBatch.v32
 message SequencedEvent {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
@@ -125,8 +126,29 @@ message SynchronizerLimits {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   TransactionProtocolLimits transaction_protocol_limits = 1;
+
+  TopologyLimits topology_limits = 2;
+
+  AcsCommitmentLimits acs_commitment_limits = 3;
 }
 
+// size limits on collections within topology transactions
+message TopologyLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // maximum number of signing keys an entity can be mapped to, where an entity is a member in an
+  // owner to key mapping or a party in a party to key mapping
+  uint32 max_signing_keys_per_entity = 1;
+
+  // maximum number of owners of a decentralized namespace definition
+  uint32 max_owners_per_decentralized_namespace = 2;
+
+  // maximum number of participants hosting a party in a party to participant mapping
+  uint32 max_hosting_participants_per_party = 3;
+}
+
+// Compared to v31:
+// - new field max_signatures_per_envelope
 // size limits on collections within the transaction protocol
 message TransactionProtocolLimits {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
@@ -169,6 +191,30 @@ message TransactionProtocolLimits {
   // maximum depth of the view tree in a transaction
   // TODO(i35845): investigate whether to update the semantics of this limit or remove it
   uint32 max_transaction_tree_depth = 11;
+
+  // maximum number of signatures on a single envelope
+  uint32 max_signatures_per_envelope = 12;
+
+  // maximum number of confirming parties in a quorum
+  // TODO(i36858): replace with max_parties_on_synchronizer
+  uint32 max_quorum_size = 13;
+}
+
+// size limits on messages and collections used in ACS commitments
+message AcsCommitmentLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // Maximum allowed serialized byte size for an individual ACS commitment
+  uint32 max_acs_commitment_size_bytes = 1;
+
+  // Maximum allowed serialized byte size for an ACS commitment summary batch
+  uint32 max_acs_commitment_summary_size_bytes = 2;
+
+  // Maximum allowed addressed counterparticipants for an ACS commitment summary batch
+  uint32 max_addressed_counterparticipants = 3;
+
+  // Maximum allowed unsent digests for an ACS commitment summary batch
+  uint32 max_unsent_digests = 4;
 }
 
 // Differences with v31:

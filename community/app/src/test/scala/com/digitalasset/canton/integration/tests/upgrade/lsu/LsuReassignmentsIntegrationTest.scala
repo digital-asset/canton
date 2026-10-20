@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config.NonNegativeFiniteDuration as ConfigNonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1_S1M1
@@ -12,6 +11,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.util.AutomaticAssignment
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.protocol.LfContractId
 
@@ -48,6 +48,7 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S3M3_Config
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .withNetworkBootstrap { implicit env =>
         NetworkBootstrapper(S1M1_S1M1)
       }
@@ -72,10 +73,7 @@ final class LsuReassignmentsIntegrationTest extends LsuBase {
         // Disable automatic assignment on synchronizer daId, as it's both a reassignment target,
         // and undergoes LSU. Otherwise, after the assignment exclusivity timeout, the participant
         // starts trying to complete the assignment to the old synchronizer nodes, causing errors.
-        sequencer1.topology.synchronizer_parameters.propose_update(
-          daId,
-          _.update(assignmentExclusivityTimeout = ConfigNonNegativeFiniteDuration.Zero),
-        )
+        AutomaticAssignment.disable(Seq(sequencer1), daId)
       }
 
   "Logical synchronizer upgrade" should {

@@ -5,12 +5,15 @@ package com.digitalasset.canton.tea.projection
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TrafficEnforcementError
 import com.digitalasset.canton.tea.projection.TrafficDelta.{creditBalanceDelta, debitBalanceDelta}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -39,6 +42,13 @@ trait TeaTrafficStoreTest
   private val alice = AccountId.tryCreate("alice")
   private val butternut = AccountId.tryCreate("butternut")
   private val unknown = AccountId.tryCreate("unknown")
+
+  private def changeIdHash(commandId: String): LfHash =
+    ChangeId(
+      Ref.UserId.assertFromString("user"),
+      Ref.CommandId.assertFromString(commandId),
+      Set(Ref.Party.assertFromString("alice")),
+    ).hash
 
   /** Small syntax helper to cut down on the boilerplate of calling `persistTrafficDelta`. Only the
     * account, delta and timestamp usually matter to a given test, everything else defaults to
@@ -77,9 +87,21 @@ trait TeaTrafficStoreTest
         case Left(err) => fail(s"expected the lookup to succeed, but it failed: $err")
       }
 
-    def prune(beforeInclusive: CantonTimestamp): FutureUnlessShutdown[Int] =
-      store.pruneEvents(beforeInclusive).value.map {
-        case Right(count) => count
+    def insertCorrelationOk(correlation: SubmissionCorrelation): FutureUnlessShutdown[Unit] =
+      store.insertCorrelation(correlation).value.map {
+        case Right(()) => ()
+        case Left(err) => fail(s"expected the correlation to be inserted, but it failed: $err")
+      }
+
+    def correlation(key: CorrelationKey): FutureUnlessShutdown[Option[SubmissionCorrelation]] =
+      store.lookupCorrelation(key).value.map {
+        case Right(value) => value
+        case Left(err) => fail(s"expected the lookup to succeed, but it failed: $err")
+      }
+
+    def pruneOk(beforeInclusive: CantonTimestamp): FutureUnlessShutdown[PruneCounts] =
+      store.prune(beforeInclusive).value.map {
+        case Right(counts) => counts
         case Left(err) => fail(s"expected the prune to succeed, but it failed: $err")
       }
   }
@@ -438,7 +460,48 @@ trait TeaTrafficStoreTest
         }
       }
 
-      "prune events" in {
+      "insert and look up correlations" in {
+        val store = mk()
+        val hashA = changeIdHash("command-a")
+        val hashB = changeIdHash("command-b")
+        val keyA1 = CorrelationKey(hashA, "s1")
+        val keyA2 = CorrelationKey(hashA, "s2")
+        val timestamp = clock.now
+        val withAccount = SubmissionCorrelation(keyA1, CorrelationAccount.Account(alice), timestamp)
+        val withoutAccount =
+          SubmissionCorrelation(keyA2, CorrelationAccount.NoAccountSelected, timestamp)
+
+        def assertConflict(result: Either[TrafficEnforcementError, Unit]) = inside(result) {
+          case Left(error) =>
+            error.code.id shouldBe TrafficEnforcementErrors.CorrelationConflict.id
+            error.context should contain allOf (
+              "change_id_hash" -> hashA.toHexString,
+              "submission_id" -> "s1",
+            )
+        }
+
+        for {
+          _ <- store.insertCorrelationOk(withAccount)
+          _ <- store.insertCorrelationOk(withoutAccount)
+          foundWithAccount <- store.correlation(keyA1)
+          foundWithoutAccount <- store.correlation(keyA2)
+          missing <- store.correlation(CorrelationKey(hashB, "s1"))
+          sameAccountConflict <- store.insertCorrelation(withAccount).value
+          otherAccountConflict <- store
+            .insertCorrelation(withAccount.copy(account = CorrelationAccount.Account(butternut)))
+            .value
+          unchanged <- store.correlation(keyA1)
+        } yield {
+          foundWithAccount shouldBe Some(withAccount)
+          foundWithoutAccount shouldBe Some(withoutAccount)
+          missing shouldBe None
+          assertConflict(sameAccountConflict)
+          assertConflict(otherAccountConflict)
+          unchanged shouldBe Some(withAccount)
+        }
+      }
+
+      "prune events and correlations" in {
         val store = mk()
         val ts1 = clock.now
         val ts2 = ts1.immediateSuccessor
@@ -448,17 +511,31 @@ trait TeaTrafficStoreTest
         val delta2 = debitBalanceDelta(5)
         val delta3 = creditBalanceDelta(20)
         val delta4 = debitBalanceDelta(15)
+        val hash = changeIdHash("prune")
+        val correlation2 = SubmissionCorrelation(
+          CorrelationKey(hash, "s2"),
+          CorrelationAccount.Account(alice),
+          ts2,
+        )
+        val correlation3 = correlation2.copy(key = CorrelationKey(hash, "s3"), insertedAt = ts3)
+        val correlation4 = correlation2.copy(key = CorrelationKey(hash, "s4"), insertedAt = ts4)
 
         for {
           _ <- store.persistOk(alice, delta1, ts1)
           _ <- store.persistOk(butternut, delta2, ts2)
           _ <- store.persistOk(alice, delta3, ts3)
           _ <- store.persistOk(butternut, delta4, ts4)
+          _ <- store.insertCorrelationOk(correlation2)
+          _ <- store.insertCorrelationOk(correlation3)
+          _ <- store.insertCorrelationOk(correlation4)
           aliceEventsBeforePrune <- store.getEvents(alice, CantonTimestamp.MinValue)
           butternutEventsBeforePrune <- store.getEvents(butternut, CantonTimestamp.MinValue)
-          prunedCount <- store.prune(ts3)
+          prunedCount <- store.pruneOk(ts3)
           aliceEventsAfterPrune <- store.getEvents(alice, CantonTimestamp.MinValue)
           butternutEventsAfterPrune <- store.getEvents(butternut, CantonTimestamp.MinValue)
+          correlation2AfterPrune <- store.correlation(correlation2.key)
+          correlation3AfterPrune <- store.correlation(correlation3.key)
+          correlation4AfterPrune <- store.correlation(correlation4.key)
         } yield {
           aliceEventsBeforePrune should contain theSameElementsInOrderAs Seq(
             deltaEvent(delta1, ts1),
@@ -468,11 +545,14 @@ trait TeaTrafficStoreTest
             deltaEvent(delta2, ts2),
             deltaEvent(delta4, ts4),
           )
-          prunedCount shouldBe 3
+          prunedCount shouldBe PruneCounts(events = 3, correlations = 2)
           aliceEventsAfterPrune shouldBe empty
           butternutEventsAfterPrune should contain theSameElementsInOrderAs Seq(
             deltaEvent(delta4, ts4)
           )
+          correlation2AfterPrune shouldBe None
+          correlation3AfterPrune shouldBe None
+          correlation4AfterPrune shouldBe Some(correlation4)
         }
       }
     }

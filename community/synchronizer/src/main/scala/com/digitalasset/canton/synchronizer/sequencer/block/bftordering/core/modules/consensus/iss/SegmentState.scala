@@ -13,13 +13,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   Epoch,
   Segment,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.PbftBlockState.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.SegmentState.{
   RetransmissionResult,
   computeLeaderOfView,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Block
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.PbftMessageValidatorImpl
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.{
+  PbftMessageValidatorImpl,
+  ViewChangeMessageValidator,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -52,6 +56,7 @@ import scala.collection.mutable
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class SegmentState(
     val segment: Segment,
+    val segmentIndex: Int,
     val epoch: Epoch,
     clock: Clock,
     completedBlocks: Seq[Block],
@@ -68,6 +73,7 @@ class SegmentState(
     mc: MetricsContext,
 ) extends NamedLogging {
 
+  private val firstBlockNumber = segment.firstBlockNumber
   private val membership = epoch.currentMembership
   private val eligibleLeaders = membership.leaders
   private val originalLeaderIndex = eligibleLeaders.indexOf(segment.originalLeader)
@@ -79,6 +85,8 @@ class SegmentState(
     metrics,
     membership.orderingTopology.sequencingParameters,
   )(abort)
+  private val viewChangeMessageValidator =
+    new ViewChangeMessageValidator(membership, segment.slotNumbers)
 
   // Only one view is active at a time, starting at view=0, inViewChange=false
   // - Upon view change start, due to timeout or >= f+1 votes, increment currentView and inViewChange=true
@@ -172,7 +180,7 @@ class SegmentState(
             )
         }
       case viewChangeEvent: PbftViewChangeEvent =>
-        processViewChangeEvent(abort)(viewChangeEvent)
+        processViewChangeInternalEvent(abort)(viewChangeEvent)
       case messagesStored: PbftMessagesStored =>
         processMessagesStored(messagesStored)
       case timeout: PbftTimeout =>
@@ -296,8 +304,10 @@ class SegmentState(
   ): RetransmissionResult = {
     val result = if (remoteStatus.viewNumber > currentViewNumber) {
       logger.info(
-        s"Node $from is in view ${remoteStatus.viewNumber}, which is higher than our current view $currentViewNumber, so we only retransmit commit certificates" +
-          s" for segment ${segment.firstBlockNumber}."
+        s"Node $from is in view ${remoteStatus.viewNumber}, " +
+          s"which is higher than our current view $currentViewNumber, " +
+          s"so we only retransmit commit certificates for segment $segmentIndex " +
+          s"starting at block number $firstBlockNumber."
       )
       addMessages(
         remoteStatus,
@@ -322,8 +332,10 @@ class SegmentState(
                     .flatMap(_.viewChangeMessagesToRetransmit(Seq.empty))
                 }
               logger.info(
-                s"Node $from is in view ${status.viewNumber}, so we retransmit a new view message at ${signedNewView.message.viewNumber}, " +
-                  s" and ${viewChangeMessages.size} view change messages for segment ${segment.firstBlockNumber}."
+                s"Node $from is in view ${status.viewNumber}, so we retransmit a new view message " +
+                  s"at ${signedNewView.message.viewNumber}, " +
+                  s"and ${viewChangeMessages.size} view change messages for segment $segmentIndex " +
+                  s"starting at block number $firstBlockNumber."
               )
               signedNewView +: viewChangeMessages
             case None => // should return all view change messages between originating node's view number and current latest view
@@ -342,7 +354,9 @@ class SegmentState(
               }
               if (viewChangeMessages.nonEmpty)
                 logger.info(
-                  s"Node $from is in view ${status.viewNumber}, so we retransmit ${viewChangeMessages.size} view change messages for segment ${segment.firstBlockNumber}."
+                  s"Node $from is in view ${status.viewNumber}, " +
+                    s"so we retransmit ${viewChangeMessages.size} view change messages " +
+                    s"for segment $segmentIndex starting at block number $firstBlockNumber."
                 )
               viewChangeMessages
           }
@@ -351,7 +365,9 @@ class SegmentState(
           val viewChangeMessages = vcState.viewChangeMessagesToRetransmit(remoteVcMsgs)
           if (viewChangeMessages.nonEmpty)
             logger.info(
-              s"Node $from is in the same view change as us in view $viewNumber, so we retransmit ${viewChangeMessages.size} view change messages for segment ${segment.firstBlockNumber}."
+              s"Node $from is in the same view change as us in view $viewNumber, " +
+                s"so we retransmit ${viewChangeMessages.size} view change messages " +
+                s"for segment $segmentIndex starting at block number $firstBlockNumber."
             )
           viewChangeMessages
         case _ =>
@@ -370,7 +386,10 @@ class SegmentState(
           val result = addMessages(remoteStatus, includeMessages = true, RetransmissionResult.Empty)
           if (!result.isEmpty)
             logger.info(
-              s"Node $from is in making progress in the same view as us $viewNumber, so we retransmit ${result.messages.size} messages and ${result.commitCerts.size} commit certificates for segment ${segment.firstBlockNumber}."
+              s"Node $from is making progress in the same view as us $viewNumber, " +
+                s"so we retransmit ${result.messages.size} messages and " +
+                s"${result.commitCerts.size} commit certificates " +
+                s"for segment $segmentIndex starting at block number $firstBlockNumber."
             )
           result
 
@@ -389,7 +408,10 @@ class SegmentState(
           )
           if (!result.isEmpty)
             logger.info(
-              s"Node $from is making progress in view ${remoteStatus.viewNumber}, so we retransmit ${result.messages.size} messages and ${result.commitCerts.size} commit certificates for segment ${segment.firstBlockNumber}."
+              s"Node $from is making progress in view ${remoteStatus.viewNumber}, " +
+                s"so we retransmit ${result.messages.size} messages and " +
+                s"${result.commitCerts.size} commit certificates " +
+                s"for segment $segmentIndex starting at block number $firstBlockNumber."
             )
           result
       }
@@ -417,14 +439,16 @@ class SegmentState(
     var result = Seq.empty[ProcessResult]
     if (msg.message.viewNumber < currentViewNumber) {
       logger.info(
-        s"Segment ${segment.firstBlockNumber} received PbftNormalCaseMessage with stale view ${msg.message.viewNumber}; " +
+        s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+          s"received PbftNormalCaseMessage with stale view ${msg.message.viewNumber}; " +
           s"current view = $currentViewNumber, from = ${msg.from}"
       )
       discardedViewMessagesCount += 1
     } else if (msg.message.viewNumber > currentViewNumber || inViewChange) {
       if (rehydrated) {
         logger.debug(
-          s"Segment ${segment.firstBlockNumber} received rehydrated PbftNormalCaseMessage; peer = ${msg.from} " +
+          s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+            s"received rehydrated PbftNormalCaseMessage; peer = ${msg.from} " +
             s"message view = ${msg.message.viewNumber}, " +
             s"current view = $currentViewNumber, inViewChange = $inViewChange"
         )
@@ -436,7 +460,9 @@ class SegmentState(
           abort("actualSender needs to be provided for PBFT messages sent over network")
         )
         logger.info(
-          s"Segment ${segment.firstBlockNumber} received early PbftNormalCaseMessage; peer = ${msg.from}, actual sender = $actualSender" +
+          s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+            s"received early PbftNormalCaseMessage; peer = ${msg.from}, " +
+            s"actual sender = $actualSender, " +
             s"message view = ${msg.message.viewNumber}, " +
             s"current view = $currentViewNumber, inViewChange = $inViewChange, " +
             s"for block number = ${msg.message.blockMetadata.blockNumber}"
@@ -464,26 +490,31 @@ class SegmentState(
     }
   }
 
-  /** process some kind of message, which will either be a network message or an internal event
+  /** Processes a message, which will either be a network message or an internal event
+    *
     * @param process
-    *   process the message and indicate if we should attempt to advance the view change process
+    *   Processes the message and indicate if we should attempt to advance the view change process
     */
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
-  private def processViewChangeMessage[Message](
-      message: Message,
+  private def processViewChangeNetworkMessageOrInternalEvent[MessageOrEvent](
+      message: MessageOrEvent,
+      from: BftNodeId,
       viewNumber: ViewNumber,
-      process: PbftViewChangeState => Message => Boolean,
+      process: PbftViewChangeState => MessageOrEvent => Boolean,
+      validate: MessageOrEvent => Either[String, Unit],
   )(implicit traceContext: TraceContext): Seq[ProcessResult] = {
     var result = Seq.empty[ProcessResult]
     if (viewNumber < currentViewNumber) {
       logger.info(
-        s"Segment ${segment.firstBlockNumber} received PbftViewChangeMessage with stale view $viewNumber; " +
+        s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+          s"received PbftViewChangeMessage with stale view $viewNumber; " +
           s"current view = $currentViewNumber"
       )
       discardedViewMessagesCount += 1
     } else if (viewNumber == currentViewNumber && !inViewChange) {
       logger.info(
-        s"Segment ${segment.firstBlockNumber} received PbftViewChangeMessage with matching view $viewNumber, " +
+        s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+          s"received PbftViewChangeMessage with matching view $viewNumber, " +
           s"but View Change is already complete, current view = $currentViewNumber"
       )
       discardedViewMessagesCount += 1
@@ -511,7 +542,8 @@ class SegmentState(
           //  - A NewView message embeds a strong quorum and is always sufficient to increase the view
           //    number of nodes who observe it
           logger.info(
-            s"Segment ${segment.firstBlockNumber} received ViewChange with view $viewNumber, " +
+            s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+              s"received ViewChange with view $viewNumber, " +
               s"but it is too far in the future (current view = $currentViewNumber, " +
               s"view numbers window size = $viewChangeWindowSize," +
               s"current ordering topology size = ${membership.orderingTopology.size})"
@@ -519,21 +551,37 @@ class SegmentState(
           discardedViewMessagesCount += 1
 
         case _ =>
-          val vcState = viewChangeState.getOrElseUpdate(
-            viewNumber,
-            new PbftViewChangeState(
-              membership,
-              computeLeader(viewNumber),
-              viewNumber,
-              segment.slotNumbers,
-              metrics,
-              loggerFactory,
-            ),
+          validate(message).fold(
+            { errorMessage =>
+              emitNonCompliance(metrics)(
+                from,
+                metrics.security.noncompliant.labels.violationType.values.ConsensusInvalidMessage,
+              )
+              logger.warn(
+                s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+                  s"received invalid PbftViewChangeMessage from $from " +
+                  s"for view $viewNumber: $errorMessage"
+              )
+              discardedViewMessagesCount += 1
+            },
+            { case () =>
+              val vcState = viewChangeState.getOrElseUpdate(
+                viewNumber,
+                new PbftViewChangeState(
+                  membership,
+                  computeLeader(viewNumber),
+                  viewNumber,
+                  segment.slotNumbers,
+                  metrics,
+                  loggerFactory,
+                ),
+              )
+              if (process(vcState)(message) && vcState.shouldAdvanceViewChange) {
+                result = advanceViewChange(viewNumber)
+                cleanUpPreviousViews()
+              }
+            },
           )
-          if (process(vcState)(message) && vcState.shouldAdvanceViewChange) {
-            result = advanceViewChange(viewNumber)
-            cleanUpPreviousViews()
-          }
       }
     }
     result
@@ -550,18 +598,40 @@ class SegmentState(
         )
     }
 
+  private def validateViewChangeNetworkMessage(
+      msg: SignedMessage[PbftViewChangeMessage]
+  ): Either[String, Unit] =
+    msg.message match {
+      case viewChange: ViewChange =>
+        viewChangeMessageValidator.validateViewChangeMessage(viewChange)
+      case newView: NewView =>
+        viewChangeMessageValidator.validateNewViewMessage(newView)
+    }
+
   // View Change Case: ViewChange, NewView
   // Note: Similarly to the future message queue, we may want to limit how many concurrent viewChangeState
   //       entries exist in the map at any given point in time
   private def processViewChangeNetworkMessage(
       msg: SignedMessage[PbftViewChangeMessage]
   )(implicit traceContext: TraceContext): Seq[ProcessResult] =
-    processViewChangeMessage(msg, msg.message.viewNumber, _.processMessage)
+    processViewChangeNetworkMessageOrInternalEvent(
+      msg,
+      msg.message.from,
+      msg.message.viewNumber,
+      _.processMessage,
+      validateViewChangeNetworkMessage,
+    )
 
-  private def processViewChangeEvent(abort: String => Unit)(event: PbftViewChangeEvent)(implicit
-      traceContext: TraceContext
+  private def processViewChangeInternalEvent(abort: String => Unit)(event: PbftViewChangeEvent)(
+      implicit traceContext: TraceContext
   ): Seq[ProcessResult] =
-    processViewChangeMessage(event, event.viewNumber, _.processEvent(abort))
+    processViewChangeNetworkMessageOrInternalEvent(
+      event,
+      from = membership.myId, // the event is generated locally, so `from` is always this very node
+      event.viewNumber,
+      process = _.processEvent(abort),
+      validate = (_: PbftViewChangeEvent) => Right(()),
+    )
 
   private def processCommitCertificate(msg: RetransmittedCommitCertificate)(implicit
       traceContext: TraceContext
@@ -572,7 +642,8 @@ class SegmentState(
     if (isBlockComplete(blockNumber)) {
       discardedRetransmittedCommitCertsCount += 1
       logger.debug(
-        s"Discarded retransmitted commit cert for block $blockNumber from $from because block is already complete"
+        s"Discarded retransmitted commit cert for block $blockNumber " +
+          s"from $from because block is already complete"
       )
       Seq.empty[ProcessResult]
     } else
@@ -682,7 +753,9 @@ class SegmentState(
           else if (viewState.viewChangeFromSelf.isDefined)
             "rehydrating a view-change message from self"
           else "reaching local timeout"
-        s"Segment ${segment.firstBlockNumber} moving from view number $currentViewNumber to $viewNumber after $reason. New leader is $newLeader."
+        s"Segment $segmentIndex starting at block number $firstBlockNumber " +
+          s"moving from view number $currentViewNumber to $viewNumber after $reason. " +
+          s"New leader is $newLeader."
       }
       currentViewNumber = viewNumber
       currentLeader = newLeader
@@ -907,7 +980,10 @@ object SegmentState {
       originalLeaderIndex: Int,
       eligibleLeaders: Seq[BftNodeId],
   ): BftNodeId = {
-    val newIndex = (originalLeaderIndex + viewNumber) % eligibleLeaders.size
+    val numberOfLeaders = eligibleLeaders.size
+    // In order to avoid overflow, we first compute the normalized view number before adding it to the original leader index.
+    val normalizedViewNumber = viewNumber % numberOfLeaders
+    val newIndex = (originalLeaderIndex + normalizedViewNumber) % numberOfLeaders
     eligibleLeaders(newIndex.toInt)
   }
 }

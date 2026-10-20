@@ -99,8 +99,7 @@ final class StorageBackendSpecPostgres
           postgresConfig = PostgresDataSourceConfig(
             networkTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(1))
           ),
-        ),
-      loggerFactory,
+        )
     )
 
     val connection = dataSource.getConnection
@@ -153,8 +152,7 @@ final class StorageBackendSpecPostgres
             clientConnectionCheckInterval = None,
             networkTimeout = None,
           ),
-        ),
-      loggerFactory,
+        )
     )
 
     val connection1 = dataSource.getConnection
@@ -215,8 +213,7 @@ final class StorageBackendSpecPostgres
             clientConnectionCheckInterval = Some(config.NonNegativeFiniteDuration.ofSeconds(2)),
             networkTimeout = None,
           ),
-        ),
-      loggerFactory,
+        )
     )
 
     val connection1 = dataSource.getConnection
@@ -280,8 +277,7 @@ final class StorageBackendSpecPostgres
         .DataSourceConfig(
           jdbcUrl = jdbcUrl,
           postgresConfig = postgresConfig,
-        ),
-      loggerFactory,
+        )
     )
 
     val connection1 = dataSource.getConnection

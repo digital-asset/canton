@@ -5,9 +5,8 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseExtensionService, UseH2}
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -29,6 +28,7 @@ import java.nio.file.*
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 abstract class DamlScriptIT(
+    protocolVersionForTesting: ProtocolVersion,
     langVersion: LanguageVersion,
     enableExperimentalExecutionConductor: Boolean = false,
 ) extends CommunityIntegrationTest
@@ -36,7 +36,8 @@ abstract class DamlScriptIT(
     with BeforeAndAfterAll {
   self: CantonEnvironmentSetup =>
 
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   // Resolve the conflict between BeforeAndAfterAll and BeforeAndAfterAllConfigMap
   override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected: Boolean = true
@@ -235,9 +236,6 @@ abstract class DamlScriptIT(
 
   protected def enableLfDev: Boolean =
     langVersion == com.digitalasset.daml.lf.language.LanguageVersion.devLfVersion
-
-  // Only test for this protocol version
-  protected def protocolVersionForTesting: ProtocolVersion
 
   private lazy val lowerCommandTrackerDuration: ConfigTransform =
     ConfigTransforms.updateAllParticipantConfigs_ {
@@ -464,11 +462,10 @@ abstract class DamlScriptIT(
 
 }
 
-abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScriptIT(langVersion) {
+abstract class DamlScriptPV36IT(langVersion: LanguageVersion)
+    extends DamlScriptIT(ProtocolVersion.v36, langVersion) {
 
   import DamlScriptIT.ExpectedResult.*
-
-  override lazy val protocolVersionForTesting = ProtocolVersion.v35
 
   override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
@@ -561,7 +558,7 @@ abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScript
   * need to be abstract as well (#33803) see also the usage in
   * [[com.digitalasset.canton.integration.tests.variations.DamlScriptITLatestStable]]
   */
-abstract class DamlScriptPV35LF23ITBase extends DamlScriptPV35IT(LanguageVersion.v2_3) {
+abstract class DamlScriptPV36LF23ITBase extends DamlScriptPV36IT(LanguageVersion.v2_3) {
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
@@ -653,7 +650,7 @@ abstract class DamlScriptPV35LF23ITBase extends DamlScriptPV35IT(LanguageVersion
 
 }
 
-class DamlScriptPV35LF23IT extends DamlScriptPV35LF23ITBase {
+class DamlScriptPV36LF23IT extends DamlScriptPV36LF23ITBase {
   doRunTests(scriptIdsToTest)
 }
 
@@ -663,13 +660,16 @@ class DamlScriptCmdPVDevLFDevIT
     extends DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor = true)
 
 abstract class DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor: Boolean)
-    extends DamlScriptIT(LanguageVersion.v2_dev, enableExperimentalExecutionConductor) {
+    extends DamlScriptIT(
+      ProtocolVersion.dev,
+      LanguageVersion.v2_dev,
+      enableExperimentalExecutionConductor,
+    ) {
 
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
   override lazy val projectName = "ScriptDevTests"
-  override lazy val protocolVersionForTesting = ProtocolVersion.dev
 
   override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
@@ -853,13 +853,12 @@ abstract class DamlScriptPVDevLFDevIT(enableExperimentalExecutionConductor: Bool
 // This suite builds ScriptLF24StagingTests at --target=2.4 (Stable(4)) at test runtime; the
 // snapshot's codegen still only accepts Staging(4,1), so the build step fails. Un-ignore together
 // with the ExternalCallTest codegen entry in BuildCommon.scala.
-class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
+class DamlScriptPV36LF24IT extends DamlScriptIT(ProtocolVersion.v36, LanguageVersion.v2_4) {
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseExtensionService(loggerFactory))
 
   override lazy val projectName = "ScriptLF24StagingTests"
-  override lazy val protocolVersionForTesting = ProtocolVersion.v36
 
   // Staging versions lie outside the participant's default (stable) LF range, which caps at 2.3.
   override protected def enableLfDev: Boolean = true

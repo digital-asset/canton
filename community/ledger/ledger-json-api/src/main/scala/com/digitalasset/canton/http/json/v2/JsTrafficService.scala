@@ -14,8 +14,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -50,8 +50,8 @@ class JsTrafficService(
         updateAccount,
       ),
       withServerLogic(
-        JsTrafficService.pruneEventsEndpoint,
-        pruneEvents,
+        JsTrafficService.pruneEndpoint,
+        prune,
       ),
     )
 
@@ -74,14 +74,13 @@ class JsTrafficService(
         .resultToRight
   }
 
-  private def pruneEvents(
+  private def prune(
       callerContext: CallerContext
-  ): TracedInput[PruneEventsRequest] => Future[Either[JsCantonError, PruneEventsResponse]] = {
-    req =>
-      implicit val tc: TraceContext = callerContext.traceContext()
-      trafficServiceClient(callerContext.token())
-        .pruneEvents(req.in)
-        .resultToRight
+  ): TracedInput[PruneRequest] => Future[Either[JsCantonError, PruneResponse]] = { req =>
+    implicit val tc: TraceContext = callerContext.traceContext()
+    trafficServiceClient(callerContext.token())
+      .prune(req.in)
+      .resultToRight
   }
 
   private def trafficServiceClient(token: Option[String])(implicit
@@ -125,14 +124,14 @@ object JsTrafficService extends DocumentationEndpoints {
                        |$TrafficEndpointEnablementNote
        """.stripMargin.trim)
 
-  private val pruneEventsEndpoint =
+  private val pruneEndpoint =
     traffic.post
-      .in("events" / "prune")
-      .in(jsonBody[PruneEventsRequest])
-      .out(jsonBody[PruneEventsResponse])
+      .in("prune")
+      .in(jsonBody[PruneRequest])
+      .out(jsonBody[PruneResponse])
       .description(s"""|
                        |${createProtoRef(
-          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_PRUNE_EVENTS
+          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_PRUNE
         )}
                        |
                        |$TrafficEndpointEnablementNote
@@ -141,7 +140,7 @@ object JsTrafficService extends DocumentationEndpoints {
   override def documentation: Seq[AnyEndpoint] = List(
     getAccountEndpoint,
     updateAccountEndpoint,
-    pruneEventsEndpoint,
+    pruneEndpoint,
   )
 }
 
@@ -151,6 +150,6 @@ object JsTrafficServiceCodecs {
   implicit val getAccountResponseRW: Codec[GetAccountResponse] = deriveRelaxedCodec
   implicit val updateAccountRequestRW: Codec[UpdateAccountRequest] = deriveRelaxedCodec
   implicit val updateAccountResponseRW: Codec[UpdateAccountResponse] = deriveRelaxedCodec
-  implicit val pruneEventsRequestRW: Codec[PruneEventsRequest] = deriveRelaxedCodec
-  implicit val pruneEventsResponseRW: Codec[PruneEventsResponse] = deriveRelaxedCodec
+  implicit val pruneRequestRW: Codec[PruneRequest] = deriveRelaxedCodec
+  implicit val pruneResponseRW: Codec[PruneResponse] = deriveRelaxedCodec
 }

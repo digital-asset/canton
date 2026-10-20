@@ -33,6 +33,7 @@ class ProtoUnvalidatedPrettyTest extends AnyWordSpec with Matchers {
       participantUid = ProtoUnvalidatedString(participant),
       permission = v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
       onboarding = None,
+      state = v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED,
     )
 
   private def partyToParticipant(party: String, participants: String*): v30.PartyToParticipant =
@@ -68,13 +69,13 @@ class ProtoUnvalidatedPrettyTest extends AnyWordSpec with Matchers {
 
     "print a message element structurally, not as its proto text format" in {
       ProtoUnvalidatedSeq(Seq(hosting("PAR::one"), hosting("PAR::two"))).toString shouldBe
-        "Seq(HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None), " +
-        "HostingParticipant(PAR::two, PARTICIPANT_PERMISSION_SUBMISSION, None))"
+        "Seq(HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None, HOSTING_STATE_UNSPECIFIED), " +
+        "HostingParticipant(PAR::two, PARTICIPANT_PERMISSION_SUBMISSION, None, HOSTING_STATE_UNSPECIFIED))"
     }
 
     "collapse a single element" in {
       ProtoUnvalidatedSeq(Seq(hosting("PAR::one"))).toString shouldBe
-        "HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None)"
+        "HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None, HOSTING_STATE_UNSPECIFIED)"
     }
 
     "check the content of a string element" in {
@@ -100,9 +101,15 @@ class ProtoUnvalidatedPrettyTest extends AnyWordSpec with Matchers {
         printer.printAdHoc(partyToParticipant("alice::default", "PAR::one", "PAR::two"))
       rendered should not include "ProtoUnvalidated"
       rendered shouldBe
-        "PartyToParticipant(alice::default, 1, Seq(" +
-        "HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None), " +
-        "HostingParticipant(PAR::two, PARTICIPANT_PERMISSION_SUBMISSION, None)), None)"
+        """PartyToParticipant(
+          |  alice::default,
+          |  1,
+          |  Seq(
+          |    HostingParticipant(PAR::one, PARTICIPANT_PERMISSION_SUBMISSION, None, HOSTING_STATE_UNSPECIFIED),
+          |    HostingParticipant(PAR::two, PARTICIPANT_PERMISSION_SUBMISSION, None, HOSTING_STATE_UNSPECIFIED)
+          |  ),
+          |  None
+          |)""".stripMargin
     }
 
     "name the violation instead of echoing rejected content" in {

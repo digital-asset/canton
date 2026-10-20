@@ -96,10 +96,11 @@ class EpochState[E <: Env[E]](
 
   // Segment module references are lazy so that the segment module factory is not triggered on object creation
   private lazy val segmentModules: Map[BftNodeId, E#ModuleRefT[ConsensusSegment.Message]] =
-    ListMap.from(epoch.segments.view.map { segment =>
+    ListMap.from(epoch.segments.zipWithIndex.view.map { case (segment, segmentIndex) =>
       segment.originalLeader -> segmentModuleRefFactory(
         new SegmentState(
           segment,
+          segmentIndex,
           epoch,
           clock,
           completedBlocks,

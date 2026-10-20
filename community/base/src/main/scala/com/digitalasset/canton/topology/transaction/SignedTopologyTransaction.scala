@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{TopologyLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
@@ -227,7 +227,10 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
 }
 
 object SignedTopologyTransaction
-    extends VersioningCompanion[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+    extends VersioningCompanionContext[
+      SignedTopologyTransaction[TopologyChangeOp, TopologyMapping],
+      TopologyTransactionDeserializationContext,
+    ]
     with PrettyPrintingCompanion[
       SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]
     ] {
@@ -253,7 +256,7 @@ object SignedTopologyTransaction
     SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.SignedTopologyTransaction
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -421,6 +424,7 @@ object SignedTopologyTransaction
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      context: TopologyTransactionDeserializationContext,
       transactionP: v30.SignedTopologyTransaction,
   ): ParsingResult[GenericSignedTopologyTransaction] = {
     val v30.SignedTopologyTransaction(
@@ -430,7 +434,7 @@ object SignedTopologyTransaction
       multiTransactionSignaturesPO,
     ) = transactionP
     for {
-      transaction <- TopologyTransaction.fromByteString(pvv, txBytes)
+      transaction <- TopologyTransaction.fromByteString(pvv, context, txBytes)
 
       singleSignatures <- ProtoValidation
         .validateLengthThen(
@@ -482,11 +486,15 @@ object SignedTopologyTransaction
       getByteString: GetResult[ByteString]
   ): GetResult[GenericSignedTopologyTransaction] =
     GetResult { r =>
-      fromTrustedByteString(r.<<[ByteString]).valueOr(err =>
+      // Trusted bytes from the node's own store, so the validators pass the content through and
+      // the limits in the context are never read.
+      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimits.default))(
+        r.<<[ByteString]
+      ).valueOr { err =>
         throw new DbSerializationException(
           s"Failed to deserialize SignedTopologyTransaction: $err"
         )
-      )
+      }
     }
 
   implicit def setParameterTopologyTransaction(implicit
@@ -528,7 +536,10 @@ final case class SignedTopologyTransactions[
 }
 
 object SignedTopologyTransactions
-    extends VersioningCompanion[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]]
+    extends VersioningCompanionContext[
+      SignedTopologyTransactions[TopologyChangeOp, TopologyMapping],
+      TopologyTransactionDeserializationContext,
+    ]
     with PrettyPrintingCompanion[
       SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]
     ] {
@@ -538,7 +549,7 @@ object SignedTopologyTransactions
     _.transactions
   )
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.SignedTopologyTransactions
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -561,6 +572,7 @@ object SignedTopologyTransactions
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      context: TopologyTransactionDeserializationContext,
       proto: v30.SignedTopologyTransactions,
   ): ParsingResult[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
     for {
@@ -574,6 +586,7 @@ object SignedTopologyTransactions
         .traverse(
           SignedTopologyTransaction.fromByteString(
             pvv,
+            context,
             _,
           )
         )

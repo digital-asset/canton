@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{TransactionProtocolLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.NoCopy
@@ -86,10 +86,22 @@ final case class ViewCommonData private (
     )
 }
 
+/** Context required to deserialize ViewCommonData
+  *
+  * @param hashOps
+  *   hashing operations
+  * @param transactionProtocolLimits
+  *   protocol limits
+  */
+final case class ViewCommonDataDeserializationContext(
+    hashOps: HashOps,
+    transactionProtocolLimits: TransactionProtocolLimits,
+)
+
 object ViewCommonData
     extends VersioningCompanionContextMemoization[
       ViewCommonData,
-      HashOps,
+      ViewCommonDataDeserializationContext,
     ]
     with PrettyPrintingCompanion[ViewCommonData] {
   override val name: String = "ViewCommonData"
@@ -100,7 +112,7 @@ object ViewCommonData
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ViewCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -139,9 +151,11 @@ object ViewCommonData
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
+      context: ViewCommonDataDeserializationContext,
       viewCommonDataP: v30.ViewCommonData,
-  )(bytes: ByteString): ParsingResult[ViewCommonData] =
+  )(bytes: ByteString): ParsingResult[ViewCommonData] = {
+    val ViewCommonDataDeserializationContext(hashOps, limits) = context
+
     for {
       informees <- ProtoValidation.validateThen(
         viewCommonDataP.informees,
@@ -160,7 +174,7 @@ object ViewCommonData
           "quorums",
           pvv,
           ProtoValidation.MaxCollectionSize,
-        )((element, _) => Quorum.fromProtoV30(pvv, element, informees))
+        )((element, _) => Quorum.fromProtoV30(pvv, limits, element, informees))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       viewConfirmationParameters <- ViewConfirmationParameters.create(informees.toSet, quorums)
     } yield new ViewCommonData(viewConfirmationParameters, salt)(
@@ -168,6 +182,7 @@ object ViewCommonData
       rpv,
       Some(bytes),
     )
+  }
 
 }
 

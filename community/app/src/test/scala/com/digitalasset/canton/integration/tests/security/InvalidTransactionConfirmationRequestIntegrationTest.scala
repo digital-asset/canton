@@ -112,7 +112,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )
@@ -469,7 +469,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                   "p2 root hash message check",
                 ),
               ) ++ (
-                if (testedProtocolVersion < ProtocolVersion.transparency) {
+                if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId) {
                   // The view will be filtered out when attempting to construct a FullTransactionViewTree.
                   Seq(
                     (
@@ -553,7 +553,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               Seq(
                 (
                   { logEntry =>
-                    if (testedProtocolVersion < ProtocolVersion.transparency) {
+                    if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId) {
                       // Tags the duplicate envelope as a MalformedRejects.Payloads error
                       logEntry.shouldBeCantonError(
                         LocalRejectError.MalformedRejects.Payloads,
@@ -574,7 +574,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             ),
           )
 
-        if (testedProtocolVersion < ProtocolVersion.transparency)
+        if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId)
           events.assertNoTransactions()
         else
           events.assertStatusOk(participant1)
@@ -777,7 +777,6 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             LazyList(participant1.id, participant2.id),
             newRandomness,
             crypto,
-            deterministicEncryption = false,
           ).map(_.values.toSeq)
             .futureValueUS
             .valueOrFail("create new randomness map")

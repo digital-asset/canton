@@ -383,10 +383,6 @@ protected object ConnectionPoolTestHelpers {
   lazy val correctStaticParametersResponse
       : Either[Exception, SequencerConnect.GetSynchronizerParametersResponse] = {
     val parameters = defaultStaticSynchronizerParameters.protoVersion match {
-      case ProtoVersion(30) =>
-        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V30(
-          defaultStaticSynchronizerParameters.toProtoV30
-        )
       case ProtoVersion(31) =>
         SequencerConnect.GetSynchronizerParametersResponse.Parameters.V31(
           defaultStaticSynchronizerParameters.toProtoV31
@@ -394,6 +390,10 @@ protected object ConnectionPoolTestHelpers {
       case ProtoVersion(32) =>
         SequencerConnect.GetSynchronizerParametersResponse.Parameters.V32(
           defaultStaticSynchronizerParameters.toProtoV32
+        )
+      case ProtoVersion(33) =>
+        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V33(
+          defaultStaticSynchronizerParameters.toProtoV33
         )
       case other => throw new IllegalStateException(s"Unexpected proto version: $other")
     }

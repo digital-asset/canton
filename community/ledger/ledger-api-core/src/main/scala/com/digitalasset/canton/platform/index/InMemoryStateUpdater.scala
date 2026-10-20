@@ -21,7 +21,7 @@ import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
-import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
+import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.UpdateBatch
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
@@ -59,10 +59,10 @@ private[platform] object InMemoryStateUpdaterFlow {
       metrics: LedgerApiServerMetrics,
   )(
       inMemoryState: InMemoryState,
-      prepare: Batch[?] => PrepareResult,
+      prepare: UpdateBatch => PrepareResult,
       update: (PrepareResult, Boolean) => Unit,
   ): UpdaterFlow = { repairMode =>
-    Flow[Batch[?]]
+    Flow[UpdateBatch]
       .filter(_.offsetsUpdates.nonEmpty)
       .via(updateOffsetCheckpointCacheFlow(inMemoryState, offsetCheckpointCacheUpdateInterval))
       .mapAsync(prepareUpdatesParallelism) { batch =>
@@ -84,8 +84,8 @@ private[platform] object InMemoryStateUpdaterFlow {
       inMemoryState: InMemoryState,
       interval: FiniteDuration,
   ): Flow[
-    Batch[?],
-    Batch[?],
+    UpdateBatch,
+    UpdateBatch,
     NotUsed,
   ] = {
     // tick source so that we update offset checkpoint caches
@@ -101,8 +101,8 @@ private[platform] object InMemoryStateUpdaterFlow {
       updateOffsetCheckpointCache: OffsetCheckpoint => Unit,
       tick: Source[Option[Nothing], NotUsed],
   ): Flow[
-    Batch[?],
-    Batch[?],
+    UpdateBatch,
+    UpdateBatch,
     NotUsed,
   ] =
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
@@ -113,15 +113,15 @@ private[platform] object InMemoryStateUpdaterFlow {
       // them with a tick source that ticks every interval seconds to signify the update of the cache
 
       val broadcast =
-        builder.add(Broadcast[Batch[?]](2))
+        builder.add(Broadcast[UpdateBatch](2))
 
       val merge =
         builder.add(Merge[Option[(Offset, Update)]](inputPorts = 2, eagerComplete = true))
 
-      val preprocess: Flow[Batch[?], Option[
+      val preprocess: Flow[UpdateBatch, Option[
         (Offset, Update)
       ], NotUsed] =
-        Flow[Batch[?]]
+        Flow[UpdateBatch]
           .map(_.offsetsUpdates)
           .mapConcat(identity)
           .map(Some(_))
@@ -187,7 +187,7 @@ private[platform] object InMemoryStateUpdater {
       contractStateEvents: Vector[ContractStateEvent],
   )
   type UpdaterFlow =
-    Boolean => Flow[Batch[?], Batch[?], NotUsed]
+    Boolean => Flow[UpdateBatch, UpdateBatch, NotUsed]
   def owner(
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
@@ -221,7 +221,7 @@ private[platform] object InMemoryStateUpdater {
   )
 
   private[index] def prepare(
-      batch: Batch[?]
+      batch: UpdateBatch
   ): PrepareResult = {
     val offsetUpdates = batch.offsetsUpdates
     val traceContext = offsetUpdates.lastOption.fold(
@@ -526,6 +526,8 @@ private[platform] object InMemoryStateUpdater {
           ),
         status = u.reasonTemplate.status,
       ),
+      synchronizerId = u.synchronizerId.toProtoPrimitive,
+      recordTime = u.recordTime.underlying,
     )(u.traceContext)
   }
 

@@ -23,7 +23,6 @@ import com.digitalasset.canton.platform.store.DbSupport.{
 }
 import com.digitalasset.canton.platform.store.backend.StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
-import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
 import com.digitalasset.canton.platform.store.{DbType, LedgerApiContractStore}
@@ -57,10 +56,8 @@ object JdbcIndexer {
   )(implicit materializer: Materializer) {
 
     def initialized()(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
-      val factory = StorageBackendFactory.of(
-        DbType.jdbcType(participantDataSourceConfig.jdbcUrl),
-        loggerFactory,
-      )
+      val dbType = DbType.jdbcType(participantDataSourceConfig.jdbcUrl)
+      val factory = StorageBackendFactory.of(dbType, loggerFactory)
       val dataSourceStorageBackend = factory.createDataSourceStorageBackend
       val ingestionStorageBackend = factory.createIngestionStorageBackend
       val parameterStorageBackend =
@@ -75,19 +72,17 @@ object JdbcIndexer {
         factory.createCompletionStorageBackend(
           inMemoryState.stringInterningView,
           inMemoryState.ledgerEndCache,
-          loggerFactory,
         )
       val eventStorageBackend = factory.createEventStorageBackend(
         inMemoryState.ledgerEndCache,
         inMemoryState.stringInterningView,
-        loggerFactory,
       )
       val dbConfig = dataSourceProperties
       // in case H2 backend, we share a single connection between indexer and index service
       // to prevent H2 synchronization bug to materialize
       // the ingestion parallelism is also limited to 1 in this case
       val (ingestionParallelism, indexerDbDispatcherOverride) =
-        if (factory == H2StorageBackendFactory) 1 -> indexServiceDbDispatcher
+        if (dbType == DbType.H2Database) 1 -> indexServiceDbDispatcher
         else config.ingestionParallelism.unwrap -> None
       ParallelIndexerFactory(
         inputMappingParallelism = config.inputMappingParallelism.unwrap,
@@ -139,9 +134,10 @@ object JdbcIndexer {
           maxInputBufferSize = config.maxInputBufferSize.unwrap,
           inputMappingParallelism = config.inputMappingParallelism.unwrap,
           dbPrepareParallelism = config.dbPrepareParallelism.unwrap,
-          batchingParallelism = config.batchingParallelism.unwrap,
           ingestionParallelism = ingestionParallelism,
           submissionBatchSize = config.submissionBatchSize,
+          ingestingMaxBatchSize = config.ingestingMaxBatchSize,
+          ingestingMinBatchSize = config.ingestingMinBatchSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           postProcessingParallelism = config.postProcessingParallelism,
           parContractReadRowLock = DbLockMeta(

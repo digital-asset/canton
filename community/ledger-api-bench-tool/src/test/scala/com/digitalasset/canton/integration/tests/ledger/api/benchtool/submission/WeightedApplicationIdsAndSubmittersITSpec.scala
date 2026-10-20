@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -16,15 +15,12 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
   CompletionsObserver,
   ObservedCompletions,
 }
-import com.digitalasset.canton.util.{DelayUtil, FutureUtil}
 import org.scalatest.concurrent.PatienceConfiguration
 import org.scalatest.{AppendedClues, Checkpoints, OptionValues}
 
-import java.util.concurrent.TimeUnit
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-@UnstableTest // TODO(i31088): remove this once the test is no longer flaky
 class WeightedUserIdsAndSubmittersITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues
@@ -67,42 +63,48 @@ class WeightedUserIdsAndSubmittersITSpec
       )
       (for {
         (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
-          submissionConfig
+          submissionConfig,
+          maxInFlightCommands = 10,
         )
-        _ <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
+        lastOffsetO <- fooSubmission.performSubmission(submissionConfig = submissionConfig)
+        lastOffset = lastOffsetO.value
         completionsApp1 <- observeCompletions(
           parties = List(allocatedParties.signatory),
           apiServices = apiServices,
           userId = "App-1",
+          endOffsetInclusive = lastOffset,
         )
         completionsApp2 <- observeCompletions(
           parties = List(allocatedParties.signatory),
           apiServices = apiServices,
           userId = "App-2",
+          endOffsetInclusive = lastOffset,
         )
         completionsApp1Submitter0 <- observeCompletions(
           parties = List(allocatedParties.extraSubmitters.head),
           apiServices = apiServices,
           userId = "App-1",
+          endOffsetInclusive = lastOffset,
         )
         completionsApp1Submitter1 <- observeCompletions(
           parties = List(allocatedParties.extraSubmitters(1)),
           apiServices = apiServices,
           userId = "App-1",
+          endOffsetInclusive = lastOffset,
         )
       } yield {
         val cp = new Checkpoint
         // App only filters
-        cp(discard(completionsApp1.completions.size shouldBe 91))
-        cp(discard(completionsApp2.completions.size shouldBe 9))
+        cp(discard(completionsApp1.completions.size shouldBe 92))
+        cp(discard(completionsApp2.completions.size shouldBe 8))
         // App and party filters
         cp(
           discard(
             completionsApp1Submitter0.completions.size shouldBe completionsApp1.completions.size
           )
         )
-        cp(discard(completionsApp1Submitter0.completions.size shouldBe 91))
-        cp(discard(completionsApp1Submitter1.completions.size shouldBe 9))
+        cp(discard(completionsApp1Submitter0.completions.size shouldBe 92))
+        cp(discard(completionsApp1Submitter1.completions.size shouldBe 8))
         cp.reportAll()
         succeed
       }).futureValue(timeout = PatienceConfiguration.Timeout(timeout))
@@ -113,20 +115,16 @@ class WeightedUserIdsAndSubmittersITSpec
       parties: List[Party],
       userId: String,
       apiServices: LedgerApiServices,
-  )(implicit ec: ExecutionContext): Future[ObservedCompletions] = {
-    val observer = CompletionsObserver()
-    FutureUtil.doNotAwait(
-      // EC passed explicitly, because otherwise scalac reports a false positive unused warning/error,
-      // but when trying to disable with @nowarn, complains that the latter does not suppress any warnings.
-      DelayUtil.delay(Duration(5, TimeUnit.SECONDS)).map(_ => observer.cancel()),
-      s"Failed to cancel observer $observer",
-    )
+      endOffsetInclusive: Long,
+  ): Future[ObservedCompletions] = {
+    val observer = CompletionsObserver(endOffsetInclusive = Some(endOffsetInclusive))
     apiServices.commandCompletionService.completions(
       config = WorkflowConfig.StreamConfig.CompletionsStreamConfig(
         name = "dummy-name",
         parties = parties.map(_.getValue),
         userId = userId,
         beginOffsetExclusive = None,
+        endOffsetInclusive = Some(endOffsetInclusive),
         objectives = None,
         timeoutO = None,
         maxItemCount = None,

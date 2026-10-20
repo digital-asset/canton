@@ -40,6 +40,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.platform.indexer.IndexerState.ShutdownInProgress
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.SynchronizerId
@@ -216,14 +217,12 @@ final class RepairServiceContractsImporter(
 
     logger.info(s"Adding contracts to synchronizer $synchronizerId with parameters: $parameters")
 
-    def toFuture[T](resET: EitherT[FutureUnlessShutdown, String, T]): Future[T] = resET.value
-      .flatMap(
-        _.fold(
-          err => FutureUnlessShutdown.failed[T](ImportAcsError.Error(err).asGrpcError),
-          res => FutureUnlessShutdown.pure(res),
-        )
+    def toFutureForIndexer[T](resET: EitherT[FutureUnlessShutdown, String, T]): Future[T] =
+      EitherTUtil.toFuture(
+        resET
+          .failOnShutdownTo(ShutdownInProgress)
+          .leftMap(err => ImportAcsError.Error(err).asGrpcError)
       )
-      .failOnShutdownToAbortException("addContracts")
 
     val workflowProvider =
       Iterator
@@ -251,9 +250,11 @@ final class RepairServiceContractsImporter(
         contracts.grouped(batchSize).zipWithIndex
 
       val doneF = for {
-        synchronizer <- toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer))
+        synchronizer <- toFutureForIndexer(
+          helpers.readSynchronizerData(synchronizerId, repairIndexer)
+        )
         // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
-        _ <- toFuture(
+        _ <- toFutureForIndexer(
           helpers.verifyRepairPreconditions(
             synchronizer,
             forceRepairWhenTopologyTransactionAtLedgerEnd,
@@ -262,7 +263,7 @@ final class RepairServiceContractsImporter(
         // 2. Execute the stream only after the Active Contract Store is clean
         _ <- indexedContractBatches
           .mapAsync(parallelism) { data =>
-            toFuture(
+            toFutureForIndexer(
               validateAndPersistContracts(
                 synchronizer = synchronizer,
                 contractImportMode = contractImportMode,
@@ -290,7 +291,7 @@ final class RepairServiceContractsImporter(
                 contractsToAddWithInternalContractIds,
                 workflowProvider,
                 repairIndexer,
-              ).failOnShutdownToAbortException("addContracts")
+              ).failOnShutdownTo(ShutdownInProgress)
             }
           }
           .toMat(Sink.ignore)(Keep.right)

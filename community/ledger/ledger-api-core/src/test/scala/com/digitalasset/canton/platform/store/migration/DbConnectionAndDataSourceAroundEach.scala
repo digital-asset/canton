@@ -39,8 +39,7 @@ trait DbConnectionAndDataSourceAroundEach
   override protected def beforeEach(): Unit = {
     super.beforeEach()
     dataSource = dataSourceBackend.createDataSource(
-      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
-      loggerFactory = loggerFactory,
+      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl)
     )
     connection = retry(20, 1000) {
       val c = dataSource.getConnection

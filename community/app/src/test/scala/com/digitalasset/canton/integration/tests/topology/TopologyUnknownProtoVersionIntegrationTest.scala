@@ -33,7 +33,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{Namespace, PartyId}
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
-import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
@@ -85,7 +85,12 @@ final class TopologyUnknownProtoVersionIntegrationTest
     // `originalBytes`, even if no deserializer exists for `protoVersion`
     val transaction = TopologyTransaction.versioningTable
       .deserializerFor(ProtoVersion(30))
-      .value(ProtocolVersionValidation.NoValidation, (), originalBytes, transactionP.toByteString)
+      .value(
+        ProtocolVersionValidation.NoValidation,
+        testedTopologyTransactionContext,
+        originalBytes,
+        transactionP.toByteString,
+      )
       .value
 
     (party, transaction)
@@ -164,33 +169,31 @@ final class TopologyUnknownProtoVersionIntegrationTest
   }
 
   "Topology transactions with wrong proto version" should {
-    // TODO(#35499): Switch to stable PV
-    "be accepted with the legacy proto version 29" onlyRunLessThan ProtocolVersion.dev in {
-      implicit env =>
-        import env.*
+    "be accepted with the legacy proto version 29" in { implicit env =>
+      import env.*
 
-        val (party, transaction) = partyToParticipant("legacy-proto-version", protoVersion = 29)
-        broadcast(transaction)
+      val (party, transaction) = partyToParticipant("legacy-proto-version", protoVersion = 29)
+      broadcast(transaction)
 
-        eventually() {
-          isHosting(party).value shouldBe party
-        }
+      eventually() {
+        isHosting(party).value shouldBe party
+      }
 
-        val stored = participant1.topology.transactions
-          .list(store = daId, filterMappings = Seq(TopologyMapping.Code.PartyToParticipant))
-          .result
-          .map(_.transaction.transaction)
-          .filter(_.mapping.select[PartyToParticipant].exists(_.partyId == party))
-          .loneElement
+      val stored = participant1.topology.transactions
+        .list(store = daId, filterMappings = Seq(TopologyMapping.Code.PartyToParticipant))
+        .result
+        .map(_.transaction.transaction)
+        .filter(_.mapping.select[PartyToParticipant].exists(_.partyId == party))
+        .loneElement
 
-        // Legacy proto versions are read with the lowest supported proto version
-        stored.representativeProtocolVersion shouldBe
-          TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(30)).value
+      // Legacy proto versions are read with the lowest supported proto version
+      stored.representativeProtocolVersion shouldBe
+        TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(30)).value
 
-        // The original proto version is kept
-        UntypedVersionedMessage
-          .parseFrom(stored.getCryptographicEvidence.toByteArray)
-          .version shouldBe 29
+      // The original proto version is kept
+      UntypedVersionedMessage
+        .parseFrom(stored.getCryptographicEvidence.toByteArray)
+        .version shouldBe 29
     }
 
     "be dropped by the receiving nodes with an unknown proto version" in { implicit env =>

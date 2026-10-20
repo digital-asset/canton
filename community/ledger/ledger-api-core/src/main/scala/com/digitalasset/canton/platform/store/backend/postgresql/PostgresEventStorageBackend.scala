@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend.postgresql
 
 import anorm.SqlParser.long
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.CannotAcquireAllRowLocksException
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
@@ -16,6 +16,7 @@ import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLoc
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.sql.Connection
 
@@ -32,30 +33,30 @@ class PostgresEventStorageBackend(
 
   override def lockExclusivelyPruningProcessingTable(
       dbLockMeta: DbLockMeta
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit =
+  )(implicit connection: Connection, traceContext: TraceContext): Unit =
     PostgresQueryStrategy.acquireLock(dbLockMeta) {
-      errorLoggingContext.info("Lock lapi_pruning_candidate_deactivated table")
+      logger.info("Lock lapi_pruning_candidate_deactivated table")
       SQL"LOCK TABLE lapi_pruning_candidate_deactivated IN SHARE ROW EXCLUSIVE MODE"
         .execute()(connection)
         .discard
-      errorLoggingContext.info("Locked lapi_pruning_candidate_deactivated table")
+      logger.info("Locked lapi_pruning_candidate_deactivated table")
     }
 
   override def lockExclusivelyContractPruningProcessingTable(
       dbLockMeta: DbLockMeta
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit =
+  )(implicit connection: Connection, traceContext: TraceContext): Unit =
     PostgresQueryStrategy.acquireLock(dbLockMeta) {
-      errorLoggingContext.info("Lock lapi_pruning_contract_candidate table")
+      logger.info("Lock lapi_pruning_contract_candidate table")
       SQL"LOCK TABLE lapi_pruning_contract_candidate IN SHARE ROW EXCLUSIVE MODE"
         .execute()(connection)
         .discard
-      errorLoggingContext.info("Locked lapi_pruning_contract_candidate table")
+      logger.info("Locked lapi_pruning_contract_candidate table")
     }
 
   override def readLockInternalContractIds(
       internalContractIds: Set[Long],
       dbLockMeta: DbLockMeta,
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Set[Long] =
+  )(implicit connection: Connection, traceContext: TraceContext): Set[Long] =
     PostgresQueryStrategy.acquireLock(dbLockMeta) {
       internalContractIds -- SQL"""
         SELECT internal_contract_id

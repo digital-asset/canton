@@ -63,7 +63,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     _.copy(traceContext = Array.emptyByteArray, payload = Array.emptyByteArray)
 
   it should "respond with payloads for a single acs commitment" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(singleDto, _))
     executeSql(updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L))
 
@@ -82,7 +82,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
   }
 
   it should "respond with payloads for multiple acs commitments of the requested synchronizer" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
@@ -131,7 +131,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
   }
 
   it should "deliver acs commitments ordered by event sequential id" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
@@ -144,7 +144,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
   }
 
   it should "deliver acs commitments in descending event sequential id order when requested" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
@@ -157,7 +157,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
   }
 
   it should "respond with no commitments for a different synchronizer" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
@@ -182,7 +182,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
   }
 
   it should "respond with no commitments for a synchronizer unknown to the participant" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
 

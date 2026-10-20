@@ -111,7 +111,7 @@ abstract sealed class LedgerIntegrityIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )

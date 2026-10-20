@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import cats.data.OptionT
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -94,7 +95,7 @@ import org.slf4j.event.Level
 import java.net.SocketAddress
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{ExecutorService, ThreadLocalRandom}
+import java.util.concurrent.{ExecutorService, RejectedExecutionException, ThreadLocalRandom}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, blocking}
 import scala.jdk.CollectionConverters.SeqHasAsJava
@@ -804,9 +805,9 @@ private[bftordering] final class P2PGrpcConnectionManager(
             authenticationContextO,
             maybeSequencerIdFromAuthenticationPromiseUS,
             maybeAuthenticateStub(
-              BftOrderingServiceGrpc
-                .stub(potentiallyCheckedChannel)
-                .withOption(TraceContextGrpc.TraceContextOptionsKey, traceContext)
+              TraceContextGrpc.addTraceContextToCallOptions(
+                BftOrderingServiceGrpc.stub(potentiallyCheckedChannel)
+              )
             ),
           )
         )
@@ -1068,6 +1069,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
                 val peerSender =
                   new PeerSender(
                     callSendingStreamObserver,
+                    isOutgoingConnection = true,
                     p2pConnectionManagementConfig.flowControlEnabled,
                     p2pConnectionManagementConfig.flowControlBuffer,
                     p2pConnectionManagementConfig.flowControlBufferDropNewest,
@@ -1239,7 +1241,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
     transportMetricsPublisherO.foreach(_.unregisterChannel(channel))
     if (!channel.isShutdown) {
       val authenticationContextId = authenticationContextO.map(objId)
-      FutureUnlessShutdown.outcomeF(Future {
+      def closeAuthenticationContextAndShutDownChannel(): ManagedChannel = {
         authenticationContextO.foreach { ac =>
           logger.info(
             s"Closing the authentication context $authenticationContextId for gRPC channel $channelId to $p2pEndpointId"
@@ -1247,9 +1249,12 @@ private[bftordering] final class P2PGrpcConnectionManager(
           ac.close()
         }
         logger.info(s"Shutting down gRPC channel $channelId to $p2pEndpointId")
+        channel.shutdownNow()
+      }
+      FutureUnlessShutdown.outcomeF(Future {
         // We ensure channels are terminated before returning in order to avoid orphans, but this requires blocking,
         //  so we use the execution context for long-running operations that will create threads as needed.
-        val shutDownChannel = channel.shutdownNow()
+        val shutDownChannel = closeAuthenticationContextAndShutDownChannel()
         val terminated =
           blocking {
             shutDownChannel
@@ -1267,7 +1272,16 @@ private[bftordering] final class P2PGrpcConnectionManager(
             s"Successfully terminated gRPC channel $channelId to $p2pEndpointId"
           )
         }
-      }(longRunningExecutionContext))
+      }(longRunningExecutionContext).recover {
+        // The long-running executor is shut down when the BFT orderer closes. A channel created
+        //  concurrently, e.g. by a connection attempt during shutdown, must still be shut down,
+        //  or gRPC reports it as orphaned; we don't wait for its termination in this case.
+        case _: RejectedExecutionException =>
+          logger.info(
+            s"Executor shut down, shutting down gRPC channel $channelId to $p2pEndpointId directly"
+          )
+          closeAuthenticationContextAndShutDownChannel().discard
+      }(DirectExecutionContext(noTracingLogger)))
     } else {
       logger.info(
         s"No need to shut down gRPC channel $channelId with authentication context $authenticationContextO " +
@@ -1302,6 +1316,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       val peerSender =
         new PeerSender(
           callSendingStreamObserver,
+          isOutgoingConnection = false,
           p2pConnectionManagementConfig.flowControlEnabled,
           p2pConnectionManagementConfig.flowControlBuffer,
           p2pConnectionManagementConfig.flowControlBufferDropNewest,
@@ -1526,6 +1541,7 @@ private[bftordering] object P2PGrpcConnectionManager {
   // Non-final for mocking in tests
   class PeerSender(
       val grpcStreamObserver: CallStreamObserver[BftOrderingMessage],
+      val isOutgoingConnection: Boolean,
       flowControlEnabled: Boolean,
       maxSendQueueSize: PositiveInt,
       dropNewest: Boolean,

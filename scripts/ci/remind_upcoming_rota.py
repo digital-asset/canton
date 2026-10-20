@@ -77,7 +77,7 @@ def build_reminder_message(label: str, date_str: str, sheet_url: str) -> str:
     )
 
 
-def _report_sheet_failure(
+def _notify_sheet_failure(
     exc: Exception,
     date_str: str,
     sheet_url: str,
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             target_values = select_rota.fetch_week_values(target_monday, sheet_id)
         except Exception as exc:
-            return _report_sheet_failure(exc, date_str, sheet_url, roster, token)
+            return _notify_sheet_failure(exc, date_str, sheet_url, roster, token)
         # Target and prior weeks share a half-year tab except at the H1/H2 boundary: reuse if so.
         if select_rota.half_year_tab(prior_monday) == select_rota.half_year_tab(target_monday):
             prior_values = target_values
@@ -164,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 prior_values = select_rota.fetch_week_values(prior_monday, sheet_id)
             except Exception as exc:
+                # failure-surfaced: sets prior_read_failed, checked below to force exit_code = 1
                 select_rota.log(
                     f"warning: could not read the prior week ({exc!r}), treating everyone in the "
                     "target week as newly starting and marking the run failed"
@@ -177,16 +178,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             target_names = names_for_rotation(target_values, rotation, target_monday, expected)
         except Exception as exc:
-            # A gap in a future week is not actionable yet (nobody to remind), so just note it.
+            # silent-ok: a gap in a future week is not actionable yet (nobody to remind)
             select_rota.log(f"note: no {label} assignment for the week of {date_str} yet ({exc!r})")
             continue
         try:
             prior_names = names_for_rotation(prior_values, rotation, prior_monday, expected)
         except Exception as exc:
-            # Unknown prior week: treat the target-week people as newly starting, which can
-            # re-DM someone already mid-shift. Not severe enough for a CI-rota page (the
-            # whole-sheet failure above already covers that), but flag it: log it and mark
-            # the run degraded so it is visible in the job status instead of looking green.
+            # failure-surfaced: sets exit_code = 1 below, may re-DM someone already mid-shift
             select_rota.log(
                 f"warning: could not resolve prior-week {label} names ({exc!r}), "
                 "treating everyone in the target week as newly starting"
@@ -208,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 select_rota.log("    done")
             except Exception as exc:
+                # failure-surfaced: sets exit_code = 1 below
                 select_rota.log(f"    ERROR: {exc!r}")
                 exit_code = 1
 

@@ -17,7 +17,6 @@ from com.digitalasset.canton.topology.admin.v30 import (
     common_pb2,
 )
 from com.digitalasset.canton.protocol.v30 import topology_pb2 as topology_v30_pb2
-from com.digitalasset.canton.protocol.v31 import topology_pb2 as topology_v31_pb2
 from com.digitalasset.canton.version.v1 import untyped_versioned_message_pb2
 from com.digitalasset.canton.crypto.v30 import crypto_pb2
 from google.rpc import status_pb2, error_details_pb2
@@ -31,17 +30,11 @@ import grpc
 
 def get_topology_module(protocol_version: str):
     """Returns the correct protobuf module based on the protocol version."""
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
-        return topology_v31_pb2
     return topology_v30_pb2
 
 
 def get_topology_version_number(protocol_version: str) -> int:
     """Returns the protobuf version number for UntypedVersionedMessage."""
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
-        return 31
     return 30
 
 
@@ -240,7 +233,6 @@ def build_signed_transaction(
 
     Returns:
         topology_v30_pb2.SignedTopologyTransaction: The signed transaction.
-        (Note: SignedTopologyTransaction is always v30, even if the payload inside is v31)
     """
     return topology_v30_pb2.SignedTopologyTransaction(
         transaction=serialized_versioned_transaction,

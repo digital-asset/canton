@@ -10,7 +10,11 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeysWithThreshold, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, OnboardingRestriction}
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
+  OnboardingRestriction,
+  StaticSynchronizerParameters,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   mediatorId,
@@ -187,9 +191,20 @@ class RequiredTopologyMappingChecksTest
   override protected def mkChecks(
       store: TopologyStore[SynchronizerStore]
   ): RequiredTopologyMappingChecks =
-    RequiredTopologyMappingChecks(
+    mkChecks(
+      store,
       Some(defaultStaticSynchronizerParameters),
       defaultStaticSynchronizerParameters.protocolVersion,
+    )
+
+  private def mkChecks(
+      store: TopologyStore[SynchronizerStore],
+      parameters: Option[StaticSynchronizerParameters],
+      protocolVersion: ProtocolVersion,
+  ): RequiredTopologyMappingChecks =
+    RequiredTopologyMappingChecks(
+      parameters,
+      protocolVersion,
       new TopologyStateLookup {
         override def makeCopy(): TopologyStateLookup = ???
         override def lookupHistoryForUid(
@@ -826,6 +841,158 @@ class RequiredTopologyMappingChecksTest
 
     }
 
+    "validating PartyToParticipant HostingState transitions" should {
+      import HostingParticipant.HostingState
+      import scala.math.Ordering.Implicits.*
+
+      val supportedStates: Seq[HostingState] =
+        if (testedProtocolVersion >= ProtocolVersion.offPRWithSequencerChannels)
+          Seq(
+            HostingState.Nominated,
+            HostingState.Freezing,
+            HostingState.Onboarding,
+            HostingState.Active,
+          )
+        else Seq(HostingState.Onboarding, HostingState.Active)
+
+      def mkPtp(
+          serial: PositiveInt,
+          participants: (ParticipantId, HostingState)*
+      ) = factory.mkAdd(
+        PartyToParticipant.tryCreate(
+          party1,
+          PositiveInt.one,
+          participants.map { case (pid, state) =>
+            HostingParticipant(pid, Submission, state)
+          },
+        ),
+        serial = serial,
+      )
+
+      // transitions are expected in the order of the participants in the mapping to validate
+      def invalidTransitions(
+          transitions: (ParticipantId, HostingState, HostingState)*
+      ): Left[TopologyTransactionRejection, Unit] =
+        Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"Invalid hosting state transitions for party $party1: " +
+              transitions
+                .map { case (pid, from, to) => s"$pid: $from -> $to" }
+                .mkString(", ")
+          )
+        )
+
+      "allow unchanged and forward hosting state transitions, including skipping states" in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        for {
+          from <- supportedStates
+          to <- supportedStates if to >= from
+        } withClue(s"$from -> $to") {
+          val inStore = mkPtp(PositiveInt.one, participant1 -> from)
+          val toValidate = mkPtp(PositiveInt.two, participant1 -> to)
+          checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+        }
+      }
+
+      "reject all backward hosting state transitions" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        for {
+          from <- supportedStates
+          to <- supportedStates if to < from
+        } withClue(s"$from -> $to") {
+          val inStore = mkPtp(PositiveInt.one, participant1 -> from)
+          val toValidate = mkPtp(PositiveInt.two, participant1 -> to)
+          checkTransaction(checks, toValidate, Some(inStore)) shouldBe
+            invalidTransitions((participant1, from, to))
+        }
+      }
+
+      "allow change from Active to Onboarding state" onlyRunLessThan ProtocolVersion.offPRWithSequencerChannels in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        val inStore = mkPtp(PositiveInt.one, participant1 -> HostingState.Active)
+        val toValidate = mkPtp(PositiveInt.two, participant1 -> HostingState.Onboarding)
+        checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+      }
+
+      "report all participants with backward hosting state transitions" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc, p2_otk, p2_dtc, p3_otk, p3_dtc)
+
+        val inStore = mkPtp(
+          PositiveInt.one,
+          participant1 -> HostingState.Active,
+          participant2 -> HostingState.Active,
+          participant3 -> HostingState.Onboarding,
+        )
+        val toValidate = mkPtp(
+          PositiveInt.two,
+          participant2 -> HostingState.Onboarding,
+          participant1 -> HostingState.Onboarding,
+          participant3 -> HostingState.Active,
+        )
+
+        checkTransaction(checks, toValidate, Some(inStore)) shouldBe invalidTransitions(
+          (participant2, HostingState.Active, HostingState.Onboarding),
+          (participant1, HostingState.Active, HostingState.Onboarding),
+        )
+      }
+
+      "not check the hosting state of newly added participants" in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc, p2_otk, p2_dtc)
+
+        val inStore = mkPtp(PositiveInt.one, participant1 -> HostingState.Active)
+
+        supportedStates.foreach { newParticipantState =>
+          withClue(s"new participant in state $newParticipantState") {
+            val toValidate = mkPtp(
+              PositiveInt.two,
+              participant1 -> HostingState.Active,
+              participant2 -> newParticipantState,
+            )
+            checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+          }
+        }
+      }
+
+      "not check the hosting state of removed participants" in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        val inStore = mkPtp(
+          PositiveInt.one,
+          participant1 -> HostingState.Active,
+          participant2 -> HostingState.Active,
+        )
+        val toValidate = mkPtp(
+          PositiveInt.two,
+          participant1 -> HostingState.Active,
+        )
+
+        checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+      }
+
+      "accept any hosting state when there is no mapping in the store" in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        supportedStates.foreach { state =>
+          withClue(s"state $state") {
+            checkTransaction(
+              checks,
+              mkPtp(PositiveInt.one, participant1 -> state),
+            ) shouldBe Either.unit
+          }
+        }
+      }
+    }
+
     "validating SynchronizerTrustCertificate" should {
 
       "reject addition without valid otk" in {
@@ -1313,6 +1480,104 @@ class RequiredTopologyMappingChecksTest
         checkTransaction(checks, sds_add_seq2, Some(sds_add_seq1)) shouldBe Right(())
       }
 
+    }
+
+    "validating the key count of key mappings" should {
+      import factory.SigningKeys.{key1, key2, key3}
+
+      val limits = testedTopologyLimits.copy(maxSigningKeysPerEntity = PositiveInt.two)
+      // Only from ProtocolVersion.newBoundsOnPV37 can the topology limits differ from the default
+      lazy val parameters = BaseTest.defaultStaticSynchronizerParametersWith(
+        protocolVersion = ProtocolVersion.newBoundsOnPV37,
+        synchronizerLimits =
+          defaultStaticSynchronizerParameters.synchronizerLimits.copy(topologyLimits = limits),
+      )
+      val party = PartyId.tryCreate("Alice", Namespace(key1.fingerprint))
+
+      def partyToKeyMapping(keys: NonEmpty[Seq[SigningPublicKey]]) =
+        factory.mkAdd(PartyToKeyMapping.tryCreate(party, PositiveInt.one, keys))
+
+      def checksAt(
+          protocolVersion: ProtocolVersion,
+          parameters: Option[StaticSynchronizerParameters],
+      ) =
+        mkChecks(mk()._2, parameters, protocolVersion)
+
+      "accept a mapping at the synchronizer's limit" in {
+        val checks = checksAt(ProtocolVersion.newBoundsOnPV37, Some(parameters))
+        checkTransaction(checks, partyToKeyMapping(NonEmpty(Seq, key1, key2))) shouldBe Either.unit
+      }
+
+      "reject a mapping above the synchronizer's limit from ProtocolVersion.newBoundsOnPV37" in {
+        val checks = checksAt(ProtocolVersion.newBoundsOnPV37, Some(parameters))
+        checkTransaction(checks, partyToKeyMapping(NonEmpty(Seq, key1, key2, key3))) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"At most ${limits.maxSigningKeysPerEntity} key(s) can be specified, got 3."
+          )
+        )
+      }
+
+      "reject an owner to key mapping above the synchronizer's limit" in {
+        val checks = checksAt(ProtocolVersion.newBoundsOnPV37, Some(parameters))
+        val otk = factory.mkAddMultiKey(
+          OwnerToKeyMapping.tryCreate(sequencerId, NonEmpty(Seq, key1, key2, key3)),
+          NonEmpty(Set, key1),
+        )
+        checkTransaction(checks, otk).left.value shouldBe a[
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping
+        ]
+      }
+
+      "reject party signing keys of a party to participant mapping above the synchronizer's limit" in {
+        val checks = checksAt(ProtocolVersion.newBoundsOnPV37, Some(parameters))
+        val ptp = factory.mkAdd(
+          PartyToParticipant.tryCreate(
+            party,
+            PositiveInt.one,
+            Seq(HostingParticipant(participant1, ParticipantPermission.Submission)),
+            Some(
+              SigningKeysWithThreshold.tryCreate(NonEmpty(Seq, key1, key2, key3), PositiveInt.one)
+            ),
+          )
+        )
+        checkTransaction(checks, ptp) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"At most ${limits.maxSigningKeysPerEntity} key(s) can be specified, got 3."
+          )
+        )
+      }
+
+      "apply KeyMapping.MaxKeys before ProtocolVersion.newBoundsOnPV37" in {
+        val pvBeforeValidationBound =
+          ProtocolVersion.supported.forgetNE.filter(_ < ProtocolVersion.newBoundsOnPV37).max
+        val checks = checksAt(
+          pvBeforeValidationBound,
+          Some(
+            BaseTest.defaultStaticSynchronizerParametersWith(protocolVersion =
+              pvBeforeValidationBound
+            )
+          ),
+        )
+        val keys = (0 to KeyMapping.MaxKeys.unwrap).map(i => factory.genSignKey(s"max-keys-$i"))
+
+        checkTransaction(
+          checks,
+          partyToKeyMapping(NonEmpty.from(keys.take(KeyMapping.MaxKeys.unwrap)).value),
+        ) shouldBe Either.unit
+        checkTransaction(checks, partyToKeyMapping(NonEmpty.from(keys).value)) shouldBe Left(
+          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+            s"At most ${KeyMapping.MaxKeys} key(s) can be specified, got ${keys.size}."
+          )
+        )
+      }
+
+      "not apply a limit without synchronizer parameters" in {
+        val checks = checksAt(ProtocolVersion.newBoundsOnPV37, None)
+        checkTransaction(
+          checks,
+          partyToKeyMapping(NonEmpty(Seq, key1, key2, key3)),
+        ) shouldBe Either.unit
+      }
     }
 
     "validating OwnerToKeyMapping" should {

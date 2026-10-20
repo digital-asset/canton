@@ -609,24 +609,20 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val resE = for {
-            protoVersion <-
-              TopologyTransaction.protoVersionFor(context.representativeProtocolVersion)
-
-            item <- elem
-              .foldProtoVersioned(protoVersion)(
-                ListPartyToParticipantResponse.Result.Item.V30(_),
-                ListPartyToParticipantResponse.Result.Item.V31(_),
+          elem.toProtoPartyToParticipantV30
+            .map(ListPartyToParticipantResponse.Result.Item.V30(_))
+            .leftMap[RpcError](err =>
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize party to participant mappings using proto version 30: $err"
+                )
+            )
+            .map(item =>
+              adminProto.ListPartyToParticipantResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = item,
               )
-              .leftMap(err =>
-                s"Cannot serialize party to participant mapping to proto version ${protoVersion.v}: $err"
-              )
-          } yield adminProto.ListPartyToParticipantResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = item,
-          )
-
-          resE.leftMap[RpcError](TopologyManagerError.InternalError.Unexpected(_))
+            )
         }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToParticipantResponse(results = results)

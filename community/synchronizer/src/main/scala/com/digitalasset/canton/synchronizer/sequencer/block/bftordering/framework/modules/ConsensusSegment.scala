@@ -94,6 +94,8 @@ object ConsensusSegment {
     final case class LocalAvailability(message: Consensus.LocalAvailability)
         extends ConsensusMessage
 
+    /** A PBFT internal processing event
+      */
     sealed trait PbftEvent extends ConsensusMessage {
       def blockMetadata: BlockMetadata
       def viewNumber: ViewNumber
@@ -293,7 +295,7 @@ object ConsensusSegment {
             case None =>
               Left(ProtoDeserializationError.OtherError("Pre-prepare with no ordering block"))
           }
-          rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData)
+          rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
         } yield ConsensusSegment.ConsensusMessage.PrePrepare(
           blockMetadata,
           viewNumber,
@@ -304,8 +306,8 @@ object ConsensusSegment {
         )(rpv, Some(originalByteString))
 
       override val versioningTable: VersioningTable = VersioningTable(
-        SupportedVersions.ProtoData ->
-          VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.ConsensusMessage)(
+        SupportedVersions.ProtoData30 ->
+          VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
             supportedProtoVersionMemoized(_)(PrePrepare.fromProtoConsensusMessage),
             _.toProto,
           )
@@ -386,7 +388,7 @@ object ConsensusSegment {
       ): ParsingResult[Prepare] =
         for {
           hash <- Hash.fromProtoPrimitive(prepare.blockHash)
-          rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData)
+          rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
         } yield ConsensusSegment.ConsensusMessage.Prepare(
           blockMetadata,
           viewNumber,
@@ -396,8 +398,8 @@ object ConsensusSegment {
         )(rpv, Some(originalByteString))
 
       override val versioningTable: VersioningTable = VersioningTable(
-        SupportedVersions.ProtoData ->
-          VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.ConsensusMessage)(
+        SupportedVersions.ProtoData30 ->
+          VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
             supportedProtoVersionMemoized(_)(Prepare.fromProtoConsensusMessage),
             _.toProto,
           )
@@ -489,8 +491,8 @@ object ConsensusSegment {
         )(rpv, Some(originalByteString))
 
       override val versioningTable: VersioningTable = VersioningTable(
-        SupportedVersions.ProtoData ->
-          VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.ConsensusMessage)(
+        SupportedVersions.ProtoData30 ->
+          VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
             supportedProtoVersionMemoized(_)(Commit.fromProtoConsensusMessage),
             _.toProto,
           )
@@ -586,8 +588,8 @@ object ConsensusSegment {
         )(rpv, Some(originalByteString))
 
       override val versioningTable: VersioningTable = VersioningTable(
-        SupportedVersions.ProtoData ->
-          VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.ConsensusMessage)(
+        SupportedVersions.ProtoData30 ->
+          VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
             supportedProtoVersionMemoized(_)(ViewChange.fromProtoConsensusMessage),
             _.toProto,
           )
@@ -649,7 +651,7 @@ object ConsensusSegment {
         NewView(
           blockMetadata,
           viewNumber,
-          viewChanges,
+          viewChanges.sorted, // we sort the view changes here to ensure that the order is deterministic and consistent across different nodes
           prePrepares,
           from,
           actualSender,
@@ -686,12 +688,12 @@ object ConsensusSegment {
       )(originalByteString: OriginalByteString): ParsingResult[NewView] =
         for {
           viewChanges <- newView.viewChanges.traverse(
-            SignedMessage.fromProto(v30.ConsensusMessage)(
+            SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
               ViewChange.fromProtoConsensusMessage(actualSender, _)
             )
           )
           prePrepares <- newView.prePrepares.traverse(
-            SignedMessage.fromProto(v30.ConsensusMessage)(
+            SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
               PrePrepare.fromProtoConsensusMessage(actualSender, _)
             )
           )
@@ -706,8 +708,8 @@ object ConsensusSegment {
         )(rpv, Some(originalByteString))
 
       override val versioningTable: VersioningTable = VersioningTable(
-        SupportedVersions.ProtoData ->
-          VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.ConsensusMessage)(
+        SupportedVersions.ProtoData30 ->
+          VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.ConsensusMessage)(
             supportedProtoVersionMemoized(_)(NewView.fromProtoConsensusMessage),
             _.toProto,
           )

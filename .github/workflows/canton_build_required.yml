@@ -102,7 +102,7 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_36:
-    name: Test 36
+    name: Test protocol version 36
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_test.yml
@@ -115,7 +115,7 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_36_requires_external_kms:
-    name: Test (RequiresExternalKms)
+    name: Test protocol version 36 (RequiresExternalKms)
     needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group' &&
@@ -300,19 +300,19 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_35:
-    name: Test Protocol Version 35
+  test_37:
+    name: Test Protocol Version 37
     needs: [pick_runner, compile]
     if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
-      protocol_version: '35'
-      job_name: test_35
+      protocol_version: '37'
+      job_name: test_37
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_35_requires_external_kms:
-    name: Test Protocol Version 35 (RequiresExternalKms)
+  test_37_requires_external_kms:
+    name: Test Protocol Version 37 (RequiresExternalKms)
     needs: [pick_runner, compile]
     if: |
       github.event_name != 'merge_group' &&
@@ -323,8 +323,8 @@ jobs:
     secrets: inherit
     with:
       include_only_requires_external_kms_tests: true
-      protocol_version: '35'
-      job_name: test_protocol_version_35_requires_external_kms
+      protocol_version: '37'
+      job_name: test_protocol_version_37_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_dev:
@@ -417,8 +417,8 @@ jobs:
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_35
-      - test_35_requires_external_kms
+      - test_37
+      - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36
       - toxiproxy_test_fast_36_requires_external_kms
@@ -471,8 +471,8 @@ jobs:
       - smoke_test
       - test_data_continuity_dumps
       - test_docker_images
-      - test_35
-      - test_35_requires_external_kms
+      - test_37
+      - test_37_requires_external_kms
       - test_dev
       - toxiproxy_test_fast_36
       - toxiproxy_test_fast_36_requires_external_kms

@@ -103,7 +103,7 @@ private[backend] trait StorageBackendTestsContracts
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(6), 6L)
@@ -249,7 +249,7 @@ private[backend] trait StorageBackendTestsContracts
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(5), 5L)
@@ -446,7 +446,7 @@ private[backend] trait StorageBackendTestsContracts
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(5), 5L)
@@ -695,7 +695,7 @@ private[backend] trait StorageBackendTestsContracts
       d(iid51, 24, deactivates = 22),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(24L), 24L))
 
@@ -864,7 +864,7 @@ private[backend] trait StorageBackendTestsContracts
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(3), 3L)
@@ -983,7 +983,7 @@ private[backend] trait StorageBackendTestsContracts
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       updateLedgerEnd(offset(4), 4L)
@@ -1067,7 +1067,7 @@ private[backend] trait StorageBackendTestsContracts
   }
 
   it should "be able to query with empty input" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     val activeContracts = executeSql(
       backend.contract.lastActivations(Nil, 0L)
     )
@@ -1075,7 +1075,7 @@ private[backend] trait StorageBackendTestsContracts
   }
 
   it should "be able to query with 1000 contract ids" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       updateLedgerEnd(offset(3), 6L)
     )

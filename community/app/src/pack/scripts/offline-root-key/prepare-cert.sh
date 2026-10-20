@@ -27,7 +27,7 @@ ALLOWED_DELEGATION_RESTRICTIONS=($(gunzip -c "$BUF_PROTO_IMAGE" | jq '.file[]
 
 # Function to display usage information
 usage() {
-  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> --output <prefix>"
+  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> --protocol-version <value> --output <prefix>"
   echo
   echo "Arguments:"
   echo "  --root-delegation              Optional. Set if the delegation is a self signed root delegation."
@@ -58,6 +58,7 @@ usage() {
   echo "                                 The script will attempt to automatically detect the key specification"
   echo "                                 from the public key. This flag can be used to override it or provide it if"
   echo "                                 automatic detection fails."
+  echo "  --protocol-version <value>     Required. Protocol version of the target synchronizer, for example 36."
   echo "  --output <prefix>              Required. Output prefix for the generated files."
   echo
   echo "Description:"
@@ -77,6 +78,7 @@ TARGET_KEY_SPEC=""
 ROOT_KEY_SPEC=""
 DELEGATION_RESTRICTIONS=""
 REVOKE_INTERMEDIATE_DELEGATION=""
+PROTOCOL_VERSION=""
 RESTRICTIONS_LIST=()
 
 # Parse arguments
@@ -88,6 +90,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --intermediate-delegation)
+      INTERMEDIATE_DELEGATION="true"
       DELEGATION_RESTRICTIONS='"can_sign_all_but_namespace_delegations": {}'
       shift
       ;;
@@ -103,11 +106,20 @@ while [[ $# -gt 0 ]]; do
         RESTRICTIONS_LIST+=("TOPOLOGY_MAPPING_CODE_$restriction")
       done
   # Join the restrictions into a JSON array
+  # sorted by enum value and deduplicated, as Canton serializes them: the transaction hash is computed over these bytes
+  SORTED_RESTRICTIONS=$(gunzip -c "$BUF_PROTO_IMAGE" | jq -c '[.file[]
+      | select(.name == "com/digitalasset/canton/protocol/v30/topology.proto")
+      | .messageType[]
+      | select(.name == "Enums")
+      | .enumType[]
+      | select(.name == "TopologyMappingCode")
+      | .value[]
+      | select(.name | IN($ARGS.positional[]))]
+      | sort_by(.number)
+      | map(.name)' --args "${RESTRICTIONS_LIST[@]}")
   DELEGATION_RESTRICTIONS=$(cat <<EOF
 "can_sign_specific_mapings": {
-  "mappings": [
-    $(IFS=','; echo "\"${RESTRICTIONS_LIST[*]}\"" | sed 's/,/","/g')
-  ]
+  "mappings": $SORTED_RESTRICTIONS
 }
 EOF
 )
@@ -195,6 +207,10 @@ EOF
       esac
       shift 2
       ;;
+    --protocol-version)
+      PROTOCOL_VERSION="$2"
+      shift 2
+      ;;
     --output)
       OUTPUT="$2"
       if [[ -z "$OUTPUT" ]]; then
@@ -234,6 +250,12 @@ if [[ -n "$CANTON_TARGET_PUB_KEY" && -n "$TARGET_PUB_KEY" ]]; then
   usage
 fi
 
+# Ensure the protocol version is set
+if [[ -z "$PROTOCOL_VERSION" ]]; then
+  err "Error: --protocol-version must be set."
+  usage
+fi
+
 # Ensure at least one of them is set
 if [[ -z "$REVOKE_INTERMEDIATE_DELEGATION" && -z "$CANTON_TARGET_PUB_KEY" && -z "$TARGET_PUB_KEY" ]]; then
   err "Error: At least one of --canton-target-pub-key or --target-pub-key must be set."
@@ -259,7 +281,7 @@ echo "== Preparing Certificate =="
 if [[ -n "$REVOKE_INTERMEDIATE_DELEGATION" ]]; then
   TRANSACTION_TYPE="Revocation"
   # The transaction to be revoked is expected to be a serialized versioned "TopologyTransaction"
-  if ! TRANSACTION_TO_REVOKE=$(serialized_versioned_message_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.TopologyTransaction" < "$REVOKE_INTERMEDIATE_DELEGATION"); then
+  if ! TRANSACTION_TO_REVOKE=$(versioned_topology_transaction_to_json < "$REVOKE_INTERMEDIATE_DELEGATION"); then
     echo "Error: Failed to import canton delegation to be revoked: $REVOKE_INTERMEDIATE_DELEGATION"
     echo "Please ensure this is a valid namespaced delegation obtained from a Canton node."
     exit 1
@@ -331,7 +353,7 @@ fi
 
 echo "Namespace $TRANSACTION_TYPE Transaction: $NAMESPACE_TRANSACTION"
 # Serialize transaction and output it to a file
-serialize_topology_transaction "$NAMESPACE_TRANSACTION" > "$OUTPUT.prep"
+serialize_topology_transaction "$NAMESPACE_TRANSACTION" "$PROTOCOL_VERSION" > "$OUTPUT.prep"
 echo "Namespace $TRANSACTION_TYPE Transaction written to $OUTPUT.prep"
 # Compute the transaction hash and output it to a file
 compute_topology_transaction_hash < "$OUTPUT.prep" > "$OUTPUT.hash"

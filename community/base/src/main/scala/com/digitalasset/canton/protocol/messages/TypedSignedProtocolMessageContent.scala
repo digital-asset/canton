@@ -64,7 +64,7 @@ object TypedSignedProtocolMessageContent
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(
-      ProtocolVersion.v35
+      ProtocolVersion.v36
     )(v30.TypedSignedProtocolMessageContent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,

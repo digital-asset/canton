@@ -250,6 +250,17 @@ object FieldValidator {
     if (s.isEmpty) Left(missingField(fieldName))
     else ContractId.fromString(s).left.map(invalidField(fieldName, _))
 
+  def optionalPackageId(
+      s: Option[String],
+      fieldName: String,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Option[Ref.PackageId]] =
+    s match {
+      case None => Right(None)
+      case Some(value) => requirePackageId(value, fieldName).map(Some(_))
+    }
+
   def requireNonEmpty[M[_] <: Iterable[?], T](
       s: M[T],
       fieldName: String,

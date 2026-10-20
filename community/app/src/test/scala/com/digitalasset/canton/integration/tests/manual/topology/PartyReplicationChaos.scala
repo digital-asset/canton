@@ -265,6 +265,19 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
       hostingParticipants(from, party).map { case (id, _) => id } should contain(from.id)
     }
 
+    // The onboarding flag is cleared automatically by `from` in the background. Proposing the removal
+    // concurrently can lead to a serial mismatch that silently rejects the removal, so wait for the
+    // clearance to be observed by the party owner first.
+    clue("party offboarding")(s"onboarding flag of $party on ${from.id} is cleared") {
+      eventually(timeUntilSuccess = topologyChangeTimeout.asFiniteApproximation) {
+        partyOwner.topology.party_to_participant_mappings
+          .list(synchronizerId = daId, filterParty = party.filterString)
+          .flatMap(_.item.participants)
+          .filter(_.participantId == from.id)
+          .map(_.onboarding) shouldBe Seq(false)
+      }
+    }
+
     partyOwner.topology.party_to_participant_mappings
       .propose_delta(party, removes = List(from.id), store = daId)
       .discard

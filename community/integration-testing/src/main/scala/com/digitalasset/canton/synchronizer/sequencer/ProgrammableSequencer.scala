@@ -27,12 +27,12 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNode
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponses,
   SignedProtocolMessage,
   TypedSignedProtocolMessageContent,
 }
-import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
@@ -453,10 +453,10 @@ class ProgrammableSequencer(
 
   override def adminServices: Seq[ServerServiceDefinition] = baseSequencer.adminServices
 
-  override def isEnabled(member: Member)(implicit
+  override def isActive(member: Member)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
-    baseSequencer.isEnabled(member)
+    baseSequencer.isActive(member)
 
   /** Return the last timestamp of the containing block of the provided timestamp. This is needed to
     * determine the effective timestamp to observe in topology processing, required to produce a
@@ -589,7 +589,7 @@ object ProgrammableSequencer {
             .flatMap(
               _.toOpenEnvelope(
                 participant.crypto.pureCrypto,
-                SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion),
+                BaseTest.testedSynchronizerLimits,
                 BaseTest.testedProtocolVersion,
               ).value.protocolMessage match {
                 case SignedProtocolMessage(
@@ -654,28 +654,11 @@ object ProgrammableSequencer {
             .focus(_.block.testingInterceptor)
             .replace(Some(createAndStoreProgrammableSequencer(instanceName)))
           // the reference sequencer
-          if (external.sequencerType == "reference") {
-            import com.typesafe.config.{ConfigObject, ConfigValueFactory}
-            import pureconfig.ConfigCursor
-            // As we are performing message reordering in the post processing stage,
-            // we need to avoid the reference sequencer to batch messages,
-            // as otherwise we might reverse the order of two messages that end up in the same
-            // batch for which we established a particular order.
-            val amendedCursor = external.config.asConfigValue
-              .map {
-                case obj: ConfigObject =>
-                  val updatedValue =
-                    obj.withValue("max-block-size", ConfigValueFactory.fromAnyRef(1))
-                  // Wrap it back into a cursor
-                  ConfigCursor.apply(updatedValue, List.empty)
-                case other =>
-                  // Handle cases where the cursor isn't pointing at an object
-                  external.config
-              }
-              .getOrElse(sys.error("Unable to replace config value for reference sequencer"))
-            cfg.focus(_.config).replace(amendedCursor)
-          } else cfg
-
+          // As we are performing message reordering in the post processing stage,
+          // we need to avoid the reference sequencer to batch messages,
+          // as otherwise we might reverse the order of two messages that end up in the same
+          // batch for which we established a particular order.
+          cfg.focus(_.config).replace(external.config.focus(_.maxBlockSize).replace(1))
         case bft: SequencerConfig.BftSequencer =>
           bft
             .focus(_.block.testingInterceptor)

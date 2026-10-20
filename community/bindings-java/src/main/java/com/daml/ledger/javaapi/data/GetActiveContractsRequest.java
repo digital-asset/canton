@@ -14,16 +14,28 @@ public final class GetActiveContractsRequest {
 
   @NonNull private final Long activeAtOffset;
 
+  private final boolean includeIncompleteReassignments;
+
   public GetActiveContractsRequest(@NonNull EventFormat eventFormat, @NonNull Long activeAtOffset) {
+    this(eventFormat, activeAtOffset, false);
+  }
+
+  public GetActiveContractsRequest(
+      @NonNull EventFormat eventFormat,
+      @NonNull Long activeAtOffset,
+      boolean includeIncompleteReassignments) {
     this.eventFormat = eventFormat;
     this.activeAtOffset = activeAtOffset;
+    this.includeIncompleteReassignments = includeIncompleteReassignments;
   }
 
   public static GetActiveContractsRequest fromProto(
       StateServiceOuterClass.GetActiveContractsRequest request) {
     if (request.hasEventFormat()) {
       return new GetActiveContractsRequest(
-          EventFormat.fromProto(request.getEventFormat()), request.getActiveAtOffset());
+          EventFormat.fromProto(request.getEventFormat()),
+          request.getActiveAtOffset(),
+          request.getIncludeIncompleteReassignments());
     } else {
       throw new IllegalArgumentException("Request has no eventFormat defined.");
     }
@@ -33,6 +45,7 @@ public final class GetActiveContractsRequest {
     return StateServiceOuterClass.GetActiveContractsRequest.newBuilder()
         .setEventFormat(this.eventFormat.toProto())
         .setActiveAtOffset(this.activeAtOffset)
+        .setIncludeIncompleteReassignments(this.includeIncompleteReassignments)
         .build();
   }
 
@@ -41,18 +54,23 @@ public final class GetActiveContractsRequest {
     return activeAtOffset;
   }
 
+  public boolean getIncludeIncompleteReassignments() {
+    return includeIncompleteReassignments;
+  }
+
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
     if (o == null || getClass() != o.getClass()) return false;
     GetActiveContractsRequest that = (GetActiveContractsRequest) o;
-    return Objects.equals(eventFormat, that.eventFormat)
+    return includeIncompleteReassignments == that.includeIncompleteReassignments
+        && Objects.equals(eventFormat, that.eventFormat)
         && Objects.equals(activeAtOffset, that.activeAtOffset);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(eventFormat, activeAtOffset);
+    return Objects.hash(eventFormat, activeAtOffset, includeIncompleteReassignments);
   }
 
   @Override
@@ -63,6 +81,8 @@ public final class GetActiveContractsRequest {
         + ", activeAtOffset='"
         + activeAtOffset
         + '\''
+        + ", includeIncompleteReassignments="
+        + includeIncompleteReassignments
         + '}';
   }
 }

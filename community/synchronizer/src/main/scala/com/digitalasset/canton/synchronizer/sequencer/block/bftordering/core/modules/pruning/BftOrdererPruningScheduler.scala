@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.scheduler.{HasPruningSchedulerStore, ScheduleRefresher}
 import com.digitalasset.canton.store.PruningSchedulerStore
@@ -15,7 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Pruning
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 class BftOrdererPruningScheduler(
     store: BftOrdererPruningSchedulerStore[PekkoEnv],
@@ -31,12 +32,9 @@ class BftOrdererPruningScheduler(
 
   override protected def pruningSchedulerStore: PruningSchedulerStore = store
 
-  override def start()(implicit traceContext: TraceContext): Future[Unit] =
+  override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
-      scheduleO <- store
-        .getBftOrdererSchedule()
-        .futureUnlessShutdown()
-        .failOnShutdownToAbortException("BftOrdererPruningSchedule")
+      scheduleO <- store.getBftOrdererSchedule().futureUnlessShutdown()
     } yield scheduleO.foreach(schedule =>
       pruningModuleRef.asyncSend(Pruning.StartPruningSchedule(schedule))
     )
@@ -44,34 +42,29 @@ class BftOrdererPruningScheduler(
   override def stop()(implicit traceContext: TraceContext): Unit =
     pruningModuleRef.asyncSend(Pruning.CancelPruningSchedule)
 
-  override def reactivateSchedulerIfActive()(implicit traceContext: TraceContext): Future[Unit] = {
+  override def reactivateSchedulerIfActive()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
     stop()
     start()
   }
 
   def setBftOrdererSchedule(schedule: BftOrdererPruningSchedule)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = updateScheduleAndReactivateIfActive(
-    store
-      .setBftOrdererSchedule(schedule)
-      .futureUnlessShutdown()
-      .failOnShutdownToAbortException("BftOrdererPruningSchedule")
+  ): FutureUnlessShutdown[Unit] = updateScheduleAndReactivateIfActive(
+    store.setBftOrdererSchedule(schedule).futureUnlessShutdown()
   )
 
   def getBftOrdererSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[BftOrdererPruningSchedule]] = store
-    .getBftOrdererSchedule()
-    .futureUnlessShutdown()
-    .failOnShutdownToAbortException("BftOrdererPruningSchedule")
+  ): FutureUnlessShutdown[Option[BftOrdererPruningSchedule]] =
+    store.getBftOrdererSchedule().futureUnlessShutdown()
 
   def updateMinBlocksToKeep(
       minBlocksToKeep: Int
-  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      _updated <- store
-        .updateMinBlocksToKeep(minBlocksToKeep)
-        .failOnShutdownToAbortException("BftOrdererPruningSchedulerStore.updateMinBlocksToKeep")
+      _updated <- store.updateMinBlocksToKeep(minBlocksToKeep)
       _reactivated <- reactivateSchedulerIfActiveET()
     } yield ()
 }

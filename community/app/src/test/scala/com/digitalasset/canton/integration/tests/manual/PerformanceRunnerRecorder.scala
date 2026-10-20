@@ -20,7 +20,6 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{LocalSequencerReference, ParticipantReference}
 import com.digitalasset.canton.integration.*
@@ -314,7 +313,12 @@ trait PerformanceRunnerRecorder
               .foreach { case ((mediator, sequencer), index) =>
                 sequencer.topology.transactions
                   .load(
-                    mediator.topology.transactions.identity_transactions(),
+                    // Mediators no longer store their identity transactions in an authorized store,
+                    // so `identity_transactions()` would return nothing: generate them for the
+                    // synchronizer's protocol version.
+                    mediator.topology.transactions.generate_onboarding_transactions(
+                      sequencer.synchronizer_parameters.static.get().protocolVersion
+                    ),
                     synchronizer1Id,
                     ForceFlag.AlienMember,
                   )
@@ -638,16 +642,4 @@ class BftSequencerPerformanceRunnerRecorder(
       shouldBenchmarkBftSequencer = true,
     )
   )
-}
-
-class ReferenceSequencerPerformanceRunnerRecorder extends PerformanceRunnerRecorder {
-  override protected val referenceBlockSequencerPlugin: Option[UseReferenceBlockSequencer[?]] =
-    Some(
-      new UseReferenceBlockSequencer[DbConfig.Postgres](
-        loggerFactory,
-        postgres = Some(postgresPlugin),
-      )
-    )
-
-  referenceBlockSequencerPlugin.foreach(registerPlugin(_))
 }
