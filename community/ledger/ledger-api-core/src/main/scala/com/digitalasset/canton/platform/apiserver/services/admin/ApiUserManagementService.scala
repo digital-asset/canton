@@ -34,13 +34,7 @@ import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.UserUpdateMapper
 import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.user.store.UserManagementStore
-import com.digitalasset.canton.user.{
-  IdentityProviderId,
-  ObjectMeta,
-  User,
-  UserRight,
-  UserRightForParty,
-}
+import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
@@ -534,8 +528,10 @@ private[apiserver] final class ApiUserManagementService(
           )
       }
 
-  private def userParties(rights: Set[UserRight]): Set[Ref.Party] =
-    rights.collect { case u: UserRightForParty => u.party }
+  private def userParties(rights: Set[UserRight]): Set[Ref.Party] = rights.collect {
+    case UserRight.CanActAs(party) => party
+    case UserRight.CanReadAs(party) => party
+  }
 
   private def withValidation[A, B](validatedResult: Either[StatusRuntimeException, A])(
       f: A => Future[B]

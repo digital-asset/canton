@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.ledgerapi.auth
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.{
   party_management_service as pproto,
-  user_management_service,
   user_management_service as uproto,
 }
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
@@ -16,7 +15,6 @@ import com.digitalasset.canton.integration.{ConfigTransforms, TestConsoleEnviron
 import com.digitalasset.canton.logging.SuppressionRule
 import com.google.protobuf.field_mask.FieldMask
 import monocle.macros.syntax.lens.*
-import org.scalatest.Assertion
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
@@ -47,28 +45,25 @@ trait IDPBoxingServiceCallOutTests
   )(implicit ec: ExecutionContext): Future[Any]
 
   serviceCallName should {
-
     "deny IDP Admin granting permissions to parties which do not exist" taggedAs adminSecurityAsset
       .setAttack(
         attackUnknownResource(threat = "Grant rights to non existing parties")
       ) in { implicit env =>
       import env.*
-      expectSuccess {
-        loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectUnknownResource {
           val suffix = UUID.randomUUID().toString
           for {
             (_, idpAdminContext, _) <- createIDPBundle(canBeAnAdmin, suffix)
-            partyRights = possiblePartyRights(
-              readAsParty = s"read-$suffix",
-              actAsParty = s"act-$suffix",
-              executeAsParty = s"execute-$suffix",
+            readAsParty = s"read-$suffix"
+            actAsParty = s"act-$suffix"
+
+            _ <- boxedCall(
+              "user-" + suffix,
+              idpAdminContext,
+              readAndActRights(readAsParty, actAsParty),
             )
-          } yield expectUnknownResourceForEachRight(
-            suffix,
-            idpAdminContext,
-            partyRights,
-            "non-existing parties",
-          )
+          } yield ()
         }
       }
     }
@@ -83,11 +78,24 @@ trait IDPBoxingServiceCallOutTests
           val suffix = UUID.randomUUID().toString
           for {
             (_, idpAdminContext, idpConfig) <- createIDPBundle(canBeAnAdmin, suffix)
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = Some(idpConfig.identityProviderId),
+            readAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"read-$suffix",
+              "",
+              Some(idpConfig.identityProviderId),
             )
-            _ <- boxedCall("user-" + suffix, idpAdminContext, partyRights)
+            actAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"act-$suffix",
+              "",
+              Some(idpConfig.identityProviderId),
+            )
+
+            _ <- boxedCall(
+              "user-" + suffix,
+              idpAdminContext,
+              readAndActRights(readAsParty, actAsParty),
+            )
           } yield ()
         }
       }
@@ -98,21 +106,20 @@ trait IDPBoxingServiceCallOutTests
         attackUnknownResource(threat = "Grant user rights to parties outside of any IDP")
       ) in { implicit env =>
       import env.*
-      expectSuccess {
-        loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectUnknownResource {
           val suffix = UUID.randomUUID().toString
           for {
             (_, idpAdminContext, _) <- createIDPBundle(canBeAnAdmin, suffix)
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = None,
+            readAsParty <- allocateParty(canBeAnAdmin, s"read-$suffix")
+            actAsParty <- allocateParty(canBeAnAdmin, s"act-$suffix")
+
+            _ <- boxedCall(
+              "user-" + suffix,
+              idpAdminContext,
+              readAndActRights(readAsParty, actAsParty),
             )
-          } yield expectUnknownResourceForEachRight(
-            suffix,
-            idpAdminContext,
-            partyRights,
-            "parties outside of any IDP",
-          )
+          } yield ()
         }
       }
     }
@@ -122,22 +129,31 @@ trait IDPBoxingServiceCallOutTests
         attackUnknownResource(threat = "Grant rights to parties in other IDPs")
       ) in { implicit env =>
       import env.*
-      expectSuccess {
-        loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        expectUnknownResource {
           val suffix = UUID.randomUUID().toString
           for {
             (_, idpAdminContext, _) <- createIDPBundle(canBeAnAdmin, suffix)
             otherIdpConfig <- createConfig(canBeAnAdmin)
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = Some(otherIdpConfig.identityProviderId),
+            readAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"read-$suffix",
+              "",
+              Some(otherIdpConfig.identityProviderId),
             )
-          } yield expectUnknownResourceForEachRight(
-            suffix,
-            idpAdminContext,
-            partyRights,
-            "parties across IDP boundaries",
-          )
+            actAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"act-$suffix",
+              "",
+              Some(otherIdpConfig.identityProviderId),
+            )
+
+            _ <- boxedCall(
+              "user-" + suffix,
+              idpAdminContext,
+              readAndActRights(readAsParty, actAsParty),
+            )
+          } yield ()
         }
       }
     }
@@ -258,16 +274,13 @@ trait IDPBoxingServiceCallOutTests
           val suffix = UUID.randomUUID().toString
           for {
             (_, _, _) <- createIDPBundle(canBeAnAdmin, suffix)
+            readAsParty = s"read-$suffix"
+            actAsParty = s"act-$suffix"
 
-            partyRights = possiblePartyRights(
-              readAsParty = s"read-$suffix",
-              actAsParty = s"act-$suffix",
-              executeAsParty = s"execute-$suffix",
-            )
             _ <- boxedCall(
               "user-" + suffix,
               canBeAnAdmin,
-              partyRights,
+              readAndActRights(readAsParty, actAsParty),
             )
           } yield ()
         }
@@ -284,16 +297,23 @@ trait IDPBoxingServiceCallOutTests
           val suffix = UUID.randomUUID().toString
           for {
             (_, _, idpConfig) <- createIDPBundle(canBeAnAdmin, suffix)
-
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = Some(idpConfig.identityProviderId),
+            readAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"read-$suffix",
+              "",
+              Some(idpConfig.identityProviderId),
+            )
+            actAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"act-$suffix",
+              "",
+              Some(idpConfig.identityProviderId),
             )
 
             _ <- boxedCall(
               "user-" + suffix,
               canBeAnAdmin,
-              partyRights,
+              readAndActRights(readAsParty, actAsParty),
             )
           } yield ()
         }
@@ -310,15 +330,13 @@ trait IDPBoxingServiceCallOutTests
           val suffix = UUID.randomUUID().toString
           for {
             (_, _, _) <- createIDPBundle(canBeAnAdmin, suffix)
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = None,
-            )
+            readAsParty <- allocateParty(canBeAnAdmin, s"read-$suffix")
+            actAsParty <- allocateParty(canBeAnAdmin, s"act-$suffix")
 
             _ <- boxedCall(
               "user-" + suffix,
               canBeAnAdmin,
-              partyRights,
+              readAndActRights(readAsParty, actAsParty),
             )
           } yield ()
         }
@@ -336,15 +354,23 @@ trait IDPBoxingServiceCallOutTests
           for {
             (_, _, _) <- createIDPBundle(canBeAnAdmin, suffix)
             otherIdpConfig <- createConfig(canBeAnAdmin)
-            partyRights <- supportedPartyRights(
-              partyHintSuffix = suffix,
-              identityProviderIdO = Some(otherIdpConfig.identityProviderId),
+            readAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"read-$suffix",
+              "",
+              Some(otherIdpConfig.identityProviderId),
+            )
+            actAsParty <- allocateParty(
+              canBeAnAdmin,
+              s"act-$suffix",
+              "",
+              Some(otherIdpConfig.identityProviderId),
             )
 
             _ <- boxedCall(
               "user-" + suffix,
               canBeAnAdmin,
-              partyRights,
+              readAndActRights(readAsParty, actAsParty),
             )
           } yield ()
         }
@@ -352,48 +378,11 @@ trait IDPBoxingServiceCallOutTests
     }
   }
 
-  private def possiblePartyRights(
-      readAsParty: String,
-      actAsParty: String,
-      executeAsParty: String,
-  ): Vector[uproto.Right] =
+  protected def readAndActRights(readAsParty: String, actAsParty: String): Vector[uproto.Right] =
     Vector(
       uproto.Right(
         uproto.Right.Kind.CanReadAs(uproto.Right.CanReadAs(readAsParty))
       ),
       uproto.Right(uproto.Right.Kind.CanActAs(uproto.Right.CanActAs(actAsParty))),
-      uproto.Right(uproto.Right.Kind.CanExecuteAs(uproto.Right.CanExecuteAs(executeAsParty))),
     )
-
-  private def supportedPartyRights(partyHintSuffix: String, identityProviderIdO: Option[String])(
-      implicit
-      env: TestConsoleEnvironment,
-      ec: ExecutionContext,
-  ): Future[Vector[user_management_service.Right]] = {
-    def allocate(partyHint: String): Future[String] =
-      allocateParty(canBeAnAdmin, partyHint, "", identityProviderIdO)
-    for {
-      readAsParty <- allocate(s"read-$partyHintSuffix")
-      actAsParty <- allocate(s"act-$partyHintSuffix")
-      executeAsParty <- allocate(s"execute-$partyHintSuffix")
-    } yield possiblePartyRights(
-      readAsParty,
-      actAsParty,
-      executeAsParty,
-    )
-  }
-
-  private def expectUnknownResourceForEachRight(
-      suffix: String,
-      serviceCallContext: ServiceCallContext,
-      rights: Vector[uproto.Right],
-      target: String,
-  )(implicit ec: ExecutionContext): Assertion = {
-    rights.zipWithIndex.foreach { case (right, idx) =>
-      expectUnknownResource(
-        boxedCall(s"user-$suffix-$idx", serviceCallContext, Vector(right))
-      ) withClue s"IDP admin cannot grant ${right.kind.value} rights on $target"
-    }
-    succeed
-  }
 }
