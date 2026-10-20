@@ -10,8 +10,8 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId, RequestId}
 import org.scalatest.wordspec.AnyWordSpec
 
-/** Tests the `crashAfterFailedValidation` participant parameter at its only crash site,
-  * [[CommitSet.createForTransaction]].
+/** Tests the `crashAfterFailedValidation` participant parameter on transactions, at their only
+  * crash site, [[CommitSet.createForTransaction]].
   *
   * ==Why the flag exists==
   *
@@ -56,8 +56,8 @@ import org.scalatest.wordspec.AnyWordSpec
   * expression through `SyncServiceSynchronizerDisconnect.UnrecoverableException`; changing the
   * wording here breaks it there.
   *
-  * Note that the transaction protocol is currently the only path honouring the flag. Reassignments
-  * ignore the activeness result in phase 7 altogether; see TODO(#34870).
+  * The flag is honoured by the transaction and the reassignment protocols. This test covers the
+  * transaction protocol.
   */
 class CrashAfterFailedValidationTest extends AnyWordSpec with BaseTest {
 
@@ -81,6 +81,7 @@ class CrashAfterFailedValidationTest extends AnyWordSpec with BaseTest {
       createdContracts = Map.empty,
       crashAfterFailedValidation = crashAfterFailedValidation,
       hostedOnboardingPartiesO = None,
+      activationsDeactivationsOrderO = None,
     )
 
   "createForTransaction" when {

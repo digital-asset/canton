@@ -13,8 +13,11 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{Activenes
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.InternalConsistencyChecker.ErrorWithInternalConsistencyCheck
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
+import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
+
+import scala.concurrent.ExecutionContext
 
 final case class TransactionValidationResult(
     updateId: UpdateId,
@@ -46,18 +49,27 @@ final case class TransactionValidationResult(
     validatedExternalTransactionHash: Option[Hash],
     crashAfterFailedValidation: Boolean,
     hostedOnboardingPartiesO: Option[HostedOnboardingParties],
+    activationsDeactivationsOrderFO: FutureUnlessShutdown[
+      Option[Map[LfContractId, Seq[ChangeType]]]
+    ],
 ) {
 
   def commitSet(
       requestId: RequestId
-  )(implicit loggingContext: ErrorLoggingContext): CommitSet =
-    CommitSet.createForTransaction(
-      activenessResult,
-      requestId,
-      consumedInputsOfHostedParties,
-      transient,
-      createdContracts,
-      crashAfterFailedValidation,
-      hostedOnboardingPartiesO,
-    )
+  )(implicit
+      loggingContext: ErrorLoggingContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[CommitSet] =
+    activationsDeactivationsOrderFO.map { activationsDeactivationsOrderO =>
+      CommitSet.createForTransaction(
+        activenessResult,
+        requestId,
+        consumedInputsOfHostedParties,
+        transient,
+        createdContracts,
+        crashAfterFailedValidation,
+        hostedOnboardingPartiesO,
+        activationsDeactivationsOrderO,
+      )
+    }
 }

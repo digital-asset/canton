@@ -17,10 +17,10 @@ import com.digitalasset.canton.platform.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.{AuthenticatedContractIdVersionV10, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.util.{ContractValidator, TestEngine}
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.*
-import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.{ContractInstanceCoder, FatContractInstance, Node}
 import com.digitalasset.daml.lf.value.Value
@@ -47,7 +47,7 @@ class DisclosedContractNormalizationTest
   private val testEngine =
     new TestEngine(
       packagePaths = Seq(UpgradingBaseTest.UpgradeV2),
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
 
@@ -135,7 +135,11 @@ class DisclosedContractNormalizationTest
       val commands = testEngine.validateCommand(command, alice, disclosedContracts = Seq(fat))
 
       val result = underTest
-        .interpret(commands, InterpretationConfig.Default, testEngine.randomHash())(
+        .interpret(
+          commands,
+          InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+          testEngine.randomHash(),
+        )(
           LoggingContextWithTrace(loggerFactory),
           ec,
         )

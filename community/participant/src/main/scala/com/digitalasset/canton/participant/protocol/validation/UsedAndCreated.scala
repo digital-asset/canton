@@ -37,7 +37,7 @@ private[protocol] final case class UsedAndCreated(
         contracts.consumedInputsOfHostedStakeholders.keySet -- contracts.maybeUnknown ++ contracts.created.keySet,
       lockMaybeUnknown =
         (contracts.consumedInputsOfHostedStakeholders.keySet intersect contracts.maybeUnknown) -- contracts.created.keySet,
-      needPriorState = Set.empty,
+      needPriorState = contracts.maybeCreated.keySet,
     )
 
     ActivenessSet(

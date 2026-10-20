@@ -242,7 +242,7 @@ object SequencedEventValidator extends HasLoggerName {
             event,
             ProtocolVersionValidation.NoValidation,
             DecompressionPolicy.MaxValueUnsafe,
-            SynchronizerLimits.max,
+            SynchronizerLimits.default,
           )
         )
       )

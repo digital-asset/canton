@@ -35,7 +35,7 @@ private[lf] final class TransactionConductor(
     val preparationTime: Time.Timestamp,
     val contractIdVersion: ContractIdVersion,
     val packageResolution: Map[Ref.PackageName, Ref.PackageId],
-    val limits: interpretation.Limits,
+    val limits: interpretation.LimitConfig,
     val logger: MachineLogger,
     val iterationsBetweenInterruptions: Long,
     val profile: Profile,
@@ -118,52 +118,86 @@ private[lf] final class TransactionConductor(
   // -----------------------------------------------------------------  ----------
 
   @scala.annotation.nowarn
-  def handleCommands(cmds: Seq[Command]): Upd.T[Unit] =
+  def handleCommands(cmds: Seq[Command], catchAll: Boolean = false): Upd.T[Unit] = for {
+    _ <- Upd.unit
+    _ = if (catchAll) ptx = ptx.beginTry
     // we use foldM to carefully control the order of evaluation:
     // each command is only handled once the previous one has actually run.
-    cmds
-      .foldM[Upd.T, SValue](SValue.SUnit)((_, cmd) =>
-        cmd match {
+    result <- cmds
+      .foldM[Upd.WithException, SValue](SValue.SUnit)((_, cmd) =>
+        setLastCommand(cmd) *> (cmd match {
           case Command.Create(templateId, argument: SValue.SRecord) =>
-            handleCommand(Question.Cmd.Create(templateId, argument))
+            handleCmd(Question.Cmd.Create(templateId, argument))
           case Command.ExerciseTemplate(
                 templateId,
                 SValue.SContractId(contractId),
                 choiceId,
                 argument,
               ) =>
-            handleCommand(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
+            handleCmd(Question.Cmd.ExerciseTemplate(templateId, contractId, choiceId, argument))
           case Command.ExerciseInterface(
                 interfaceId,
                 SValue.SContractId(contractId),
                 choiceId,
                 argument,
               ) =>
-            handleCommand(
+            handleCmd(
               Question.Cmd
                 .ExerciseInterface(interfaceId, contractId, choiceId, argument)
             )
           case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
-            handleCommand(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
+            handleCmd(Question.Cmd.ExerciseByKey(templateId, contractKey, choiceId, argument))
           case Command.CreateAndExercise(
                 templateId,
                 createArgument: SValue.SRecord,
                 choiceId,
                 choiceArgument,
               ) =>
-            handleCreateThenExercise(
-              Question.Cmd.Create(templateId, createArgument),
-              Question.Cmd.ExerciseTemplate(templateId, _, choiceId, choiceArgument),
-            )
+            handleCmd(Question.Cmd.Create(templateId, createArgument))
+              .flatMap {
+                case SValue.SContractId(cid) =>
+                  handleCmd(
+                    Question.Cmd.ExerciseTemplate(templateId, cid, choiceId, choiceArgument)
+                  )
+                case other =>
+                  throw SError.Crash(
+                    NameOf.qualifiedNameOfCurrentFunc,
+                    s"expected a contract id from create, got $other",
+                  )
+              }
           case Command.FetchTemplate(templateId, SValue.SContractId(contractId)) =>
-            handleCommand(Question.Cmd.FetchTemplate(templateId, contractId))
+            handleCmd(Question.Cmd.FetchTemplate(templateId, contractId))
           case Command.FetchInterface(interfaceId, SValue.SContractId(contractId)) =>
-            handleCommand(Question.Cmd.FetchInterface(interfaceId, contractId))
+            handleCmd(Question.Cmd.FetchInterface(interfaceId, contractId))
           case Command.FetchByKey(templateId, key) =>
-            handleCommand(Question.Cmd.FetchByKey(templateId, key))
-        }
+            handleCmd(Question.Cmd.FetchByKey(templateId, key))
+        })
       )
-      .map(_ => ())
+      .value
+    _ <- result match {
+      case Right(_) =>
+        if (catchAll) ptx = ptx.endTry
+        Upd.unit
+      case Left(excp) =>
+        if (catchAll)
+          ptx.rollbackTry match {
+            case Right(rolledBack) =>
+              ptx = rolledBack
+              Upd.unit
+            case Left(err) =>
+              Upd.raise(err)
+          }
+        else
+          raiseFailureWithStatus(excp)
+    }
+  } yield ()
+
+  private[this] var lastCommand: Option[Command] = None
+
+  private def setLastCommand(cmd: Command): Upd.WithException[Unit] = {
+    lastCommand = Some(cmd)
+    Upd.WithException.pure(())
+  }
 
   def finish: Either[SError.Crash, Result] = ptx.finish.map { case (tx, seeds) =>
     Result(
@@ -178,24 +212,6 @@ private[lf] final class TransactionConductor(
   /** Public seam: interpret a single ledger command, yielding a program to drive. */
   def handleCommand(cmd: Question.Cmd): Upd.T[SValue] =
     handleCmd(cmd).valueOrF(raiseFailureWithStatus(_))
-
-  /** Runs `create`, then feeds the resulting contract id to `exerciseOn` and runs that command.
-    * Used by tests that must set up a contract (e.g. a helper) before exercising it.
-    */
-  def handleCreateThenExercise(
-      create: Question.Cmd.Create,
-      exerciseOn: V.ContractId => Question.Cmd,
-  ): Upd.T[SValue] =
-    handleCmd(create)
-      .flatMap {
-        case SValue.SContractId(cid) => handleCmd(exerciseOn(cid))
-        case other =>
-          throw SError.Crash(
-            NameOf.qualifiedNameOfCurrentFunc,
-            s"expected a contract id from create, got $other",
-          )
-      }
-      .valueOrF(raiseFailureWithStatus(_))
 
   // ---------------------------------------------------------------------------
   // Host questions (Question.Update)
@@ -310,6 +326,8 @@ private[lf] final class TransactionConductor(
   private[lf] def transactionTrace(numOfCmds: Int): String = {
     def prettyTypeId(typeId: Ref.TypeConId): String =
       s"${typeId.packageId.take(8)}:${typeId.qualifiedName}"
+    def prettyCoid(coid: V.ContractId): String = coid.coid.take(10)
+    def prettyValue(v: SValue) = Pretty.prettyValue(false)(v.toUnnormalizedValue)
     val stringBuilder = new StringBuilder()
     def addLine(s: String): Unit = {
       val _ = stringBuilder.addAll("    ").addAll(s).addAll("\n")
@@ -329,6 +347,28 @@ private[lf] final class TransactionConductor(
       addLine("...")
     }
 
+    lastCommand
+      .map {
+        case Command.Create(tmplId, _) =>
+          s"in create command ${prettyTypeId(tmplId)}."
+        case Command.ExerciseTemplate(tmplId, coid, choiceId, _) =>
+          s"in exercise command ${prettyTypeId(tmplId)}:$choiceId on contract ${prettyCoid(coid.value)}."
+        case Command.ExerciseInterface(ifaceId, coid, choiceId, _) =>
+          s"in exercise command ${prettyTypeId(ifaceId)}:$choiceId on contract ${prettyCoid(coid.value)}."
+        case Command.ExerciseByKey(tmplId, key, choiceId, _) =>
+          s"in exercise-by-key command ${prettyTypeId(tmplId)}:$choiceId on key ${prettyValue(key)}."
+        case Command.FetchTemplate(tmplId, coid) =>
+          s"in fetch command ${prettyTypeId(tmplId)} on contract ${prettyCoid(coid.value)}."
+        case Command.FetchInterface(ifaceId, coid) =>
+          s"in fetch-by-interface command ${prettyTypeId(ifaceId)} on contract ${prettyCoid(coid.value)}."
+        case Command.FetchByKey(tmplId, key) =>
+          s"in fetch-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
+        case Command.CreateAndExercise(tmplId, _, choiceId, _) =>
+          s"in create-and-exercise command ${prettyTypeId(tmplId)}:$choiceId."
+        case Command.QueryNByKey(tmplId, _, key) =>
+          s"in query-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
+      }
+      .foreach(addLine)
     stringBuilder.result()
   }
 
@@ -731,21 +771,14 @@ private[lf] final class TransactionConductor(
 
     getIfLocalContract(coid) match {
       case Some((srcTmplId, srcSArg)) =>
-        ensureContractActive(coid, srcTmplId).flatMap { _ =>
-          if (srcTmplId == dstTmplId) {
-            contractInfoCache.get((coid, srcTmplId.packageId)) match {
-              case Some(contract) =>
-                Upd.pure((srcSArg, contract))
-              case None =>
-                throw SError.Crash(
-                  NameOf.qualifiedNameOfCurrentFunc,
-                  s"Contract info for local contract $coid with template ID $srcTmplId",
-                )
-            }
-          } else
-            for {
-              srcContractInfo <- getContractInfo(coid, srcTmplId, srcSArg)
-              result <- processSrcContract(
+        for {
+          _ <- ensureContractActive(coid, srcTmplId)
+          srcContractInfo <- getContractInfo(coid, srcTmplId, srcSArg)
+          result <-
+            if (srcTmplId == dstTmplId)
+              Upd.pure((srcSArg, srcContractInfo))
+            else
+              processSrcContract(
                 srcTmplId = srcTmplId,
                 srcPkgName = srcContractInfo.packageName,
                 srcMetadata = srcContractInfo.metadata,
@@ -754,8 +787,7 @@ private[lf] final class TransactionConductor(
                 forbidLocalContractIds = false,
                 forbidTrailingNones = true,
               )
-            } yield result
-        }
+        } yield result
       case None =>
         resolveLedgerContract(coid).flatMap { case (coinst, mbAuthenticator, forbidTrailingNones) =>
           processSrcContract(
@@ -1620,8 +1652,9 @@ private[lf] object TransactionConductor {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       interpretationConfig: interpretation.InterpretationConfig,
       contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
-      limits: interpretation.Limits = interpretation.Limits.Lenient,
+      limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      transactionTraceMaxLength: Int = 10,
   ): TransactionConductor =
     new TransactionConductor(
       compiledPackages = compiledPackages,
@@ -1639,6 +1672,7 @@ private[lf] object TransactionConductor {
         authorizationChecker,
       ),
       metricPlugins = metricPlugins,
+      transactionTraceMaxLength = transactionTraceMaxLength,
     )
 
   @VisibleForTesting
@@ -1650,8 +1684,8 @@ private[lf] object TransactionConductor {
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       interpretationConfig: interpretation.InterpretationConfig =
-        interpretation.InterpretationConfig.Default,
-      limits: interpretation.Limits = interpretation.Limits.Lenient,
+        interpretation.InterpretationConfig.DefaultForTesting,
+      limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
   ): TransactionConductor =
     apply(
       compiledPackages = compiledPackages,

@@ -149,10 +149,18 @@ template AssetRequest
     choice AcceptRequest : [ContractId Asset]
       with
         registryCid : ContractId Registry
+        maxPerBatch: Int
       controller issuer
         do
+          let qty = if quantity > maxPerBatch then maxPerBatch else quantity
+          let remaining = quantity - qty
+          _ <- if remaining > 0 then do
+              _ <- create AssetRequest with requester = requester, issuer = issuer, id = id, payload = payload, quantity = remaining, locations = locations
+              return ()
+            else
+              do return ()
           proposal <- exercise registryCid CreateProposal with requester
-          exercise proposal IssueAssets with ..
+          exercise proposal IssueAssets with id = id, payload = payload, quantity = qty, locations = locations
 
     choice GarbageCollectAssetRequest : ()
       with

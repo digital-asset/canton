@@ -267,7 +267,11 @@ final class SequencerWriterSourceTest
           },
           _.shouldBeCantonErrorCode(PayloadToEventTimeBoundExceeded),
         )
-        events <- store.readEvents(registeredAlice.memberId, alice, registeredAlice.registeredFrom)
+        events <- store.readEvents(
+          registeredAlice.memberId,
+          alice,
+          registeredAlice.registeredFrom.value,
+        )
       } yield events.events shouldBe empty
     }
   }
@@ -316,7 +320,11 @@ final class SequencerWriterSourceTest
           FutureUnlessShutdown.outcomeF(completeFlow())
         }
 
-        events <- store.readEvents(registeredAlice.memberId, alice, registeredAlice.registeredFrom)
+        events <- store.readEvents(
+          registeredAlice.memberId,
+          alice,
+          registeredAlice.registeredFrom.value,
+        )
       } yield {
         events.events should have size 1
         events.events.headOption.map(_.event).value should matchPattern {
@@ -369,12 +377,12 @@ final class SequencerWriterSourceTest
             events <- env.store.readEvents(
               registeredAlice.memberId,
               alice,
-              registeredAlice.registeredFrom,
+              registeredAlice.registeredFrom.value,
             )
             error = events.events.collectFirst {
               case Sequenced(
                     _,
-                    deliverError @ DeliverErrorStoreEvent(aliceId, _, _, _, _),
+                    deliverError @ DeliverErrorStoreEvent(_, _, _, _, _),
                     _,
                   ) =>
                 deliverError

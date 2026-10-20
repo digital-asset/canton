@@ -39,6 +39,16 @@ class TrafficEnforcementMetrics(
     )
   )
 
+  val prunedRows: Meter = metricsFactory.meter(
+    MetricInfo(
+      name = prefix :+ "pruned-rows",
+      summary = "Number of traffic enforcement rows pruned",
+      description = "The number of traffic enforcement rows pruned, labeled by table.",
+      qualification = Traffic,
+      labelsWithDescription = Map("table" -> "The pruned table."),
+    )
+  )
+
   val enforcementCheckDuration: Timer = metricsFactory.timer(inventory.enforcementCheckItem.info)
 
   val projectionTimestamp: Gauge[Long] = metricsFactory.gauge[Long](
@@ -70,6 +80,9 @@ class TrafficEnforcementMetrics(
     )
     decisions.mark()(labeled)
   }
+
+  def markPrunedRows(table: String, count: Int): Unit =
+    prunedRows.mark(count.toLong)(metricsContext.withExtraLabels("table" -> table))
 }
 
 class TrafficEnforcementInventory(parent: MetricName)(implicit inventory: HistogramInventory) {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.tea.projection.db
 
 import cats.data.EitherT
+import cats.syntax.applicativeError.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,9 +18,13 @@ import com.digitalasset.canton.tea.projection.db.TeaDbTrafficStore.TrafficUpdate
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   AccountState,
+  CorrelationAccount,
+  CorrelationKey,
   DeltaEvent,
   EventId,
   EventSource,
+  PruneCounts,
+  SubmissionCorrelation,
   TeaTrafficStore,
   TrafficDelta,
 }
@@ -30,7 +35,6 @@ import org.postgresql.util.PSQLState
 import java.sql.SQLException
 import scala.concurrent.ExecutionContext
 import scala.util.control.NoStackTrace
-import scala.util.{Failure, Success}
 
 /** Store for DB operations on traffic persistence.
   */
@@ -44,6 +48,66 @@ class TeaDbTrafficStore(
     with TeaTrafficStore {
   import storage.api.*
 
+  override def insertCorrelation(correlation: SubmissionCorrelation)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit] = {
+    val key = correlation.key
+    // A retry after a lost commit ack would report a false CorrelationConflict.
+    singleAttemptUpdate(insertCorrelationDBIO(correlation), "insert_correlation").flatMap {
+      insertedRows =>
+        EitherT.cond[FutureUnlessShutdown](
+          insertedRows == 1,
+          (),
+          TrafficEnforcementErrors.CorrelationConflict
+            .Reject(key.changeIdHash.toHexString, key.submissionId): TrafficEnforcementError,
+        )
+    }
+  }
+
+  private def insertCorrelationDBIO(correlation: SubmissionCorrelation) = {
+    val changeIdHash = correlation.key.changeIdHash.toHexString
+    val submissionId = correlation.key.submissionId
+    val accountId = correlation.account.toOption
+    val insertedAt = correlation.insertedAt
+    storage.profile match {
+      case _: Profile.Postgres =>
+        sqlu"""insert into par_traffic_enforcement_correlations
+               (change_id_hash, submission_id, account_id, timestamp)
+               values ($changeIdHash, $submissionId, $accountId, $insertedAt)
+               on conflict (change_id_hash, submission_id) do nothing"""
+      case _: Profile.H2 =>
+        sqlu"""merge into par_traffic_enforcement_correlations t
+               using (values ($changeIdHash, $submissionId, $accountId, $insertedAt)) as v(change_id_hash, submission_id, account_id, timestamp)
+               on t.change_id_hash = v.change_id_hash and t.submission_id = v.submission_id
+               when not matched then
+                 insert (change_id_hash, submission_id, account_id, timestamp)
+                 values (v.change_id_hash, v.submission_id, v.account_id, v.timestamp)"""
+    }
+  }
+
+  override def lookupCorrelation(key: CorrelationKey)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]] =
+    storage
+      .queryWithStatementTimeout(
+        lookupCorrelationDBIO(key),
+        databaseQueryTimeout,
+        "lookup_correlation",
+        maxRetries = 0,
+      )
+      .attemptT
+      .leftMap(TeaDbTrafficStore.classifyFailure)
+
+  private def lookupCorrelationDBIO(key: CorrelationKey) = {
+    val changeIdHash = key.changeIdHash.toHexString
+    sql"""select account_id, timestamp from par_traffic_enforcement_correlations
+          where change_id_hash = $changeIdHash and submission_id = ${key.submissionId}"""
+      .as[(Option[AccountId], CantonTimestamp)]
+      .map(_.headOption.map { case (accountId, insertedAt) =>
+        SubmissionCorrelation(key, CorrelationAccount.fromOption(accountId), insertedAt)
+      })
+  }
+
   override def persistTrafficDelta(
       accountId: AccountId,
       eventId: EventId,
@@ -54,26 +118,22 @@ class TeaDbTrafficStore(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]] = {
     val classify = TeaDbTrafficStore.classifyPersistFailure(accountId, trafficDelta)
-    EitherT(
-      storage
-        .queryAndUpdate(
-          persistDeltaDBIO(
-            accountId,
-            eventId,
-            eventSource,
-            trafficDelta,
-            timestamp = timestamp,
-          ).transactionally,
-          "persist traffic delta",
-          // Single attempt per call: the RPC client retries within its own deadline, reusing the
-          // same deduplication id.
-          maxRetries = 0,
-        )
-        .transformWithHandledAborted {
-          case Success(state) => FutureUnlessShutdown.pure(Right(state))
-          case Failure(ex) => FutureUnlessShutdown.pure(Left(classify(ex)))
-        }
-    )
+    storage
+      .queryAndUpdate(
+        persistDeltaDBIO(
+          accountId,
+          eventId,
+          eventSource,
+          trafficDelta,
+          timestamp = timestamp,
+        ).transactionally,
+        "persist traffic delta",
+        // Single attempt per call: the RPC client retries within its own deadline, reusing the
+        // same deduplication id.
+        maxRetries = 0,
+      )
+      .attemptT
+      .leftMap(classify)
   }
 
   private def insertEventDBIO(
@@ -220,15 +280,8 @@ class TeaDbTrafficStore(
 
   override def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]] = EitherT(
-    getBalanceAttempt(accountId).transformWithHandledAborted {
-      case Success(balance) => FutureUnlessShutdown.pure(Right(balance))
-      case Failure(exception) =>
-        FutureUnlessShutdown.pure(
-          Left(TeaDbTrafficStore.classifyFailure(exception))
-        )
-    }
-  )
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]] =
+    getBalanceAttempt(accountId).attemptT.leftMap(TeaDbTrafficStore.classifyFailure)
 
   /** Only one attempt per call (`maxRetries = 0`); retries are left to the RPC client, not the
     * store.
@@ -256,19 +309,29 @@ class TeaDbTrafficStore(
       .as[(AccountId, Long, Long, CantonTimestamp)]
       .map(_.headOption)
 
-  override def pruneEvents(beforeInclusive: CantonTimestamp)(implicit
+  override def prune(beforeInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int] = {
-    val prune =
-      sqlu"delete from par_traffic_enforcement_event where timestamp <= $beforeInclusive"
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, PruneCounts] = {
+    val prune = for {
+      events <- sqlu"delete from par_traffic_enforcement_event where timestamp <= $beforeInclusive"
+      correlations <-
+        sqlu"delete from par_traffic_enforcement_correlations where timestamp <= $beforeInclusive"
+    } yield PruneCounts(events = events, correlations = correlations)
 
-    EitherT(
-      storage.update(prune.transactionally, "prune_events", 0).transformWithHandledAborted {
-        case Success(state) => FutureUnlessShutdown.pure(Right(state))
-        case Failure(ex) => FutureUnlessShutdown.pure(Left(TeaDbTrafficStore.classifyFailure(ex)))
-      }
-    )
+    singleAttemptUpdate(prune.transactionally, "prune")
   }
+
+  /** Let the caller handle retries, like the other request-path operations. */
+  private def singleAttemptUpdate[A](
+      action: DBIOAction[A, NoStream, Effect.Write & Effect.Transactional],
+      operationName: String,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, A] =
+    storage
+      .update(action, operationName, maxRetries = 0)
+      .attemptT
+      .leftMap(TeaDbTrafficStore.classifyFailure)
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext

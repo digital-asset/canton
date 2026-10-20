@@ -8,7 +8,11 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CachingConfigs,
+  DefaultProcessingTimeouts,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -76,6 +80,7 @@ import com.digitalasset.canton.participant.store.{
   SyncPersistentState,
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.StringInterningView
@@ -233,6 +238,7 @@ final class UnassignmentProcessingStepsTest
       // Disable the session encryption key cache: it starts a scheduler that must be closed properly,
       // otherwise we see RejectedExecutionException warnings during shutdown.
       SessionEncryptionKeyCacheConfig(enabled = false),
+      CachingConfigs.defaultTransparencyCheckCache,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
       FutureSupervisor.Noop,
@@ -334,6 +340,7 @@ final class UnassignmentProcessingStepsTest
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       participantId: ParticipantId = submittingParticipant,
       reassignmentMetrics: ReassignmentMetrics = TestReassignmentMetrics(),
+      crashAfterFailedValidation: Boolean = true,
   ) =
     new UnassignmentProcessingSteps(
       sourceSynchronizer,
@@ -346,6 +353,9 @@ final class UnassignmentProcessingStepsTest
       clock,
       Source(testedProtocolVersion),
       reassignmentMetrics,
+      ParticipantNodeParameters
+        .forTestingOnly(testedProtocolVersion)
+        .copy(crashAfterFailedValidation = crashAfterFailedValidation),
       loggerFactory,
     )(executorService)
 
@@ -898,6 +908,7 @@ final class UnassignmentProcessingStepsTest
       ResourceUtil.withResourceM(
         new SessionKeyStoreWithInMemoryCache(
           SessionEncryptionKeyCacheConfig(),
+          CachingConfigs.defaultTransparencyCheckCache,
           timeouts,
           loggerFactory,
         )
@@ -918,7 +929,7 @@ final class UnassignmentProcessingStepsTest
               .decryptViews(
                 envelopes,
                 cryptoSnapshot,
-                SynchronizerLimits.defaultFor(testedProtocolVersion),
+                testedSynchronizerLimits,
                 sessionKeyStore,
               )
               .valueOrFailShutdown(
@@ -1241,6 +1252,60 @@ final class UnassignmentProcessingStepsTest
           ),
         )
       } yield succeed
+    }
+
+    val failingActivenessValidation = pendingUnassignment
+      .focus(_.unassignmentValidationResult.commonValidationResult.activenessResult)
+      .replace(mkActivenessResult(locked = Set(contract.contractId)))
+
+    def getCommitSetAndContractsToBeStoredAndEvent(steps: UnassignmentProcessingSteps): EitherT[
+      Future,
+      ReassignmentProcessingSteps.ReassignmentProcessorError,
+      steps.CommitAndStoreContractsAndPublishEvent,
+    ] =
+      steps
+        .getCommitSetAndContractsToBeStoredAndEventFactory(
+          NoOpeningErrors(signedContent),
+          reassignmentResult.verdict,
+          failingActivenessValidation,
+          state.pendingUnassignmentSubmissions,
+          crypto.pureCrypto,
+        )
+        .failOnShutdown
+
+    def failedActivenessAlarm(entries: Seq[LogEntry]): Assertion =
+      LogEntry.assertLogSeq(
+        Seq(
+          (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe s"Unassignment request ${pendingUnassignment.requestId} with failed activeness check is approved.",
+            ),
+            "failed activeness check",
+          )
+        )
+      )(entries)
+
+    "alarm and crash when the activeness check failed and crashAfterFailedValidation is set" in {
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        getCommitSetAndContractsToBeStoredAndEvent(
+          createUnassignmentProcessingSteps(crashAfterFailedValidation = true)
+        ).value.failed.map(_ shouldBe a[RuntimeException]),
+        failedActivenessAlarm,
+      )
+    }
+
+    "alarm but commit when the activeness check failed and crashAfterFailedValidation is not set" in {
+      for {
+        result <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          valueOrFail(
+            getCommitSetAndContractsToBeStoredAndEvent(
+              createUnassignmentProcessingSteps(crashAfterFailedValidation = false)
+            )
+          )("get commit set and contract to be stored and event"),
+          failedActivenessAlarm,
+        )
+      } yield result.commitSet.nonEmpty shouldBe true
     }
 
     "don't commit when multi-synchronizer is not enabled" in {

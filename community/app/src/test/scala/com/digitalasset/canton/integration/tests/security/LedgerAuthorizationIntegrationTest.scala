@@ -237,7 +237,7 @@ trait LedgerAuthorizationIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
           testSubmissionServiceOverrideO = Some(submissionService),
@@ -2122,11 +2122,7 @@ trait LedgerAuthorizationIntegrationTest
 
 class LedgerAuthorizationReferenceIntegrationTestDefault
     extends LedgerAuthorizationIntegrationTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.H2](
-      loggerFactory
-    )
-  )
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 

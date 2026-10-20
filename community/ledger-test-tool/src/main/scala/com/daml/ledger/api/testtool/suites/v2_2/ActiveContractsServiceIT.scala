@@ -86,6 +86,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             ),
             activeAtOffset = end,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .map(_.filter(_.offset > offsetAtTestStart))
@@ -861,6 +862,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
                 ),
                 activeAtOffset = end,
                 streamContinuationToken = None,
+                includeIncompleteReassignments = false,
               )
             )
             .map(_.filter(_.offset > offsetAtTestStart))
@@ -940,6 +942,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = offset1,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       _ = assertEquals("acs1", acs1.toSet, Set(c1))
@@ -950,6 +953,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = offset2,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       _ = assertEquals("ACS at the second offset", acs2.toSet, Set(c1, c2))
@@ -986,6 +990,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = anOffset,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       _ = assertEquals("acs valid_at at pruning offset", acs.toSet, Set(c1))
@@ -1023,6 +1028,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = offset1,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(
@@ -1052,6 +1058,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = -1L,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(
@@ -1083,6 +1090,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             eventFormat = eventFormat,
             activeAtOffset = offsetBeyondLedgerEnd,
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(
@@ -1211,6 +1219,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(2),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       (dummy, dummyWithParam, dummyFactory) <- createDummyContracts(party, ledger)
@@ -1222,6 +1231,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(2),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       secondActiveContractsPage <- ledger
@@ -1231,6 +1241,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(2),
             pageToken = firstActiveContractsPage.nextPageToken,
+            includeIncompleteReassignments = false,
           )
         )
       singleActiveContractsPage <- ledger
@@ -1240,6 +1251,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(3),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       end <- ledger.currentEnd()
@@ -1250,6 +1262,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = Some(end),
             maxPageSize = Some(2),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
       secondActiveContractsPageWithActiveAt <- ledger
@@ -1259,6 +1272,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = Some(end),
             maxPageSize = Some(2),
             pageToken = firstActiveContractsPageWithActiveAt.nextPageToken,
+            includeIncompleteReassignments = false,
           )
         )
 
@@ -1357,6 +1371,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(2),
             pageToken = Some(invalidToken),
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(
@@ -1385,6 +1400,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(0),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(
@@ -1413,6 +1429,7 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
             activeAtOffset = None,
             maxPageSize = Some(10000000),
             pageToken = None,
+            includeIncompleteReassignments = false,
           )
         )
         .mustFailWith(

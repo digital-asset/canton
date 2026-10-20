@@ -130,7 +130,8 @@ trait DistributedStatusIntegrationTest
   }
 }
 
-class DistributedStatusBftOrderingIntegrationTestPostgres extends DistributedStatusIntegrationTest {
+final class DistributedStatusBftOrderingIntegrationTestPostgres
+    extends DistributedStatusIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

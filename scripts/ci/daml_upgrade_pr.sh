@@ -14,7 +14,7 @@ CANTON_DAML_VERSION=$(fetch_daml_version $PWD)
 info "Current Daml version: \"$CANTON_DAML_VERSION\""
 DPM_REGISTRY=$(fetch_dpm_registry $PWD)
 
-NEWEST_DAML_VERSION=$(fetch_newest_daml_version)
+NEWEST_DAML_VERSION=$(fetch_newest_daml_version) || exit 1
 info "Newest Daml version: \"$NEWEST_DAML_VERSION\""
 
 # change branch

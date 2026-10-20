@@ -85,7 +85,6 @@ class PostgresDataSourceStorageBackend(
 
   override def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
-      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit],
   ): DataSource = {
     import DataSourceStorageBackendImpl.exe

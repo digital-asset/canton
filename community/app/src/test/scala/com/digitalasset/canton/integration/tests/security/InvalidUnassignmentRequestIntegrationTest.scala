@@ -100,7 +100,7 @@ class InvalidUnassignmentRequestIntegrationTest
           participant2,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )

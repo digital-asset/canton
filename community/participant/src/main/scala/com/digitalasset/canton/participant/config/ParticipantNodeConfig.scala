@@ -131,8 +131,15 @@ final case class ParticipantNodeConfig(
       .modify(ReplicationConfig.withDefaultO(storage, _))
 }
 
-/** Participant features configuration */
-final case class ParticipantFeaturesConfig()
+/** Participant features configuration
+  *
+  * @param deprecated
+  *   Feature flags to temporarily re-enable endpoints and request fields that were deprecated in an
+  *   earlier release and are disabled by default in this one.
+  */
+final case class ParticipantFeaturesConfig(
+    deprecated: DeprecatedApiConfig = DeprecatedApiConfig()
+)
 
 /** Configuration to connect the console to a participant running remotely.
   *
@@ -392,7 +399,7 @@ final case class ParticipantNodeParameterConfig(
     caching: CachingConfigs = CachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
-      ParticipantProtocolVersion(ProtocolVersion.v35)
+      ParticipantProtocolVersion(ProtocolVersion.v36)
     ),
     devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,

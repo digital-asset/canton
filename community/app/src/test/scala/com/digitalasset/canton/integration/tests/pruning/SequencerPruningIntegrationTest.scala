@@ -7,6 +7,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.console.{LocalParticipantReference, SequencerReference}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
@@ -16,7 +17,9 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.Database
+import com.digitalasset.canton.synchronizer.sequencer.SequencerMemberStatus.Active
 import com.digitalasset.canton.synchronizer.sequencer.{
+  SequencerMemberStatus,
   SequencerPruningStatus,
   SequencerReaderConfig,
 }
@@ -71,7 +74,13 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   ): Option[CantonTimestamp] =
     status.members
       .filterNot(_.member == participantId)
-      .flatMap(_.lastAcknowledged.toList)
+      .flatMap {
+        case SequencerMemberStatus.Onboarding(_) => Nil
+        case SequencerMemberStatus.Active(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+        case SequencerMemberStatus.Disabled(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+      }
       .minOption
 
   private def onboardParticipant(participant: LocalParticipantReference)(implicit
@@ -111,8 +120,7 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
     logger.info(s"Waiting for acknowledgement bound at $acknowledgementBound")
     eventually(timeUntilSuccess = 60.seconds) {
       val status = sequencer.pruning.status()
-      val members =
-        status.members.filter(_.enabled)
+      val members = status.members.collect { case m: Active => m }
 
       forAll(members) { member =>
         assert(member.lastAcknowledged.exists(_ >= acknowledgementBound))
@@ -222,8 +230,8 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
       for {
         earliestAck <- earliestAckExcludingParticipant(status, participant3.id)
         ackParticipant3 <- status.members.collectFirst {
-          case memberStatus if memberStatus.member == participant3.id =>
-            memberStatus.safePruningTimestamp
+          case member: Active if member.member == participant3.id =>
+            member.safePruningTimestamp
         }
       } yield {
         assert(ackParticipant3.isBefore(earliestAck))
@@ -302,11 +310,17 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
 
     // move past the default retention period
     environment.simClock.value.advanceTo(pastDefaultRetentionTimestamp)
+    TestUtils.waitForTargetTimeOnSynchronizerNode(environment.simClock.value.now, logger)(
+      sequencer1
+    )
 
     // do some more stuff and move forward to convince some acks to occur
     participant1.health.ping(participant2)
     environment.simClock.value.advance(
       sequencerClientAcknowledgementInterval.asJava.multipliedBy(2)
+    )
+    TestUtils.waitForTargetTimeOnSynchronizerNode(environment.simClock.value.now, logger)(
+      sequencer1
     )
 
     // make sure we're all ahead of this default retention period

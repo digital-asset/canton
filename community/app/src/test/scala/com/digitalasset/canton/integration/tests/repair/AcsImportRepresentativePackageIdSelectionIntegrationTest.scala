@@ -471,6 +471,7 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
         activeAtOffset = ledgerEndOffset,
         eventFormat = Some(queryEventFormat),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
       .asJson
       .toString()

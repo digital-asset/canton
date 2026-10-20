@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
@@ -234,6 +235,7 @@ class ExampleTransactionConformanceTest
         factory.cryptoOps,
         TestContractHasher.Async,
         loggerFactory,
+        CommonMockMetrics.transactionViewMetrics,
       )
 
     def reInterpret(
@@ -386,7 +388,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "reject views with tampered external-call metadata during reconstruction" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reject views with tampered external-call metadata during reconstruction" in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -422,7 +424,7 @@ class ExampleTransactionConformanceTest
           contractOfId = contractOfId,
           maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
-          protocolLimits = defaultProtocolLimits,
+          protocolLimits = testedTransactionLimits,
         )
 
         for {
@@ -457,7 +459,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "aggregate visible external-call results for replay" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "aggregate visible external-call results for replay" in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -495,7 +497,7 @@ class ExampleTransactionConformanceTest
           contractOfId = contractOfId,
           maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
-          protocolLimits = defaultProtocolLimits,
+          protocolLimits = testedTransactionLimits,
         )
 
         def treeWithCheckingParties(

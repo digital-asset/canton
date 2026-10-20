@@ -568,7 +568,7 @@ private object MutableCacheBackedContractStoreRaceTests {
           .getOrElse(fail(s"Failed creating contract ${event.contract.contractId}"))
       contractStore.participantContractStore
         .storeContracts(Seq(contract))
-        .failOnShutdownToAbortException("update")
+        .onShutdown(fail("update"))
         .map(_ => ())
     } else Future.unit
 }

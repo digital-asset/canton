@@ -82,8 +82,6 @@ private[engine] final class Preprocessor(
       forbidLocalContractIds = forbidLocalContractIds,
     )
 
-  val transactionPreprocessor = new TransactionPreprocessor(commandPreprocessor)
-
   /** Translates the LF value `v0` of type `ty0` to a speedy value. Fails if the nesting is too deep
     * or if v0 does not match the type `ty0`. Assumes ty0 is a well-formed serializable typ.
     */
@@ -180,7 +178,10 @@ private[engine] final class Preprocessor(
         case ReplayCommand.FetchByKey(templateId, _) => List(templateId)
       }
     safelyRun(pullPackage(templateAndInterfaceIds)) {
-      commandPreprocessor.unsafePreprocessReplayCommand(cmd)
+      commandPreprocessor.unsafePreprocessReplayCommand(
+        cmd,
+        extendLocalIdForbiddanceToRelativeV2 = true,
+      )
     }
   }
 
@@ -190,10 +191,43 @@ private[engine] final class Preprocessor(
   ): Result[ImmArray[speedy.Command]] =
     safelyRun(
       pullPackage(
-        tx.nodes.values.collect { case action: Node.Action => action.templateId }
+        tx.nodes.values.flatMap {
+          case exe: Node.Exercise => exe.templateId :: exe.interfaceId.toList
+          case action: Node.Action => List(action.templateId)
+          case _: Node.Rollback => Nil
+        }
       )
     ) {
-      transactionPreprocessor.unsafeTranslateTransactionRoots(tx)
+      tx.roots.map { id =>
+        val cmd = tx.nodes.get(id) match {
+          case Some(create: Node.Create) =>
+            ReplayCommand.Create(create.templateId, create.arg)
+          case Some(exe: Node.Exercise) =>
+            exe.keyOpt match {
+              case Some(key) if exe.byKey =>
+                ReplayCommand.ExerciseByKey(
+                  exe.templateId,
+                  key.globalKey.key,
+                  exe.choiceId,
+                  exe.chosenValue,
+                )
+              case _ =>
+                ReplayCommand.Exercise(
+                  exe.templateId,
+                  exe.interfaceId,
+                  exe.targetCoid,
+                  exe.choiceId,
+                  exe.chosenValue,
+                )
+            }
+          case _ =>
+            throw Error.Preprocessing.RootNode(id, s"root $id is not a create or exercise node")
+        }
+        commandPreprocessor.unsafePreprocessReplayCommand(
+          cmd,
+          extendLocalIdForbiddanceToRelativeV2 = false,
+        )
+      }
     }
 
   def preprocessInterfaceView(

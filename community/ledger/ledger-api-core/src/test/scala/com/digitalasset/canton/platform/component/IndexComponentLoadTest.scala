@@ -304,6 +304,7 @@ trait IndexComponentLoadTestBase
         activeAt = ledgerEndOffset,
         rangeInfo = AcsRangeInfo.empty,
         configOverrides = None,
+        includeIncompleteReassignments = true,
       )
       .zipWithIndex
       .runWith(Sink.last)
@@ -339,6 +340,7 @@ trait IndexComponentLoadTestBase
           Some(pageSize.toLong),
         ),
         configOverrides = None,
+        includeIncompleteReassignments = true,
       )
       .runWith(Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]])
       .flatMap { page =>

@@ -287,12 +287,8 @@ object FutureUnlessShutdownImpl {
     ): Future[A] =
       CantonGrpcUtil.shutdownAsGrpcError(self)
 
-    /** consider using [[failOnShutdownToAbortException]] unless you need a specific exception. */
     def failOnShutdownTo(t: => Throwable)(implicit ec: ExecutionContext): Future[A] =
-      unwrap.flatMap {
-        case UnlessShutdown.Outcome(result) => Future.successful(result)
-        case UnlessShutdown.AbortedDueToShutdown => Future.failed(t)
-      }
+      onShutdown(throw t)
 
     def isCompleted: Boolean =
       unwrap.isCompleted
@@ -494,6 +490,14 @@ object FutureUnlessShutdownImpl {
   implicit class EitherTOnShutdownSyntax[A, B](
       private val eitherT: EitherT[FutureUnlessShutdown, A, B]
   ) extends AnyVal {
+
+    /** Converts [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]]s into an
+      * internal exception so that shutdowns can tunnel through APIs that expect a plain
+      * [[scala.concurrent.Future]] Must be used together with
+      * [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown.recoverFromAbortException]] to turn
+      * the internal exception back into
+      * [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]].
+      */
     def failOnShutdownToAbortException[C >: A, D >: B](action: String)(implicit
         ec: ExecutionContext
     ): EitherT[Future, C, D] =

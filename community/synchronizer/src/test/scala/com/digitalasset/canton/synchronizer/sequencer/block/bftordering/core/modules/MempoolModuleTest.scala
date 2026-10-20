@@ -59,11 +59,13 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       ): Unit =
         msg match {
           case SequencerNode.RequestAccepted => fail("the request should fail")
-          case SequencerNode.RequestRejected(msg) if msg.contains(rejectionMessageSubstring) => ()
-          case SequencerNode.RequestRejected(msg) =>
+          case SequencerNode.RequestRejected(reason)
+              if reason.rejectionMessage.contains(rejectionMessageSubstring) =>
+            ()
+          case SequencerNode.RequestRejected(reason) =>
             fail(
               s"the request should fail with a message containing '$rejectionMessageSubstring' " +
-                s"but it failed with '$msg'"
+                s"but it failed with '${reason.rejectionMessage}'"
             )
           case other => fail(s"unexpected message received: $other")
         }

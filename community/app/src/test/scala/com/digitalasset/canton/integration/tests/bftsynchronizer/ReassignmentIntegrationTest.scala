@@ -12,6 +12,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
+import com.digitalasset.canton.integration.util.AutomaticAssignment
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -35,6 +36,7 @@ final class ReassignmentIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P5S4M4_Manual
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
 
   protected val sequencerGroups: MultiSynchronizer = MultiSynchronizer(
@@ -185,7 +187,6 @@ final class ReassignmentIntegrationTest
           active = mediatorsD2b.map(_.id),
           observers = Seq.empty,
           group = NonNegativeInt.one,
-          signedBy = Some(node.fingerprint),
         )
       )
 
@@ -207,13 +208,10 @@ final class ReassignmentIntegrationTest
     synchronizerOwnersD2.map { owner =>
       owner.topology.synchronizer_parameters.propose_update(
         synchronizerId = synchronizerId2,
-        _.update(
-          assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero,
-          mediatorReactionTimeout = config.NonNegativeFiniteDuration.ofMinutes(5),
-        ),
-        signedBy = Some(owner.fingerprint),
+        _.update(mediatorReactionTimeout = config.NonNegativeFiniteDuration.ofMinutes(5)),
       )
     }
+    AutomaticAssignment.disable(synchronizerOwnersD2, synchronizerId2)
 
     // Obtain a new synchronizer timestamp for the reassignment's synchronizer time proof
     participant1.testing.fetch_synchronizer_time(synchronizerId2)

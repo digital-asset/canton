@@ -25,6 +25,7 @@ import com.digitalasset.canton.performance.util.{
   ParticipantSimulatorController,
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
 
@@ -184,6 +185,8 @@ object LongRunning {
           sequencerLivenessMargin,
         )
       else participant.synchronizers.reconnect_all()
+      LongRunning.enableMultisync(participant)
+
     }
     uploadDarToNodes(participants.all, myLogger)
 
@@ -337,6 +340,12 @@ object LongRunning {
       )
     else
       Right(runTypeConfig)
+
+  def enableMultisync(participant: ParticipantReference): Unit =
+    participant.synchronizers.list_connected().foreach { sync =>
+      participant.synchronizers.feature_flags
+        .add(sync.synchronizerId, ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
+    }
 
   def growTopologyState(
       participant: ParticipantReference,

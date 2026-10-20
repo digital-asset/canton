@@ -53,6 +53,9 @@ import java.net.URI
   * @param initializeFromTrustedSynchronizer
   *   if false will automatically generate a SynchronizerTrustCertificate when connecting to a new
   *   synchronizer.
+  * @param disableAuthorizedStoreDispatching
+  *   if true, the transactions of the authorized store are not pushed to this synchronizer. Set
+  *   when the operator provides the onboarding transactions at registration.
   */
 final case class SynchronizerConnectionConfig(
     synchronizerAlias: SynchronizerAlias,
@@ -65,6 +68,8 @@ final case class SynchronizerConnectionConfig(
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
     timeTracker: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
     initializeFromTrustedSynchronizer: Boolean = false,
+    // TODO(#34022): remove once the authorized store is removed
+    disableAuthorizedStoreDispatching: Boolean = false,
 ) extends PrettyPrintingFromCompanion {
 
   /** Merges this connection config with provided config, but only if the provided config is
@@ -77,6 +82,8 @@ final case class SynchronizerConnectionConfig(
     *     connections with the same sequencer alias. The SequencerConnections' sequencerId fields
     *     may be set in either or none of the two configs, but if it's set in both, it must be the
     *     same sequencer id.
+    *   - the field `disableAuthorizedStoreDispatching` is true in the merged configuration if it is
+    *     true in either config.
     * @return
     *   either the merged configuration if the other configuration is subsumed by this
     *   configuration, or an error
@@ -102,6 +109,7 @@ final case class SynchronizerConnectionConfig(
             `maxRetryDelay`,
             `timeTracker`,
             `initializeFromTrustedSynchronizer`,
+            otherDisableAuthorizedStoreDispatching,
           ) =>
         for {
           updatedSynchronizerId <- mergeOrRequireEqual(synchronizerId, otherSynchronizerId)
@@ -157,6 +165,8 @@ final case class SynchronizerConnectionConfig(
         } yield this.copy(
           synchronizerId = updatedSynchronizerId,
           sequencerConnections = updatedSequencerConnections,
+          disableAuthorizedStoreDispatching =
+            disableAuthorizedStoreDispatching || otherDisableAuthorizedStoreDispatching,
         )
       case _ =>
         Left("the new synchronizer config does not subsume the existing synchronizer config")
@@ -254,6 +264,11 @@ object SynchronizerConnectionConfig extends PrettyPrintingCompanion[Synchronizer
       paramIfNotDefault(
         "initializeFromTrustedSynchronizer",
         _.initializeFromTrustedSynchronizer,
+        false,
+      ),
+      paramIfNotDefault(
+        "disableAuthorizedStoreDispatching",
+        _.disableAuthorizedStoreDispatching,
         false,
       ),
     )

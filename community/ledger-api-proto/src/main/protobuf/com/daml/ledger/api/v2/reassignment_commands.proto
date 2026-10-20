@@ -83,6 +83,17 @@ message UnassignCommand {
   //
   // Required
   string target = 3;
+
+  // The package id used to validate the contract on the source synchronizer.
+  //
+  // Optional
+  optional string override_source_validation_package_id = 4;
+
+  // The package id used to validate the contract on the target synchronizer. This
+  // package id will also become the representative package id used in the created event.
+  //
+  // Optional
+  optional string override_target_validation_package_id = 5;
 }
 
 // Assign a contract

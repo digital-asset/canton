@@ -81,9 +81,13 @@ import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
+import com.digitalasset.canton.topology.store.TimeQuery
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.topology.transaction.{
   GrpcConnection,
   SignedTopologyTransaction,
+  SynchronizerTrustCertificate,
   TopologyChangeOp,
   TopologyMapping,
 }
@@ -97,6 +101,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
 import io.grpc.Context
 
@@ -2918,6 +2923,113 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         ParticipantAdminCommands.SynchronizerConnectivity
           .PerformManualLsu(currentPsid, successorPsid, upgradeTime, Right(config))
       )
+    }
+
+    @Help.Summary("Manage protocol feature flags of the participant")
+    @Help.Group("Feature flags")
+    object feature_flags extends Helpful {
+
+      @Help.Summary("Get current feature flags")
+      @Help.Description(
+        """
+          |A participant may signal to other nodes that it supports certain protocol features by
+          |setting feature flags.
+          |This command returns the set of feature flags currently set on the participant.
+          |The feature flags are communicated to other nodes via the SynchronizerTrustCertificate.
+          |
+          |Optionally, a participantId may be passed to read the feature flags of other participant
+          |nodes."""
+      )
+      def get(
+          synchronizerId: SynchronizerId,
+          participantId: Option[ParticipantId] = None,
+      ): Set[ParticipantTopologyFeatureFlag] =
+        consoleEnvironment
+          .run(
+            getFlags(synchronizerId = synchronizerId, participantId = participantId.getOrElse(id))
+          )
+
+      private def getFlags(
+          synchronizerId: SynchronizerId,
+          participantId: ParticipantId,
+      ): ConsoleCommandResult[Set[ParticipantTopologyFeatureFlag]] =
+        adminCommand(
+          TopologyAdminCommands.Read.ListSynchronizerTrustCertificate(
+            BaseQuery(
+              store = TopologyStoreId.Synchronizer(synchronizerId),
+              proposals = false,
+              timeQuery = TimeQuery.HeadState,
+              ops = TopologyChangeOp.Replace.some,
+              filterSigningKey = "",
+              protocolVersion = None,
+            ),
+            filterUid = participantId.filterString,
+          )
+        ).map(_.headOption.map(_.item.featureFlags).getOrElse(Set.empty))
+
+      private def set(
+          synchronizerId: SynchronizerId,
+          flags: Set[ParticipantTopologyFeatureFlag],
+          synchronize: Option[NonNegativeDuration],
+      ) =
+        adminCommand(
+          TopologyAdminCommands.Write.Propose(
+            baseRequest = BaseWriteRequest(
+              clientVersion = Some(ReleaseVersion.current)
+            ),
+            mapping = SynchronizerTrustCertificate(
+              id,
+              synchronizerId,
+              flags,
+            ),
+            signedBy = Seq.empty,
+            store = TopologyStoreId.Synchronizer(synchronizerId),
+            serial = None,
+            mustFullyAuthorize = true,
+            waitToBecomeEffective = synchronize,
+            serverVersion = None,
+          )
+        ).toEither
+
+      @Help.Summary("Add a feature flag")
+      @Help.Description(
+        """
+         |Add a feature flag to the participant's SynchronizerTrustCertificate.
+ """
+      )
+      def add(
+          synchronizerId: SynchronizerId,
+          flag: ParticipantTopologyFeatureFlag,
+          synchronize: Option[NonNegativeDuration] =
+            consoleEnvironment.commandTimeouts.ledgerCommand.some,
+      ): Unit =
+        consoleEnvironment.runE(for {
+          flags <- getFlags(synchronizerId, id).toEither
+          _ <-
+            if (flags.contains(flag)) Right(())
+            else set(synchronizerId, flags + flag, synchronize)
+        } yield ())
+
+      @Help.Summary("Remove a feature flag")
+      @Help.Description(
+        """
+         |Remove a feature flag to the participant's SynchronizerTrustCertificate.
+          """
+      )
+      def remove(
+          synchronizerId: SynchronizerId,
+          flag: ParticipantTopologyFeatureFlag,
+          synchronize: Option[NonNegativeDuration] =
+            consoleEnvironment.commandTimeouts.ledgerCommand.some,
+      ): Unit =
+        consoleEnvironment.runE(for {
+          flags <- getFlags(synchronizerId, id).toEither
+          _ <-
+            if (!flags.contains(flag)) Right(())
+            else
+              set(synchronizerId, flags - flag, synchronize)
+        } yield ())
+
     }
   }
 

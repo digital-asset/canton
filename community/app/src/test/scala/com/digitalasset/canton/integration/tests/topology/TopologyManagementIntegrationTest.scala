@@ -24,7 +24,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{PartiesAllocator, PartyToParticipantDeclarative}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.ForceFlag.{
   AllowInsufficientParticipantPermissionForSignatoryParty,
@@ -48,8 +48,8 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
-import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.slf4j.event.Level.DEBUG
@@ -87,35 +87,19 @@ final class TopologyManagementIntegrationTest
       )
     }
 
-  private def buildMalformedTopologyTransaction(
-      mappingV30: v30.TopologyMapping,
-      mappingV31: v31.TopologyMapping,
-  ): ByteString = {
-    val protoVersion = TopologyTransaction.protoVersionFor(testedProtocolVersion).value
-
-    val transactionBytes = if (protoVersion == ProtoVersion(31)) {
-      v31
-        .TopologyTransaction(
-          operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
-          serial = 1,
-          mapping = Some(mappingV31),
-        )
-        .toByteString
-    } else {
-      v30
-        .TopologyTransaction(
-          operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
-          serial = 1,
-          mapping = Some(mappingV30),
-        )
-        .toByteString
-    }
-
+  private def buildMalformedTopologyTransaction(mapping: v30.TopologyMapping): ByteString =
     UntypedVersionedMessage(
-      UntypedVersionedMessage.Wrapper.Data(transactionBytes),
-      version = protoVersion.v,
+      UntypedVersionedMessage.Wrapper.Data(
+        v30
+          .TopologyTransaction(
+            operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
+            serial = 1,
+            mapping = Some(mapping),
+          )
+          .toByteString
+      ),
+      version = 30,
     ).toByteString
-  }
 
   "A Canton operator" can {
 
@@ -547,7 +531,11 @@ final class TopologyManagementIntegrationTest
       )
 
       PartyToKeyMapping
-        .fromProtoV30(testedProtocolVersionValidation, ptkProto)
+        .fromProtoV30(
+          testedProtocolVersionValidation,
+          testedTopologyLimits,
+          ptkProto,
+        )
         .isRight shouldBe true
     }
 
@@ -569,12 +557,15 @@ final class TopologyManagementIntegrationTest
       )
 
       val originalByteString = buildMalformedTopologyTransaction(
-        v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto)),
-        v31.TopologyMapping(v31.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto)),
+        v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToKeyMapping(ptkProto))
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptkMappingDeserialized = deserialized.mapping.select[PartyToKeyMapping].value
       ptkMappingDeserialized.signingKeys.forgetNE should have size 1
       ptkMappingDeserialized.signingKeys.forgetNE.toSeq should contain theSameElementsAs Seq(
@@ -599,13 +590,11 @@ final class TopologyManagementIntegrationTest
         v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
       )
       val participantsProtoV30 = permissions.map(
-        v30.PartyToParticipant.HostingParticipant(participant2.toProtoPrimitive, _, None)
-      )
-      val participantsProtoV31 = permissions.map(
-        v31.PartyToParticipant.HostingParticipant(
+        v30.PartyToParticipant.HostingParticipant(
           participant2.toProtoPrimitive,
           _,
-          v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
+          None,
+          v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED,
         )
       )
 
@@ -615,21 +604,15 @@ final class TopologyManagementIntegrationTest
             v30
               .PartyToParticipant(party.toProtoPrimitive, threshold = 1, participantsProtoV30, None)
           )
-        ),
-        v31.TopologyMapping(
-          v31.TopologyMapping.Mapping.PartyToParticipant(
-            v31.PartyToParticipant(
-              party.toProtoPrimitive,
-              threshold = 1,
-              participantsProtoV31,
-              None,
-            )
-          )
-        ),
+        )
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptpMappingDeserialized = deserialized.mapping.select[PartyToParticipant].value
       val hosting = ptpMappingDeserialized.participants
       hosting should have size 1

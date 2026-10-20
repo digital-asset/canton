@@ -75,7 +75,7 @@ export KNOWN_MISSING_FAILED_TRADER_METRICS="true"
 
 # This is a Bong test as well so it doesn't use PerformanceRunner but the transactions
 # are generally accepted without userId so we need to update filtering in the indexer metric csv file
-export UPDATES_LOAD_METRICS_FILTER_PATTERN="event_type=transaction.*status=accepted"
+export UPDATES_LOAD_METRICS_FILTER_PATTERN="event_type=transaction.*status=accepted$"
 
 export PARTICIPANT_EVENTS_METRICS_FILE="participant1.synchronizer1.daml.sequencer-client.handler.sequencer-events.csv"
 export MEDIATOR_EVENTS_METRICS_FILE="mediator1.daml.sequencer-client.handler.sequencer-events.csv"

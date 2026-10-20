@@ -202,7 +202,9 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
 
         // Parse the returned transaction so we can compute the exact hash Canton expects
         val parsedTx = TopologyTransaction
-          .fromByteString(testedProtocolVersion, generateRes.transaction)
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            generateRes.transaction
+          )
           .valueOrFail("Failed to parse topology transaction")
 
         val externalPartySignature = generateSignature(parsedTx.hash.hash.getCryptographicEvidence)
@@ -268,7 +270,9 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
 
         // Parse the transaction to get the exact hash that needs to be signed by the decentralized namespace owners
         val parsedTx = TopologyTransaction
-          .fromByteString(testedProtocolVersion, generateRes.transaction)
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            generateRes.transaction
+          )
           .valueOrFail("Failed to parse topology transaction")
 
         val txHash = parsedTx.hash.hash.getCryptographicEvidence

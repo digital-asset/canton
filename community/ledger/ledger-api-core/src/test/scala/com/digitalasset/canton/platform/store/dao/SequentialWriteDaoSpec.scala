@@ -9,7 +9,6 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsLastPointers
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
@@ -213,11 +212,10 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       })
 
     override def initializeParameters(
-        params: ParameterStorageBackend.IdentityParams,
-        loggerFactory: NamedLoggerFactory,
+        params: ParameterStorageBackend.IdentityParams
     )(
         connection: Connection
-    ): Unit =
+    )(implicit traceContext: TraceContext): Unit =
       throw new UnsupportedOperationException
 
     override def ledgerIdentity(
@@ -263,13 +261,13 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
     override def clearAchsStateAndData()(implicit
         connection: Connection,
-        errorLoggingContext: ErrorLoggingContext,
+        traceContext: TraceContext,
     ): Unit =
       throw new UnsupportedOperationException
 
     override def vacuumAndReindexAchsTables()(implicit
         connection: Connection,
-        errorLoggingContext: ErrorLoggingContext,
+        traceContext: TraceContext,
     ): Unit =
       throw new UnsupportedOperationException
   }

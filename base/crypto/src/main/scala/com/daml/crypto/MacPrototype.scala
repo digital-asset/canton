@@ -31,8 +31,7 @@ final class MacPrototype(val algorithm: String) {
         false
     }
 
-  // use SunJCE provider to ensure backward compatibility
-  private def createMac: Mac = Mac.getInstance(algorithm, Providers.sunJCE)
+  private def createMac: Mac = Mac.getInstance(algorithm)
 
   def newMac: Mac =
     if (supportsClone)

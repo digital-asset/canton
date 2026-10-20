@@ -276,6 +276,7 @@ class AchsIndexComponentTest
         activeAt = Some(Offset.tryFromLong(queryOffset)),
         rangeInfo = AcsRangeInfo.empty,
         configOverrides = None,
+        includeIncompleteReassignments = false,
       )
       .zipWithIndex
       .mapAsync(1) { case (elem, idx) =>

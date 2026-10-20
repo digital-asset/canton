@@ -169,7 +169,11 @@ class TopologyTicksIntegrationTest
 
       runAsyncAndAdvanceClockUntilFinished(
         bootstrap
-          .upload_new_sequencer_identity_transactions(daId, sequencer2, sequencer1),
+          .upload_new_sequencer_identity_transactions(
+            daId,
+            newSequencer = sequencer2,
+            existingSequencer = sequencer1,
+          ),
         simClock,
         deltaTime = epsilon,
       )
@@ -179,8 +183,8 @@ class TopologyTicksIntegrationTest
       // create the new sequencer's topology transaction without advancing time
       bootstrap.propose_new_sequencer_state(
         daId.logical,
-        sequencer2,
-        sequencer1,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
         initializedSynchronizers(daName).synchronizerOwners,
         synchronize = None, // set to none so we don't wait for transactions to be effective
       )
@@ -192,22 +196,33 @@ class TopologyTicksIntegrationTest
       // now propose new party topology transactions after new sequencer's topology transactions, but before they are effective
       val partyId = participant1.parties.enable("testParty3", synchronize = None)
       participant1.ledger_api.parties.list().map(_.party) should not contain partyId
-      // advance time so new sequencer's topology transactions become effective, but not the new party topology transactions
-      simClock.advance(epsilon.duration.dividedBy(2).plusMillis(10))
-      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
-      // complete initialization of new sequencer
+      // advance time so new sequencer's topology transactions become effective,
+      //  but not the new party topology transactions
+      simClock.advance(epsilon.duration.dividedBy(2).plusMillis(10))
+
+      // complete initialization of the new sequencer, so that the 2-nodes network is not stuck
       bootstrap.wait_for_sequencer_state_to_be_effective(
         daId.logical,
-        sequencer2,
-        sequencer1,
-        true,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
+        isBftSequencer = true,
         commandTimeouts.bounded,
       )
-      bootstrap.complete_new_sequencer_initialization(sequencer2, sequencer1)
-      setUpAdditionalConnections(sequencer1, sequencer2)
+      bootstrap.complete_new_sequencer_initialization(
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
+      )
+      setUpAdditionalConnections(
+        existingSequencerReference = sequencer1,
+        newSequencerReference = sequencer2,
+      )
       sequencer2.health.wait_for_initialized()
-      participant1.health.ping(participant1)
+
+      // Now sequencing is operational and sequencing time can advance, reach the target
+      //  instant to ensure that the new sequencer is effective
+      //  but not the new party topology transaction yet
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
       // both sequencers do not consider party topology transaction effective yet
       sequencers.all.foreach { sequencer =>

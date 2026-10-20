@@ -677,6 +677,7 @@ class TransactionServiceFiltersIT(testDars: TestDars) extends LedgerTestSuite {
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat),
       streamContinuationToken = None,
+      includeIncompleteReassignments = false,
     )
 
   private def eventBlobFlagFromInterfaces(format: EventFormat): Boolean =

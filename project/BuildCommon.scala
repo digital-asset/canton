@@ -21,7 +21,7 @@ import sbtassembly.AssemblyPlugin.autoImport.*
 import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.{BuildInfoKey, *}
-import sbtide.Keys.ideExcludedDirectories
+import sbtide.Keys.{ideExcludedDirectories, ideOutputDirectory}
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
 import scalafix.sbt.ScalafixPlugin.autoImport.scalafix
@@ -156,6 +156,7 @@ object BuildCommon {
       Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
       Global / excludeLintKeys += Compile / ideExcludedDirectories,
       Global / excludeLintKeys += Test / ideExcludedDirectories,
+      Global / excludeLintKeys += `ledger-api-core` / Test / ideOutputDirectory,
     )
 
     publishSettings ++ buildSettings ++ globalSettings ++ commandAliases
@@ -312,6 +313,8 @@ object BuildCommon {
     }
   }
 
+  private object printTestsLock
+
   // Originally https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
   lazy val printTestTask = {
     val destination = "test-full-class-names.log"
@@ -320,7 +323,10 @@ object BuildCommon {
     printTests := {
       val testNames = (Test / definedTestNames).value.toVector
       val projectName = thisProjectRef.value.project
-      IO.writeLines(file(destination), testNames, append = true)
+      // Projects run this task in parallel; unsynchronized appends can splice lines together
+      printTestsLock.synchronized {
+        IO.writeLines(file(destination), testNames, append = true)
+      }
       println(s"Printed ${testNames.size} tests for `$projectName`")
     }
   }
@@ -700,8 +706,6 @@ object BuildCommon {
       `performance-driver`,
       performance,
       `sequencer-driver-api`,
-      `sequencer-driver-api-conformance-tests`,
-      `sequencer-driver-lib`,
       `reference-sequencer-driver`,
       blake2b,
       `slick-fork`,
@@ -826,7 +830,6 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `community-synchronizer` % "compile->compile;test->test",
         `community-integration-testing` % Test,
-        `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
         `ledger-common-dars` % Test,
@@ -959,6 +962,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
             "com.digitalasset.canton.tests.vettingmain.v1",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TeaTrafficPurchase",
+            (Test / damlDarOutput).value / "TeaTrafficPurchase-1.0.0.dar",
+            "com.digitalasset.canton.tea.tests",
+          ),
         ),
         Test / damlTsCodegen := {
           (`ledger-common-dars` / Compile / damlBuild).value
@@ -1070,7 +1078,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("35", "36")),
+          BuildInfoKey("stableProtocolVersions" -> List("36")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1239,6 +1247,7 @@ object BuildCommon {
         DamlProjects.`daml-lf-archive-encoder` % Test,
         DamlProjects.`daml-lf-encoder` % Test,
         DamlProjects.`daml-lf-parser` % Test,
+        DamlProjects.`daml-lf-transaction`,
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`test-evidence-tag` % "test->test",
         `community-common` % "test->test",
@@ -1394,31 +1403,6 @@ object BuildCommon {
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := HouseRules.wartremoverErrorsForTestScope,
-
-        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-        UberLibrary.assemblySettings("community-integration-testing-lib"),
-        // when building the fat jar, we need to properly merge our artefacts
-        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
-      )
-
-    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-    lazy val `community-integration-testing-lib` = project
-      .settings(
-        sharedCantonCommunitySettings,
-        UberLibrary.of(`community-integration-testing`),
-        excludeTranscodeConflictingDependencies,
-        Compile / packageDoc := {
-          // TODO(i12766): producing an empty file because there are errors in running the `doc` task
-          val destination = (Compile / packageDoc / artifactPath).value
-          IO.touch(destination)
-          destination
-        },
-
-        // The dependency override is needed because `community-testing` depends transitively on
-        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
-        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
-        // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
       )
 
     lazy val microbench = project
@@ -1587,35 +1571,7 @@ object BuildCommon {
           pureconfig_core,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        UberLibrary.assemblySettings("sequencer-driver-lib"),
       )
-
-    lazy val `sequencer-driver-api-conformance-tests` = project
-      .in(file("community/sequencer-driver-api-conformance-tests"))
-      .dependsOn(
-        `community-testing`,
-        `sequencer-driver-api`,
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          scalatest
-        ),
-      )
-
-    // TODO(i12761): package individual libraries instead of fat JARs for external consumption
-    lazy val `sequencer-driver-lib`: Project =
-      project
-        .settings(
-          sharedCantonCommunitySettings,
-          libraryDependencies ++= Seq(
-            circe_core,
-            circe_generic,
-            circe_parser,
-            better_files,
-          ),
-        )
-        .settings(UberLibrary.of(`sequencer-driver-api`))
 
     lazy val `reference-sequencer-driver` = project
       .in(file("community/reference-sequencer-driver"))
@@ -2071,6 +2027,13 @@ object BuildCommon {
         Perf / fork := true,
         Perf / baseDirectory := (LocalRootProject / baseDirectory).value,
         Perf / javaOptions += "-Xmx" + sys.props.getOrElse("perf.xmx", "32G"),
+        // IntelliJ merges every Test-extending configuration into a single module and picks one of
+        // them as the module's test output directory. Without the settings below it picks `Perf`,
+        // so the module's test output becomes `target/scala-2.13/perf-classes` and no regular
+        // test class is on the IDE run classpath. It makes running tests from the IDE impossible.
+        // Pin both configurations to the regular `Test` output so the IDE always sees `test-classes`.
+        Test / ideOutputDirectory := Some((Test / classDirectory).value),
+        Perf / ideOutputDirectory := Some((Test / classDirectory).value),
       )
 
     lazy val `ledger-json-api` =
@@ -2661,6 +2624,7 @@ object BuildCommon {
       )
         .dependsOn(
           `traffic-enforcement-api`,
+          DamlProjects.`bindings-java`,
           DamlProjects.`ledger-api-scala`,
           `ledger-api-core`,
           DamlProjects.`ledger-api-proto`,
@@ -2680,6 +2644,19 @@ object BuildCommon {
               DamlProjects.`google-common-protos-scala` / PB.unpackDependencies
             )
             .value,
+          Compile / damlDarOutput := (Compile / target).value / "dar-output",
+          damlPinnedProjects := Seq(
+            (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit"
+          ),
+          Compile / useVersionedDarName := true,
+          Compile / damlJavaCodegen := Seq(
+            (
+              (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit",
+              (Compile / resourceDirectory).value / "dar" / "canton-traffic-credit-1.0.0.dar",
+              "com.digitalasset.canton.tea.daml",
+            )
+          ),
+          addFilesToHeaderCheck("*.daml", "daml", Compile),
           libraryDependencies ++= Seq(
             commons_io,
             pekko_actor_typed,
@@ -3490,7 +3467,8 @@ object BuildCommon {
         enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          google_protobuf_java
+          google_protobuf_java,
+          scalatest % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
       )
@@ -3503,6 +3481,7 @@ object BuildCommon {
         `daml-lf-language`,
         `daml-lf-snapshot-proto`,
         `daml-lf-transaction`,
+        `daml-lf-parser` % Test,
       )
       .settings()
 

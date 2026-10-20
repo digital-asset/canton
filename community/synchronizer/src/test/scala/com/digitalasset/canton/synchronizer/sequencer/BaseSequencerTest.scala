@@ -212,7 +212,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
     ]] =
       EitherT.pure(Some(TrafficState.empty(timestamp)))
 
-    override def isEnabled(member: Member)(implicit
+    override def isActive(member: Member)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] =
       FutureUnlessShutdown.pure(existingMembers.contains(member))

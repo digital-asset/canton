@@ -230,7 +230,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = cases.contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         prefetchKeys = Seq.empty,
       )
       .consume(

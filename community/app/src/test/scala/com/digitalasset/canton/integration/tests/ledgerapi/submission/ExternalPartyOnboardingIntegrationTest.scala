@@ -22,11 +22,13 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.ExternalPartyAlreadyExists
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
@@ -46,9 +48,11 @@ import com.digitalasset.canton.topology.{
   ForceFlag,
   ForceFlags,
   Namespace,
+  ParticipantId,
   PartyId,
   TopologyManagerError,
 }
+import com.digitalasset.canton.version.{ProtocolVersion, v1}
 import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
@@ -341,6 +345,137 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         synchronizeParticipants = Seq(participant1),
         synchronizerId = synchronizer1Id.logical,
       )
+    }
+
+    "allocate a party from wallet-built v30 transactions" when {
+      // Builds the v30 protobuf messages directly, as a wallet does, rather than through Canton's
+      // classes, allocates the party with them, and returns the resulting mapping
+      def allocateFromWalletBuiltTransaction(name: String, nominee: Option[ParticipantId])(implicit
+          env: TestConsoleEnvironment
+      ): PartyToParticipant = {
+        import env.*
+        val partyKey = global_secret.keys.secret
+          .generate_keys(
+            PositiveInt.one,
+            usage = NonEmpty.mk(Set, SigningKeyUsage.Namespace, SigningKeyUsage.Protocol),
+          )
+          .head1
+        val partyId = PartyId.tryCreate(name, partyKey.fingerprint)
+        def entry(
+            participantId: ParticipantId,
+            state: v30.PartyToParticipant.HostingParticipant.HostingState,
+        ) = v30.PartyToParticipant.HostingParticipant(
+          participantUid = participantId.uid.toProtoPrimitive,
+          permission = v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+          onboarding = None,
+          state = state,
+        )
+        val transactionP = v30.TopologyTransaction(
+          operation = v30.Enums.TopologyChangeOp.TOPOLOGY_CHANGE_OP_ADD_REPLACE,
+          serial = 1,
+          mapping = Some(
+            v30.TopologyMapping(
+              v30.TopologyMapping.Mapping.PartyToParticipant(
+                v30.PartyToParticipant(
+                  party = partyId.toProtoPrimitive,
+                  threshold = 1,
+                  participants = entry(
+                    participant1.id,
+                    v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED,
+                  ) +: nominee.toList.map(
+                    entry(
+                      _,
+                      v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED,
+                    )
+                  ),
+                  partySigningKeys = Some(
+                    SigningKeysWithThreshold
+                      .tryCreate(keys = NonEmpty.mk(Seq, partyKey), threshold = PositiveInt.one)
+                      .toProtoV30
+                      .value
+                  ),
+                )
+              )
+            )
+          ),
+        )
+        val bytes = v1
+          .UntypedVersionedMessage(
+            v1.UntypedVersionedMessage.Wrapper.Data(transactionP.toByteString),
+            version = 30,
+          )
+          .toByteString
+
+        val transaction = TopologyTransaction
+          .fromByteString(testedProtocolVersionValidation, testedTopologyTransactionContext, bytes)
+          .value
+        // Canton encodes the same mapping into the same bytes as the wallet
+        TopologyTransaction
+          .tryCreate(
+            TopologyChangeOp.Replace,
+            PositiveInt.one,
+            transaction.mapping,
+            testedProtocolVersion,
+          )
+          .getCryptographicEvidence shouldBe bytes
+
+        val multiHash = MultiTransactionSignature.computeCombinedHash(
+          NonEmpty.mk(Set, transaction.hash),
+          tryGlobalCrypto.pureCrypto,
+        )
+        participant1.ledger_api.parties.allocate_external(
+          synchronizer1Id,
+          Seq(
+            transaction -> Seq(
+              global_secret.sign(
+                transaction.hash.hash.getCryptographicEvidence,
+                partyKey.fingerprint,
+                SigningKeyUsage.ProtocolOnly,
+              )
+            )
+          ),
+          multiSignatures = Seq(
+            global_secret.sign(
+              multiHash.getCryptographicEvidence,
+              partyKey.fingerprint,
+              SigningKeyUsage.NamespaceOnly,
+            )
+          ),
+        )
+        PartiesAdministration.Allocation.waitForPartyKnown(
+          partyId = partyId,
+          hostingParticipant = participant1,
+          synchronizeParticipants = Seq(participant1),
+          synchronizerId = synchronizer1Id.logical,
+        )
+        participant1.topology.party_to_participant_mappings
+          .list(synchronizer1Id, filterParty = partyId.filterString)
+          .loneElement
+          .item
+      }
+
+      "no participant has a hosting state" in { implicit env =>
+        import env.*
+        allocateFromWalletBuiltTransaction(
+          "WalletAlice",
+          nominee = None,
+        ).participants shouldBe Seq(
+          HostingParticipant(participant1.id, Confirmation)
+        )
+      }
+
+      "the party nominates a participant" onlyRunWithOrGreaterThan ProtocolVersion.offPRWithSequencerChannels in {
+        implicit env =>
+          import env.*
+          allocateFromWalletBuiltTransaction(
+            "WalletBob",
+            nominee = Some(participant2.id),
+          ).participants
+            .map(entry => entry.participantId -> entry.state) shouldBe Seq(
+            participant1.id -> HostingState.Active,
+            participant2.id -> HostingState.Nominated,
+          )
+      }
     }
 
     "allocate a party with an explicit NamespaceDelegation" in { implicit env =>

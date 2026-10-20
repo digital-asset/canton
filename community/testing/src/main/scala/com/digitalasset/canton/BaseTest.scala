@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
   SynchronizerLimits,
+  TopologyLimits,
   TransactionProtocolLimits,
 }
 import com.digitalasset.canton.scalatest.{ScalaFuturesWithPatience, ScalatestEssentials}
@@ -30,6 +31,7 @@ import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
+import com.digitalasset.canton.topology.transaction.TopologyTransactionDeserializationContext
 import com.digitalasset.canton.topology.{PartyKind, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.FutureInstances.*
@@ -86,12 +88,17 @@ trait TestEssentials extends ScalatestEssentials with NamedLogging {
   protected lazy val testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
   protected lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     BaseTest.testedProtocolVersionValidation
+  protected lazy val testedTopologyTransactionContext: TopologyTransactionDeserializationContext =
+    BaseTest.testedTopologyTransactionContext
+  protected lazy val testedSynchronizerLimits: SynchronizerLimits =
+    BaseTest.testedSynchronizerLimits
+  protected lazy val testedTopologyLimits: TopologyLimits = BaseTest.testedTopologyLimits
   protected lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion =
     BaseTest.testedReleaseProtocolVersion
   protected lazy val defaultStaticSynchronizerParameters: StaticSynchronizerParameters =
     BaseTest.defaultStaticSynchronizerParameters
-  protected lazy val defaultProtocolLimits: TransactionProtocolLimits =
-    BaseTest.defaultProtocolLimits
+  protected lazy val testedTransactionLimits: TransactionProtocolLimits =
+    BaseTest.testedTransactionLimits
 
   protected implicit lazy val testedHashingSchemeVersion: HashingSchemeVersion =
     HashingSchemeVersion.getHashingSchemeVersionsForProtocolVersion(testedProtocolVersion).last1
@@ -632,13 +639,18 @@ object BaseTest extends EitherValues {
   lazy val defaultStaticSynchronizerParameters: StaticSynchronizerParameters =
     defaultStaticSynchronizerParametersWith()
 
-  lazy val defaultProtocolLimits: TransactionProtocolLimits =
-    defaultStaticSynchronizerParameters.synchronizerLimits.transactionProtocolLimits
+  lazy val testedSynchronizerLimits: SynchronizerLimits =
+    defaultStaticSynchronizerParameters.synchronizerLimits
+
+  lazy val testedTransactionLimits: TransactionProtocolLimits =
+    testedSynchronizerLimits.transactionProtocolLimits
 
   def defaultStaticSynchronizerParametersWith(
       topologyChangeDelay: NonNegativeFiniteDuration =
         StaticSynchronizerParameters.defaultTopologyChangeDelay,
+      enableTransparencyChecks: Boolean = false,
       protocolVersion: ProtocolVersion = testedProtocolVersion,
+      synchronizerLimits: SynchronizerLimits = SynchronizerLimits.default,
   ): StaticSynchronizerParameters =
     StaticSynchronizerParameters
       .create(
@@ -649,12 +661,11 @@ object BaseTest extends EitherValues {
         requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
         requiredSignatureFormats = SymbolicCryptoProvider.supportedSignatureFormats,
         topologyChangeDelay = topologyChangeDelay,
-        enableTransparencyChecks = false,
+        enableTransparencyChecks = enableTransparencyChecks,
         protocolVersion = protocolVersion,
         serial = NonNegativeInt.zero,
         // Used to set protocol limits during testing
-        // - limit checking can be disabled by using SynchronizerLimits.max
-        synchronizerLimits = SynchronizerLimits.defaultFor(protocolVersion),
+        synchronizerLimits = synchronizerLimits,
       )
       .value
 
@@ -692,6 +703,11 @@ object BaseTest extends EitherValues {
 
   lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     ProtocolVersionValidation(testedProtocolVersion)
+
+  lazy val testedTopologyTransactionContext: TopologyTransactionDeserializationContext =
+    TopologyTransactionDeserializationContext(testedTopologyLimits)
+
+  lazy val testedTopologyLimits: TopologyLimits = testedSynchronizerLimits.topologyLimits
 
   lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion = ReleaseProtocolVersion(
     testedProtocolVersion

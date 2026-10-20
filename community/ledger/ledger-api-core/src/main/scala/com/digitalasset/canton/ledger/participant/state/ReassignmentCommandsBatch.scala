@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ledger.participant.state.ReassignmentCommand.{Assign, Unassign}
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -19,17 +20,26 @@ object ReassignmentCommandsBatch {
       source: Source[SynchronizerId],
       target: Target[SynchronizerId],
       contractIds: NonEmpty[Seq[LfContractId]],
-  ) extends ReassignmentCommandsBatch
+      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
+  ) extends ReassignmentCommandsBatch {
+    def hasPkgValidationOverrides: Boolean =
+      overrideSourceValidationPkgIds.nonEmpty || overrideTargetValidationPkgIds.nonEmpty
+  }
 
-  final case class Assignments(target: Target[SynchronizerId], reassignmentId: ReassignmentId)
-      extends ReassignmentCommandsBatch
+  final case class Assignments(
+      target: Target[SynchronizerId],
+      reassignmentId: ReassignmentId,
+  ) extends ReassignmentCommandsBatch
 
   abstract class InvalidBatch(val error: String)
   case object NoCommands extends InvalidBatch("no commands")
   case object MixedAssignWithOtherCommands extends InvalidBatch("mixed assign with other commands")
   case object DifferingSynchronizers extends InvalidBatch("differing synchronizers")
 
-  def create(commands: Seq[ReassignmentCommand]): Either[InvalidBatch, ReassignmentCommandsBatch] =
+  def create(
+      commands: Seq[ReassignmentCommand]
+  ): Either[InvalidBatch, ReassignmentCommandsBatch] =
     commands match {
       case Nil => Left(NoCommands)
       case Seq(assign: Assign) =>
@@ -45,11 +55,23 @@ object ReassignmentCommandsBatch {
             source = head.sourceSynchronizer,
             target = head.targetSynchronizer,
             contractIds = NonEmpty.mk(Seq, head.contractId),
+            overrideSourceValidationPkgIds =
+              overridePackageIdMap(head, _.overrideSourceValidationPkgId),
+            overrideTargetValidationPkgIds =
+              overridePackageIdMap(head, _.overrideTargetValidationPkgId),
           ),
           tail,
         )
       case _ => Left(MixedAssignWithOtherCommands)
     }
+
+  private def overridePackageIdMap(
+      unassign: Unassign,
+      overridePackageId: Unassign => Option[LfPackageId],
+  ): Map[LfContractId, LfPackageId] =
+    overridePackageId(unassign).fold(Map.empty[LfContractId, LfPackageId])(rpId =>
+      Map(unassign.contractId -> rpId)
+    )
 
   @tailrec
   private def validateUnassigns(
@@ -59,7 +81,16 @@ object ReassignmentCommandsBatch {
     case Nil => Right(soFar.copy(contractIds = soFar.contractIds.reverse))
     case (head: Unassign) +: tail =>
       if (head.sourceSynchronizer == soFar.source && head.targetSynchronizer == soFar.target)
-        validateUnassigns(soFar.copy(contractIds = head.contractId +: soFar.contractIds), tail)
+        validateUnassigns(
+          soFar.copy(
+            contractIds = head.contractId +: soFar.contractIds,
+            overrideSourceValidationPkgIds = soFar.overrideSourceValidationPkgIds ++
+              overridePackageIdMap(head, _.overrideSourceValidationPkgId),
+            overrideTargetValidationPkgIds = soFar.overrideTargetValidationPkgIds ++
+              overridePackageIdMap(head, _.overrideTargetValidationPkgId),
+          ),
+          tail,
+        )
       else
         Left(DifferingSynchronizers)
     case _ => Left(MixedAssignWithOtherCommands)

@@ -96,7 +96,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
     _.copy(traceContext = Array.emptyByteArray)
 
   it should "return correct index for a single party to participant mapping" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(singleDto, _))
     val eventsForAll = executeSql(
       backend.event
@@ -131,7 +131,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "return correct indices for multiple party to participant mappings" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     val eventsForAll = executeSql(
       backend.event
@@ -166,7 +166,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "respond with payloads for a single party to participant mapping" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(singleDto, _))
     val payloadsForAll = executeSql(
       backend.event.topologyPartyEventBatch(Ids(Vector(1L)))
@@ -182,7 +182,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "respond with payloads for a multiple party to participant mappings" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     val payloadsForAll = executeSql(
       backend.event.topologyPartyEventBatch(Ids(Vector(1L, 2L, 3L, 4L)))
@@ -199,7 +199,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "handle the different authorization events" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(authorizationEventDtos, _))
 
     authorizationEventDtos.foreach { dto =>
@@ -219,7 +219,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   private val synchronizerId2 = SynchronizerId.tryFromString("x::synchronizer2")
 
   it should "be the offset if there is one" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(
@@ -279,7 +279,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "be no offset (None) if there is none" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(
@@ -324,7 +324,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "be no offset (None) if it is on a different synchronizer" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(
@@ -382,7 +382,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
   }
 
   it should "be no offset (None) if it is after the ledger end" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(

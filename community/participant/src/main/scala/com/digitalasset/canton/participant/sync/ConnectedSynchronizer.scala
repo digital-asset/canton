@@ -229,6 +229,7 @@ class ConnectedSynchronizer(
       parameters.loggingConfig,
       testingConfig.useLegacyContractIdVersionV11,
       loggerFactory,
+      metrics.transactionProcessing.transactionViewMetrics,
     )
 
   private val damle =
@@ -280,6 +281,7 @@ class ConnectedSynchronizer(
     timeouts,
     Source(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig = testingConfig,
@@ -301,6 +303,7 @@ class ConnectedSynchronizer(
     timeouts,
     Target(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig,
@@ -422,6 +425,9 @@ class ConnectedSynchronizer(
     synchronizerHandle.topologyClient,
     sequencerClient,
     ephemeral.timeTracker,
+    disableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+      .get(psid)
+      .exists(_.config.disableAuthorizedStoreDispatching),
   )
 
   private val messageDispatcher: MessageDispatcher = {
@@ -971,7 +977,6 @@ class ConnectedSynchronizer(
           "Failed to complete outstanding assignments on startup. " +
             "You may have to complete the assignments manually.",
         )
-        ()
       }).value
     }
 
@@ -1064,6 +1069,9 @@ class ConnectedSynchronizer(
                 data.submitterMetadata,
                 participantId,
                 data.targetTimestamp,
+                data.unassignmentTs,
+                parameters.reassignmentsConfig,
+                clock,
               )
             )
             eitherF.leftMap(err => data.reassignmentId -> err).value
@@ -1166,6 +1174,8 @@ class ConnectedSynchronizer(
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
+      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
@@ -1194,8 +1204,8 @@ class ConnectedSynchronizer(
                 submitterMetadata,
                 contractIds,
                 targetSynchronizer,
-                overrideSourceValidationPkgIds = Map.empty,
-                overrideTargetValidationPkgIds = Map.empty,
+                overrideSourceValidationPkgIds = overrideSourceValidationPkgIds,
+                overrideTargetValidationPkgIds = overrideTargetValidationPkgIds,
               ),
             sourceTopology.unwrap,
           )

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.damltests.java.automaticreassignmenttransactions as M
@@ -13,6 +12,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.SynchronizerRouterIntegrationTestSetup
 import com.digitalasset.canton.integration.util.{
+  AutomaticAssignment,
   EntitySyntax,
   PartiesAllocator,
   PartyToParticipantDeclarative,
@@ -47,25 +47,18 @@ final class AutomaticReassignmentDecentralizedPartyIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*
 
-        def disableAssignmentExclusivityTimeout(d: InitializedSynchronizer): Unit =
-          d.synchronizerOwners.foreach(
-            _.topology.synchronizer_parameters
-              .propose_update(
-                d.synchronizerId,
-                _.update(
-                  assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero
-                ),
-              )
-          )
+        def disableAutomaticAssignment(d: InitializedSynchronizer): Unit =
+          AutomaticAssignment.disable(d.synchronizerOwners, d.synchronizerId)
 
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(daName))
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(acmeName))
+        disableAutomaticAssignment(getInitializedSynchronizer(daName))
+        disableAutomaticAssignment(getInitializedSynchronizer(acmeName))
 
         participants.all.synchronizers.connect_local(sequencer1, daName)
         participants.all.synchronizers.connect_local(sequencer2, acmeName)

@@ -158,6 +158,7 @@ object PartyRole {
       override val settings: RateSettings,
       selfRegistrar: Boolean = true,
       numPending: Int = 5,
+      maxPerBatch: Int = 10000,
   ) extends ActivePartyRole {
     override def role: M.orchestration.Role = M.orchestration.Role.ISSUER
 

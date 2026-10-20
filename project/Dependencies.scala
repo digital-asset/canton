@@ -46,7 +46,7 @@ object Dependencies {
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.13.0"
-  lazy val checkerFramework_version = "4.2.2"
+  lazy val checkerFramework_version = "4.3.0"
   lazy val chimney_version = "1.4.0"
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
@@ -66,7 +66,7 @@ object Dependencies {
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "3.0.0"
-  lazy val magnolia_version = "1.1.10"
+  lazy val magnolia_version = "1.1.14"
   lazy val magnolifyScalacheck_version = "0.9.8"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
@@ -206,7 +206,7 @@ object Dependencies {
   // As an alternative to `mockito-scala`, available on Scala 3
   lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
 
-  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.11.1"
   lazy val junit_interface = "com.github.sbt" % "junit-interface" % "0.13.3"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
@@ -346,7 +346,7 @@ object Dependencies {
   // Transcode dependencies
   lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
-  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.10.3"
+  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.11.8"
   lazy val semver = "org.semver4j" % "semver4j" % "6.0.0"
   lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
   lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version

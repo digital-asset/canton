@@ -7,7 +7,7 @@ import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.platform.indexer.parallel.BatchingParallelIngestionPipeSpec.*
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.{Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -68,10 +68,11 @@ class BatchingParallelIngestionPipeSpec
     val stuckIngestion = Promise[Unit]()
     val run = runPipe(
       submissionBatchSize = 1, // one element per batch
+      ingestionMaxBatchSize = 1, // one element per second batch
       ingesterHook = batch => if (batch.head.index == stuck) stuckIngestion.future else Future.unit,
     )
     def ingested = run.ingesterCalls.all.flatten.map(_.index)
-    def tailed = run.ingestTailCalls.all.flatten.flatten.map(_.index)
+    def tailed = run.ingestTailCalls.all.flatten.map(_.index)
 
     // Ingestion continues in parallel with the stuck element ...
     eventually(ingested should contain(stuck + 1))
@@ -80,7 +81,7 @@ class BatchingParallelIngestionPipeSpec
     // ... but nothing after it.
     tailed.max shouldBe stuck - 1
     // The ingester does not run further ahead than its parallelism allows.
-    ingested.max shouldBe stuck + IngestingParallelism - 1
+    ingested.max shouldBe stuck + IngestionParallelism - 1
 
     stuckIngestion.success(())
     run.output.futureValue.flatten.map(_.index) shouldBe (1 to InputSize)
@@ -116,31 +117,34 @@ class BatchingParallelIngestionPipeSpec
   }
 
   /*
-   * Tests the secondary batching stage (`ingestTail`). We want to ensure it forms large batches of batches
+   * Tests the secondary batching stage (before batcher). We want to ensure it forms large batches of batches
    * when the final database insertion is slow.
    */
-  it should "form max-sized batches of batches while ingestTail back-pressures" in {
+  it should "form max-sized db batches when ingestion back-pressures" in {
     val release = Promise[Unit]()
     val run = runPipe(
-      submissionBatchSize = 1, // Force BatchN out of the equation
-      // Block the tail consumer to ensure total backpressure
-      ingestTailHook = _ => release.future,
+      submissionBatchSize = 1, // Force the first BatchN out of the equation
+      ingestionParallelism =
+        1, // Second BatchN then forms one batch of up to MaxIngestionBatchSize at a time
+      // Block the consumer of the second BatchN stage to ensure total backpressure
+      batcherHook = () => release.future,
     )
 
-    // Same reasoning as for BatchN above, except that up to IngestingParallelism more batches can
+    // Same reasoning as for the first BatchN above, except that up to IngestionParallelism more batches can
     // wait in the ingester stage in front of the tailer.
     eventually {
-      run.ingestTailCalls.all should have size 1
-      run.ingesterCalls.all.size - run.ingestTailCalls.all.flatten.size should be >=
-        MaxTailerBatchSize + 1 + IngestingParallelism
+      run.batcherCalls.all.size should be >= 1
+      run.dbPrepareCalls.all.size - run.batcherCalls.all.flatten.size should be >=
+        MaxIngestionBatchSize + 1 + IngestionParallelism
     }
     release.success(())
 
     run.output.futureValue
-    val batchSizes = run.ingestTailCalls.all.map(_.size)
-    // The first batch was formed before ingestTail was busy, the second one while it was.
-    batchSizes(1) shouldBe MaxTailerBatchSize
-    all(batchSizes) should be <= MaxTailerBatchSize
+    val batchSizes = run.batcherCalls.all.map(_.size)
+    // The first batch was formed before batcher was busy, the second one while it was.
+    // +3 due to the 0 weight elements (at most 3 of them can present in a batch of 23)
+    batchSizes(1) should (be >= MaxIngestionBatchSize + 2 and be <= MaxIngestionBatchSize + 3)
+    all(batchSizes) should be <= MaxIngestionBatchSize + 3
   }
 
   /*
@@ -158,8 +162,8 @@ class BatchingParallelIngestionPipeSpec
       input = Source(1 to numElements).mapAsync(parallelism = 1)(i =>
         (if (i == 1) Future.unit else tailed(i - 1).future).map(_ => i)
       ),
-      ingestTailHook = batches => {
-        batches.flatten.foreach(item => tailed(item.index).success(()))
+      ingestTailHook = batch => {
+        batch.foreach(item => tailed(item.index).success(()))
         Future.unit
       },
     )
@@ -181,52 +185,73 @@ class BatchingParallelIngestionPipeSpec
       contractReInsertionHook: Iterable[Int] => Future[Unit] = _ => Future.unit,
       inputMapperHook: () => Unit = () => (),
       seqMapperHook: () => Unit = () => (),
-      batcherHook: () => Unit = () => (),
+      batcherHook: () => Future[Unit] = () => Future.unit,
+      ingestionParallelism: Int = IngestionParallelism,
+      ingestionMaxBatchSize: Int = MaxIngestionBatchSize,
       ingesterHook: DbBatch => Future[Unit] = _ => Future.unit,
-      ingestTailHook: Vector[DbBatch] => Future[Unit] = _ => Future.unit,
+      ingestTailHook: List[BatchedItem] => Future[Unit] = _ => Future.unit,
   ): PipeRun = {
     val emitted = new AtomicInteger(0)
     val contractReInsertionCalls = new CallLog[Iterable[Int]]
+    val dbPrepareCalls = new CallLog[List[SequencedItem]]
+    val batcherCalls = new CallLog[List[PreBatchItem]]
     val ingesterCalls = new CallLog[DbBatch]
-    val ingestTailCalls = new CallLog[Vector[DbBatch]]
+    val ingestTailCalls = new CallLog[List[BatchedItem]]
 
-    val pipe = BatchingParallelIngestionPipe[Int, List[SequencedItem], DbBatch](
-      submissionBatchSize = submissionBatchSize.toLong,
-      inputMappingParallelism = inputMappingParallelism,
-      contractReInsertion = batch => {
-        contractReInsertionCalls.record(batch)
-        contractReInsertionHook(batch).map(_ => batch)
-      },
-      inputMapper = batch =>
-        Future {
-          inputMapperHook()
-          batch.map(value => SequencedItem(index = 0, value = value)).toList
+    val pipe =
+      BatchingParallelIngestionPipe[Int, List[SequencedItem], PreBatchItem, List[BatchedItem], List[
+        BatchedItem
+      ]](
+        submissionBatchSize = submissionBatchSize,
+        inputMappingParallelism = inputMappingParallelism,
+        contractReInsertion = batch => {
+          contractReInsertionCalls.record(batch)
+          contractReInsertionHook(batch).map(_ => batch)
         },
-      seqMapperZero = List(SequencedItem(index = 0, value = 0)),
-      seqMapper = (previous, current) => {
-        seqMapperHook()
-        val lastIndex = previous.last.index
-        current.zipWithIndex.map { case (item, i) => item.copy(index = lastIndex + 1 + i) }
-      },
-      dbPrepareParallelism = 2,
-      dbPrepare = Future.successful,
-      batchingParallelism = 2,
-      batcher = batch =>
-        Future {
-          batcherHook()
-          batch.map(item => BatchedItem(index = item.index, value = item.value.toString))
+        inputMapper = batch =>
+          Future {
+            inputMapperHook()
+            batch.map(value => SequencedItem(index = 0, value = value)).toList
+          },
+        seqMapperZero = List(SequencedItem(index = 0, value = 0)),
+        seqMapper = (previous, current) => {
+          seqMapperHook()
+          val lastIndex = previous.last.index
+          current.zipWithIndex.map { case (item, i) => item.copy(index = lastIndex + 1 + i) }
         },
-      ingestingParallelism = IngestingParallelism,
-      ingester = batch => {
-        ingesterCalls.record(batch)
-        ingesterHook(batch).map(_ => batch)
-      },
-      maxTailerBatchSize = MaxTailerBatchSize,
-      ingestTail = batches => {
-        ingestTailCalls.record(batches)
-        ingestTailHook(batches).map(_ => batches)
-      },
-    )
+        dbPrepareParallelism = 2,
+        dbPrepare = inBatch => {
+          dbPrepareCalls.record(inBatch.toList)
+          Future.successful(inBatch.map { case SequencedItem(index, value) =>
+            PreBatchItem(index, Vector(value))
+          }.toVector)
+        },
+        batcher = inBatch => {
+          batcherCalls.record(inBatch.toList)
+          batcherHook().flatMap { _ =>
+            Future {
+              inBatch.map { item =>
+                BatchedItem(index = item.index, value = item.batch.mkString)
+              }.toList
+            }
+          }
+        },
+        batcherCostFn = item => if (item.index % 10 == 0) 0L else 1L,
+        ingestionParallelism = ingestionParallelism,
+        ingestionMaxBatchSize = ingestionMaxBatchSize,
+        ingestionMinBatchSize = 1,
+        ingester = batch => {
+          ingesterCalls.record(batch)
+          ingesterHook(batch).map(_ => batch)
+        },
+        tailConflateFlow = Flow
+          .apply[List[BatchedItem]]
+          .map(b => b),
+        ingestTail = batch => {
+          ingestTailCalls.record(batch)
+          ingestTailHook(batch).map(_ => batch)
+        },
+      )
 
     val output = input
       .map { value =>
@@ -236,17 +261,26 @@ class BatchingParallelIngestionPipeSpec
       .via(pipe)
       .runWith(Sink.seq)
 
-    PipeRun(emitted, contractReInsertionCalls, ingesterCalls, ingestTailCalls, output)
+    PipeRun(
+      emitted,
+      contractReInsertionCalls,
+      dbPrepareCalls,
+      batcherCalls,
+      ingesterCalls,
+      ingestTailCalls,
+      output,
+    )
   }
 }
 
 object BatchingParallelIngestionPipeSpec {
   private val InputSize = 1000
   private val MaxBatchSize = 300
-  private val MaxTailerBatchSize = 4
-  private val IngestingParallelism = 2
+  private val MaxIngestionBatchSize = 20
+  private val IngestionParallelism = 2
 
   final case class SequencedItem(index: Int, value: Int)
+  final case class PreBatchItem(index: Int, batch: Vector[Int])
   final case class BatchedItem(index: Int, value: String)
   type DbBatch = List[BatchedItem]
 
@@ -254,8 +288,10 @@ object BatchingParallelIngestionPipeSpec {
   private final case class PipeRun(
       emitted: AtomicInteger, // elements that left the input source
       contractReInsertionCalls: CallLog[Iterable[Int]], // i.e. the batches formed by BatchN
+      dbPrepareCalls: CallLog[List[SequencedItem]],
+      batcherCalls: CallLog[List[PreBatchItem]],
       ingesterCalls: CallLog[DbBatch],
-      ingestTailCalls: CallLog[Vector[DbBatch]],
+      ingestTailCalls: CallLog[List[BatchedItem]],
       output: Future[Seq[DbBatch]],
   )
 

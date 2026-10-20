@@ -9,6 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.digitalasset.base.error.*
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -35,6 +36,8 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCredit
+import com.digitalasset.canton.tea.ingestion.TeaCreditIngestionService
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.TopologyManagerError.{
@@ -275,21 +278,8 @@ class AdminWorkflowServices(
     */
   private def loadDamlArchiveResource(darName: String)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
-    val bytes =
-      withResource(AdminWorkflowServices.getDarInputStream(darName))(ByteString.readFrom)
-    AdminWorkflowServices.handleDamlErrorDuringPackageLoading(darName)(
-      packageService
-        .upload(
-          darBytes = bytes,
-          description = Some("System package"),
-          submissionIdO = None,
-          vettingInfo = None,
-          expectedMainPackageId = None,
-        )
-        .void
-    )
-  }
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    AdminWorkflowServices.uploadBuiltInDar(packageService, darName)
 
   private def createLedgerClient(
       userId: String
@@ -343,6 +333,7 @@ class AdminWorkflowServices(
                     client.updateService.getUpdatesSource(
                       begin = subscribeOffset,
                       eventFormat = service.eventFormat,
+                      transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
                     ),
                   consumingFlow = Flow[GetUpdatesResponse]
                     .map(_.update)
@@ -381,7 +372,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
     "canton-builtin-admin-workflow-acs-replication-alpha"
   private val AcsReplicationDarResourceFileName: String =
     s"dar/$AcsReplicationDarResourceName.dar"
-  val AdminWorkflowNames: Set[String] = Set(PingDarResourceName, AcsReplicationDarResourceName)
+  val AdminWorkflowNames: Set[String] =
+    Set(PingDarResourceName, AcsReplicationDarResourceName, TrafficCredit.PACKAGE_NAME)
 
   private def getDarInputStream(resourceName: String): InputStream =
     Option(
@@ -400,6 +392,46 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       .valueOr(err =>
         throw new IllegalStateException(s"Unable to load admin workflow packages: $err")
       )
+
+  /** Uploads a DAR from the classpath as a system package. Does NOT vet the DAR. */
+  private def uploadBuiltInDar(packageService: PackageService, darName: String)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
+    val bytes = withResource(getDarInputStream(darName))(ByteString.readFrom)
+    handleDamlErrorDuringPackageLoading(darName)(
+      packageService
+        .upload(
+          darBytes = bytes,
+          description = Some("System package"),
+          submissionIdO = None,
+          vettingInfo = None,
+          expectedMainPackageId = None,
+        )
+        .void
+    )
+  }
+
+  /** Whether all packages of the canton-traffic-credit DAR are registered with the participant. */
+  private[participant] def isTrafficCreditDarRegistered(packageService: PackageService)(implicit
+      loggingContext: ErrorLoggingContext
+  ): Boolean =
+    TrafficCreditPackages.keySet.subsetOf(
+      packageService.getPackageMetadataView.getSnapshot.packages.keySet
+    )
+
+  /** Uploads the canton-traffic-credit DAR read by the traffic enforcement top-up ingestion, unless
+    * all its packages are already registered with the participant. Does NOT vet the DAR.
+    */
+  private[participant] def uploadTrafficCreditDarUnlessRegistered(packageService: PackageService)(
+      implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    if (isTrafficCreditDarRegistered(packageService)) EitherTUtil.unitUS
+    else uploadBuiltInDar(packageService, TeaCreditIngestionService.DarResourceFileName)
 
   private[participant] def handleDamlErrorDuringPackageLoading(adminWorkflow: String)(
       res: EitherT[FutureUnlessShutdown, RpcError, Unit]
@@ -436,8 +468,11 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
   lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(
     AcsReplicationDarResourceFileName
   )
+  lazy val TrafficCreditPackages: Map[PackageId, Ast.Package] = getDarPackages(
+    TeaCreditIngestionService.DarResourceFileName
+  )
   lazy val AllBuiltInPackages: Map[PackageId, Ast.Package] =
-    PingPackages ++ AcsReplicationPackages
+    PingPackages ++ AcsReplicationPackages ++ TrafficCreditPackages
 
   @Explanation(
     """This error indicates that the admin workflow package could not be vetted. The admin workflows is

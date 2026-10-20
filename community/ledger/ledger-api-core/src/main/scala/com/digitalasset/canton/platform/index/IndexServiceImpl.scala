@@ -266,6 +266,7 @@ private[index] class IndexServiceImpl(
       activeAt = Some(activeAt),
       rangeInfo = AcsRangeInfo.assertFromContinuationTokenBytes(continuationToken),
       configOverrides = Some(configOverrides),
+      includeIncompleteReassignments = true,
     ).async
       .mapAsync(parallelism = acsFilteringParallelism) { getActiveContractsResponse =>
         Future {
@@ -404,6 +405,7 @@ private[index] class IndexServiceImpl(
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -435,6 +437,7 @@ private[index] class IndexServiceImpl(
                 eventProjectionProperties = eventProjectionProperties,
                 rangeInfo = rangeInfo,
                 configOverrides = configOverrides,
+                includeIncompleteReassignments = includeIncompleteReassignments,
               )
           }
         activeContractsSource

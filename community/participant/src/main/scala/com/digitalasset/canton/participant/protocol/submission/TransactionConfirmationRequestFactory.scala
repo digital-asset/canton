@@ -26,6 +26,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.TransactionViewMetrics
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   ViewHashAndRecipients,
   ViewKeyDataMap,
@@ -339,9 +340,9 @@ class TransactionConfirmationRequestFactory(
       OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
     ]] = {
       require(
-        protocolVersion >= ProtocolVersion.transparency,
+        protocolVersion >= ProtocolVersion.transparencyAndCiphertextId,
         s"Ciphertext ID-based subview references are only supported for protocol " +
-          s"versions >= v${ProtocolVersion.transparency} (got $protocolVersion)",
+          s"versions >= v${ProtocolVersion.transparencyAndCiphertextId} (got $protocolVersion)",
       )
 
       // Accumulator for ciphertext IDs + final envelopes
@@ -497,8 +498,8 @@ class TransactionConfirmationRequestFactory(
       OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
     ]] = {
       require(
-        protocolVersion < ProtocolVersion.transparency,
-        s"ViewHash-based encryption is only supported for protocol versions < v${ProtocolVersion.transparency} (got $protocolVersion)",
+        protocolVersion < ProtocolVersion.transparencyAndCiphertextId,
+        s"ViewHash-based encryption is only supported for protocol versions < v${ProtocolVersion.transparencyAndCiphertextId} (got $protocolVersion)",
       )
 
       def makeLightTransactionViewTreeWithRecipient(
@@ -610,7 +611,7 @@ class TransactionConfirmationRequestFactory(
       )
 
       envelopes <-
-        if (protocolVersion < ProtocolVersion.transparency)
+        if (protocolVersion < ProtocolVersion.transparencyAndCiphertextId)
           createOpenEnvelopesWithTransactionV1(
             viewsWithWitnessesAndRecipientsNE,
             viewsKeyDataMap,
@@ -636,6 +637,7 @@ object TransactionConfirmationRequestFactory {
       loggingConfig: LoggingConfig,
       useLegacyContractIdVersionV11: Boolean,
       loggerFactory: NamedLoggerFactory,
+      metrics: TransactionViewMetrics,
   )(implicit executionContext: ExecutionContext): TransactionConfirmationRequestFactory = {
 
     val transactionTreeFactory = TransactionTreeFactory(
@@ -647,6 +649,7 @@ object TransactionConfirmationRequestFactory {
       cryptoOps,
       hasher,
       loggerFactory,
+      metrics,
     )
 
     new TransactionConfirmationRequestFactory(submitterNode, loggingConfig, loggerFactory)(

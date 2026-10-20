@@ -6,7 +6,6 @@ syntax = "proto3";
 package com.digitalasset.canton.topology.admin.v30;
 
 import "com/digitalasset/canton/protocol/v30/topology.proto";
-import "com/digitalasset/canton/protocol/v31/topology.proto";
 import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/duration.proto";
 
@@ -62,7 +61,6 @@ message GenerateTransactionsRequest {
     /** The mapping to be authorized */
     oneof mapping {
       com.digitalasset.canton.protocol.v30.TopologyMapping v30 = 3;
-      com.digitalasset.canton.protocol.v31.TopologyMapping v31 = 5;
     }
 
     // Target store
@@ -96,7 +94,6 @@ message AuthorizeRequest {
     /** The mapping to be authorized */
     oneof mapping {
       com.digitalasset.canton.protocol.v30.TopologyMapping v30 = 3;
-      com.digitalasset.canton.protocol.v31.TopologyMapping v31 = 4;
     }
   }
 

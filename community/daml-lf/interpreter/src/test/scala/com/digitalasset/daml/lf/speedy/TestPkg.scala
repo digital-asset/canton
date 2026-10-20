@@ -274,7 +274,7 @@ trait CmdFlowRunner {
       authorizationChecker: RecordingMachineLogger => AuthorizationChecker =
         new AuthorizationCheckerLogger(_),
       interpretationConfig: interpretation.InterpretationConfig =
-        interpretation.InterpretationConfig.Default,
+        interpretation.InterpretationConfig.DefaultForTesting,
   )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, Result], Seq[String])
 }
 
@@ -303,7 +303,7 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
       expr = SExpr.SEValue(SValue.SUnit),
       committers = parties,
       packageResolution = packageResolution,
-      limits = interpretation.Limits.Lenient,
+      limits = interpretation.LimitConfig.Off,
       authorizationChecker = authorizationChecker(recordingLogger),
       iterationsBetweenInterruptions = 10000,
       interpretationConfig = interpretationConfig,
@@ -388,7 +388,7 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
       initialSeeding = InitialSeeding.TransactionSeed(seed),
       committers = parties,
       packageResolution = packageResolution,
-      limits = interpretation.Limits.Lenient,
+      limits = interpretation.LimitConfig.Off,
       authorizationChecker = authorizationChecker(recordingLogger),
       iterationsBetweenInterruptions = 10000,
       interpretationConfig = interpretationConfig,

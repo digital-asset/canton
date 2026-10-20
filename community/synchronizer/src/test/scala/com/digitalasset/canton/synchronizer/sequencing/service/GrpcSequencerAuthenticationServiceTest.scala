@@ -13,7 +13,6 @@ import com.digitalasset.canton.synchronizer.sequencing.authentication.MemberAuth
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -126,7 +125,7 @@ class GrpcSequencerAuthenticationServiceTest
         .value shouldBe Seq(expectedFingerprint.unwrap.toProtoUnvalidated)
     }
 
-    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "reject challenge requests with too many member protocol versions" in {
       val sequencerLimits = SequencerLimits()
       val maxMemberProtocolVersions = sequencerLimits.maxMemberProtocolVersions.value
       val request = mkChallengeRequest("", Seq.fill(maxMemberProtocolVersions + 1)(30))

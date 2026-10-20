@@ -617,6 +617,7 @@ final class SingleParticipantTestContext private[participant] (
           eventFormat = request.eventFormat,
           maxPageSize = Some(size),
           pageToken = token,
+          includeIncompleteReassignments = request.includeIncompleteReassignments,
         )
       )
       .flatMap { response =>
@@ -681,32 +682,49 @@ final class SingleParticipantTestContext private[participant] (
       templateIds: Seq[Identifier] = Seq.empty,
       interfaceFilters: Seq[(Identifier, IncludeInterfaceView)] = Seq.empty,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): GetActiveContractsRequest =
     GetActiveContractsRequest(
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat(verbose, parties, templateIds, interfaceFilters)),
       streamContinuationToken = None,
+      includeIncompleteReassignments = includeIncompleteReassignments,
     )
 
   override def activeContractsWithVariants(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
-    activeContractsByTemplateIdWithVariants(Seq.empty, parties, activeAtOffsetO, verbose)
+    activeContractsByTemplateIdWithVariants(
+      templateIds = Seq.empty,
+      parties = parties,
+      activeAtOffsetO = activeAtOffsetO,
+      verbose = verbose,
+      includeIncompleteReassignments = includeIncompleteReassignments,
+    )
 
   override def activeContracts(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
-    activeContractsByTemplateId(Seq.empty, parties, activeAtOffsetO, verbose)
+    activeContractsByTemplateId(
+      templateIds = Seq.empty,
+      parties = parties,
+      activeAtOffsetO = activeAtOffsetO,
+      verbose = verbose,
+      includeIncompleteReassignments = includeIncompleteReassignments,
+    )
 
   override def activeContractsByTemplateId(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     for {
       activeAtOffset <- activeAtOffsetO match {
@@ -719,6 +737,7 @@ final class SingleParticipantTestContext private[participant] (
           activeAtOffset,
           templateIds,
           verbose = verbose,
+          includeIncompleteReassignments = includeIncompleteReassignments,
         )
       )
     } yield acs
@@ -728,6 +747,7 @@ final class SingleParticipantTestContext private[participant] (
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     for {
       activeAtOffset <- activeAtOffsetO match {
@@ -740,6 +760,7 @@ final class SingleParticipantTestContext private[participant] (
           activeAtOffset,
           templateIds,
           verbose = verbose,
+          includeIncompleteReassignments = includeIncompleteReassignments,
         )
       )
     } yield acs

@@ -46,16 +46,6 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  package_sequencer_driver_api:
-    name: Package Sequencer Driver API
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_package_sequencer_driver_api.yml
-    secrets: inherit
-    with:
-      is_nightly_workflow: true
-      is_manual: false
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
   package_kms_driver:
     name: Package KMS Driver
     needs: [pick_runner, compile]
@@ -196,7 +186,6 @@ jobs:
       - pick_runner
       - compile
       - package_community
-      - package_sequencer_driver_api
       - package_kms_driver
       - build_scaladoc
       - build_docs_snippets

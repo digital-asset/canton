@@ -99,10 +99,10 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
     }
 
     @Explanation(
-      "Record time is either before synchronizer connection was esablished or it was pruned already."
+      "Record time is either before synchronizer connection was established or it was pruned already."
     )
     @Resolution(
-      "Make sure that record time was not pruned yet and that the connection from this participand node to this synchronizer was esablished before this record time."
+      "Make sure that record time was not pruned yet and that the connection from this participant node to this synchronizer was established before this record time."
     )
     object RecordTime
         extends ErrorCode(
@@ -113,7 +113,7 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           loggingContext: ErrorLoggingContext
       ) extends DamlErrorWithDefiniteAnswer(
             cause =
-              "Record time is either before synchronizer connection was esablished or it was pruned already"
+              "Record time is either before synchronizer connection was established or it was pruned already"
           ) {
         override def resources: Seq[(ErrorResource, String)] = Seq(
           (ErrorResource.SynchronizerId, synchronizerId.toProtoPrimitive),

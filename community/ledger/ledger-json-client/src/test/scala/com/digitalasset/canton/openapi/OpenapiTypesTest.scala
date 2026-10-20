@@ -9,8 +9,8 @@ import com.digitalasset.canton.http.json.v2 as json
 import com.digitalasset.canton.openapi.json.{JSON, model as openapi}
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -1103,16 +1103,16 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.UpdateAccountResponse.fromJson
         ),
         Mapping[
-          PruneEventsRequest,
-          openapi.PruneEventsRequest,
+          PruneRequest,
+          openapi.PruneRequest,
         ](
-          openapi.PruneEventsRequest.fromJson
+          openapi.PruneRequest.fromJson
         ),
         Mapping[
-          PruneEventsResponse,
-          openapi.PruneEventsResponse,
+          PruneResponse,
+          openapi.PruneResponse,
         ](
-          openapi.PruneEventsResponse.fromJson
+          openapi.PruneResponse.fromJson
         ),
         Mapping[
           v2.state_service.ConvertRecordTimeToOffsetResponse,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -11,7 +12,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.platform.config.TrafficAccountingConfig
 import com.digitalasset.canton.tea.v1.{TrafficServiceGrpc, UpdateAccountRequest}
-import com.google.protobuf.timestamp.Timestamp
 import monocle.Monocle.toAppliedFocusOps
 
 import java.util.UUID
@@ -47,16 +47,16 @@ final class UpdateAccountAuthIT extends TrafficServiceAdminAuthIT {
       )
 }
 
-final class PruneEventsAuthIT extends TrafficServiceAdminAuthIT {
-  override def serviceCallName: String = "TrafficService#PruneEvents"
+final class PruneAuthIT extends TrafficServiceAdminAuthIT {
+  override def serviceCallName: String = "TrafficService#Prune"
 
   override def serviceCall(
       context: ServiceCallContext
   )(implicit env: TestConsoleEnvironment): Future[Any] =
     stub(TrafficServiceGrpc.stub(channel), context.token)
-      .pruneEvents(
-        com.digitalasset.canton.tea.v1.PruneEventsRequest(
-          beforeOrAt = Some(Timestamp.defaultInstance)
+      .prune(
+        com.digitalasset.canton.tea.v1.PruneRequest(
+          beforeOrAt = Some(CantonTimestamp.MinValue.toProtoTimestamp)
         )
       )
 }

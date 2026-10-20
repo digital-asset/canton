@@ -879,8 +879,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   }
 }
 
-class AcsCommitmentProcessorBftOrderingIntegrationTestPostgres
-    extends AcsCommitmentProcessorIntegrationTest {
+class AcsCommitmentProcessorIntegrationTestPostgres extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseBftSequencer(
@@ -896,11 +895,10 @@ class AcsCommitmentProcessorBftOrderingIntegrationTestPostgres
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-//class AcsCommitmentProcessorReferenceIntegrationTestH2
-//    extends AcsCommitmentProcessorIntegrationTest {
+//class AcsCommitmentProcessorIntegrationTestH2 extends AcsCommitmentProcessorIntegrationTest {
 //  registerPlugin(new UseH2(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](
+//    new UseBftSequencer(
 //      loggerFactory,
 //      sequencerGroups = MultiSynchronizer(
 //        Seq(

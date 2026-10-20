@@ -181,6 +181,21 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingError
     }
+
+    @Explanation(
+      """The provided submission id is invalid."""
+    )
+    @Resolution("Resubmit the command with a valid submission id.")
+    object InvalidSubmissionId
+        extends ErrorCode(
+          id = "INVALID_SUBMISSION_ID",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      final case class Error(submissionId: String, issue: String)
+          extends TransactionErrorImpl(cause = s"$issue. Provided submission id: $submissionId")
+          with TransactionRoutingError
+    }
   }
 
   object TopologyErrors extends ErrorGroup() {

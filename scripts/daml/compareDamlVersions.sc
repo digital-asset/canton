@@ -104,12 +104,11 @@ private def parseSemver(version: String): Version = {
     case regex(major, minor, patch, suffix) =>
       val rawSuffixO = Option(suffix) // `suffix` is `null` if no suffix is given
 
-      // TODO(i27546) Remove adhoc handling once adhoc versions are no longer used
-      val suffixRegex = raw"(adhoc|snapshot)\.([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9a-z]+)".r
+      val suffixRegex = raw"snapshot\.([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9a-z]+)".r
       val rcRegex = "rc([0-9]+)".r
 
       val suffixO = rawSuffixO.map {
-        case suffixRegex(_, date, commits, _, _) =>
+        case suffixRegex(date, commits, _, _) =>
           Version.Snapshot(LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE), commits.toInt)
         case rcRegex(rcNumber) =>
           Version.RC(rcNumber.toInt)

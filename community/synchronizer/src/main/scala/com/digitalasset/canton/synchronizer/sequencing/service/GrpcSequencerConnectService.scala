@@ -43,11 +43,12 @@ import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
   SignedTopologyTransaction,
   TopologyMapping,
+  TopologyTransactionDeserializationContext,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
-import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.{Status, StatusRuntimeException}
@@ -98,12 +99,6 @@ class GrpcSequencerConnectService(
   ): Future[GetSynchronizerParametersResponse] =
     mapErrorEither(
       staticSynchronizerParameters.protoVersion match {
-        case ProtoVersion(30) =>
-          Right(
-            GetSynchronizerParametersResponse(
-              Parameters.V30(staticSynchronizerParameters.toProtoV30)
-            )
-          )
         case ProtoVersion(31) =>
           Right(
             GetSynchronizerParametersResponse(
@@ -114,6 +109,12 @@ class GrpcSequencerConnectService(
           Right(
             GetSynchronizerParametersResponse(
               Parameters.V32(staticSynchronizerParameters.toProtoV32)
+            )
+          )
+        case ProtoVersion(33) =>
+          Right(
+            GetSynchronizerParametersResponse(
+              Parameters.V33(staticSynchronizerParameters.toProtoV33)
             )
           )
         case unsupported =>
@@ -160,8 +161,6 @@ class GrpcSequencerConnectService(
       metrics.publicApi.handshakes.mark()(MetricsContext("member" -> member, "status" -> status))
     }
 
-    val maxClientProtocolVersions = sequencerLimits.maxClientProtocolVersions.value
-
     mapErrorEither(
       for {
         clientProtocolVersions <- ProtoValidation
@@ -169,7 +168,7 @@ class GrpcSequencerConnectService(
             request.clientProtocolVersions,
             "client_protocol_versions",
             pvv,
-            maxClientProtocolVersions,
+            ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxClientProtocolVersions),
           )
           .leftMap(err => invalidArgument(err.message))
         clientVersion <- ProtoValidation
@@ -308,10 +307,15 @@ class GrpcSequencerConnectService(
             topologyTransactions,
             "topology_transactions",
             pvv,
-            maxOnboardingTransactions.value,
+            ValidationParam(ProtocolVersion.v36 -> maxOnboardingTransactions),
           )((tx, _) =>
-            SignedTopologyTransaction
-              .fromProtoV30(pvv, tx)
+            SignedTopologyTransaction.fromProtoV30(
+              pvv,
+              TopologyTransactionDeserializationContext(
+                staticSynchronizerParameters.synchronizerLimits.topologyLimits
+              ),
+              tx,
+            )
           )
           .map(_.distinctBy(_.mapping.uniqueKey))
           .leftMap(err => invalidArgument(err.message))

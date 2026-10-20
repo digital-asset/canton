@@ -146,7 +146,7 @@ class GrpcPruningService(
       request: v30.SetParticipantScheduleRequest
   ): Future[v30.SetParticipantScheduleResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    for {
+    val fus = for {
       scheduler <- ensureScheduler
       participantSchedule <- convertRequiredF(
         "participant_schedule",
@@ -158,16 +158,18 @@ class GrpcPruningService(
         "set_participant_schedule",
       )
     } yield v30.SetParticipantScheduleResponse()
+    fus.asGrpcFuture
   }
 
   override def getParticipantSchedule(
       request: v30.GetParticipantScheduleRequest
   ): Future[v30.GetParticipantScheduleResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    for {
+    val fus = for {
       scheduler <- ensureScheduler
       schedule <- scheduler.getParticipantSchedule()
     } yield v30.GetParticipantScheduleResponse(schedule.map(_.toProtoV30))
+    fus.asGrpcFuture
   }
 
   private def toProtoResponse(safeOffsetO: Option[Offset]): GetSafePruningOffsetResponse = {
@@ -186,8 +188,8 @@ class GrpcPruningService(
 
   override protected def ensureScheduler(implicit
       traceContext: TraceContext
-  ): Future[ParticipantPruningScheduler] =
-    Future.successful(pruningScheduler)
+  ): FutureUnlessShutdown[ParticipantPruningScheduler] =
+    FutureUnlessShutdown.pure(pruningScheduler)
 
   /** Enable or disable waiting for commitments from the given counter-participants Disabling
     * waiting for commitments disregards these counter-participants w.r.t. pruning, which gives up

@@ -450,7 +450,6 @@ lazy val `community-participant` = CommunityProjects.`community-participant`
 lazy val `community-admin-api` = CommunityProjects.`community-admin-api`
 lazy val `community-testing` = CommunityProjects.`community-testing`
 lazy val `community-integration-testing` = CommunityProjects.`community-integration-testing`
-lazy val `community-integration-testing-lib` = CommunityProjects.`community-integration-testing-lib`
 lazy val `daml-script-tests` = CommunityProjects.`daml-script-tests`
 lazy val microbench = CommunityProjects.microbench
 lazy val `performance-driver` = CommunityProjects.`performance-driver`
@@ -462,9 +461,6 @@ lazy val `scalatest-addon` = CommunityProjects.`scalatest-addon`
 lazy val `util-external` = CommunityProjects.`util-external`
 lazy val `util-observability` = CommunityProjects.`util-observability`
 lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`
-lazy val `sequencer-driver-api-conformance-tests` =
-  CommunityProjects.`sequencer-driver-api-conformance-tests`
-lazy val `sequencer-driver-lib` = CommunityProjects.`sequencer-driver-lib`
 lazy val `reference-sequencer-driver` = CommunityProjects.`reference-sequencer-driver`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 lazy val `wartremover-annotations` = CommunityProjects.`wartremover-annotations`

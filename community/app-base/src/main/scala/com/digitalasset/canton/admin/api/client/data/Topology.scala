@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
+import com.digitalasset.canton.admin.api.client.AdminApiResponseValidation
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantSynchronizers
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -12,7 +13,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersionValidation
 
 final case class ListPartiesResult(
     partyResult: Party,
@@ -38,7 +38,7 @@ object ListPartiesResult {
       synchronizerId <- ProtoValidation.validateThen(
         valueP.synchronizerId,
         "synchronizer_id",
-        ProtocolVersionValidation.AlwaysValidation,
+        AdminApiResponseValidation.Trusted,
       )(SynchronizerId.fromProtoPrimitive)
       permission <- ParticipantPermission.fromProtoV30(valueP.permission)
     } yield SynchronizerPermission(synchronizerId, permission)
@@ -50,15 +50,15 @@ object ListPartiesResult {
       participantId <- ProtoValidation.validateThen(
         value.participantUid,
         "participant_uid",
-        ProtocolVersionValidation.AlwaysValidation,
+        AdminApiResponseValidation.Trusted,
       )(ParticipantId.fromProtoPrimitiveUid)
 
       synchronizers <- ProtoValidation
         .validateLengthThen(
           value.synchronizers,
           "synchronizers",
-          ProtocolVersionValidation.AlwaysValidation,
-          ProtoValidation.MaxCollectionSize,
+          AdminApiResponseValidation.Trusted,
+          AdminApiResponseValidation.NoLengthLimit,
         )((entry, _) => fromProtoV30(entry))
     } yield ParticipantSynchronizers(participantId, synchronizers)
 
@@ -69,14 +69,14 @@ object ListPartiesResult {
       partyUid <- ProtoValidation.validateThen(
         value.party,
         "party",
-        ProtocolVersionValidation.AlwaysValidation,
+        AdminApiResponseValidation.Trusted,
       )(UniqueIdentifier.fromProtoPrimitive)
       participants <- ProtoValidation
         .validateLengthThen(
           value.participants,
           "participants",
-          ProtocolVersionValidation.AlwaysValidation,
-          ProtoValidation.MaxCollectionSize,
+          AdminApiResponseValidation.Trusted,
+          AdminApiResponseValidation.NoLengthLimit,
         )((entry, _) => fromProtoV30(entry))
     } yield ListPartiesResult(PartyId(partyUid), participants)
 }
@@ -101,26 +101,26 @@ object ListKeyOwnersResult {
       synchronizerId <- ProtoValidation.validateThen(
         value.synchronizerId,
         "synchronizer_id",
-        ProtocolVersionValidation.AlwaysValidation,
+        AdminApiResponseValidation.Trusted,
       )(SynchronizerId.fromProtoPrimitive)
       owner <- ProtoValidation.validateThen(
         value.keyOwner,
         "keyOwner",
-        ProtocolVersionValidation.AlwaysValidation,
+        AdminApiResponseValidation.Trusted,
       )(Member.fromProtoPrimitive)
       signingKeys <- ProtoValidation
         .validateLengthThen(
           value.signingKeysV30,
           "signing_keys",
-          ProtocolVersionValidation.AlwaysValidation,
-          ProtoValidation.MaxCollectionSize,
+          AdminApiResponseValidation.Trusted,
+          AdminApiResponseValidation.NoLengthLimit,
         )((entry, _) => SigningPublicKey.fromProtoV30(entry))
       encryptionKeys <- ProtoValidation
         .validateLengthThen(
           value.encryptionKeys,
           "encryption_keys",
-          ProtocolVersionValidation.AlwaysValidation,
-          ProtoValidation.MaxCollectionSize,
+          AdminApiResponseValidation.Trusted,
+          AdminApiResponseValidation.NoLengthLimit,
         )((entry, _) => EncryptionPublicKey.fromProtoV30(entry))
     } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
 }

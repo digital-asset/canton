@@ -521,10 +521,12 @@ object Generators {
     for {
       eventFormat <- eventFormatGen
       activeAtOffset <- Arbitrary.arbLong.arbitrary
+      includeIncompleteReassignments <- Arbitrary.arbBool.arbitrary
     } yield v2.StateServiceOuterClass.GetActiveContractsRequest
       .newBuilder()
       .setEventFormat(eventFormat)
       .setActiveAtOffset(activeAtOffset)
+      .setIncludeIncompleteReassignments(includeIncompleteReassignments)
       .build()
 
   def activeContractGen: Gen[v2.StateServiceOuterClass.ActiveContract] =

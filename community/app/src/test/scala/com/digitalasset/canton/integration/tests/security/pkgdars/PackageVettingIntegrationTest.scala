@@ -57,6 +57,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, SynchronizerAlias, config}
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -157,7 +158,7 @@ sealed trait PackageVettingIntegrationTest
           participant2,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )
@@ -417,7 +418,7 @@ sealed trait PackageVettingIntegrationTest
     events.assertNoTransactions()
   }
 
-  "fail gracefully if the underlying package is not vetted on the target synchronizer" in {
+  "fail gracefully if the underlying package is not vetted on the target synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
     // target state: fail gracefully, do not fork the ledger
     implicit env =>
       import env.*
@@ -489,12 +490,16 @@ sealed trait PackageVettingIntegrationTest
       // An attempt to assign this contract fails because the package is not vetted on participant4
       def tryAssign(assertion: Seq[LogEntry] => Assertion): Unit =
         loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-          participant2.ledger_api.commands.submit_assign_async(
-            participant2.adminParty,
-            unassignment.reassignmentId,
-            daId,
-            acmeId,
-          ),
+          {
+            participant2.ledger_api.commands.submit_assign_async(
+              participant2.adminParty,
+              unassignment.reassignmentId,
+              daId,
+              acmeId,
+            )
+            // Do a ping as a proxy for the assignment to be processed. The assignment is not expected to succeed, but we want to wait until the assignment has been processed.
+            participant2.health.ping(participant2)
+          },
           assertion,
         )
 

@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.grpc.{GrpcPruningScheduler, HasPruningScheduler}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencer.admin.v30
@@ -50,8 +51,7 @@ class GrpcBftOrderingSequencerPruningAdminService(
     val promise = Promise[String]()
     for {
       positiveDuration <- convertF(
-        PositiveSeconds
-          .fromProtoPrimitiveO("retention")(request.retention)
+        PositiveSeconds.fromProtoPrimitiveO("retention")(request.retention)
       )
       _ = pruningModuleRef.asyncSend(
         KickstartPruning(positiveDuration.toFiniteDuration, request.minBlocksToKeep, Some(promise))
@@ -70,7 +70,7 @@ class GrpcBftOrderingSequencerPruningAdminService(
 
   override def setBftSchedule(request: SetBftScheduleRequest): Future[SetBftScheduleResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    for {
+    val fus = for {
       bftOrdererSchedule <- convertRequiredF(
         "bft_orderer_schedule",
         request.schedule,
@@ -81,24 +81,28 @@ class GrpcBftOrderingSequencerPruningAdminService(
         "set_bft_orderer_schedule",
       )
     } yield v30.SetBftScheduleResponse()
+    fus.asGrpcFuture
   }
 
-  override def getBftSchedule(request: GetBftScheduleRequest): Future[GetBftScheduleResponse] =
-    for {
+  override def getBftSchedule(request: GetBftScheduleRequest): Future[GetBftScheduleResponse] = {
+    val fus = for {
       schedule <- pruningScheduler.getBftOrdererSchedule()
     } yield GetBftScheduleResponse(schedule.map(_.toProtoV30))
+    fus.asGrpcFuture
+  }
 
   override def setMinBlocksToKeep(
       request: SetMinBlocksToKeepRequest
   ): Future[SetMinBlocksToKeepResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    for {
+    val fus = for {
       _ <- handleUserError(pruningScheduler.updateMinBlocksToKeep(request.minBlocksToKeep))
     } yield v30.SetMinBlocksToKeepResponse()
+    fus.asGrpcFuture
   }
 
   override protected def ensureScheduler(implicit
       traceContext: TraceContext
-  ): Future[PruningScheduler] = Future.successful(pruningScheduler)
+  ): FutureUnlessShutdown[PruningScheduler] = FutureUnlessShutdown.pure(pruningScheduler)
 
 }

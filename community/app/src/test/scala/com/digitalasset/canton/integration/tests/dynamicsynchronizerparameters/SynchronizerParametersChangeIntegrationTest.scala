@@ -16,17 +16,12 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
-import com.digitalasset.canton.config.{DbConfig, StorageConfig}
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.console.{CommandFailure, SequencerReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors
@@ -651,16 +646,6 @@ sealed trait SynchronizerParametersChangeIntegrationTest
 class SynchronizerParametersChangeIntegrationTestInMemory
     extends SynchronizerParametersChangeIntegrationTest {
   registerPlugin(
-    new UseReferenceBlockSequencer[StorageConfig.Memory](
-      loggerFactory,
-      sequencersForPlugin,
-    )
-  )
-}
-
-class SynchronizerParametersChangeBftOrderingIntegrationTestInMemory
-    extends SynchronizerParametersChangeIntegrationTest {
-  registerPlugin(
     new UseBftSequencer(loggerFactory, sequencersForPlugin)
   )
 }
@@ -703,12 +688,6 @@ trait SynchronizerParametersRestartIntegrationTest
 // No SynchronizerParametersRestartIntegrationTestInMemory as persistence is required by restart
 
 class SynchronizerParametersRestartIntegrationTestPostgres
-    extends SynchronizerParametersRestartIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
-}
-
-class SynchronizerParametersRestartBftOrderingIntegrationTestPostgres
     extends SynchronizerParametersRestartIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

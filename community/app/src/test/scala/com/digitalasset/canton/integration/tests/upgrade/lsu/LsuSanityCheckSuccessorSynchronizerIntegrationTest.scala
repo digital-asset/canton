@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.UniquePortGenerator
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,11 +12,7 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.getLsuSequencingTestMetricValues
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
@@ -159,17 +154,13 @@ sealed abstract class LsuSanityCheckSuccessorSynchronizerIntegrationTest extends
               NonNegativeInt.zero
             ) // we keep sending test messages until we match below
 
-            if (!this.isInstanceOf[ReferenceLsuSanityCheckSuccessorSynchronizerIntegrationTest]) {
-              forAtLeast(1, logs) { log =>
-                val logPattern =
-                  """Delivering block \d+ to post-ordering \(epoch = \d+, block's BFT time = (.+), block size = (\d+).+""".r
-                inside(log.message) {
-                  case logPattern(ts, blockSize) if blockSize.toInt > 0 =>
-                    CantonTimestamp.fromString(ts).value should be > upgradeTime.immediateSuccessor
-                }
+            forAtLeast(1, logs) { log =>
+              val logPattern =
+                """Delivering block \d+ to post-ordering \(epoch = \d+, block's BFT time = (.+), block size = (\d+).+""".r
+              inside(log.message) {
+                case logPattern(ts, blockSize) if blockSize.toInt > 0 =>
+                  CantonTimestamp.fromString(ts).value should be > upgradeTime.immediateSuccessor
               }
-            } else {
-              succeed // for reference sequencer it is hard to detect the block timestamps + contents from the logs
             }
           },
           timeUntilSuccess = 60.seconds,
@@ -200,16 +191,6 @@ final class BftLsuSanityCheckSuccessorSynchronizerIntegrationTest
     extends LsuSanityCheckSuccessorSynchronizerIntegrationTest {
   registerPlugin(
     new UseBftSequencer(
-      loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
-    )
-  )
-}
-
-final class ReferenceLsuSanityCheckSuccessorSynchronizerIntegrationTest
-    extends LsuSanityCheckSuccessorSynchronizerIntegrationTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
     )

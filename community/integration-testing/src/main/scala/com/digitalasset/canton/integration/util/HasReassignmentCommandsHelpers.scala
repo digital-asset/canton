@@ -17,6 +17,7 @@ import com.digitalasset.canton.{
   LedgerCommandId,
   LedgerSubmissionId,
   LedgerUserId,
+  LfPackageId,
   LfPartyId,
   LfWorkflowId,
 }
@@ -32,6 +33,8 @@ trait HasReassignmentCommandsHelpers {
       target: SynchronizerId,
       submittingParty: LfPartyId,
       participantOverride: Option[LocalParticipantReference] = None,
+      overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+      overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
   )(implicit
       env: TestConsoleEnvironment
   ): (UpdateService.UnassignedWrapper, Completion) = {
@@ -52,6 +55,8 @@ trait HasReassignmentCommandsHelpers {
       userId = userId,
       workflowId = workflowId,
       submissionId = LedgerSubmissionId.assertFromString("some-submission-id"),
+      overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+      overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
     )
 
     logger.debug(s"Listening for completion and update starting at $ledgerEnd")
@@ -228,12 +233,16 @@ trait HasReassignmentCommandsHelpers {
       cid: LfContractId,
       source: SynchronizerId,
       target: SynchronizerId,
+      overrideSourceValidationPackageId: Option[LfPackageId] = None,
+      overrideTargetValidationPackageId: Option[LfPackageId] = None,
   ): proto.reassignment_commands.ReassignmentCommand.Command.UnassignCommand =
     proto.reassignment_commands.ReassignmentCommand.Command.UnassignCommand(
       proto.reassignment_commands.UnassignCommand(
         contractId = cid.coid,
         source = source.toProtoPrimitive,
         target = target.toProtoPrimitive,
+        overrideSourceValidationPackageId = overrideSourceValidationPackageId,
+        overrideTargetValidationPackageId = overrideTargetValidationPackageId,
       )
     )
 

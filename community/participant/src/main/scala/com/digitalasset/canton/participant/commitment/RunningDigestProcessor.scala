@@ -48,13 +48,18 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   allCheckpointsFilter,
 }
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
-import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
+  LfContractId,
+  TopologyLimits,
+}
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   SynchronizerParametersState,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
 }
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -393,7 +398,10 @@ class RunningDigestProcessorImpl(
                 // given n topology events at the same record time, when processing the i-th topology event (where i <= n),
                 // all effects of the previously processed topology events 1 <= j < i must be applied to the party to participant
                 // topology state, so that the classification correctly calculates the required digest updates.
-                Source(events)
+                PekkoUtil
+                  .futureSourceUS(
+                    withoutRevokedOfNotOnboardedHosts(topoSnapshot, events).map(Source(_))
+                  )
                   .statefulMapAsyncUSAndDrain(
                     // start with the noop change
                     TopologyChangeTracker.empty
@@ -446,6 +454,37 @@ class RunningDigestProcessorImpl(
       }
       .flatten
       .map(updateMetric(metrics.runningDigestProcessor.latestClassifiedRecordTime, _))
+
+  // TODO(#36607): Decide from the Revoked event whether the participant was still onboarding,
+  //  instead of from the snapshot. The snapshot holds the state before all changes at the record
+  //  time, so this breaks if the changes of one record time span several updates.
+  /** Drops each Revoked whose participant was not an onboarded host of the party just before the
+    * change, such as a participant removed while still onboarding. Only Added adds the party to the
+    * digests, so there is nothing to subtract.
+    *
+    * @param topologySnapshotBeforeChange
+    *   The snapshot at the record time of `events`, which excludes their own changes.
+    */
+  private def withoutRevokedOfNotOnboardedHosts(
+      topologySnapshotBeforeChange: TopologySnapshot,
+      events: Set[PartyToParticipantAuthorization],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PartyToParticipantAuthorization]] = {
+    val revokedParties = events.collect { case PartyToParticipantAuthorization(party, _, Revoked) =>
+      party
+    }
+    if (revokedParties.isEmpty) FutureUnlessShutdown.pure(events)
+    else
+      getOnboardedParticipantsOfParties(topologySnapshotBeforeChange, revokedParties).map {
+        onboardedHostsBeforeChange =>
+          events.filter {
+            case PartyToParticipantAuthorization(party, participant, Revoked) =>
+              onboardedHostsBeforeChange.get(party).exists(_.contains(participant))
+            case _ => true
+          }
+      }
+  }
 
   /** Determines the classification for a topology event and register the corresponding change in
     * the topology change tracker.
@@ -916,7 +955,10 @@ class RunningDigestProcessorImpl(
       event: GenericTopologyEvent.SynchronizerParametersState,
       currentSynchronizerParams: DynamicSynchronizerParameters,
   )(implicit traceContext: TraceContext): Option[CheckpointType] =
-    TopologyTransaction.fromTrustedByteString(event.payload) match {
+    // Trusted bytes from the node's own topology store, so the limits in the context are never read.
+    TopologyTransaction.fromTrustedByteString(
+      TopologyTransactionDeserializationContext(TopologyLimits.default)
+    )(event.payload) match {
       case Left(error) => ErrorUtil.invalidArgument(error.message)
       case Right(topoTx) =>
         topoTx.selectMapping[SynchronizerParametersState] match {

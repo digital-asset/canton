@@ -18,7 +18,7 @@ import io.grpc.StatusRuntimeException
 import scala.util.chaining.scalaUtilChainingOps
 
 object AcsPageToken {
-  private val TokenVersion = 1
+  private val TokenVersion = 2
 
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   def encode(
@@ -40,6 +40,7 @@ object AcsPageToken {
       .build(HashPurpose.AcsContinuationToken, HashAlgorithm.Sha256)
       .addOptional(request.activeAtOffset, _.addLong)
       .addOptional(request.eventFormat, UpdateFormatHashUtils.hashEventFormat)
+      .addBool(request.includeIncompleteReassignments)
       .finish()
       .pipe(PageTokenUtils.toChecksum)
 
@@ -73,7 +74,7 @@ object AcsPageToken {
       )(proto => proto.version == TokenVersion)
       .ensure(
         ValidationErrors.invalidAcsPageToken(
-          "The page token was prepared with different event_format or active_at_offset."
+          "The page token was prepared with different event_format, active_at_offset or include_incomplete_reassignments."
         )
       )(proto => proto.requestChecksum == expectedRequestChecksum)
     offset <- Offset

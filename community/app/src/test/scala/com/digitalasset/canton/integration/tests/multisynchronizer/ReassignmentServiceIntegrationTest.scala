@@ -29,6 +29,7 @@ import com.digitalasset.canton.integration.util.HasCommandRunnersHelpers.{
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
   TestUtils,
@@ -97,6 +98,7 @@ class ReassignmentServiceIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
@@ -148,12 +150,7 @@ class ReassignmentServiceIntegrationTest
           synchronizer = acmeName,
         )
 
-        synchronizerOwners2.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            synchronizerId = acmeId,
-            _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-          )
-        )
+        AutomaticAssignment.disable(synchronizerOwners2, acmeId)
       }
       .withTrafficControl(
         TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),

@@ -33,6 +33,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
+import com.digitalasset.canton.topology.client.BaseTopologySnapshot.HostingView
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -41,17 +42,20 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.nonempty.NonEmpty
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordered.orderingToOrdered
 
 // architecture-handbook-entry-begin: IdentityProvidingServiceClient
 
@@ -310,6 +314,20 @@ trait PartyTopologySnapshotClient {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]]
 
+  /** Like `activeParticipantsOfPartiesWithInfo`, but a Freezing entry does not remove the party's
+    * other hosts.
+    *
+    * Only for consumers that track which participants store the party's contracts, such as ACS
+    * commitments, the reassignment stores' offboarding check and the legacy OffPR export, or that
+    * read a participant's hosting state, such as the legacy OffPR onboarding checks. A freeze does
+    * not change either, and emits no topology events.
+    */
+  def activeParticipantsOfPartiesWithInfoIgnoringFreeze(
+      parties: Seq[LfPartyId]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]]
+
   /** Returns the set of active participants the given party is represented by as of the snapshot
     * timestamp
     *
@@ -363,7 +381,21 @@ trait PartyTopologySnapshotClient {
       parties: Set[LfPartyId]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[LfPartyId]]
 
-  /** Returns the subset of parties the given participant can NOT submit on behalf of */
+  /** Returns the subset of `parties` for which `participant` cannot submit. Used for submissions
+    * that the party has not signed externally.
+    *
+    * The participant can submit for a party only if it hosts the party with Submission permission,
+    * after lowering to the permission in its `ParticipantSynchronizerPermission`, and the party's
+    * threshold is 1: a party with a higher threshold needs several participants to act for it.
+    * Reads the default hosting view, so no participant can submit for a frozen party. Routing
+    * applies the same rule in `AdmissibleSynchronizersComputation`; keep the two consistent.
+    *
+    * The threshold is the party info's: from `ProtocolVersion.offPRWithSequencerChannels` on, the
+    * effective confirmation threshold, not the mapping's. While new confirming hosts are not yet
+    * Active, it can be 1 although the mapping's threshold is higher, and a Submission host can then
+    * submit alone. This is accepted: the PartyToParticipant proto requires that a party with
+    * threshold > 1 has no Submission hosts, although topology validation does not enforce it.
+    */
   def canNotSubmit(
       participant: ParticipantId,
       parties: Seq[LfPartyId],
@@ -389,16 +421,115 @@ trait PartyTopologySnapshotClient {
 }
 
 object PartyTopologySnapshotClient {
-  final case class PartyInfo(
+
+  /** Created only through the companion's factories, so that the hosts and the threshold are always
+    * derived from the topology state.
+    */
+  final case class PartyInfo private (
       threshold: PositiveInt, // > 1 for consortium parties
       participants: Map[ParticipantId, ParticipantAttributes],
   )
 
   object PartyInfo {
-    def nonConsortiumPartyInfo(participants: Map[ParticipantId, ParticipantAttributes]): PartyInfo =
-      PartyInfo(threshold = PositiveInt.one, participants = participants)
 
-    lazy val EmptyPartyInfo: PartyInfo = nonConsortiumPartyInfo(Map.empty)
+    lazy val EmptyPartyInfo: PartyInfo = PartyInfo(PositiveInt.one, Map.empty)
+
+    /** The info of a participant's admin party. Its only host is its own participant, so the
+      * threshold is 1. Topology validation only accepts an explicit allocation of the admin party
+      * that agrees with this.
+      */
+    def forAdminParty(participantId: ParticipantId, attributes: ParticipantAttributes): PartyInfo =
+      PartyInfo(PositiveInt.one, Map(participantId -> attributes))
+
+    /** Derives the info of a party from a
+      * [[com.digitalasset.canton.topology.transaction.PartyToParticipant PartyToParticipant]]
+      * mapping.
+      *
+      * Only Onboarding and Active entries host. Each entry's permission is lowered to the
+      * permission in the participant's `ParticipantSynchronizerPermission`. Entries whose
+      * participant is missing from `participantAttributes` (i.e. has left the synchronizer) are
+      * dropped.
+      *
+      * @param participantAttributes
+      *   The synchronizer-level state of the participants (`SynchronizerTrustCertificate` and
+      *   `ParticipantSynchronizerPermission`), not part of `mapping`. Only the presence, the
+      *   permission and `loginAfter` are used.
+      * @param view
+      *   With `HostingView.Default`, a Freezing entry freezes the party: the party has no hosts.
+      *   With `HostingView.IgnoringFreeze`, the Onboarding and Active entries still host.
+      * @param protocolVersion
+      *   The protocol version of the synchronizer of `mapping`.
+      * @return
+      *   The party's info, or `None` if the party is frozen or no hosting entry remains.
+      */
+    private[client] def fromMapping(
+        mapping: PartyToParticipant,
+        participantAttributes: Map[ParticipantId, ParticipantAttributes],
+        view: HostingView,
+        protocolVersion: ProtocolVersion,
+    ): Option[PartyInfo] = {
+      // Applies to the whole party. Each Nominated or Freezing entry is also dropped on its own, by
+      // `canHost` below, in both views.
+      val frozen = view match {
+        case HostingView.Default =>
+          mapping.participants.exists(_.state == HostingState.Freezing)
+        case HostingView.IgnoringFreeze => false
+      }
+      val hosts =
+        if (frozen) Map.empty[ParticipantId, ParticipantAttributes]
+        else
+          mapping.participants
+            .filter(_.state.canHost)
+            .mapFilter { host =>
+              participantAttributes.get(host.participantId).map { attributes =>
+                host.participantId -> ParticipantAttributes(
+                  ParticipantPermission.lowerOf(host.permission, attributes.permission),
+                  attributes.loginAfter,
+                  onboarding = host.onboarding,
+                )
+              }
+            }
+            .toMap
+      val threshold =
+        if (protocolVersion >= ProtocolVersion.offPRWithSequencerChannels)
+          effectiveConfirmationThreshold(mapping)
+        else mapping.threshold
+      Option.when(hosts.nonEmpty)(PartyInfo(threshold, hosts))
+    }
+
+    /** The effective confirmation threshold:
+      * {{{
+      * max(1, min(threshold, max(numConfirming, threshold) - numConfirmingPending))
+      * }}}
+      *
+      *   - threshold: the mapping's threshold, the quorum once every entry is Active.
+      *   - numConfirming: entries whose mapping permission is Confirmation or Submission, in any
+      *     hosting state.
+      *   - numConfirmingPending: those of them in Nominated, Freezing or Onboarding.
+      *
+      * The counts read each entry's own state and permission, so a freeze, a lower synchronizer
+      * permission or a participant that left the synchronizer does not change them.
+      */
+    private[client] def effectiveConfirmationThreshold(mapping: PartyToParticipant): PositiveInt = {
+      val withConfirmingPermission =
+        mapping.participants.filter(_.permission >= ParticipantPermission.Confirmation)
+      val numConfirming = withConfirmingPermission.size
+      val numConfirmingPending =
+        withConfirmingPermission.count(_.state != HostingParticipant.HostingState.Active)
+      val threshold = mapping.threshold.unwrap
+      // The floor applies only if no confirming entry is Active and numConfirmingPending >= threshold.
+      // The party then has no host that can confirm, so 1 does not change who can confirm.
+      PositiveInt.tryCreate(
+        math.max(1, math.min(threshold, math.max(numConfirming, threshold) - numConfirmingPending))
+      )
+    }
+
+    /** Bypasses the derivation from the topology state, e.g. to describe a test topology. */
+    @VisibleForTesting
+    def forTesting(
+        threshold: PositiveInt,
+        participants: Map[ParticipantId, ParticipantAttributes],
+    ): PartyInfo = PartyInfo(threshold, participants)
   }
 }
 
@@ -1080,11 +1211,14 @@ private[client] trait PartyTopologySnapshotLoader
   ): FutureUnlessShutdown[Map[ParticipantId, ParticipantAttributes]] =
     PartyId
       .fromLfParty(party)
-      .map(loadActiveParticipantsOf(_, loadParticipantStates).map(_.participants))
+      .map(
+        loadActiveParticipantsOf(_, HostingView.Default, loadParticipantStates).map(_.participants)
+      )
       .getOrElse(FutureUnlessShutdown.pure(Map()))
 
   private[client] def loadActiveParticipantsOf(
       party: PartyId,
+      view: HostingView,
       participantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
@@ -1093,12 +1227,17 @@ private[client] trait PartyTopologySnapshotLoader
   final override def activeParticipantsOfParties(
       parties: Seq[LfPartyId]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfPartyId, Set[ParticipantId]]] =
-    loadAndMapPartyInfos(parties, _.participants.keySet)
+    loadAndMapPartyInfos(parties, HostingView.Default, _.participants.keySet)
 
   final override def activeParticipantsOfPartiesWithInfo(
       parties: Seq[LfPartyId]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]] =
-    loadAndMapPartyInfos(parties, identity)
+    loadAndMapPartyInfos(parties, HostingView.Default, identity)
+
+  final override def activeParticipantsOfPartiesWithInfoIgnoringFreeze(
+      parties: Seq[LfPartyId]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfPartyId, PartyInfo]] =
+    loadAndMapPartyInfos(parties, HostingView.IgnoringFreeze, identity)
 
   final override def canNotSubmit(
       participant: ParticipantId,
@@ -1106,6 +1245,7 @@ private[client] trait PartyTopologySnapshotLoader
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[immutable.Iterable[LfPartyId]] =
     loadAndMapPartyInfos(
       parties,
+      HostingView.Default,
       _ => (),
       info =>
         info.threshold > PositiveInt.one ||
@@ -1116,11 +1256,13 @@ private[client] trait PartyTopologySnapshotLoader
 
   private def loadAndMapPartyInfos[T](
       lfParties: Seq[LfPartyId],
+      view: HostingView,
       f: PartyInfo => T,
       filter: PartyInfo => Boolean = _ => true,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfPartyId, T]] =
     loadBatchActiveParticipantsOf(
       lfParties.mapFilter(PartyId.fromLfParty(_).toOption),
+      view,
       loadParticipantStates,
     ).map(_.collect {
       case (partyId, partyInfo) if filter(partyInfo) => partyId.toLf -> f(partyInfo)
@@ -1128,6 +1270,7 @@ private[client] trait PartyTopologySnapshotLoader
 
   private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
+      view: HostingView,
       loadParticipantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],

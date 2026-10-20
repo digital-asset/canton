@@ -20,6 +20,7 @@ import com.digitalasset.daml.lf.IdeLedgerBridge
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.script.IdeLedger
 import com.digitalasset.daml.lf.transaction.FatContractInstance
 
@@ -37,13 +38,18 @@ object ReferenceInterpreter {
       LedgerState(newLedger, IdeLedgerBridge.nextSeed(seed))
   }
 
-  /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath. */
+  /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath.
+    *
+    * @param interpretationConfig
+    *   the interpretation config of the protocol version to model
+    */
   def apply(
-      loggerFactory: NamedLoggerFactory
+      interpretationConfig: InterpretationConfig,
+      loggerFactory: NamedLoggerFactory,
   ): ReferenceInterpreter = {
     val url = getClass.getClassLoader.getResource("universal.dar")
     require(url != null, s"universal.dar not found on the classpath")
-    new ReferenceInterpreter(new File(url.toURI), loggerFactory)
+    new ReferenceInterpreter(new File(url.toURI), interpretationConfig, loggerFactory)
   }
 }
 
@@ -54,6 +60,7 @@ object ReferenceInterpreter {
   */
 class ReferenceInterpreter(
     darFile: File,
+    interpretationConfig: InterpretationConfig,
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
   import ReferenceInterpreter.*
@@ -93,6 +100,7 @@ class ReferenceInterpreter(
       readAs = readAs,
       apiCommands = commands,
       seed = state.seed,
+      interpretationConfig = interpretationConfig,
       disclosures = disclosures,
     ) match {
       case IdeLedgerBridge.SubmitSuccess(newLedger, commitResult) =>

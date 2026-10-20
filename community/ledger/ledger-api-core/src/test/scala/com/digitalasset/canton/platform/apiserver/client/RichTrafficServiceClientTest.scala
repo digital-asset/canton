@@ -8,14 +8,19 @@ import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.generator.ErrorCodeDocumentationGenerator
 import com.digitalasset.canton.ledger.error.CommonErrors
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
+import com.digitalasset.canton.tea.v1.SubmissionAccountingServiceGrpc.SubmissionAccountingService
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
+  RegisterSubmissionRequest,
+  RegisterSubmissionResponse,
+  SubmissionAccountingServiceGrpc,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -25,8 +30,9 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtoDeserializat
 import io.grpc.inprocess.InProcessServerBuilder
 import io.grpc.{Status, StatusRuntimeException}
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.Future
 
 class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExecutionContext {
@@ -47,19 +53,49 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
         UpdateAccountResponse(Some(GetAccountResponse(request.accountId, 0L)))
       )
 
-    override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
-      Future.successful(PruneEventsResponse(0))
+    override def prune(request: PruneRequest): Future[PruneResponse] =
+      Future.successful(PruneResponse(0, 0))
+  }
+
+  private val conflictingSubmissionId = "conflicting"
+  private val unavailableSubmissionId = "unavailable"
+
+  private class FakeSubmissionAccountingService extends SubmissionAccountingService {
+    val calls = new AtomicInteger(0)
+
+    override def registerSubmission(
+        request: RegisterSubmissionRequest
+    ): Future[RegisterSubmissionResponse] = {
+      calls.incrementAndGet().discard
+      if (request.submissionId == conflictingSubmissionId)
+        Future.failed(
+          TrafficEnforcementErrors.CorrelationConflict
+            .Reject(request.changeIdHash, request.submissionId)
+            .asGrpcError
+        )
+      else if (request.submissionId == unavailableSubmissionId)
+        Future.failed(Status.UNAVAILABLE.asRuntimeException())
+      else Future.successful(RegisterSubmissionResponse())
+    }
   }
 
   private def withTrafficService(
-      body: (RichTrafficServiceClient, RecordingTrafficService) => Unit
+      body: (
+          RichTrafficServiceClient,
+          RecordingTrafficService,
+          FakeSubmissionAccountingService,
+      ) => Unit
   ): Unit = {
     val service = new RecordingTrafficService
+    val submissionAccounting = new FakeSubmissionAccountingService
     val serverName = InProcessServerBuilder.generateName()
     val server = InProcessServerBuilder
       .forName(serverName)
       .intercept(TraceContextGrpc.serverInterceptor)
       .addService(TrafficServiceGrpc.bindService(service, parallelExecutionContext))
+      .addService(
+        SubmissionAccountingServiceGrpc.bindService(submissionAccounting, parallelExecutionContext)
+      )
       .build()
       .start()
     val client = RichTrafficServiceClient.toInternalServer(
@@ -69,7 +105,7 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
       loggerFactory,
     )
 
-    try body(client, service)
+    try body(client, service, submissionAccounting)
     finally {
       client.close()
       server.shutdown().awaitTermination().discard
@@ -78,17 +114,53 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
 
   "toInternalServer" should {
     "carry the caller's trace context to the traffic service" in withTrafficService {
-      (client, service) =>
+      (client, service, _) =>
         val callerTraceContext = TraceContext.withNewTraceContext("caller")(identity)
         val callerTraceId = callerTraceContext.traceId.valueOrFail("caller trace id")
 
         client
-          .getAccount(GetAccountRequest("alice"))(callerTraceContext, parallelExecutionContext)
+          .getAccount(GetAccountRequest("alice"))(callerTraceContext)
           .futureValueUS
           .valueOrFail("get-account")
           .discard
 
         Option(service.getAccountTraceContext.get()).flatMap(_.traceId) shouldBe Some(callerTraceId)
+    }
+
+    "reach the submission accounting service and return a conflict without retrying or warning" in withTrafficService {
+      (client, _, submissionAccounting) =>
+        def register(submissionId: String) =
+          client
+            .registerSubmission(RegisterSubmissionRequest("hash", submissionId, None))
+            .value
+            .futureValueUS
+
+        register("accepted") shouldBe Right(RegisterSubmissionResponse())
+        val conflict = loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+          register(conflictingSubmissionId),
+          _ shouldBe empty,
+        )
+        inside(conflict) { case Left(error) =>
+          error.decodedCantonError.map(_.code.id) shouldBe Some(
+            TrafficEnforcementErrors.CorrelationConflict.id
+          )
+        }
+        submissionAccounting.calls.get() shouldBe 2
+    }
+
+    "not retry a registration that failed with a bare UNAVAILABLE" in withTrafficService {
+      (client, _, submissionAccounting) =>
+        val result = loggerFactory.assertLogs(
+          client
+            .registerSubmission(
+              RegisterSubmissionRequest("hash", unavailableSubmissionId, None)
+            )
+            .value
+            .futureValueUS,
+          _.warningMessage should include("UNAVAILABLE"),
+        )
+        inside(result) { case Left(_: GrpcError.GrpcServiceUnavailable) => succeed }
+        submissionAccounting.calls.get() shouldBe 1
     }
   }
 

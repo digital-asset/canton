@@ -124,6 +124,7 @@ private[dao] final class UpdateReader(
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
@@ -138,6 +139,7 @@ private[dao] final class UpdateReader(
               eventProjectionProperties = eventProjectionProperties,
               rangeInfo = rangeInfo,
               configOverrides = configOverrides,
+              includeIncompleteReassignments = includeIncompleteReassignments,
             )
           )
         Source

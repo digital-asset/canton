@@ -18,17 +18,6 @@ publish_release_on_s3:
         command: |
           .ci/nix-exec ./scripts/ci/publish-to-s3.sh
 
-publish_release_on_artifactory:
-  parameters:
-    nightly_release:
-      type: boolean
-      default: false
-  steps:
-    - run:
-        name: Publish to Artifactory
-        command: |
-          .ci/nix-exec ./scripts/ci/publish-to-artifactory.sh << parameters.nightly_release >>
-
 publish_release_on_oci_registry:
   parameters:
     nightly_release:

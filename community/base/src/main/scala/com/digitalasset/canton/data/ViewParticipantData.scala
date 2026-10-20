@@ -15,7 +15,7 @@ import com.digitalasset.canton.data.ActionDescription.{
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.{v30, v31, *}
+import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.ShowUtil.*
@@ -37,7 +37,6 @@ import com.digitalasset.canton.{
   LfPartyId,
   LfVersioned,
   ProtoDeserializationError,
-  checked,
 }
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
@@ -350,29 +349,6 @@ final case class ViewParticipantData private (
   @transient override protected lazy val companionObj: ViewParticipantData.type =
     ViewParticipantData
 
-  private def tryToProtoV30RollbackContext: Option[v30.ViewParticipantData.RollbackContext] =
-    rollbackContext match {
-      case pathRollbackContext: PathRollbackContext =>
-        if (pathRollbackContext.isEmpty) None else Some(pathRollbackContext.toProtoV30)
-      case _ =>
-        throw new IllegalStateException(
-          s"Unexpected rollback context type ${rollbackContext.getClass} in ViewParticipantData"
-        )
-    }
-
-  private[ViewParticipantData] def toProtoV31: v31.ViewParticipantData = v31.ViewParticipantData(
-    coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
-    createdCore = createdCore.map(_.toProtoV30),
-    createdInSubviewArchivedInCore =
-      createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive.toProtoUnvalidated),
-    resolvedKeys = keyResolution.toList.map { case (k, v) =>
-      KeyResolutionWithMaintainers.toProtoV31(k, v)
-    },
-    actionDescription = Some(actionDescription.toProtoV31),
-    rollbackContext = checked(tryToProtoV30RollbackContext),
-    salt = Some(salt.toProtoV30),
-  )
-
   private[ViewParticipantData] def toProtoV32: v32.ViewParticipantData = v32.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV31),
@@ -452,14 +428,10 @@ object ViewParticipantData
   }
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.ViewParticipantData)(
-      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV31)),
-      _.toProtoV31,
-    ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.ViewParticipantData)(
       supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
       _.toProtoV32,
-    ),
+    )
   )
 
   /** Like [[create]], but throws InvalidViewParticipantData instead of returning `Left` when the
@@ -515,63 +487,6 @@ object ViewParticipantData
       externalCallResults,
     )(hashOps, protocolVersionRepresentativeFor(protocolVersion), deserializedFrom = None)
       .validated(protocolVersion)
-
-  private def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
-      protocolVersion: ProtocolVersion,
-      dataP: v31.ViewParticipantData,
-  )(
-      bytes: ByteString
-  ): ParsingResult[ViewParticipantData] = {
-    val v31.ViewParticipantData(
-      saltP,
-      coreInputsP,
-      createdCoreP,
-      createdInSubviewArchivedInCoreP,
-      resolvedKeysP,
-      actionDescriptionP,
-      rbContextP,
-    ) = dataP
-
-    for {
-      keyResolution <- ProtoValidation
-        .validateLengthThen(
-          resolvedKeysP,
-          "resolved_keys",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => KeyResolutionWithMaintainers.fromProtoV31(pvv, element))
-      actionDescription <- ProtoConverter
-        .required("action_description", actionDescriptionP)
-        .flatMap(ActionDescription.fromProtoV31(pvv, _))
-      rollbackContext <- PathRollbackContext
-        .fromProtoV30(pvv, rbContextP)
-        .leftMap(_.inField("rollback_context"))
-      createdCore <- ProtoValidation
-        .validateLengthThen(
-          createdCoreP,
-          "created_core",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => CreatedContract.fromProtoV30(element))
-      viewParticipantData <- fromProto(
-        pvv,
-        hashOps,
-        keyResolution.toMap,
-        actionDescription,
-        rollbackContext,
-        createdCore,
-        protocolVersion,
-        bytes,
-      )(
-        saltP,
-        coreInputsP,
-        createdInSubviewArchivedInCoreP,
-        Seq.empty,
-      )
-    } yield viewParticipantData
-  }
 
   private def fromProtoV32(
       pvv: ProtocolVersionValidation,

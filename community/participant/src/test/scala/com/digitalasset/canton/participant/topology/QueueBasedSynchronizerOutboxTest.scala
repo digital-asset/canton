@@ -16,11 +16,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{
-  FutureUnlessShutdown,
-  PromiseUnlessShutdown,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.State
@@ -226,9 +222,11 @@ class QueueBasedSynchronizerOutboxTest
       }
       val finalResult = transactions.map(_ => responses.next())
       val localProcessingF = for {
-        _ <- MonadUtil.sequentialTraverse(transactions) { x =>
-          if (dropBroadcast) logger.debug(s"Dropping $x")
-          else logger.debug(s"Processing $x")
+        _ <- {
+          transactions.foreach { x =>
+            if (dropBroadcast) logger.debug(s"Dropping $x")
+            else logger.debug(s"Processing $x")
+          }
           if (autoFlush) flushBlocker.get().outcome_(())
           val ts = CantonTimestamp.now()
           if (finalResult.forall(_ == State.Accepted) && !dropBroadcast) {
@@ -236,18 +234,21 @@ class QueueBasedSynchronizerOutboxTest
             for {
               _ <- flushBlocker.get().futureUS
               _ = flushBlocker.set(PromiseUnlessShutdown.unsupervised())
+              validated = transactions.map(x => ValidatedTopologyTransaction(x, rejections.next()))
               _ <- store
                 .update(
                   SequencedTime(ts),
                   EffectiveTime(ts),
-                  additions = List(ValidatedTopologyTransaction(x, rejections.next())),
+                  additions = validated,
                   // dumbed down version of how to "append" ValidatedTopologyTransactions:
-                  removals = Option
-                    .when(x.operation == TopologyChangeOp.Remove)(
-                      x.mapping.uniqueKey -> (x.serial.some, Set.empty[TxHash])
+                  removals = validated
+                    .filter(tx =>
+                      tx.rejectionReason.isEmpty && tx.operation == TopologyChangeOp.Remove
                     )
-                    .toList
-                    .toMap,
+                    .groupBy(_.mapping.uniqueKey)
+                    .map { case (key, txs) =>
+                      key -> (txs.maxBy(_.serial.value).serial.some, Set.empty[TxHash])
+                    },
                 )
               _ <- MonadUtil.when(topologyClientConnected.get())(
                 targetClient
@@ -255,7 +256,9 @@ class QueueBasedSynchronizerOutboxTest
                     SequencedTime(ts),
                     EffectiveTime(ts),
                     SequencerCounter(3),
-                    if (rejections.isEmpty) Seq(x) else Seq.empty,
+                    validated
+                      .filter(tx => tx.rejectionReason.isEmpty && !tx.transaction.isProposal)
+                      .map(_.transaction),
                   )
               )
 
@@ -265,7 +268,7 @@ class QueueBasedSynchronizerOutboxTest
         _ = if (transactionsBuffer.size() >= expect.get()) {
           allTransactionsObservedPromise
             .get()
-            .success(UnlessShutdown.Outcome(batches.asScala.toSeq))
+            .outcome_(batches.asScala.toSeq)
         }
       } yield {
         logger.debug(s"Done with observed ${transactions.length} transactions")
@@ -553,7 +556,7 @@ class QueueBasedSynchronizerOutboxTest
       // 3. simulate disconnecting from the synchronizer, by disconnecting the topology client from the processing.
       //    in the production code, this happens by shutting down the topology processor for the synchronizer. in
       //    this test, we do it via handle.disconnectTopologyClient. Additionally, close the outbox and the topology client.
-      // 4. d
+      // 4. finish storing TB1, reconnect, and verify that only TB2 and a new TB3 are submitted.
 
       for {
         (target, manager, handle, client) <- mk(
@@ -579,7 +582,7 @@ class QueueBasedSynchronizerOutboxTest
           None,
         )
 
-        // wait until we get just before flushing the topology cache to the store, so that we can push
+        // wait until the mock is blocked before writing to the store, so that we can push
         // another transaction that will end up in the unsent-queue, while the first one is still being processed.
         _ <- preFlushF
 
@@ -599,10 +602,11 @@ class QueueBasedSynchronizerOutboxTest
         // at exactly that moment.
         _ = handle.disconnectTopologyClient()
 
-        // shut down the topology client and outbox and disconnect the outbox from the topology manager
-        _ = client.close()
+        // Close the outbox before the client: aborting observation while the outbox is still open
+        // can trigger a retry of both transactions, incorrectly storing TB2 before reconnecting.
         _ = manager.clearObservers()
         _ = outbox.close()
+        _ = client.close()
 
         // if the shutdown procedure is properly wired up, the pending transactions gets put into the unsent queue
         _ = eventually() {
@@ -610,8 +614,9 @@ class QueueBasedSynchronizerOutboxTest
           manager.outboxQueue.numUnsentTransactions shouldBe 2
         }
 
-        // release the flush blocker to write the transaction to the store.
+        // Finish storing TB1 before reconnecting so the new outbox reliably filters it out.
         _ = handle.flushBlocker.get().outcome_(())
+        _ <- handle.allObserved()
 
         // now simulate reconnecting to the synchronizer by setting up a new
         // * topology client
@@ -630,9 +635,7 @@ class QueueBasedSynchronizerOutboxTest
         )
 
         handle2 = new MockHandle(
-          // even though we pushed two transactions before, the one that was pending ultimately made it into the store
-          // and therefore will be filtered out.
-          // the test pushes another transaction to this new outbox, to show that the state recovers properly.
+          // TB1 is already stored, so expect only the requeued TB2 and the new TB3.
           2,
           responses = Iterator.continually(TopologyTransactionsBroadcast.State.Accepted),
           store = manager.store,
@@ -645,6 +648,7 @@ class QueueBasedSynchronizerOutboxTest
         // this doesn't happen anymore, because the shutdown logic now works correctly.
         _ <- outboxConnected(manager, handle2, client2, target)
 
+        // Submit TB3 (gamma) through the reconnected outbox, in addition to the requeued TB2.
         _ = push(manager, transactions.slice(2, 3))
 
         _ <- handle2.allObserved()

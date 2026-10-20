@@ -31,7 +31,6 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterEach}
 
-import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
 
 class TrafficEnforcementBackendTelemetryTest
@@ -150,7 +149,7 @@ class TrafficEnforcementBackendTelemetryTest
       client: RichTrafficServiceClient,
       result: Either[GrpcError, GetAccountResponse],
   ): Unit =
-    when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
+    when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
       .thenReturn(EitherT.fromEither[FutureUnlessShutdown](result))
       .discard
 
@@ -338,7 +337,7 @@ class TrafficEnforcementBackendTelemetryTest
         .futureValueUS shouldBe Right(())
 
       val traceContextCaptor = ArgCaptor[TraceContext]
-      verify(client).getAccount(any[GetAccountRequest])(traceContextCaptor, any[ExecutionContext])
+      verify(client).getAccount(any[GetAccountRequest])(traceContextCaptor)
 
       val span = singleReportedSpan()
       traceContextCaptor.value.spanId shouldBe Some(span.getSpanId)
@@ -347,7 +346,7 @@ class TrafficEnforcementBackendTelemetryTest
     "record one latency sample per enforcement check" in {
       val client = mock[RichTrafficServiceClient]
       when(
-        client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext])
+        client.getAccount(any[GetAccountRequest])(any[TraceContext])
       ).thenAnswer { (_: GetAccountRequest) =>
         Threading.sleep(scala.util.Random.nextLong(10) + 1)
         EitherT.rightT[FutureUnlessShutdown, GrpcError](

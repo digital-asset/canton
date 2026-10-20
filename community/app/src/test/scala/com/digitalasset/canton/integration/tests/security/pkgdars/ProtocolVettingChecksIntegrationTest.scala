@@ -55,7 +55,7 @@ class ProtocolVettingChecksIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )

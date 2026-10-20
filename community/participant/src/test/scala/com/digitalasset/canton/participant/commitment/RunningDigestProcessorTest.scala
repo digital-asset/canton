@@ -62,6 +62,8 @@ import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, Topo
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  ParticipantPermission,
   SynchronizerParametersState,
   TopologyTransaction,
 }
@@ -231,6 +233,20 @@ class RunningDigestProcessorTest
 
   def mkTickSignaller(): TickSignaller =
     new LocalEventSignaller[TickListener, Offset]("subscriber", timeouts, loggerFactory)
+
+  /** A party with one onboarded host, so that the onboarding host does not violate the threshold.
+    */
+  private def partyHostingWhileOnboarding(party: LfPartyId)(
+      onboarded: ParticipantId,
+      onboarding: ParticipantId,
+  ): (LfPartyId, PartyInfo) =
+    party -> PartyInfo.forTesting(
+      PositiveInt.one,
+      Map(
+        onboarded -> ParticipantAttributes(ParticipantPermission.Submission),
+        onboarding -> ParticipantAttributes(ParticipantPermission.Submission, onboarding = true),
+      ),
+    )
 
   "RunningDigestProcessor" when {
 
@@ -805,7 +821,8 @@ class RunningDigestProcessorTest
           Revoked,
         )
 
-        val topologySnapshot = mock[TopologySnapshot]
+        val topologySnapshot =
+          TestingTopology(topology = Map(partyHosting(bob)(p3))).build().topologySnapshot()
         val toProcess =
           ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
 
@@ -821,7 +838,53 @@ class RunningDigestProcessorTest
         rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
 
         result.value.tryValue shouldBe PartyRemovedFromParticipant(bob, p3.toLf)
-        verifyZeroInteractions(topologySnapshot)
+      }
+
+      "ignore the removal of a party from a remote participant that is still onboarding it" in {
+        val event = PartyToParticipantAuthorization(bob, p3.toLf, Revoked)
+
+        val topologySnapshot =
+          TestingTopology(topology = Map(partyHostingWhileOnboarding(bob)(p2, onboarding = p3)))
+            .build()
+            .topologySnapshot()
+        val toProcess =
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
+
+        val rdp = mkRunningDigestProcessor()
+
+        Source
+          .single(toProcess)
+          .via(rdp.classification)
+          .runWith(Sink.seq)
+          .futureValue shouldBe empty
+      }
+
+      "ignore the removal of a party from the local participant that is still onboarding it" in {
+        val testingTopology =
+          TestingTopology(topology =
+            Map(
+              partyHostingWhileOnboarding(alice)(p2, onboarding = thisParticipant),
+              partyHosting(bob)(p2),
+            )
+          ).build()
+        val event = PartyToParticipantAuthorization(alice, thisParticipant.toLf, Revoked)
+
+        val toProcess =
+          ProcessingContext(
+            tp(2),
+            NotCheckpointFence(testingTopology.topologySnapshot(), tte(event)),
+          )
+
+        val rdp = mkRunningDigestProcessor(
+          indexService = mkIndexService((off(1), cid(1), Seq(alice, bob))),
+          partyTopology = testingTopology.getTopology().topology,
+        )
+
+        Source
+          .single(toProcess)
+          .via(rdp.classification)
+          .runWith(Sink.seq)
+          .futureValue shouldBe empty
       }
 
       "handle multiple topology changes at the same effective time" in {

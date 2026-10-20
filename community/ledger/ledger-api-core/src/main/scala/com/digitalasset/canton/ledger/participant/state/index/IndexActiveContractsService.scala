@@ -26,6 +26,7 @@ trait IndexActiveContractsService {
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]

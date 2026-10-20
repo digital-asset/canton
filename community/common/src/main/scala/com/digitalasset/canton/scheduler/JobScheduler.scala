@@ -19,7 +19,7 @@ import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
@@ -63,12 +63,12 @@ abstract class JobScheduler(
     */
   protected def initializeSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[JobSchedule]]
+  ): FutureUnlessShutdown[Option[JobSchedule]]
 
   private val isActiveReplica = new AtomicBoolean(false)
   private val activeSchedulerState = new AtomicReference[Option[ActiveSchedulerState]](None)
 
-  private def activate()(implicit traceContext: TraceContext): Future[Unit] =
+  private def activate()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     initializeSchedule().map(_.fold {
       logger.debug(s"Scheduler not configured. Not activating.")
     } { schedule =>
@@ -106,7 +106,7 @@ abstract class JobScheduler(
   protected def isScheduleActivated: Boolean =
     activeSchedulerState.get.nonEmpty
 
-  override def start()(implicit traceContext: TraceContext): Future[Unit] = {
+  override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     isActiveReplica.set(true)
     activate()
   }
@@ -136,13 +136,15 @@ abstract class JobScheduler(
       (),
     )
 
-  override def reactivateSchedulerIfActive()(implicit traceContext: TraceContext): Future[Unit] =
+  override def reactivateSchedulerIfActive()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
     if (isActiveReplica.get) {
       // Stop and start scheduler executor to ensure the new schedule goes into effect asap.
       // This purposely emphasizes safety over efficiency.
       deactivate()
       activate()
-    } else Future.unit
+    } else FutureUnlessShutdown.unit
 
   private def runIfActive[T](code: ActiveSchedulerState => T, noOp: T)(implicit
       traceContext: TraceContext
@@ -165,27 +167,27 @@ abstract class JobScheduler(
               job(traceContext)
             },
             noOp = FutureUnlessShutdown.pure(Done),
-          )
+          ).unwrap
             .transform {
               case Success(UnlessShutdown.Outcome(result)) =>
                 logger.debug(s"Completed scheduler job")
-                Success(UnlessShutdown.Outcome(scheduleNextRun(result)))
+                Success(scheduleNextRun(result))
               case Failure(NonFatal(t)) =>
                 // log non-fatal errors as info rather than warning as we expect noisy when canceling arbitrary jobs
                 logger.info(s"Scheduler job non fatal exception", t)
-                Success(UnlessShutdown.Outcome(scheduleNextRun(Error(t.getMessage))))
+                Success(scheduleNextRun(Error(t.getMessage)))
               case Failure(fatal) => ErrorUtil.internalErrorTry(fatal)
               case Success(UnlessShutdown.AbortedDueToShutdown) =>
-                Success(UnlessShutdown.Outcome(scheduleNextRun(Error("Aborted due to shutdown."))))
+                Success(scheduleNextRun(Error("Aborted due to shutdown.")))
             }
 
         // Wait for schedule job indefinitely as we rely on scheduler jobs to break up long-running tasks.
         // We don't interrupt the job to prevent infinite retries.
-        processingTimeouts.unbounded
-          .await(
-            s"Scheduler Job",
-            Some(Level.INFO), // not WARN because RejectedExecutionException on stop/shutdown
-          )(future.failOnShutdownToAbortException("JobScheduler.run"))
+        processingTimeouts.unbounded.await(
+          s"Scheduler Job",
+          // not WARN because RejectedExecutionException on stop/shutdown
+          Some(Level.INFO),
+        )(future)
     }
   }
 

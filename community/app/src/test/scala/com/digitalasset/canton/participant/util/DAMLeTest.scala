@@ -22,6 +22,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestEngine
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -74,7 +75,7 @@ class DAMLeTest
         validationPhaseLogging = EngineLoggingConfig(),
         loggerFactory = loggerFactory,
       ),
-      interpretationConfig = LfInterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.forProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
 

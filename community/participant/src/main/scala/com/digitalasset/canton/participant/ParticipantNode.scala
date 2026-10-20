@@ -95,6 +95,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{
   EitherTUtil,
   FutureUnlessShutdownUtil,
@@ -114,7 +115,7 @@ import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.Success
 
 class ParticipantNodeBootstrap(
@@ -688,13 +689,43 @@ class ParticipantNodeBootstrap(
               val trafficEnforcementAppContainer = new LifeCycleContainer(
                 stateName = "traffic-enforcement-app",
                 create = () =>
-                  FutureUnlessShutdown.pure(
+                  withNewTraceContext("upload_traffic_credit_dar") { implicit traceContext =>
+                    // The credit projection subscribes to TrafficCredit creates, which the Ledger
+                    // API rejects until the package is known, so upload it before starting TEA.
+                    MonadUtil.when(parameters.damlTopUpEnabled)(
+                      if (parameters.adminWorkflow.autoLoadDar) {
+                        EitherTUtil.toFutureUnlessShutdown(
+                          AdminWorkflowServices.uploadTrafficCreditDarUnlessRegistered(
+                            packageService
+                          )
+                        )
+                      } else {
+                        if (!AdminWorkflowServices.isTrafficCreditDarRegistered(packageService))
+                          logger.warn(
+                            "Daml top-up is enabled but auto-load of DARs is disabled and the traffic credit DAR is not uploaded. " +
+                              "On-ledger traffic top-ups will not work until it is uploaded."
+                          )
+                        FutureUnlessShutdown.unit
+                      }
+                    )
+                  }.map(_ =>
                     TrafficEnforcementApp(
                       storage = storage,
                       token = () => teaTokenDispenserO.map(_.getCurrentToken.secret),
                       instanceName = name,
                       ledgerApiPort = config.ledgerApi.clientConfig.port,
                       config = internalServerConfig,
+                      // If a correlation is pruned before its completion arrives, TEA can't debit
+                      // the submission. We use the ledger's pruning floor to keep correlations for
+                      // at least the maximum deduplication duration (7 days by default).
+                      minimumPruningRetention =
+                        persistentState.value.settingsStore.settings.maxDeduplicationDuration
+                          .getOrElse(
+                            throw new IllegalStateException(
+                              "Max deduplication duration is not available"
+                            )
+                          )
+                          .toConfig,
                       loggerFactory = loggerFactory,
                       timeouts = timeouts,
                       clock = clock,
@@ -828,23 +859,18 @@ class ParticipantNodeBootstrap(
         }
 
         schedulers <-
-          EitherT
-            .liftF(
-              {
-                val schedulers =
-                  new SchedulersImpl(
-                    Map("pruning" -> pruningScheduler) ++
-                      purgeObsoleteTopologySchedulerO.map("obsoleteTopology" -> _).toList.toMap,
-                    arguments.loggerFactory,
-                  )
-                if (isActive) {
-                  schedulers.start().map(_ => schedulers)
-                } else {
-                  Future.successful(schedulers)
-                }
-              }
+          EitherT.liftF {
+            val schedulers = new SchedulersImpl(
+              Map("pruning" -> pruningScheduler) ++
+                purgeObsoleteTopologySchedulerO.map("obsoleteTopology" -> _).toList.toMap,
+              arguments.loggerFactory,
             )
-            .mapK(FutureUnlessShutdown.outcomeK)
+            if (isActive) {
+              schedulers.start().map(_ => schedulers)
+            } else {
+              FutureUnlessShutdown.pure(schedulers)
+            }
+          }
 
         // Create extension service manager early so it can be shared with both CantonSyncService and LedgerApiServer
         extensionServiceManagerO: Option[ExtensionServiceManager] =

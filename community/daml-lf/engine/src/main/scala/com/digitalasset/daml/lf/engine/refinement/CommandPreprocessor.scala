@@ -237,9 +237,9 @@ private[lf] final class CommandPreprocessor(
   // returns the speedy translation of an Replay command.
   @throws[Error.Preprocessing.Error]
   private[refinement] def unsafePreprocessReplayCommand(
-      cmd: command.ReplayCommand
-  ): speedy.Command = {
-    val extendLocalIdForbiddanceToRelativeV2 = true
+      cmd: command.ReplayCommand,
+      extendLocalIdForbiddanceToRelativeV2: Boolean = true,
+  ): speedy.Command =
     cmd match {
       case command.ReplayCommand.Create(templateId, argument) =>
         unsafePreprocessCreate(templateId, argument, extendLocalIdForbiddanceToRelativeV2)
@@ -290,7 +290,6 @@ private[lf] final class CommandPreprocessor(
         val sKey = unsafeTranslateValue(ckTtype, key, extendLocalIdForbiddanceToRelativeV2)
         speedy.Command.FetchByKey(templateId, sKey)
     }
-  }
 
   @throws[Error.Preprocessing.Error]
   def unsafePreprocessApiCommands(

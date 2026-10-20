@@ -126,11 +126,20 @@ object SequencingParameters
     extends VersioningCompanion[SequencingParameters]
     with PrettyPrintingCompanion[SequencingParameters] {
 
+  private implicit val shortPretty: Pretty[Short] = Pretty.prettyOfString(_.toString)
   override protected val pretty: Pretty[SequencingParameters] =
     prettyOfClass(
       param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
       param("segmentLength", _.segmentLength.length.value),
       param("blacklistConfig", _.blacklistLeaderSelectionPolicyConfig),
+      param("maxRequestsInBatch", _.maxRequestsInBatch),
+      param("maxBatchesPerBlockProposal", _.maxBatchesPerBlockProposal),
+      param("pbftViewChangeTimeoutStep", _.pbftViewChangeTimeoutStep),
+      param("pbftViewChangeTimeoutUpperBound", _.pbftViewChangeTimeoutUpperBound),
+      param(
+        "stricterDetectionOfRequestsPotentiallyChangingOrderingTopology",
+        _.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+      ),
     )
 
   val DefaultPbftViewChangeTimeout: PositiveFiniteDuration =
@@ -255,7 +264,7 @@ object SequencingParameters
   override def versioningTable: data.topology.SequencingParameters.VersioningTable =
     VersioningTable(
       ProtoVersion(31) ->
-        VersionedProtoCodec(ProtocolVersion.v35)(
+        VersionedProtoCodec(ProtocolVersion.v36)(
           v31.DynamicSequencingParametersPayload
         )(
           supportedProtoVersion(_)(SequencingParameters.fromProto31),

@@ -9,9 +9,9 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
+  SequencingParameters as ConsoleSequencingParameters,
 }
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
@@ -19,9 +19,9 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UseExternalProcess,
   UsePostgres,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -31,11 +31,21 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.{
+  HowLongToBlacklist,
+  HowManyCanWeBlacklist,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  BlacklistLeaderSelectionPolicyConfig,
+  SequencingParameters,
+}
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.{SequencerAlias, config}
 import org.scalatest.Assertion
 
 import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 /** This test checks that the sequencer connection pool properly recovers connections and
   * subscriptions when sequencers go down.
@@ -75,7 +85,13 @@ sealed trait BftSequencerConnectionsIntegrationTest
   )
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2S4M1_Config
+    EnvironmentDefinition
+      .buildBaseEnvironmentDefinition(
+        numParticipants = 2,
+        // 4 external sequencers + 3 local sequencers (3f+1 with f=2, so we can crash 2 a time)
+        numSequencers = 7,
+        numMediators = 1,
+      )
       .addConfigTransforms(
         // Increase the acknowledgement interval to avoid flakes with failing acknowledgements log messages
         ConfigTransforms.updateSequencerClientAcknowledgementInterval(
@@ -94,6 +110,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
           seq.health.wait_for_running()
           logger.debug(s"Sequencer ${seq.name} is running")
         }
+        sequencers.local.foreach(_.start())
       }
       .withNetworkBootstrap { implicit env =>
         import env.*
@@ -102,7 +119,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
             daName,
             synchronizerOwners = Seq[InstanceReference](remoteSequencer1, mediator1),
             synchronizerThreshold = PositiveInt.one,
-            sequencers = sequencers.remote,
+            sequencers = sequencers.all,
             mediators = Seq(mediator1),
             overrideMediatorToSequencers = Some(
               Map(
@@ -118,8 +135,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
       }
       .withSetup { implicit env =>
         import env.*
-
-        sequencers.remote.foreach { seq =>
+        sequencers.all.foreach { seq =>
           seq.health.wait_for_initialized()
           logger.debug(s"Sequencer ${seq.name} is initialized")
         }
@@ -208,6 +224,31 @@ sealed trait BftSequencerConnectionsIntegrationTest
           validation = SequencerConnectionValidation.Disabled,
         )
       }
+
+      clue("update sequencing parameters") {
+        val newSequencingParameters = SequencingParameters
+          .Default(testedProtocolVersion)
+          .update(
+            // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
+            // The default timeout is 10s which can make some blocks be delayed by much, so we lower the view-change timeout and segment length,
+            // as well as disable blacklisting to avoid that nodes get blacklisted because of view-changes in this test.
+            pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(250.millis.toJava),
+            segmentLength = SegmentLength(PositiveLong.tryCreate(2L)),
+            blacklistLeaderSelectionPolicyConfig = BlacklistLeaderSelectionPolicyConfig(
+              howLongToBlacklist = HowLongToBlacklist.NoBlacklisting,
+              howManyCanWeBlacklist = HowManyCanWeBlacklist.NoBlacklisting,
+            ),
+          )
+        remoteSequencer1.topology.sequencing_parameters.propose(
+          synchronizer1Id.logical,
+          ConsoleSequencingParameters(Some(newSequencingParameters.toByteString)),
+        )
+        eventually() {
+          remoteSequencer1.bft
+            .get_ordering_topology()
+            .sequencingParameters shouldBe newSequencingParameters
+        }
+      }
     }
 
     "Handle sequencers stopped graciously" in { implicit env =>
@@ -257,6 +298,6 @@ sealed trait BftSequencerConnectionsIntegrationTest
 
 class BftSequencerConnectionsIntegrationTestDefault extends BftSequencerConnectionsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(externalPlugin)
 }

@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{TopologyLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.TopologyManagerError
@@ -210,15 +210,6 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       )
     )
 
-  def toProtoV31: Either[String, v31.TopologyTransaction] =
-    mapping.toProtoV31.map(serializedMapping =>
-      v31.TopologyTransaction(
-        operation = operation.toProto,
-        serial = serial.value,
-        mapping = Some(serializedMapping),
-      )
-    )
-
   override def prettyCompanion
       : PrettyPrintingCompanion[TopologyTransaction[TopologyChangeOp, TopologyMapping]] =
     TopologyTransactionPrettyPrintingCompanion
@@ -227,9 +218,16 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
     TopologyTransaction
 }
 
+/** @param topologyLimits
+  *   bounds the collections inside a mapping: the synchronizer's limits, or
+  *   [[com.digitalasset.canton.protocol.TopologyLimits.default]] where no synchronizer is known
+  */
+final case class TopologyTransactionDeserializationContext(topologyLimits: TopologyLimits)
+
 object TopologyTransaction
-    extends VersioningCompanionMemoizationE[
-      TopologyTransaction[TopologyChangeOp, TopologyMapping]
+    extends VersioningCompanionContextMemoizationE[
+      TopologyTransaction[TopologyChangeOp, TopologyMapping],
+      TopologyTransactionDeserializationContext,
     ] {
 
   final case class TxHash(hash: Hash) extends AnyVal
@@ -241,15 +239,10 @@ object TopologyTransaction
 
   val versioningTable: VersioningTable =
     VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v35)(v30.TopologyTransaction)(
+      ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(v30.TopologyTransaction)(
         supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
         _.toProtoV30,
-      ),
-      // TODO(#35499): OffPR with Squencer Channels - Switch dev to 37
-      ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.dev)(v31.TopologyTransaction)(
-        supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
-        _.toProtoV31,
-      ),
+      )
     )
 
   def create[Op <: TopologyChangeOp, M <: TopologyMapping](
@@ -257,10 +250,13 @@ object TopologyTransaction
       serial: PositiveInt,
       mapping: M,
       protocolVersion: ProtocolVersion,
-  ): Either[String, TopologyTransaction[Op, M]] = {
-    val rpv = protocolVersionRepresentativeFor(protocolVersion)
-    create(op, serial, mapping, rpv)
-  }
+  ): Either[String, TopologyTransaction[Op, M]] =
+    for {
+      _ <- mapping
+        .select[PartyToParticipant]
+        .fold(Either.unit[String])(_.checkHostingStatesSupportedOn(protocolVersion))
+      transaction <- create(op, serial, mapping, protocolVersionRepresentativeFor(protocolVersion))
+    } yield transaction
 
   def tryCreate[Op <: TopologyChangeOp, M <: TopologyMapping](
       op: Op,
@@ -289,48 +285,22 @@ object TopologyTransaction
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      context: TopologyTransactionDeserializationContext,
       transactionP: v30.TopologyTransaction,
   )(
       bytes: ByteString
   ): ParsingResult[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
+    val TopologyTransactionDeserializationContext(topologyLimits) = context
     val v30.TopologyTransaction(opP, serialP, mappingP) = transactionP
     for {
       mapping <- ProtoConverter.parseRequired(
-        TopologyMapping.fromProtoV30(pvv, _),
+        TopologyMapping.fromProtoV30(pvv, topologyLimits, _),
         "mapping",
         mappingP,
       )
       serial <- ProtoConverter.parsePositiveInt("serial", serialP)
       op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      tx = TopologyTransaction(op, serial, mapping)(
-        rpv,
-        Some(bytes),
-      )
-      // Ensure the transaction is serializable
-      // TODO(i33934): use memoization for `toByteString`; this will implicitly guarantee that a deserialized transaction is serializable
-      _ <- tx.toByteString.leftMap(err =>
-        ProtoDeserializationError.OtherError(s"Transaction is not serializable: $err")
-      )
-    } yield tx
-  }
-
-  private def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      transactionP: v31.TopologyTransaction,
-  )(
-      bytes: ByteString
-  ): ParsingResult[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
-    val v31.TopologyTransaction(opP, serialP, mappingP) = transactionP
-    for {
-      mapping <- ProtoConverter.parseRequired(
-        TopologyMapping.fromProtoV31(pvv, _),
-        "mapping",
-        mappingP,
-      )
-      serial <- ProtoConverter.parsePositiveInt("serial", serialP)
-      op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
       tx = TopologyTransaction(op, serial, mapping)(
         rpv,
         Some(bytes),

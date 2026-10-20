@@ -10,6 +10,7 @@
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
 - **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
 - **Upcoming-shift reminders.** Another scheduled workflow, `remind_upcoming_rota.yml`, runs every Monday and privately DMs the people who start a rota shift about a month (28 days) out, so they get a heads-up in time to arrange a swap.
+- **When these scripts themselves break.** `notify_tooling_failure()` pages the **CI rota** instead of only logging it, and `check_guarded_excepts.py` (run in CI) blocks new silent failures from being introduced. See [below](#when-the-ci-scripts-themselves-break).
 
 ## Flaky test notification system
 
@@ -204,6 +205,10 @@ python3 "$OLDPWD/scripts/ci/report_failing_tests.py"
 
 The rota lookup also honors an optional `ROTA_SHEET_ID` variable to point at a different sheet, defaulting to the roster sheet baked into `select_rota.py`.
 
+## Investigating a flaky test
+
+Run the `/investigate-flaky-test` Claude Code skill on a downloaded investigation package (the `flake-pkg-*` artifact linked from the flaky issue's evidence comment); see its [README](../../.claude/skills/investigate-flaky-test/README.md).
+
 ## Rota Slack channel topics
 
 `update_rota_topics.py` keeps three channel topics in sync with the people on duty this week, reading the same [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) and roster (`roster_people.json`) as `select_rota.py`:
@@ -266,3 +271,9 @@ It runs weekly via the `Remind upcoming rota` GitHub Actions workflow (`.github/
 |---|---|
 | `GCLOUD_SHEETS_SA_KEY` | Reading the rota sheet (SA must be a Viewer on it) |
 | `SLACK_BOT_QA_NOTIFICATIONS` | Sending the DMs (bot needs `im:write` for `conversations.open` and `chat:write` for `chat.postMessage`) |
+
+## When the CI scripts themselves break
+
+These scripts keep running on a non-critical failure (an unreadable sheet, one failed DM) rather than crash. `select_rota.notify_tooling_failure()` closes the resulting blind spot: it DMs the **CI rota** (falling back to `fallback_pool`) whenever one of these scripts' own plumbing fails, independent of the job's own exit status, a path can page a human and still leave the job green, or exit non-zero on top of that when nobody could be pinged at all (e.g. the fallback pool itself being unresolvable). Wired into `select_rota.py`'s rotation lookup, `alert_slack.py`'s Slack post, and `report_failing_tests.py`'s per-step crash handler.
+
+`check_guarded_excepts.py`, run in the `yaml_lint` job on every PR, enforces this going forward: a new except-block in `scripts/ci/` (including subdirectories) must satisfy the same rule. See the script's own docstring for exactly what that means. A handler that does neither can carry `# silent-ok: <reason>` when the error is genuinely ignored, or `# failure-surfaced: <where>` when the failure is reported elsewhere (an exit code set below, an error list printed later). Grepping `silent-ok` therefore lists only the places where errors are really ignored.

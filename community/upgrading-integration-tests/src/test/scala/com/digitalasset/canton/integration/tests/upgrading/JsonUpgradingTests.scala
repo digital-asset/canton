@@ -202,6 +202,7 @@ class JsonUpgradingTests extends HttpTestFuns with HttpServiceUserFixture.UserTo
                 activeAtOffset = endOffset,
                 eventFormat = Some(eventFormat),
                 streamContinuationToken = None,
+                includeIncompleteReassignments = false,
               )
               .asJson
               .noSpaces

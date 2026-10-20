@@ -22,7 +22,10 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   PreparedTransaction,
 }
-import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsRequest,
+  GetConnectedSynchronizersRequest,
+}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{
   EventFormat,
@@ -165,6 +168,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -190,6 +194,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -210,6 +215,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
   }
@@ -220,8 +226,42 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         activeAtOffset = 15,
         eventFormat = None,
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
+  }
+
+  behavior of "StateServiceAuthorization.getConnectedSynchronizersClaims"
+
+  it should "require only a public claim if no parameters are given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(party = "", participantId = "", identityProviderId = "")
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require only a public claim if no party is given, regardless of the other parameters" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "",
+        participantId = "some-participant",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require admin, IDP admin or operate as party rights with a matching IDP if a party is given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "alice",
+        participantId = "",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(
+      RequiredClaim.AdminOrIdpAdminOrOperateAsParty[GetConnectedSynchronizersRequest](Seq("alice")),
+      RequiredClaim.MatchIdentityProviderId(
+        StateServiceAuthorization.identityProviderIdForGetConnectedSynchronizersL
+      ),
+    )
   }
 
   behavior of "InteractiveSubmissionServiceAuthorization.prepareSubmission"

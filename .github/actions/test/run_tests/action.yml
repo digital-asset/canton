@@ -22,6 +22,10 @@ inputs:
     description: Reset precompiled classes if requested (passed through to restore_precompiled_classes)
     required: false
     default: 'false'
+  restore_compile_sbt_caches:
+    description: Whether to restore precompiled classes and sbt dependency caches before running tests
+    required: false
+    default: 'true'
   execution_context_size:
     description: Scala concurrent context size
     required: false
@@ -129,6 +133,7 @@ runs:
   steps:
     - name: Restore Precompiled Classes and sbt caches
       id: restore_classes
+      if: inputs.restore_compile_sbt_caches == 'true'
       uses: ./.github/actions/build/restore_compile_sbt_caches
       with:
         reset_classes_if_requested: ${{ inputs.reset_classes_if_requested }}

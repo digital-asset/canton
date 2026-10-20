@@ -126,7 +126,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -340,7 +340,7 @@ class CantonSyncService(
       // vet any packages that have not yet been vetted
       EitherTUtil.toFutureUnlessShutdown(
         AdminWorkflowServices.handleDamlErrorDuringPackageLoading(
-          s"${AdminWorkflowServices.PingDarResourceName}__${AdminWorkflowServices.AcsReplicationDarResourceName}"
+          AdminWorkflowServices.AdminWorkflowNames.mkString("__")
         )(
           packageService
             .vetPackages(
@@ -362,8 +362,11 @@ class CantonSyncService(
           ) {
             AdminWorkflowServices.AcsReplicationPackages.keySet
           } else Set.empty
+        val trafficCreditPackagesIfShouldVet =
+          if (parameters.damlTopUpEnabled) AdminWorkflowServices.TrafficCreditPackages.keySet
+          else Set.empty
         val packagesToVet = AdminWorkflowServices.PingPackages.keySet ++
-          acsReplicationPackagesIfShouldVet
+          acsReplicationPackagesIfShouldVet ++ trafficCreditPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
         topologyClient.headSnapshot
@@ -1010,6 +1013,9 @@ class CantonSyncService(
           )
       )
       _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
+      configToStore = config.copy(disableAuthorizedStoreDispatching =
+        config.disableAuthorizedStoreDispatching || onboardingTransactions.isDefined
+      )
       _ <- EitherT
         .rightT[FutureUnlessShutdown, SyncServiceError](
           synchronizerConnectionConfigStore
@@ -1022,7 +1028,7 @@ class CantonSyncService(
             case Seq() =>
               synchronizerConnectionConfigStore
                 .put(
-                  config,
+                  configToStore,
                   SynchronizerConnectionConfigStore.Active,
                   configuredPsid = UnknownPhysicalSynchronizerId,
                   synchronizerPredecessor = None,
@@ -1035,7 +1041,7 @@ class CantonSyncService(
             case Seq(storedConfig) =>
               EitherT
                 .fromEither[FutureUnlessShutdown](
-                  config
+                  configToStore
                     .subsumeMerge(storedConfig.config)
                     .leftMap(err =>
                       SyncServiceError.SynchronizerRegistration
@@ -1098,7 +1104,7 @@ class CantonSyncService(
       }
       operation = PendingOnboardingTransactions(
         transactions.sortBy(TopologyStore.initialParticipantDispatchingOrder),
-        ProtocolVersion.latest,
+        ReleaseProtocolVersion(ProtocolVersion.latest),
       )
         .toPendingOperation(synchronizerId, config.synchronizerAlias)
       _ <- pendingOnboardingTransactionsStore
@@ -1197,8 +1203,16 @@ class CantonSyncService(
       }
       connectionIdToUpdate <- EitherT.fromEither[FutureUnlessShutdown](connectionIdToUpdateE)
 
+      storedDisableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+        .get(config.synchronizerAlias, connectionIdToUpdate)
+        .exists(_.config.disableAuthorizedStoreDispatching)
       _ <- synchronizerConnectionConfigStore
-        .replace(connectionIdToUpdate, config)
+        .replace(
+          connectionIdToUpdate,
+          config.copy(disableAuthorizedStoreDispatching =
+            config.disableAuthorizedStoreDispatching || storedDisableAuthorizedStoreDispatching
+          ),
+        )
         .leftMap(_ =>
           SyncServiceError.SyncServiceUnknownSynchronizer
             .Error(config.synchronizerAlias): SyncServiceError
@@ -1841,17 +1855,33 @@ class CantonSyncService(
               .Reject(s"Unable to resolve $synchronizerId to a connected physical synchronizer id")
           )
 
-      def lookupPsids(source: Source[SynchronizerId], target: Target[SynchronizerId]): Either[
+      def lookupAndCheckPsids(
+          source: Source[SynchronizerId],
+          target: Target[SynchronizerId],
+          hasPkgValidationOverrides: Boolean,
+      ): Either[
         RequestValidationErrors.InvalidArgument.Reject,
         (Source[PhysicalSynchronizerId], Target[PhysicalSynchronizerId]),
       ] = for {
         sourcePsid <- lookupPsid(source.unwrap).map(Source(_))
         targetPsid <- lookupPsid(target.unwrap).map(Target(_))
+        _ <- Either.cond(
+          !hasPkgValidationOverrides || (sourcePsid.unwrap.protocolVersion > ProtocolVersion.v36 && targetPsid.unwrap.protocolVersion > ProtocolVersion.v36),
+          (),
+          RequestValidationErrors.InvalidArgument
+            .Reject(
+              s"Can only use validation package overrides when both source and target synchronizers are running protocol version ${ProtocolVersion.v37} or later. Source: ${sourcePsid.unwrap.protocolVersion}, Target: ${targetPsid.unwrap.protocolVersion}"
+            ),
+        )
       } yield (sourcePsid, targetPsid)
 
       ReassignmentCommandsBatch.create(reassignmentCommands) match {
         case Right(unassigns: ReassignmentCommandsBatch.Unassignments) =>
-          lookupPsids(unassigns.source, unassigns.target) match {
+          lookupAndCheckPsids(
+            unassigns.source,
+            unassigns.target,
+            unassigns.hasPkgValidationOverrides,
+          ) match {
             case Right((sourcePsid, targetPsid)) =>
               doReassignment(
                 psid = sourcePsid.unwrap
@@ -1868,6 +1898,8 @@ class CantonSyncService(
                   contractIds = unassigns.contractIds,
                   targetSynchronizer = targetPsid,
                   sourceTopology = Source(sourceTopology),
+                  overrideSourceValidationPkgIds = unassigns.overrideSourceValidationPkgIds,
+                  overrideTargetValidationPkgIds = unassigns.overrideTargetValidationPkgIds,
                 )
               }
 

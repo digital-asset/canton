@@ -5,7 +5,11 @@ package com.digitalasset.canton.store
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
-import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CacheConfigWithTimeout,
+  ProcessingTimeout,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
@@ -44,6 +48,11 @@ sealed trait ConfirmationRequestSessionKeyStore {
 
   protected val sessionKeysCacheRecipients: Cache[RecipientGroup, SessionKeyInfo]
 
+  /** Cache of transparency checks that have already been successfully verified. For each session
+    * key, the randomness is encrypted for every recipient, and the resulting list of encryptions is
+    * hashed and stored here. Reusing the cached hash during transparency checks avoids repeating
+    * expensive encryption operations, while keeping memory usage minimal.
+    */
   protected val transparencyCheckCache: Cache[Hash, Unit]
 
   protected val sessionKeysCacheDecryptions: Cache[AsymmetricEncrypted[
@@ -103,6 +112,12 @@ sealed trait ConfirmationRequestSessionKeyStore {
           }
     }
 
+  private[canton] def hasTransparencyCheck(hash: Hash): Boolean =
+    transparencyCheckCache.getIfPresent(hash).isDefined
+
+  private[canton] def saveTransparencyCheck(hash: Hash): Unit =
+    transparencyCheckCache.put(hash, ())
+
 }
 
 object SessionKeyStoreDisabled extends SessionKeyStore {
@@ -111,6 +126,7 @@ object SessionKeyStoreDisabled extends SessionKeyStore {
 
 final class SessionKeyStoreWithInMemoryCache(
     sessionKeysCacheConfig: SessionEncryptionKeyCacheConfig,
+    transparencyCheckCacheConfig: CacheConfigWithTimeout,
     timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -153,13 +169,8 @@ final class SessionKeyStoreWithInMemoryCache(
       .scheduler(Scheduler.forScheduledExecutorService(scheduledExecutorService))
       .build()
 
-  /** Cache of hashes of the session key randomness encrypted for all recipients. For each session
-    * key, the randomness is encrypted for every recipient, and the resulting list of encryptions is
-    * hashed and stored here. Reusing the cached hash during transparency checks avoids repeating
-    * expensive encryption operations, while keeping memory usage minimal.
-    */
   override protected lazy val transparencyCheckCache: Cache[Hash, Unit] =
-    sessionKeysCacheConfig.receiverCache
+    transparencyCheckCacheConfig
       .buildScaffeine(loggerFactory)
       .build()
 
@@ -204,18 +215,23 @@ final class SessionKeyStoreWithNoEviction(implicit executionContext: ExecutionCo
   override protected lazy val sessionKeysCacheDecryptions
       : Cache[AsymmetricEncrypted[SecureRandomness], SecureRandomness] =
     Scaffeine().executor(executionContext.execute(_)).build()
-
 }
 
 object SessionKeyStore {
 
   def apply(
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+      transparencyCheckCacheConfig: CacheConfigWithTimeout,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SessionKeyStore =
     if (sessionKeyCacheConfig.enabled)
-      new SessionKeyStoreWithInMemoryCache(sessionKeyCacheConfig, timeouts, loggerFactory)
+      new SessionKeyStoreWithInMemoryCache(
+        sessionKeyCacheConfig,
+        transparencyCheckCacheConfig,
+        timeouts,
+        loggerFactory,
+      )
     else SessionKeyStoreDisabled
 
   // Defines a recipients tree and the crypto scheme used to generate the session key for that group

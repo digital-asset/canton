@@ -346,6 +346,7 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       templateIds: Seq[Identifier],
       interfaceFilters: Seq[(Identifier, IncludeInterfaceView)] = Seq.empty,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): GetActiveContractsRequest =
     delegate.activeContractsRequest(
       parties,
@@ -353,42 +354,69 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       templateIds,
       interfaceFilters,
       verbose,
+      includeIncompleteReassignments,
     )
   override def activeContracts(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     withTimeout(
       s"Active contracts for parties $parties",
-      delegate.activeContracts(parties, activeAtOffsetO, verbose),
+      delegate.activeContracts(
+        parties,
+        activeAtOffsetO,
+        verbose,
+        includeIncompleteReassignments,
+      ),
     )
   override def activeContractsWithVariants(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     withTimeout(
       s"Active contracts with variants for parties $parties",
-      delegate.activeContracts(parties, activeAtOffsetO, verbose),
+      delegate.activeContractsWithVariants(
+        parties,
+        activeAtOffsetO,
+        verbose,
+        includeIncompleteReassignments,
+      ),
     )
   override def activeContractsByTemplateId(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] = withTimeout(
     s"Active contracts by template ids $templateIds for parties $parties",
-    delegate.activeContractsByTemplateId(templateIds, parties, activeAtOffsetO, verbose),
+    delegate.activeContractsByTemplateId(
+      templateIds,
+      parties,
+      activeAtOffsetO,
+      verbose,
+      includeIncompleteReassignments,
+    ),
   )
   override def activeContractsByTemplateIdWithVariants(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] = withTimeout(
     s"Active contracts with variants by template ids $templateIds for parties $parties",
-    delegate.activeContractsByTemplateIdWithVariants(templateIds, parties, activeAtOffsetO, verbose),
+    delegate.activeContractsByTemplateIdWithVariants(
+      templateIds,
+      parties,
+      activeAtOffsetO,
+      verbose,
+      includeIncompleteReassignments,
+    ),
   )
 
   def eventFormat(

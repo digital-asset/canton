@@ -19,7 +19,10 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -190,13 +193,32 @@ trait ParticipantOffboardingIntegrationTestAssertions { self: CommunityIntegrati
       LogEntryOptionality.Required,
       _.warningMessage should include(s"$offboardedParticipant access is disabled"),
     ),
+    // The client closes with either permission denied or, if a token refresh races
+    //  with offboarding, an unrecoverable error, because the sole sequencer connection fails
+    //  and the threshold is unreachable.
+    //  These are mutually exclusive outcomes of the same completion callback.
     (
       LogEntryOptionality.Required,
-      _.shouldBeCantonError(
-        SyncServiceSynchronizerDisabledUs,
-        _ should include(s"$synchronizer rejected our subscription attempt with permission denied"),
-      ),
+      entry =>
+        if (entry.message.startsWith(SyncServiceSynchronizerDisabledUs.id))
+          entry.shouldBeCantonError(
+            SyncServiceSynchronizerDisabledUs,
+            _ should include(
+              s"$synchronizer rejected our subscription attempt with permission denied"
+            ),
+          )
+        else
+          entry.shouldBeCantonError(
+            SyncServiceSynchronizerDisconnect,
+            message => {
+              message should include(
+                "PERMISSION_DENIED/Authentication token refresh error"
+              )
+              message should include(s"$offboardedParticipant access is disabled")
+            },
+          ),
     ),
+    // A token refresh racing with offboarding can be denied because the participant's access is disabled.
     (
       LogEntryOptionality.Optional,
       _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),

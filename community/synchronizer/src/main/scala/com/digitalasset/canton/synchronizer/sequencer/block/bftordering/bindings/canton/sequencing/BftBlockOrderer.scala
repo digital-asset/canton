@@ -96,6 +96,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Mempool,
   Output,
@@ -149,9 +150,8 @@ final class BftBlockOrderer(
     cryptoApi: SynchronizerCryptoClient,
     sequencerId: SequencerId,
     clock: Clock,
-    authenticationServicesO: Option[
-      AuthenticationServices
-    ], // Owned and managed by the sequencer runtime, absent in some tests
+    // Owned and managed by the sequencer runtime, absent in some tests
+    authenticationServicesO: Option[AuthenticationServices],
     nodeParameters: CantonNodeParameters,
     sequencerSubscriptionInitialHeight: Long,
     override val orderingTimeFixMode: OrderingTimeFixMode,
@@ -209,9 +209,6 @@ final class BftBlockOrderer(
   private val psId: PhysicalSynchronizerId = cryptoApi.psid
 
   private implicit val protocolVersion: ProtocolVersion = psId.protocolVersion
-
-  private val isAuthenticationEnabled =
-    config.initialNetwork.exists(_.endpointAuthentication.enabled)
 
   private val thisNode =
     config.standalone.fold(SequencerNodeId.toBftNodeId(sequencerId)) { standaloneConfig =>
@@ -508,11 +505,26 @@ final class BftBlockOrderer(
           metrics,
         )
       ) { standaloneConfig =>
-        new StandaloneOrderingTopologyProvider(
-          standaloneConfig,
-          cryptoApi.pureCrypto,
-          metrics,
-        )
+        standaloneConfig.testSlowdown
+          .flatMap(_.computeDelay)
+          .fold {
+            new StandaloneOrderingTopologyProvider(
+              standaloneConfig,
+              cryptoApi.pureCrypto,
+              metrics,
+            )
+          } { computeSlowdownConfig =>
+            new StandaloneOrderingTopologyProvider(
+              standaloneConfig,
+              cryptoApi.pureCrypto,
+              metrics,
+              delaySignMessageO = {
+                case _: PrePrepare =>
+                  computeSlowdownConfig.nextSignPrePrepareDelay
+                case _ => None
+              },
+            )
+          }
       }
 
     new BftOrderingModuleSystemInitializer(
@@ -562,7 +574,10 @@ final class BftBlockOrderer(
       timeouts,
     )
     timeouts.default.await(s"${getClass.getSimpleName} starting pruning scheduler")(
-      scheduler.start()
+      scheduler
+        .start()
+        // Recovered in BftSequencerFactory.createBlockOrderer
+        .failOnShutdownToAbortException("BftOrdererPruningScheduler")
     )
     scheduler
   }
@@ -732,7 +747,7 @@ final class BftBlockOrderer(
 
   override def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): EitherT[Future, SequencerDeliverError, Unit] = {
     val request = signedAcknowledgeRequest.content
     logger.debug(s"member ${request.member} acknowledging timestamp ${request.timestamp}")
     sendToMempool(
@@ -741,7 +756,7 @@ final class BftBlockOrderer(
       signedAcknowledgeRequest.content.member,
       signedAcknowledgeRequest.toByteString,
       maxSequencingTime = None,
-    ).value.map(_ => ())
+    )
   }
 
   override def health(implicit traceContext: TraceContext): Future[SequencerDriverHealthStatus] = {
@@ -956,13 +971,22 @@ final class BftBlockOrderer(
     )
     EitherT(replyPromise.future.map {
       case SequencerNode.RequestAccepted => Either.unit
+      case SequencerNode.RequestRejected(
+            reason @ SequencerNode.RequestRejected.P2PNotReady(_, _)
+          ) =>
+        Left(SequencerErrors.Unavailable(reason.rejectionMessage))
+      // We map any other error to Overloaded to preserve backwards-compatibility.
+      // This is convenient because Overloaded is retried immediately in the
+      // sequencer client.  In the long term, we should extend SequencerErrors to
+      // include the other cases.
       case SequencerNode.RequestRejected(reason) =>
-        Left(SequencerErrors.Overloaded(reason)) // Currently the only case
+        Left(SequencerErrors.Overloaded(reason.rejectionMessage))
       case _ => Left(SequencerErrors.Internal("wrong response"))
     })
   }
 
   private def checkConfigSecurity()(implicit traceContext: TraceContext): Unit = {
+    val isAuthenticationEnabled = config.initialNetwork.exists(_.endpointAuthentication.enabled)
     if (
       !(isAuthenticationEnabled || config.initialNetwork
         .map(_.peerEndpoints)
@@ -985,7 +1009,9 @@ final class BftBlockOrderer(
     logger.info(description)
     config.initTimeout
       .await(s"${getClass.getSimpleName} $description")(
-        f.futureUnlessShutdown().failOnShutdownToAbortException(description)
+        f.futureUnlessShutdown()
+          // Recovered in the BftSequencerFactory.createBlockOrderer
+          .failOnShutdownToAbortException(description)
       )(ErrorLoggingContext.fromTracedLogger(logger))
   }
 }

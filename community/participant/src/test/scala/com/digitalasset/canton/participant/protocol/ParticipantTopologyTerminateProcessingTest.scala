@@ -52,7 +52,6 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -903,7 +902,7 @@ final class ParticipantTopologyTerminateProcessingTest
       }
     }
 
-    "notify of dynamic synchronizer parameter changes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "notify of dynamic synchronizer parameter changes" in {
       val (proc, store, eventCaptor, rop, _) = mk()
       val (cts0, sc0) = timestampWithCounter(0)
       val (cts1, sc1) = timestampWithCounter(1)

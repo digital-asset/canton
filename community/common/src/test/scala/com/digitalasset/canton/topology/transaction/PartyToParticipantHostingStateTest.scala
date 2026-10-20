@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
+import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, UnrecognizedEnum}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.topology.DefaultTestIdentities.{participant1, participant2, party1}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Confirmation, Submission}
-import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.wordspec.AnyWordSpec
 
 class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
@@ -27,100 +27,108 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
       ),
     )
 
-  private def ptpV31(
-      participant2State: v31.PartyToParticipant.HostingParticipant.HostingState
-  ): v31.PartyToParticipant =
-    v31.PartyToParticipant(
+  private def ptpV30(
+      onboarding: Boolean,
+      participant2State: v30.PartyToParticipant.HostingParticipant.HostingState,
+  ): v30.PartyToParticipant =
+    v30.PartyToParticipant(
       party = party1.toProtoPrimitive,
       threshold = 1,
       participants = Seq(
-        v31.PartyToParticipant.HostingParticipant(
+        v30.PartyToParticipant.HostingParticipant(
           participant1.uid.toProtoPrimitive,
           v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
-          v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
+          None,
+          v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED,
         ),
-        v31.PartyToParticipant.HostingParticipant(
+        v30.PartyToParticipant.HostingParticipant(
           participant2.uid.toProtoPrimitive,
           v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+          Option.when(onboarding)(v30.PartyToParticipant.HostingParticipant.Onboarding()),
           participant2State,
         ),
       ),
       partySigningKeys = None,
     )
 
-  "PartyToParticipant v31" should {
-    "serialize every hosting state" in {
-      Seq(
-        HostingState.Nominated -> v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED,
-        HostingState.Freezing -> v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_FREEZING,
-        HostingState.Onboarding -> v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ONBOARDING,
-        HostingState.Active -> v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
-      ).foreach { case (state, stateP) =>
-        val mapping = ptp(state)
-        val proto = mapping.toProtoPartyToParticipantV31.value
+  private val unsupportedPV = ProtocolVersionValidation.PV(ProtocolVersion.v36)
+  private val supportedPV = ProtocolVersionValidation.PV(ProtocolVersion.offPRWithSequencerChannels)
 
-        proto shouldBe ptpV31(stateP)
-        PartyToParticipant.fromProtoV31(pvv, proto).value shouldBe mapping
+  private val nominatedP =
+    v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_NOMINATED
+  private val freezingP =
+    v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_FREEZING
+  private val unspecifiedP =
+    v30.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED
+  private val unrecognizedP =
+    v30.PartyToParticipant.HostingParticipant.HostingState.Unrecognized(42)
+
+  private def parseV30(
+      pvv: ProtocolVersionValidation,
+      proto: v30.PartyToParticipant,
+  ): Either[ProtoDeserializationError, PartyToParticipant] =
+    PartyToParticipant.fromProtoV30(pvv, testedTopologyLimits, proto)
+
+  "PartyToParticipant v30" should {
+    "serialize every hosting state, Onboarding and Active as in earlier releases" in {
+      Seq(
+        HostingState.Nominated -> ptpV30(onboarding = false, nominatedP),
+        HostingState.Freezing -> ptpV30(onboarding = false, freezingP),
+        HostingState.Onboarding -> ptpV30(onboarding = true, unspecifiedP),
+        HostingState.Active -> ptpV30(onboarding = false, unspecifiedP),
+      ).foreach { case (state, expectedProto) =>
+        val mapping = ptp(state)
+        val proto = mapping.toProtoPartyToParticipantV30.value
+
+        proto shouldBe expectedProto
+        parseV30(supportedPV, proto).value shouldBe mapping
+        parseV30(pvv, proto).value shouldBe mapping
       }
     }
 
-    "reject an unspecified hosting state" in {
-      PartyToParticipant
-        .fromProtoV31(
-          pvv,
-          ptpV31(v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED),
-        )
-        .left
-        .value shouldBe a[FieldNotSet]
+    "ignore the hosting state before ProtocolVersion.offPRWithSequencerChannels" in {
+      parseV30(unsupportedPV, ptpV30(onboarding = false, freezingP)).value shouldBe
+        ptp(HostingState.Active)
+      parseV30(unsupportedPV, ptpV30(onboarding = true, nominatedP)).value shouldBe
+        ptp(HostingState.Onboarding)
+      parseV30(unsupportedPV, ptpV30(onboarding = false, unrecognizedP)).value shouldBe
+        ptp(HostingState.Active)
     }
 
-    "reject an unrecognized hosting state" in {
-      PartyToParticipant
-        .fromProtoV31(
-          pvv,
-          ptpV31(v31.PartyToParticipant.HostingParticipant.HostingState.Unrecognized(42)),
-        )
-        .left
-        .value shouldBe an[UnrecognizedEnum]
+    "reject a hosting state with the onboarding flag, and unrecognized hosting states, for untrusted input" in {
+      Seq(supportedPV, ProtocolVersionValidation.AlwaysValidation).foreach { untrusted =>
+        parseV30(untrusted, ptpV30(onboarding = true, freezingP)).left.value shouldBe
+          an[InvariantViolation]
+        parseV30(untrusted, ptpV30(onboarding = false, unrecognizedP)).left.value shouldBe
+          an[UnrecognizedEnum]
+      }
+    }
+
+    "read such hosting states in trusted input: the onboarding flag wins, unrecognized counts as unset" in {
+      parseV30(pvv, ptpV30(onboarding = true, freezingP)).value shouldBe
+        ptp(HostingState.Onboarding)
+      parseV30(pvv, ptpV30(onboarding = true, unrecognizedP)).value shouldBe
+        ptp(HostingState.Onboarding)
+      parseV30(pvv, ptpV30(onboarding = false, unrecognizedP)).value shouldBe
+        ptp(HostingState.Active)
     }
   }
 
-  "PartyToParticipant v30" should {
-    "represent ONBOARDING as the onboarding flag and ACTIVE as no flag" in {
-      val mapping = ptp(HostingState.Onboarding)
-      val proto = mapping.toProtoPartyToParticipantV30.value
-
-      proto shouldBe v30.PartyToParticipant(
-        party = party1.toProtoPrimitive,
-        threshold = 1,
-        participants = Seq(
-          v30.PartyToParticipant.HostingParticipant(
-            participant1.uid.toProtoPrimitive,
-            v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
-            None,
-          ),
-          v30.PartyToParticipant.HostingParticipant(
-            participant2.uid.toProtoPrimitive,
-            v30.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-            Some(v30.PartyToParticipant.HostingParticipant.Onboarding()),
-          ),
-        ),
-        partySigningKeys = None,
-      )
-      PartyToParticipant.fromProtoV30(pvv, proto).value shouldBe mapping
-    }
-
-    "reject NOMINATED and FREEZING" in {
+  "TopologyTransaction.create" should {
+    "reject Nominated and Freezing before ProtocolVersion.offPRWithSequencerChannels" in {
       Seq(HostingState.Nominated, HostingState.Freezing).foreach { state =>
-        val mapping = ptp(state)
+        def create(protocolVersion: ProtocolVersion) =
+          TopologyTransaction.create(
+            TopologyChangeOp.Replace,
+            PositiveInt.one,
+            ptp(state),
+            protocolVersion,
+          )
 
-        mapping.canBeSerializedTo(ProtoVersion(31)) shouldBe Right(())
-        mapping.canBeSerializedTo(ProtoVersion(30)).left.value should include(
-          "unsupported hosting states"
+        create(ProtocolVersion.v36).left.value should include(
+          "The hosting states Nominated and Freezing require protocol version"
         )
-        mapping.toProtoPartyToParticipantV30.left.value should include(
-          "unsupported hosting states"
-        )
+        create(ProtocolVersion.offPRWithSequencerChannels).value.mapping shouldBe ptp(state)
       }
     }
   }

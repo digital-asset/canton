@@ -75,7 +75,7 @@ object DAMLe {
       snapshotDir: Option[Path] = None,
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration,
-      transactionLimits: interpretation.Limits = interpretation.Limits.Lenient,
+      transactionLimits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
       paranoidMode: Boolean,
       submissionPhaseLogging: EngineLoggingConfig,
       validationPhaseLogging: EngineLoggingConfig,

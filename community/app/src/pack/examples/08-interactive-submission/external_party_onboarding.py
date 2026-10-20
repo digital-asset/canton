@@ -14,7 +14,6 @@ from com.daml.ledger.api.v2.admin import (
     party_management_service_pb2
 )
 from com.digitalasset.canton.protocol.v30 import topology_pb2 as topology_v30_pb2
-from com.digitalasset.canton.protocol.v31 import topology_pb2 as topology_v31_pb2
 from com.digitalasset.canton.crypto.v30 import crypto_pb2
 from com.daml.ledger.api.v2 import crypto_pb2 as ledger_api_crypto_pb2
 from interactive_topology_util import (
@@ -116,47 +115,24 @@ def onboard_external_party(
     # This means those participants are not allowed to submit transactions on behalf of this party but will validate transactions
     # on behalf of the party by confirming or rejecting them according to the ledger model. They also records transaction for that party on the ledger.
     # It also contains the protocol signing keys and signing threshold for the party
-    # Both v30 and v31 use the v30 ParticipantPermission; v31 additionally sets the hosting state of each participant
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
-        confirming_participants_hosting = [
-            topology_v31_pb2.PartyToParticipant.HostingParticipant(
-                participant_uid=confirming_participant_id,
-                permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-                state=topology_v31_pb2.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_ACTIVE,
-            )
-            for confirming_participant_id in confirming_participant_ids
-        ]
-        party_to_participant_mapping = topology_v31_pb2.TopologyMapping(
-            party_to_participant=topology_v31_pb2.PartyToParticipant(
-                party=party_id,
-                threshold=confirming_threshold,
-                participants=confirming_participants_hosting,
-                party_signing_keys= crypto_pb2.SigningKeysWithThreshold(
-                    keys = [signing_public_key],
-                    threshold=1,
-                ),
+    confirming_participants_hosting = [
+        topology_v30_pb2.PartyToParticipant.HostingParticipant(
+            participant_uid=confirming_participant_id,
+            permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+        )
+        for confirming_participant_id in confirming_participant_ids
+    ]
+    party_to_participant_mapping = topology_v30_pb2.TopologyMapping(
+        party_to_participant=topology_v30_pb2.PartyToParticipant(
+            party=party_id,
+            threshold=confirming_threshold,
+            participants=confirming_participants_hosting,
+            party_signing_keys= crypto_pb2.SigningKeysWithThreshold(
+                keys = [signing_public_key],
+                threshold=1,
             )
         )
-    else:
-        confirming_participants_hosting = [
-            topology_v30_pb2.PartyToParticipant.HostingParticipant(
-                participant_uid=confirming_participant_id,
-                permission=topology_v30_pb2.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
-            )
-            for confirming_participant_id in confirming_participant_ids
-        ]
-        party_to_participant_mapping = topology_v30_pb2.TopologyMapping(
-            party_to_participant=topology_v30_pb2.PartyToParticipant(
-                party=party_id,
-                threshold=confirming_threshold,
-                participants=confirming_participants_hosting,
-                party_signing_keys= crypto_pb2.SigningKeysWithThreshold(
-                    keys = [signing_public_key],
-                    threshold=1,
-                )
-            )
-        )
+    )
 
     (party_to_participant_transaction, party_to_participant_transaction_hash) = (
         build_serialized_transaction_and_hash(party_to_participant_mapping, protocol_version)

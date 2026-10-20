@@ -7,7 +7,6 @@ import anorm.SqlParser.long
 import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api
-import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
@@ -562,9 +561,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       checkContentsBefore: () => Assertion,
       checkContentsAfter: () => Assertion,
   ): Assertion = {
-    val loggerFactory = SuppressingLogger(getClass)
     // Initialize
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     // Start the indexer (a no-op in this case)
     val end1 = executeSql(backend.parameter.ledgerEnd)
     executeSql(backend.ingestion.deletePartiallyIngestedData(end1))
@@ -592,9 +590,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       lastEventSeqId: Long,
       checkContentsAfter: () => Assertion,
   ): Assertion = {
-    val loggerFactory = SuppressingLogger(getClass)
     // Initialize
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     // Start the indexer (a no-op in this case)
     val end1 = executeSql(backend.parameter.ledgerEnd)
     executeSql(backend.ingestion.deletePartiallyIngestedData(end1))
@@ -616,7 +613,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
 
     val ledgerEnd = 1000L
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(

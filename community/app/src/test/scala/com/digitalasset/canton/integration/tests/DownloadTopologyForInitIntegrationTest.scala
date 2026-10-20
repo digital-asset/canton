@@ -17,11 +17,13 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.resource.{DbStorage, StorageSingleFactory}
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{MediatorId, NodeIdentity}
+import org.apache.pekko.stream.scaladsl.Sink
 
 import java.time.Instant
 
@@ -120,7 +122,8 @@ abstract class DownloadTopologyForInitIntegrationTest
     }
 
     val errorMessage = sequencerClient
-      .downloadTopologyStateForInit(0, retryLogLevel = None)
+      .streamTopologyStateForInit(0, retryLogLevel = None)
+      .semiflatMap(source => FutureUnlessShutdown.outcomeF(source.runWith(Sink.ignore)))
       .futureValueUS
       .leftOrFail("Expected a hash disagreement")
 

@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
@@ -57,13 +56,13 @@ object SequencerTestUtils extends BaseTest {
       case Some(bytes) =>
         // Somehow ugly way to tweak the `deserializedFrom` attribute of Deliver
         SequencedEvent
-          .fromProtoV31(
+          .fromProtoV32(
             testedProtocolVersionValidation,
             SequencedEventDeserializationContext(
               defaultDecompressionPolicy,
-              SynchronizerLimits.defaultFor(testedProtocolVersion),
+              testedSynchronizerLimits,
             ),
-            deliver.toProtoV31,
+            SequencedEvent.serializeV32(deliver),
           )(bytes)
           .value
           .asInstanceOf[Deliver[Batch[ClosedUncompressedEnvelope]]]

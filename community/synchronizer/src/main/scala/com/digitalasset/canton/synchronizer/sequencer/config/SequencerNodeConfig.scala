@@ -112,7 +112,7 @@ final case class SequencerNodeConfig(
       .modify(replication =>
         sequencer match {
           // TODO(#29603): remove this logic once reference sequencer is gone. The reference sequencer does not
-          case SequencerConfig.External(sequencerType, _, _) if sequencerType == "reference" => None
+          case SequencerConfig.External(_, _) => None
           case _ => ReplicationConfig.withDefaultO(storage, replication)
         }
       )

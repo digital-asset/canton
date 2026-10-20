@@ -65,7 +65,7 @@ final case class AcsContinuationPointerIncompleteReassignments(
 }
 
 object AcsContinuationToken {
-  private val TokenVersion = 1
+  private val TokenVersion = 2
 
   final case class Checksum(bytes: ByteString)
 
@@ -81,6 +81,7 @@ object AcsContinuationToken {
       .addOptional(request.eventFormat, UpdateFormatHashUtils.hashEventFormat)
       .addInt(TokenVersion)
       .addString(participantId)
+      .addBool(request.includeIncompleteReassignments)
       .finish()
       .pipe(PageTokenUtils.toChecksum)
       .pipe(Checksum(_))

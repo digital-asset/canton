@@ -12,6 +12,7 @@ import com.digitalasset.canton.testing.modelbased.checker.{
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
 import com.digitalasset.canton.testing.modelbased.syntax.Pretty
+import com.digitalasset.canton.version.InterpretationConfig
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.DurationInt
@@ -39,7 +40,10 @@ class IdeLedgerGenerativeTest
         )
       ).foreach { case (pv, generators) =>
         s"for $pv transactions" in {
-          val interpreter = ReferenceInterpreter(loggerFactory)
+          val interpreter = ReferenceInterpreter(
+            InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+            loggerFactory,
+          )
 
           val generator =
             generators.validScenarioGenerator(

@@ -11,7 +11,7 @@ import com.digitalasset.canton.data.MerkleTreeTest.{AbstractLeaf, Leaf1}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion}
+import com.digitalasset.canton.version.DepthCounter
 import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAnyWordSpec}
 import com.google.protobuf.ByteString
 import org.scalatest.prop.TableFor4
@@ -116,13 +116,13 @@ final class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersion
   ): ParsingResult[MerkleSeq[VersionedMerkleTree[?]]] =
     MerkleSeq
       .fromByteString(
+        testedProtocolVersion,
         (
           hashOps,
           (bytes: ByteString, _: DepthCounter) =>
             AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
           depthCounter,
         ),
-        testedProtocolVersion,
       )(merkleSeqP)
 
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>
@@ -203,7 +203,7 @@ final class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersion
   }
 
   // The payload is built up from v30 structures to avoid stack overflow during serialization
-  "return parsing failure when nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+  "return parsing failure when nesting is over limit" in {
 
     import TestProtoBuilder.*
 

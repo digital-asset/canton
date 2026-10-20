@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.continuity
 
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -49,7 +48,7 @@ trait ProtocolContinuityConformanceTest
     with IsolatedEnvironments
     with HasExecutionContext {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def connectedSynchronizersCount = 1
 

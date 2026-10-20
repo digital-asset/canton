@@ -19,6 +19,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
@@ -90,6 +91,7 @@ class AssignmentProcessor private (
       timeouts: ProcessingTimeout,
       targetProtocolVersion: Target[ProtocolVersion],
       reassignmentMetrics: ReassignmentMetrics,
+      participantNodeParameters: ParticipantNodeParameters,
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
       testingConfig: TestingConfigInternal,
@@ -106,6 +108,7 @@ class AssignmentProcessor private (
       clock,
       targetProtocolVersion,
       reassignmentMetrics,
+      participantNodeParameters,
       loggerFactory,
     ),
     participantId,

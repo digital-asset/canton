@@ -45,10 +45,7 @@ import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTr
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.OutdatedTrafficCost
 import com.digitalasset.canton.sequencing.protocol.TrafficState
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{
-  TrafficControlSerialTooLow,
-  TrafficPurchasedRequestAsyncSendFailed,
-}
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlSerialTooLow
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
   TimestampSelector,
@@ -337,14 +334,6 @@ trait TrafficControlTest
           .extraTrafficPurchased
           .value shouldBe topUpAmount
       }
-  }
-
-  "send an error if topping up for an unknown member" in { implicit env =>
-    import env.*
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      updateBalanceForMember(participant3, PositiveLong.one),
-      _.errorMessage should include(TrafficPurchasedRequestAsyncSendFailed.id),
-    )
   }
 
   "fail to exercise a large command with not enough traffic" in { implicit env =>

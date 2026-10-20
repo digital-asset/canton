@@ -217,7 +217,7 @@ abstract class ContractKeySpec(executionMode: ExecutionMode)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       result shouldBe a[Right[?, ?]]
@@ -247,7 +247,7 @@ abstract class ContractKeySpec(executionMode: ExecutionMode)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       result shouldBe a[Left[?, ?]]
@@ -280,7 +280,7 @@ abstract class ContractKeySpec(executionMode: ExecutionMode)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
 
@@ -370,7 +370,7 @@ abstract class ContractKeySpec(executionMode: ExecutionMode)
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default,
+            interpretationConfig = InterpretationConfig.DefaultForTesting,
           )
           .consume(lookupHandler(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey))
       }

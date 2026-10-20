@@ -44,8 +44,10 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.metrics.MetricsConfig
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
+  DefaultAvailabilityDisseminationPatience,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond,
   DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
@@ -201,6 +203,13 @@ class BftOrderingBenchmark
       : ConfigWriter[UseBftSequencer.TopologyDelayConfig] =
     deriveWriter[UseBftSequencer.TopologyDelayConfig]
 
+  private implicit lazy val computeDelayConfigReader
+      : ConfigReader[UseBftSequencer.ComputeDelayConfig] =
+    deriveReader[UseBftSequencer.ComputeDelayConfig]
+  private implicit lazy val computeDelayConfigWriter
+      : ConfigWriter[UseBftSequencer.ComputeDelayConfig] =
+    deriveWriter[UseBftSequencer.ComputeDelayConfig]
+
   private implicit lazy val testSlowdownConfigReader
       : ConfigReader[UseBftSequencer.TestSlowdownConfig] =
     deriveReader[UseBftSequencer.TestSlowdownConfig]
@@ -313,6 +322,8 @@ class BftOrderingBenchmark
         bftOrderingBenchmarkConfig.consensusEmptyBlockCreationTimeout.underlying,
       consensusWindowSizeForRetransmissionOfCommitCertificates =
         bftOrderingBenchmarkConfig.consensusWindowSizeForRetransmissionOfCommitCertificates,
+      consensusExtraAllowedRetransmissionRequestsPerSecond =
+        bftOrderingBenchmarkConfig.consensusExtraAllowedRetransmissionRequestsPerSecond,
       sequencingParameters = Some(
         SequencingParameters.create(
           pbftViewChangeTimeout = bftOrderingBenchmarkConfig.pbftViewChangeTimeout.toInternal,
@@ -325,6 +336,8 @@ class BftOrderingBenchmark
       ),
       minRequestsInBatch = bftOrderingBenchmarkConfig.minRequestsInBatch,
       maxBatchCreationInterval = bftOrderingBenchmarkConfig.maxBatchCreationInterval.underlying,
+      availabilityDisseminationPatience =
+        bftOrderingBenchmarkConfig.availabilityDisseminationPatience.map(_.underlying),
       availabilityMinProposalCreationDelay =
         bftOrderingBenchmarkConfig.availabilityMinProposalCreationDelay.underlying,
       dedicatedExecutionContextDivisor =
@@ -628,6 +641,8 @@ private object BftOrderingBenchmark {
         PositiveFiniteDuration.tryFromDuration(DefaultConsensusEmptyBlockCreationTimeout),
       consensusWindowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] =
         DefaultConsensusWindowSizeForRetransmissionOfCommitCertificates,
+      consensusExtraAllowedRetransmissionRequestsPerSecond: Int =
+        DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond,
       pbftViewChangeTimeout: PositiveFiniteDuration = DefaultPbftViewChangeTimeout.toConfig,
       pbftViewChangeTimeoutStep: config.NonNegativeFiniteDuration =
         DefaultPbftViewChangeTimeoutStep,
@@ -644,6 +659,8 @@ private object BftOrderingBenchmark {
       maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
       availabilityMinProposalCreationDelay: PositiveFiniteDuration =
         PositiveFiniteDuration.tryFromDuration(DefaultAvailabilityMinProposalCreationDelay),
+      availabilityDisseminationPatience: Option[PositiveFiniteDuration] =
+        DefaultAvailabilityDisseminationPatience.map(PositiveFiniteDuration.tryFromDuration),
       batchCacheSizeMb: Option[PositiveLong] = None,
       dedicatedExecutionContextDivisor: Option[PositiveInt] = None,
       pruningRetentionPeriodSeconds: PositiveLong = PositiveLong.tryCreate(300), // 5 minutes

@@ -4,18 +4,16 @@
 package com.digitalasset.canton.integration.tests.infra
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   findAllCoreVersions,
   findMatchingVersions,
   latestRelease,
   latestReleases,
 }
-import com.digitalasset.canton.version.{ReleaseVersion, ReleaseVersionToProtocolVersions}
+import com.digitalasset.canton.util.ReleaseUtils
+import com.digitalasset.canton.version.ReleaseVersion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.util.matching.Regex
 
 final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with BaseTest {
   private val versions = Seq(
@@ -45,38 +43,13 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
     )
   }
 
-  private def extractVersion(version: String): ReleaseVersion = {
-    val versionPattern: Regex = """(\d+)\.(\d+)\.(\d+).*""".r
-    version match {
-      case versionPattern(major, minor, patch) =>
-        ReleaseVersion(major.toInt, minor.toInt, patch.toInt)
-      case _ => throw new IllegalArgumentException(s"No version number found in '$version'")
-    }
-  }
-
-  /*
-   TODO(#16458)
-   This is a lie because it does not contain all releases. Revisit when Canton 3 is stable and we can
-   again get the list of releases via the release notes.
-   */
-  private val allReleases =
-    ReleaseVersionToProtocolVersions.majorMinorToStableProtocolVersions.keys.toSeq.sorted
-
-  /** Return the (major, minor) just before `version`
-    */
-  private def previous(version: ReleaseVersion): (Int, Int) =
-    allReleases.zip(allReleases.tail).collectFirst {
-      case (prev, curr) if curr == version.majorMinor => prev
-    } match {
-      case Some(previous) => previous
-      case None => allReleases.last
-    }
+  private val allReleases = ReleaseUtils.allPreviousReleases
 
   "latestRelease" should "be able to fetch the latest version from S3" in {
     val latestTool = latestRelease(logger)
 
     latestTool.major shouldBe 3
-    latestTool.majorMinor shouldBe >=(previous(extractVersion(BuildInfo.version)))
+    latestTool shouldBe >=(ReleaseVersion.current)
   }
 
   "latestReleases" should "be able to fetch the lapitt for each release from S3" in {
@@ -88,13 +61,14 @@ final class UseLedgerApiTestToolTest extends AnyFlatSpec with Matchers with Base
       ReleaseVersion(ReleaseVersion.current.major, ReleaseVersion.current.minor, 0)
 
     // We only test releases starting from 3.3.0, as earlier releases are no longer supported
-    // TODO(#16458): update the earliest tested release once Canton 3 is stable
-    val releases33andLater = allReleases.filter { case (major, minor) =>
-      major == 3 && minor >= 3
-    }
+    val releases33andLater = allReleases.filter(_ > ReleaseVersion(3, 3, 0))
 
-    releasedTools
+    val foundReleaseTools = releasedTools
       .filter(_ <= currentMajorMinor)
-      .map(_.majorMinor) should contain allElementsOf releases33andLater.dropRight(1)
+      .filter(_.isStable)
+
+    val expectedReleases = releases33andLater.dropRight(1)
+
+    foundReleaseTools should contain allElementsOf expectedReleases
   }
 }

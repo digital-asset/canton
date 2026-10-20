@@ -56,6 +56,14 @@ jobs:
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
 
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will select the protocol version automatically"
+        shell: bash
+
       - name: Run all protocol continuity tests
         uses: ./.github/actions/test/run_tests
         with:

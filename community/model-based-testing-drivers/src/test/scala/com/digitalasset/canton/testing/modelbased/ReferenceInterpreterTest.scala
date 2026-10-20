@@ -7,12 +7,19 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.testing.modelbased.checker.PropertyCheckerResultAssertions
 import com.digitalasset.canton.testing.modelbased.runner.ReferenceInterpreter
 import com.digitalasset.canton.testing.modelbased.syntax.Parser
+import com.digitalasset.canton.version.InterpretationConfig
 import org.scalatest.wordspec.AnyWordSpec
 
 class ReferenceInterpreterTest
     extends AnyWordSpec
     with BaseTest
     with PropertyCheckerResultAssertions {
+
+  private def referenceInterpreter: ReferenceInterpreter =
+    ReferenceInterpreter(
+      InterpretationConfig.forProtocolVersion(testedProtocolVersion),
+      loggerFactory,
+    )
 
   "The reference interpreter" should {
     "run a scenario with two toplevel create commands" in {
@@ -27,7 +34,7 @@ class ReferenceInterpreterTest
           |      Create 1 sigs={1} obs={}
           |""".stripMargin)
 
-      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
+      referenceInterpreter.runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -51,7 +58,7 @@ class ReferenceInterpreterTest
           |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
           |""".stripMargin)
 
-      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
+      referenceInterpreter.runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -72,7 +79,7 @@ class ReferenceInterpreterTest
           |        QueryByKey [] key=(0, {1}) exhaustive=true
           |""".stripMargin)
 
-      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
+      referenceInterpreter.runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -92,7 +99,7 @@ class ReferenceInterpreterTest
           |        CreateWithKey 1 key=(1, {1,2}) sigs={1,2} obs={}
           |        QueryByKey [1] exhaustive=true
           |""".stripMargin)
-      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
+      referenceInterpreter.runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -112,7 +119,7 @@ class ReferenceInterpreterTest
           |    Commands participant=1 actAs={1} disclosures=[0]
           |      ExerciseByKey Consuming 0 ctl={1} cobs={}
           |""".stripMargin)
-      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
+      referenceInterpreter.runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>

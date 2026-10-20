@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
@@ -65,7 +64,7 @@ class ExternalCallConsistencyCheckerTest
   }
 
   "ExternalCallConsistencyChecker" should {
-    "report conflicting outputs for the same call across views" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "report conflicting outputs for the same call across views" in {
       val inconsistency = check().loneElement
 
       inconsistency.outputs shouldBe Set(
@@ -75,16 +74,16 @@ class ExternalCallConsistencyCheckerTest
       inconsistency.occurrences.map(_.viewPosition) shouldBe Set(leftPosition, rightPosition)
     }
 
-    "not report identical outputs" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not report identical outputs" in {
       check(rightResult = externalCallResult) shouldBe Seq.empty
     }
 
-    "not report different semantic calls with different outputs" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not report different semantic calls with different outputs" in {
       check(rightResult = otherExternalCallResult.copy(functionId = "other-function")) shouldBe
         Seq.empty
     }
 
-    "report all independent disagreements" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "report all independent disagreements" in {
       val example = factory.MultipleRoots
       val firstCall = externalCallResult.copy(functionId = "function-a")
       val secondCall = externalCallResult.copy(functionId = "function-b")
