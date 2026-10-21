@@ -1,0 +1,70 @@
+import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
+import com.digitalasset.canton.config
+import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
+import com.digitalasset.canton.sequencing.{
+  TrafficControlParameters => InternalTrafficControlParameters
+}
+
+import java.math.{BigDecimal => JavaBigDecimal}
+import scala.jdk.CollectionConverters._
+
+val darPath = sys.props("all-the-lsus.dar-path")
+val synchronizerAlias = "synchronizer1"
+
+participants.all.foreach(_.health.wait_for_initialized())
+sequencer1.health.wait_for_ready_for_initialization()
+mediator1.health.wait_for_ready_for_initialization()
+
+val psid = bootstrap.synchronizer(
+  synchronizerAlias,
+  sequencers = Seq(sequencer1),
+  mediators = Seq(mediator1),
+  synchronizerOwners = Seq(sequencer1),
+  synchronizerThreshold = PositiveInt.one,
+  staticSynchronizerParameters =
+    StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.v34),
+)
+
+sequencer1.topology.synchronizer_parameters.propose_update(
+  psid.logical,
+  _.copy(
+    reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1),
+    trafficControl = Some(
+      TrafficControlParameters(
+        maxBaseTrafficAmount = NonNegativeLong.tryCreate(1000000000000L),
+        readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
+        maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
+        setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
+        enforceRateLimiting = true,
+        baseEventCost = NonNegativeLong.one,
+        freeConfirmationResponses = true,
+      )
+    ),
+  ),
+)
+utils.retry_until_true(
+  sequencer1.topology.synchronizer_parameters
+    .get_dynamic_synchronizer_parameters(psid.logical)
+    .trafficControl
+    .nonEmpty
+)
+
+participants.all.foreach { participant =>
+  participant.synchronizers.connect_local(sequencer1, alias = synchronizerAlias)
+  participant.dars.upload(darPath)
+}
+
+val alice = participant1.parties.enable("Alice")
+participant1.parties.enable("Bob")
+val bank = participant2.parties.enable("Bank")
+
+// Iou of pv=34, never consumed
+participant2.ledger_api.javaapi.commands.submit(
+  Seq(bank),
+  new Iou(
+    bank.toProtoPrimitive,
+    alice.toProtoPrimitive,
+    new Amount(JavaBigDecimal.valueOf(100.0), "pv34"),
+    List.empty[String].asJava,
+  ).create.commands.asScala.toSeq,
+)

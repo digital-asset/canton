@@ -4,17 +4,9 @@
 package com.digitalasset.daml.lf.data
 package support.crypto
 
-import com.daml.crypto.{MessageSignaturePrototype, Providers}
+import com.daml.crypto.MessageSignaturePrototype
 
-import java.security.spec.InvalidKeySpecException
-import java.security.{
-  InvalidKeyException,
-  KeyFactory,
-  NoSuchAlgorithmException,
-  NoSuchProviderException,
-  PublicKey,
-  SignatureException,
-}
+import java.security.{InvalidKeyException, NoSuchProviderException, PublicKey, SignatureException}
 
 object MessageSignature {
   @throws(classOf[NoSuchProviderException])
@@ -31,18 +23,4 @@ object MessageSignature {
   @throws(classOf[InvalidKeyException])
   def validateKey(publicKey: PublicKey): Boolean =
     MessageSignaturePrototype.Secp256k1.validateKey(publicKey)
-
-  // Parse a DER (X.509 SubjectPublicKeyInfo) encoded secp256k1 public key with SunEC,
-  // for backward compatibility reason.
-  @throws(classOf[NoSuchAlgorithmException])
-  @throws(classOf[InvalidKeySpecException])
-  def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-    KeyFactory
-      // use SunEC for backward compatibity reasons
-      .getInstance("EC", Providers.sunEC)
-      .generatePublic(
-        new java.security.spec.X509EncodedKeySpec(
-          Bytes.fromHexString(hexEncodedPublicKey).toByteArray
-        )
-      )
 }

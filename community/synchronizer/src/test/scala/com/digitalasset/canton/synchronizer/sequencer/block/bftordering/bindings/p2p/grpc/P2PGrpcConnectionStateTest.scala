@@ -149,6 +149,75 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.isConnected(APeerP2PNodeAddressId) shouldBe true
     }
 
+    "report the winning sender's direction independently of the network ref" in {
+      Table("outgoing sender", false, true).forEvery { isOutgoingConnection =>
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+        val ref = newNetworkRef()
+        val sender = mock[PeerSender]
+        when(sender.isOutgoingConnection).thenReturn(isOutgoingConnection)
+        val duplicateSender = mock[PeerSender]
+        when(duplicateSender.isOutgoingConnection).thenReturn(!isOutgoingConnection)
+
+        state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() => ref)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+
+        // Match production ordering: association reuses the outgoing ref before the winning sender
+        //  is registered, hence, ensuring (adding) a network ref afterward is a no-op
+        //  even if the sender is incoming.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        state.addSenderIfMissing(APeerBftNodeId, sender) shouldBe true
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => ())(() => fail())
+
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe isOutgoingConnection
+
+        state.addSenderIfMissing(APeerBftNodeId, duplicateSender) shouldBe false
+        state.associateP2PEndpointIdToBftNodeId(AnotherPeerP2PEndpoint.id, APeerBftNodeId)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe isOutgoingConnection
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe isOutgoingConnection
+
+        state.unassociateSenderAndReturnEndpointIds(sender) should contain theSameElementsAs Seq(
+          APeerP2PEndpoint.id,
+          AnotherPeerP2PEndpoint.id,
+        )
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+        state.addSenderIfMissing(APeerBftNodeId, duplicateSender) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe !isOutgoingConnection
+        state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe !isOutgoingConnection
+        verifyOnlyStarted(ref)
+      }
+    }
+
+    "gate the senderless direction fallback on network ref presence" in {
+      val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+      val ref = newNetworkRef()
+
+      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+      state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+
+      state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+      state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref)
+      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+
+      // A send failure can remove an incoming sender while retaining its ref.
+      state.shutdownConnectionAndReturnPeerSender(
+        APeerP2PNodeAddressId,
+        clearNetworkRefAssociations = false,
+        closeNetworkRef = false,
+      )
+      state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref)
+      state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+
+      state.shutdownConnectionAndReturnPeerSender(
+        APeerP2PNodeAddressId,
+        clearNetworkRefAssociations = true,
+        closeNetworkRef = true,
+      )
+      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+      verify(ref).close()
+    }
+
     "associate a network ref with an address ID only if missing" in {
       Table("address ID", APeerP2PNodeAddressId, APeerP2PEndpointAddressId).forEvery { addressId =>
         val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
@@ -230,7 +299,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
-        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        // Without a registered sender, ref presence is reported as an outgoing attempt.
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
         state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
         state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
@@ -313,7 +383,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
-        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        // Without a registered sender, ref presence is reported as an outgoing attempt.
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
         state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
         state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
@@ -357,7 +428,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref2)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
-        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        // Without a registered sender, ref presence is reported as an outgoing attempt.
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
         state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
         state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
@@ -458,19 +530,20 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
                 //  are also cleared, so a subsequent admin re-add can reconnect the endpoints.
                 associatedEndpointIds.foreach { endpointId =>
                   state.isDefined(endpointId) shouldBe !clearNetworkRefAssociations
+                  // The sender is gone, so direction falls back to network ref presence,
+                  // even if the removed sender was incoming.
+                  state.isOutgoing(endpointId) shouldBe !clearNetworkRefAssociations
                 }
               case Left(endpointId) =>
                 peerSenderO shouldBe None
                 // The requesting endpoint is always reported as affected, so that the earlier
                 //  `onConnect` is properly balanced by an `onDisconnect` notification.
                 affectedP2PEndpointIds should contain(endpointId)
-                // Clearing associations clears both the endpoint's network ref entry and,
+                // Clearing associations clears both the endpoint's network ref and,
                 //  transitively via the node it was associated with, its endpoint-to-node mapping,
                 //  so `isDefined` reflects the shutdown; otherwise nothing is cleared.
                 state.isDefined(endpointId) shouldBe !clearNetworkRefAssociations
-                // The connection was outgoing (created via a `Left` address ID),
-                //  so `isOutgoing` is true as long as the network ref entry is still
-                //  present, i.e., when associations were not cleared.
+                // With no sender registered, direction falls back to network ref presence.
                 state.isOutgoing(endpointId) shouldBe !clearNetworkRefAssociations
             }
 
@@ -536,6 +609,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // Incoming connection wins, outgoing is closed
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref2)
         verify(ref1, times(1)).close()
+        state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
 
         // Simulate cleanup (both connections die and network ref associations are cleared)
@@ -576,6 +650,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
         // Associate endpoint
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
@@ -594,6 +669,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref2)
 
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref2)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false // No endpoint association yet
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        state.addSenderIfMissing(APeerBftNodeId, AnotherSender) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
       }
     }
@@ -621,9 +699,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
         verify(outgoingRefToNode2, times(1)).close()
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(incomingRefFromNode2)
-        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
         // Sender is registered for the incoming connection.
         state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
         state.isConnected(APeerP2PNodeAddressId) shouldBe true
 
         // The operator of node1 removes the endpoint of node2.
@@ -651,9 +729,9 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         // the incoming ref wins, the outgoing ref is closed.
         state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(incomingRefFromNode2b)
-        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
         // Sender is registered for the incoming connection.
         state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
         state.isConnected(APeerP2PNodeAddressId) shouldBe true
 
         // node2 is then shut down, which causes sender-driven cleanup on node1.
@@ -716,6 +794,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         verify(ref3, times(1)).close()
 
         // Both endpoints report isOutgoing = false (incoming connection won)
+        state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
         state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe false
 

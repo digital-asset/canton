@@ -87,15 +87,15 @@ class RichTrafficServiceClient(
       retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
     )
 
-  def pruneEvents(
-      request: PruneEventsRequest
+  def prune(
+      request: PruneRequest
   )(implicit
       traceContext: TraceContext,
       @unused ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, GrpcError, PruneEventsResponse] =
+  ): EitherT[FutureUnlessShutdown, GrpcError, PruneResponse] =
     CantonGrpcUtil.sendGrpcRequest(client, serverName)(
-      _.pruneEvents(request),
-      requestDescription = "prune-events",
+      _.prune(request),
+      requestDescription = "prune",
       timeout = timeouts.network.duration,
       logger = logger,
       logPolicy = RichTrafficServiceClient.doNotLogRefusedRequests,

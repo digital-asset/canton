@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.crypto.SynchronizerSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -43,6 +44,7 @@ class TestSequencerClientSend(
 
   override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps,
       messageId: MessageId,
       aggregationRule: Option[AggregationRule],

@@ -8,7 +8,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion.unsupportedErrorMessage
 import org.scalatest.wordspec.AnyWordSpec
 
-class ProtocolVersionTest extends AnyWordSpec with BaseTest {
+final class ProtocolVersionTest extends AnyWordSpec with BaseTest {
   "ProtocolVersion" should {
     "refuse release versions which are not protocol versions" in {
       ProtocolVersion.create("5.1.3").left.value shouldBe a[String]
@@ -21,8 +21,8 @@ class ProtocolVersionTest extends AnyWordSpec with BaseTest {
     "parse version string if valid" in {
       // New format
       ProtocolVersion
-        .create(ProtocolVersion.v35.toProtoPrimitiveS)
-        .value shouldBe ProtocolVersion.v35
+        .create(ProtocolVersion.latest.toProtoPrimitiveS)
+        .value shouldBe ProtocolVersion.latest
 
       ProtocolVersion
         .create(Int.MaxValue.toString)

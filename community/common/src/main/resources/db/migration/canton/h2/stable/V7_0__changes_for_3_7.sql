@@ -24,3 +24,34 @@ alter table "pekko_projection_management" alter column LAST_UPDATED rename to "l
 alter index PROJECTION_NAME_INDEX rename to "projection_name_index";
 
 alter table sequencer_events drop column topology_timestamp;
+
+drop table lapi_party_entries;
+
+-- See the Postgres counterpart of this migration for the rationale.
+create index lapi_events_party_to_participant_party_idx
+    on lapi_events_party_to_participant (party, event_sequential_id desc);
+
+-- See the Postgres counterpart of this migration for the rationale.
+create index lapi_events_party_to_participant_party_id_idx
+    on lapi_events_party_to_participant (party_id, participant_id, synchronizer_id, event_sequential_id desc);
+
+-- vvv Allow traffic purchases for non-registered participants (#34369) vvv
+alter table sequencer_members
+    add column status smallint not null default 1; -- Active by default
+
+-- Onboarding members do not have a registration timestamp yet
+alter table sequencer_members
+    alter column registered_ts drop not null;
+
+-- Time from which a member is onboarding, i.e. the sequencing time of the first traffic purchased for it ahead of its
+-- registration. Kept after the member is registered, so that the member status can be reconstructed at earlier times.
+alter table sequencer_members
+    add column onboarded_ts bigint;
+
+update sequencer_members
+set status = 2 -- Disabled
+where enabled = false;
+
+alter table sequencer_members
+drop column enabled;
+--- ^^^ Allow traffic purchases for non-registered participants (#34369) ^^^

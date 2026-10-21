@@ -12,12 +12,15 @@ import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
   PruneEventsRequest,
   PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
 import io.grpc.ServerServiceDefinition
 
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 final class TrafficServiceAuthorization(
@@ -37,6 +40,10 @@ final class TrafficServiceAuthorization(
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
     authorizer.rpc(service.updateAccount)(RequiredClaim.Admin())(request)
 
+  override def prune(request: PruneRequest): Future[PruneResponse] =
+    authorizer.rpc(service.prune)(RequiredClaim.Admin())(request)
+
+  @nowarn("cat=deprecation")
   override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
     authorizer.rpc(service.pruneEvents)(RequiredClaim.Admin())(request)
 

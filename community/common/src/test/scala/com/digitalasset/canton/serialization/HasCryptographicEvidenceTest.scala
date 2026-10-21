@@ -109,7 +109,7 @@ object MemoizedEvidenceSUT
   val name: String = "MemoizedEvidenceSUT"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> UnsupportedProtoCodec(ProtocolVersion.v35)
+    ProtoVersion(30) -> UnsupportedProtoCodec(ProtocolVersion.v36)
   )
 
   private val defaultProtocolVersionRepresentative = protocolVersionRepresentativeFor(

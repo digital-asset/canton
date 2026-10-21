@@ -178,7 +178,7 @@ sealed trait StatusIntegrationTest
   }
 }
 
-class StatusReferenceIntegrationTestPostgres extends StatusIntegrationTest {
+final class StatusReferenceIntegrationTestPostgres extends StatusIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

@@ -41,7 +41,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.Status
 import org.slf4j.event.Level
@@ -148,7 +148,7 @@ class GrpcSequencerAuthenticationService(
           request.memberProtocolVersions,
           "member_protocol_versions",
           pvv,
-          sequencerLimits.maxMemberProtocolVersions.value,
+          ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxMemberProtocolVersions),
         )
         .getOrElse(Seq.empty)
       val redactedError =
@@ -231,7 +231,7 @@ class GrpcSequencerAuthenticationService(
           request.memberProtocolVersions,
           "member_protocol_versions",
           pvv,
-          sequencerLimits.maxMemberProtocolVersions.value,
+          ValidationParam(ProtocolVersion.v36 -> sequencerLimits.maxMemberProtocolVersions),
         )
         .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), false))
       clientVersion <- ProtoValidation

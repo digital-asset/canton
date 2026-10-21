@@ -1221,6 +1221,7 @@ private[sync] class SynchronizerConnectionsManager(
                 promiseUSFactory,
                 connectedSynchronizerMetrics,
                 parameters.cachingConfigs.sessionEncryptionKeyCache,
+                parameters.cachingConfigs.transparencyCheckCache,
                 synchronizerConnectionConfig,
                 onboardingClearanceScheduler,
                 participantId,

@@ -116,13 +116,13 @@ final class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersion
   ): ParsingResult[MerkleSeq[VersionedMerkleTree[?]]] =
     MerkleSeq
       .fromByteString(
+        testedProtocolVersion,
         (
           hashOps,
           (bytes: ByteString, _: DepthCounter) =>
             AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
           depthCounter,
         ),
-        testedProtocolVersion,
       )(merkleSeqP)
 
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>

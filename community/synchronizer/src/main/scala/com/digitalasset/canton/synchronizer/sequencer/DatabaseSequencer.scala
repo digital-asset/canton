@@ -44,6 +44,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.synchronizer.sequencer.store.{
+  MemberLifeCycleStatus,
   PayloadId,
   SequencerMemberId,
   SequencerMemberValidator,
@@ -235,12 +236,10 @@ class DatabaseSequencer(
 
     pruningScheduler.foreach(ps =>
       // default wait should be enough since scheduler start only involves single database access
-      timeouts.default.await(
+      timeouts.default.awaitUS(
         s"Waiting for pruning scheduler to start",
         logFailing = Level.INFO.some, // in case we're shutting down at start-up
-      )(
-        ps.start()
-      )
+      )(ps.start())
     )
   }
 
@@ -304,14 +303,15 @@ class DatabaseSequencer(
   ): FutureUnlessShutdown[Boolean] =
     sequencerStore.lookupMember(member).map(_.isDefined)
 
-  override def isEnabled(
+  override def isActive(
       member: Member
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     sequencerStore.lookupMember(member).map {
-      case Some(registeredMember) => registeredMember.enabled
+      case Some(registeredMember) =>
+        registeredMember.status == MemberLifeCycleStatus.Active
       case None =>
         logger.warn(
-          s"Attempted to check if member $member is enabled but they are not registered"
+          s"Attempted to check if member $member is active but they are not registered"
         )
         false
     }

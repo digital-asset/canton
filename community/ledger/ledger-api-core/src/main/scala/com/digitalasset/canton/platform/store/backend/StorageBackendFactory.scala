@@ -28,7 +28,6 @@ trait StorageBackendFactory {
   def createCompletionStorageBackend(
       stringInterning: StringInterning,
       ledgerEndCache: LedgerEndCache,
-      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend
   def createContractStorageBackend(
       stringInterning: StringInterning,
@@ -37,7 +36,6 @@ trait StorageBackendFactory {
   def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
-      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend
   def createDataSourceStorageBackend: DataSourceStorageBackend
   def createDBLockStorageBackend: DBLockStorageBackend
@@ -51,23 +49,20 @@ trait StorageBackendFactory {
       participantId: Ref.ParticipantId,
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
-      loggerFactory: NamedLoggerFactory,
   ): ReadStorageBackend =
     ReadStorageBackend(
       partyStorageBackend =
         createPartyStorageBackend(participantId, ledgerEndCache, stringInterning),
-      completionStorageBackend =
-        createCompletionStorageBackend(stringInterning, ledgerEndCache, loggerFactory),
+      completionStorageBackend = createCompletionStorageBackend(stringInterning, ledgerEndCache),
       contractStorageBackend = createContractStorageBackend(stringInterning, ledgerEndCache),
-      eventStorageBackend =
-        createEventStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
+      eventStorageBackend = createEventStorageBackend(ledgerEndCache, stringInterning),
     )
 }
 
 object StorageBackendFactory {
   def of(dbType: DbType, loggerFactory: NamedLoggerFactory): StorageBackendFactory =
     dbType match {
-      case DbType.H2Database => H2StorageBackendFactory
+      case DbType.H2Database => H2StorageBackendFactory(loggerFactory)
       case DbType.Postgres => PostgresStorageBackendFactory(loggerFactory)
     }
 }

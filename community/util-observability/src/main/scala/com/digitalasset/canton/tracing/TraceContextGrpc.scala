@@ -7,6 +7,7 @@ import io.grpc.*
 import io.grpc.Context as GrpcContext
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
+import io.grpc.stub.AbstractStub
 import io.opentelemetry.api.trace.{Span, Tracer}
 
 import scala.util.{Try, Using}
@@ -20,7 +21,13 @@ object TraceContextGrpc {
   private val TraceContextKey =
     Context.keyWithDefault[TraceContext]("traceContext", TraceContext.empty)
 
-  val TraceContextOptionsKey = CallOptions.Key.create[TraceContext]("traceContext")
+  /** Value of the trace context in a call's [[io.grpc.CallOptions]].
+    *
+    * Unlike `TraceContextKey`, call options travel with the stub value rather than with the thread,
+    * so they survive arbitrary thread hops and `Future` composition.
+    */
+  val TraceContextOptionsKey: CallOptions.Key[TraceContext] =
+    CallOptions.Key.create[TraceContext]("traceContext")
 
   def fromGrpcContext: TraceContext = TraceContextKey.get()
 
@@ -39,6 +46,33 @@ object TraceContextGrpc {
     val context = GrpcContext.current().withValue(TraceContextKey, traceContext)
 
     context.call(() => fn)
+  }
+
+  /** Attaches `traceContext` to the stub's call options, so that it is propagated to the server
+    * even if the call is later issued from a different thread, e.g. from a `Future` callback.
+    */
+  def addTraceContextToCallOptions[T <: AbstractStub[T]](
+      stub: T
+  )(implicit traceContext: TraceContext): T =
+    stub.withOption(TraceContextOptionsKey, traceContext)
+
+  /** The trace context the caller of a GRPC call intended.
+    *
+    * Prefers the call option set by [[addTraceContextToCallOptions]] and falls back to the
+    * thread-local [[io.grpc.Context]]. A call issued from a thread without an attached GRPC context
+    * yields the empty trace context; callers that want a usable trace id regardless should use
+    * [[inferClientRequestTraceContext]].
+    */
+  def inferCallerTraceContext(callOptions: CallOptions): TraceContext =
+    Option(callOptions.getOption(TraceContextOptionsKey)).getOrElse(fromGrpcContext)
+
+  /** The trace context to report an outgoing GRPC call under, or a new one named `name` if the
+    * caller supplied none.
+    */
+  def inferClientRequestTraceContext(callOptions: CallOptions, name: String): TraceContext = {
+    val callerTraceContext = inferCallerTraceContext(callOptions)
+    if (callerTraceContext.traceId.isDefined) callerTraceContext
+    else TraceContext.withNewTraceContext(name)(identity)
   }
 
   private implicit final class TryFailedOps[A](private val a: Try[A]) extends AnyVal {
@@ -65,8 +99,7 @@ object TraceContextGrpc {
         callOptions: CallOptions,
         next: Channel,
     ): ClientCall[ReqT, RespT] = {
-      val tcOpts = Option(callOptions.getOption(TraceContextOptionsKey))
-      val traceContext = tcOpts.getOrElse(TraceContextKey.get())
+      val traceContext = inferClientRequestTraceContext(callOptions, "grpc-client")
       val contextToPropagate = traceContext.context
 
       def withPropagatedContext[T](fn: => T): T =

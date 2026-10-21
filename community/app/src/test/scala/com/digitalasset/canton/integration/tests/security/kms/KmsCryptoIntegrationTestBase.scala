@@ -71,17 +71,16 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
         if (
           sequencer1.config.init.identity.isManual && !sequencer1.config.init.generateTopologyTransactionsAndKeys
         )
-          manuallyInitNodeId(
+          manuallyInitSynchronizerNode(
             sequencer1,
             if (sequencer1.config.crypto.provider == CryptoProvider.Kms)
               Some(getTopologyKeysForNode(sequencer1.name))
             else None,
           )
-
         if (
           mediator1.config.init.identity.isManual && !mediator1.config.init.generateTopologyTransactionsAndKeys
         )
-          manuallyInitNodeId(
+          manuallyInitSynchronizerNode(
             mediator1,
             if (mediator1.config.crypto.provider == CryptoProvider.Kms)
               Some(getTopologyKeysForNode(mediator1.name))

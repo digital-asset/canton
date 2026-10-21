@@ -4,7 +4,9 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.ProtocolVersionChecksAnyWordSpec
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
@@ -77,7 +79,12 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
-class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
+import scala.concurrent.duration.FiniteDuration
+
+class StateTransferManagerTest
+    extends AnyWordSpec
+    with BftSequencerBaseTest
+    with ProtocolVersionChecksAnyWordSpec {
 
   import StateTransferManagerTest.*
 
@@ -214,7 +221,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       )
     }
 
-    "send an empty block transfer response on a request for onboarding when the serving node is lagging behind" in {
+    "send an empty block transfer response on a request for onboarding when the serving node is lagging behind" onlyRunLessThan ProtocolVersion.v37 in {
       implicit val context: ContextType = new ProgrammableUnitTestContext()
 
       val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
@@ -251,7 +258,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
           eqTo(
             P2PNetworkOut.send(
               P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
-                StateTransferMessage.BlockTransferResponse
+                StateTransferMessage.BlockTransferResponse30
                   .create(commitCertificate = None, from = myId)
                   .fakeSign
               ),
@@ -261,7 +268,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         )(any[TraceContext], any[MetricsContext])
     }
 
-    "send a non-empty block transfer response on a request for onboarding" in {
+    "send a non-empty block transfer response on a request for onboarding" onlyRunLessThan ProtocolVersion.v37 in {
       implicit val context: ContextType = new ProgrammableUnitTestContext()
 
       val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
@@ -314,7 +321,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
           eqTo(
             P2PNetworkOut.send(
               P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
-                StateTransferMessage.BlockTransferResponse
+                StateTransferMessage.BlockTransferResponse30
                   .create(Some(commitCert), from = myId)
                   .fakeSign
               ),
@@ -323,6 +330,133 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
           )
         )(any[TraceContext], any[MetricsContext])
     }
+
+    "send block transfer responses carrying multiple commit certificates grouped by the configured " +
+      "window size for protocol versions >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
+        val epochStore = new InMemoryUnitTestEpochStore[ProgrammableUnitTestEnv]
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef,
+            epochStore = epochStore,
+            consensusWindowSizeForStateTransferOfCommitCertificates = Some(PositiveInt.tryCreate(2)),
+          )
+
+        // Store 3 blocks in the epoch that will be sent by the serving node.
+        val commitCerts = (0L to 2L).map { blockNumber =>
+          aCommitCert(BlockMetadata.mk(EpochNumber.First, blockNumber))
+        }
+        commitCerts.foreach { commitCert =>
+          context.pipeToSelf(
+            epochStore.addOrderedBlockAtomically(
+              commitCert.prePrepare,
+              commitCert.commits.map(Traced(_)),
+            )
+          )(
+            _.map(_ => None).getOrElse(fail("Storing the pre-prepare failed"))
+          )
+          context.runPipedMessages() // store ordered block data
+        }
+
+        val latestCompletedEpochLocally = EpochStore.Epoch(
+          EpochInfo.forTesting(EpochNumber.First, startBlockNumber = BlockNumber.First, length = 3),
+          lastBlockCommits = Seq.empty,
+        )
+
+        stateTransferManager.handleStateTransferMessage(
+          VerifiedStateTransferMessage(
+            StateTransferMessage.BlockTransferRequest.create(
+              epoch = EpochNumber.First,
+              from = otherId,
+            )
+          ),
+          aTopologyInfo,
+          latestCompletedEpoch = latestCompletedEpochLocally,
+          aBootstrapEpoch.info,
+        )(abort = fail(_)) shouldBe StateTransferMessageResult.Continue
+
+        context.runPipedMessages() // retrieve blocks
+        context.runPipedMessages() // sign messages
+
+        context.selfMessages shouldBe empty
+
+        // With a window size of 2 and 3 commit certificates, 2 responses are expected: one with the first 2 certs
+        //  and one with the remaining cert.
+        verify(p2pNetworkOutRef, times(1))
+          .asyncSend(
+            eqTo(
+              P2PNetworkOut.send(
+                P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
+                  StateTransferMessage.BlockTransferResponse31
+                    .create(commitCerts.take(2), from = myId)
+                    .fakeSign
+                ),
+                destinationBftNodeId = otherId,
+              )
+            )
+          )(any[TraceContext], any[MetricsContext])
+        verify(p2pNetworkOutRef, times(1))
+          .asyncSend(
+            eqTo(
+              P2PNetworkOut.send(
+                P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
+                  StateTransferMessage.BlockTransferResponse31
+                    .create(commitCerts.drop(2), from = myId)
+                    .fakeSign
+                ),
+                destinationBftNodeId = otherId,
+              )
+            )
+          )(any[TraceContext], any[MetricsContext])
+      }
+
+    "send an empty block transfer response reusing the retransmission response message for protocol " +
+      "versions >= 37 when the serving node is lagging behind" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val p2pNetworkOutRef = mock[ModuleRef[P2PNetworkOut.Message]]
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef
+          )
+
+        val latestCompletedEpochLocally = EpochStore.Epoch(
+          aBootstrapEpoch.info, // the serving node is still at genesis
+          lastBlockCommits = Seq.empty,
+        )
+
+        stateTransferManager.handleStateTransferMessage(
+          VerifiedStateTransferMessage(
+            StateTransferMessage.BlockTransferRequest.create(
+              epoch = EpochNumber.First,
+              from = otherId,
+            )
+          ),
+          aTopologyInfo,
+          latestCompletedEpoch = latestCompletedEpochLocally,
+          aBootstrapEpoch.info,
+        )(abort = fail(_)) shouldBe StateTransferMessageResult.Continue
+
+        context.selfMessages shouldBe empty
+        context.runPipedMessages()
+
+        // Should have sent a single empty block transfer response.
+        verify(p2pNetworkOutRef, times(1))
+          .asyncSend(
+            eqTo(
+              P2PNetworkOut.send(
+                P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
+                  StateTransferMessage.BlockTransferResponse31
+                    .create(commitCertificates = Seq.empty, from = myId)
+                    .fakeSign
+                ),
+                destinationBftNodeId = otherId,
+              )
+            )
+          )(any[TraceContext], any[MetricsContext])
+      }
   }
 
   "verify, store, send block to Output, and continue on response for onboarding" in {
@@ -357,7 +491,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
     // Handle a block transfer response with a single commit certificate.
     val blockTransferResponse =
-      StateTransferMessage.BlockTransferResponse.create(Some(commitCert), from = otherId)
+      StateTransferMessage.BlockTransferResponse30.create(Some(commitCert), from = otherId)
     val topologyInfo = OrderingTopologyInfo(
       myId,
       currentTopology = aMembershipBeforeOnboarding.orderingTopology,
@@ -458,7 +592,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
     // Handle an empty block transfer response.
     val blockTransferResponse =
-      StateTransferMessage.BlockTransferResponse.create(commitCertificate = None, from = otherId)
+      StateTransferMessage.BlockTransferResponse30.create(commitCertificate = None, from = otherId)
     context.runPipedMessages() shouldBe List()
     stateTransferManager
       .handleStateTransferMessage(
@@ -503,7 +637,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     val currentEpochInfo = bootstrapEpochInfo(TestBootstrapTopologyActivationTime)
 
     val aBlockTransferResponse =
-      StateTransferMessage.BlockTransferResponse.create(commitCertificate = None, from = otherId)
+      StateTransferMessage.BlockTransferResponse30.create(commitCertificate = None, from = otherId)
 
     forAll(
       List[StateTransferMessage](
@@ -595,7 +729,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
           // Handle a block transfer response with a single commit certificate.
           val blockTransferResponse =
-            StateTransferMessage.BlockTransferResponse
+            StateTransferMessage.BlockTransferResponse30
               .create(Some(commitCert), from = otherId)
               .fakeSign
           val topologyInfo = OrderingTopologyInfo(
@@ -687,7 +821,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
           // Handle a block transfer response with a single commit certificate.
           val blockTransferResponse =
-            StateTransferMessage.BlockTransferResponse
+            StateTransferMessage.BlockTransferResponse30
               .create(Some(commitCert), from = otherId)
               .fakeSign
           val topologyInfo = OrderingTopologyInfo(
@@ -713,7 +847,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
                 (
                   { entry =>
                     entry.warningMessage should include(
-                      "received a block transfer response from 'other' containing a pre-prepare with unexpected epoch Some(6), expected 0, dropping..."
+                      "received a block transfer response from 'other' containing pre-prepare(s) with unexpected epoch(s) List(6), expected 0, dropping..."
                     )
                   },
                   "future block transfer",
@@ -728,6 +862,415 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     }
   }
 
+  "speculatively receiving responses for a future epoch" should {
+    val parallelEpochs = 5
+
+    // Postpones a response for a future epoch by feeding it to the manager while it's within the future window.
+    def postponeFutureResponse(
+        stateTransferManager: StateTransferManager[ProgrammableUnitTestEnv],
+        response: SignedMessage[StateTransferMessage.BlockTransferResponse],
+        latestCompletedEpochLocally: EpochStore.Epoch,
+    )(implicit context: ContextType): Unit = {
+      val topologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
+        myId,
+        currentTopology = aMembershipBeforeOnboarding.orderingTopology,
+        currentCryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        currentLeaders = aMembershipBeforeOnboarding.leaders,
+        currentBlacklistedNodes = Seq.empty,
+        previousTopology = aMembershipBeforeOnboarding.orderingTopology,
+        previousCryptoProvider = failingCryptoProvider,
+        previousLeaders = aMembershipBeforeOnboarding.leaders,
+        previousBlacklistedNodes = Seq.empty,
+      )
+      stateTransferManager.handleStateTransferMessage(
+        UnverifiedStateTransferMessage(response),
+        topologyInfo,
+        latestCompletedEpochLocally,
+        currentEpochInfo = EpochInfo(
+          EpochNumber(1),
+          BlockNumber(0),
+          EpochLength(1),
+          TestBootstrapTopologyActivationTime,
+        ),
+      )(abort = fail(_)) shouldBe StateTransferMessageResult.Continue
+      context.runPipedMessages().discard // drain commit certificate signature verification
+    }
+
+    def verifyWaitedInsteadOfSendingRequest(
+        timeoutManager: TimeoutManager[
+          ProgrammableUnitTestEnv,
+          Consensus.Message[ProgrammableUnitTestEnv],
+          StateTransferTimeout,
+          String,
+        ],
+        p2pNetworkOutRef: ModuleRef[P2PNetworkOut.Message],
+        targetEpoch: EpochNumber,
+    ): Unit = {
+      // Should have scheduled a timeout to wait for the postponed responses to complete the epoch,
+      //  rather than immediately sending a new block transfer request.
+      verify(timeoutManager, times(1)).scheduleTimeout(
+        argThat((event: StateTransferTimeout) =>
+          event match {
+            case StateTransferMessage.InitiateSendBlockTransferRequest(epoch, _, _) =>
+              epoch == targetEpoch
+            case _ => false
+          }
+        ),
+        eqTo(Some(BftBlockOrdererConfig.DefaultEpochStateTransferTimeoutForFutureEpoch)),
+      )(any[ContextType], any[TraceContext])
+      verifyNoMoreInteractions(timeoutManager)
+      // Should not have sent any block transfer request.
+      verify(p2pNetworkOutRef, never).asyncSend(any[P2PNetworkOut.Message])(
+        any[TraceContext],
+        any[MetricsContext],
+      )
+    }
+
+    "wait for postponed responses instead of sending a new request" when {
+      "enough responses containing each " +
+        "a single commit certificate for the epoch have already been received" onlyRunLessThan ProtocolVersion.v37 in {
+          implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+          val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+            ProgrammableUnitTestEnv
+          ], StateTransferTimeout, String]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              maybeCustomTimeoutManager = Some(timeoutManager),
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val targetEpoch = EpochNumber(2)
+          val latestCompletedEpochLocally = aBootstrapEpoch
+
+          // Speculatively receive both blocks of the (future) 2-block target epoch, each in its own response.
+          Seq(BlockNumber.First, BlockNumber(1L)).foreach { blockNumber =>
+            val response =
+              StateTransferMessage.BlockTransferResponse30
+                .create(
+                  Some(aCommitCert(BlockMetadata.mk(targetEpoch, blockNumber))),
+                  from = otherId,
+                )
+                .fakeSign
+            postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+          }
+
+          stateTransferManager.stateTransferNewEpoch(
+            targetEpoch,
+            Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            nodesThatTimedOut = Seq.empty,
+            targetEpochO = None,
+          )(abort = fail(_))
+          context.runPipedMessages().discard
+
+          verifyWaitedInsteadOfSendingRequest(timeoutManager, p2pNetworkOutRef, targetEpoch)
+        }
+
+      "commit certificates are carried within a single response " +
+        "message for protocol versions >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+          implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+          val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+            ProgrammableUnitTestEnv
+          ], StateTransferTimeout, String]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              maybeCustomTimeoutManager = Some(timeoutManager),
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val targetEpoch = EpochNumber(2)
+          val latestCompletedEpochLocally = aBootstrapEpoch
+
+          // A single response carries both blocks of the (future) 2-block target epoch: the count of commit
+          //  certificates (not of messages) must be used to detect that the epoch is already complete.
+          val response =
+            StateTransferMessage.BlockTransferResponse31
+              .create(
+                Seq(BlockNumber.First, BlockNumber(1L)).map(blockNumber =>
+                  aCommitCert(BlockMetadata.mk(targetEpoch, blockNumber))
+                ),
+                from = otherId,
+              )
+              .fakeSign
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+
+          stateTransferManager.stateTransferNewEpoch(
+            targetEpoch,
+            Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            nodesThatTimedOut = Seq.empty,
+            targetEpochO = None,
+          )(abort = fail(_))
+          context.runPipedMessages().discard
+
+          verifyWaitedInsteadOfSendingRequest(timeoutManager, p2pNetworkOutRef, targetEpoch)
+        }
+    }
+
+    "send a new request instead of waiting" when {
+      def verifySentRequestInsteadOfWaiting(
+          timeoutManager: TimeoutManager[
+            ProgrammableUnitTestEnv,
+            Consensus.Message[ProgrammableUnitTestEnv],
+            StateTransferTimeout,
+            String,
+          ],
+          p2pNetworkOutRef: ModuleRef[P2PNetworkOut.Message],
+          targetEpoch: EpochNumber,
+      ): Unit = {
+        val expectedRequest =
+          StateTransferMessage.BlockTransferRequest.create(targetEpoch, from = myId).fakeSign
+        // Should have sent a new block transfer request, as the epoch is not complete yet (blocks are missing).
+        verify(p2pNetworkOutRef, times(1)).asyncSend(
+          argThat((msg: P2PNetworkOut.Message) =>
+            msg match {
+              case P2PNetworkOut.SendToRandomAuthenticated(message, _, _, _, _, _, _) =>
+                message == P2PNetworkOut.BftOrderingNetworkMessage.StateTransferMessage(
+                  expectedRequest
+                )
+              case _ => false
+            }
+          )
+        )(any[TraceContext], any[MetricsContext])
+        // Should have scheduled a retry for the request, rather than a wait for the postponed responses.
+        verify(timeoutManager, times(1)).scheduleTimeout(
+          argThat((event: StateTransferTimeout) =>
+            event match {
+              case StateTransferMessage.RetryBlockTransferRequest(request, _) =>
+                request == expectedRequest
+              case _ => false
+            }
+          ),
+          any[Option[FiniteDuration]],
+        )(any[ContextType], any[TraceContext])
+        verifyNoMoreInteractions(timeoutManager)
+      }
+
+      "a response does not contain all the epoch's blocks" onlyRunLessThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], StateTransferTimeout, String]]
+        val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef,
+            maybeCustomTimeoutManager = Some(timeoutManager),
+            epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+              NonNegativeLong.tryCreate(parallelEpochs.toLong),
+          )
+
+        val targetEpoch = EpochNumber(2)
+        val latestCompletedEpochLocally = aBootstrapEpoch
+
+        // Receive only the first block of the 2-block target epoch: the epoch is not complete yet, so a new
+        //  block transfer request must be sent rather than waiting for the postponed responses.
+        val response =
+          StateTransferMessage.BlockTransferResponse30
+            .create(
+              Some(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+              from = otherId,
+            )
+            .fakeSign
+        postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+
+        stateTransferManager.stateTransferNewEpoch(
+          targetEpoch,
+          Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+          ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          nodesThatTimedOut = Seq.empty,
+          targetEpochO = None,
+        )(abort = fail(_))
+        context.runPipedMessages().discard
+
+        verifySentRequestInsteadOfWaiting(timeoutManager, p2pNetworkOutRef, targetEpoch)
+      }
+
+      "a single response does not contain all the epoch's blocks " +
+        "for protocol versions >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+          implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+          val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+            ProgrammableUnitTestEnv
+          ], StateTransferTimeout, String]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              maybeCustomTimeoutManager = Some(timeoutManager),
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val targetEpoch = EpochNumber(2)
+          val latestCompletedEpochLocally = aBootstrapEpoch
+
+          // A single response carries only the first block of the 2-block target epoch: the epoch is not
+          //  complete yet, so a new block transfer request must be sent rather than waiting.
+          val response =
+            StateTransferMessage.BlockTransferResponse31
+              .create(
+                Seq(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+                from = otherId,
+              )
+              .fakeSign
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+
+          stateTransferManager.stateTransferNewEpoch(
+            targetEpoch,
+            Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            nodesThatTimedOut = Seq.empty,
+            targetEpochO = None,
+          )(abort = fail(_))
+          context.runPipedMessages().discard
+
+          verifySentRequestInsteadOfWaiting(timeoutManager, p2pNetworkOutRef, targetEpoch)
+        }
+
+      "a speculative response for the same block is duplicated" onlyRunLessThan ProtocolVersion.v37 in {
+        implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+        val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], StateTransferTimeout, String]]
+        val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+        val stateTransferManager =
+          createStateTransferManager[ProgrammableUnitTestEnv](
+            p2pNetworkOutModuleRef = p2pNetworkOutRef,
+            maybeCustomTimeoutManager = Some(timeoutManager),
+            epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+              NonNegativeLong.tryCreate(parallelEpochs.toLong),
+          )
+
+        val targetEpoch = EpochNumber(2)
+        val latestCompletedEpochLocally = aBootstrapEpoch
+
+        // Receive the same (single) block of the 2-block target epoch twice: counting messages (or certificates)
+        //  rather than distinct blocks would wrongly consider the epoch complete and suppress the request.
+        (1 to 2).foreach { _ =>
+          val response =
+            StateTransferMessage.BlockTransferResponse30
+              .create(
+                Some(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+                from = otherId,
+              )
+              .fakeSign
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+        }
+
+        stateTransferManager.stateTransferNewEpoch(
+          targetEpoch,
+          Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+          ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          nodesThatTimedOut = Seq.empty,
+          targetEpochO = None,
+        )(abort = fail(_))
+        context.runPipedMessages().discard
+
+        verifySentRequestInsteadOfWaiting(timeoutManager, p2pNetworkOutRef, targetEpoch)
+      }
+
+      "a single response repeats the same block's certificate " +
+        "for protocol versions >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+          implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+          val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+            ProgrammableUnitTestEnv
+          ], StateTransferTimeout, String]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              maybeCustomTimeoutManager = Some(timeoutManager),
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val targetEpoch = EpochNumber(2)
+          val latestCompletedEpochLocally = aBootstrapEpoch
+
+          // A single response carries the same (single) block of the 2-block target epoch twice: distinct block
+          //  numbers (not the number of certificates) must be counted to avoid suppressing the request.
+          val response =
+            StateTransferMessage.BlockTransferResponse31
+              .create(
+                Seq.fill(2)(aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First))),
+                from = otherId,
+              )
+              .fakeSign
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+
+          stateTransferManager.stateTransferNewEpoch(
+            targetEpoch,
+            Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            nodesThatTimedOut = Seq.empty,
+            targetEpochO = None,
+          )(abort = fail(_))
+          context.runPipedMessages().discard
+
+          verifySentRequestInsteadOfWaiting(timeoutManager, p2pNetworkOutRef, targetEpoch)
+        }
+
+      "a single response mixes in certificates from other epochs " +
+        "for protocol versions >= 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+          implicit val context: ContextType = new ProgrammableUnitTestContext()
+
+          val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+            ProgrammableUnitTestEnv
+          ], StateTransferTimeout, String]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              maybeCustomTimeoutManager = Some(timeoutManager),
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val targetEpoch = EpochNumber(2)
+          val latestCompletedEpochLocally = aBootstrapEpoch
+
+          // A single (invalid) response carries the first block of the 2-block target epoch plus a certificate
+          //  from a future epoch. The mixed-epoch batch is still queued under the target epoch, but only the
+          //  target-epoch block must count: otherwise the foreign-epoch block would wrongly complete the epoch
+          //  and suppress the immediate request, forcing a timeout wait.
+          val response =
+            StateTransferMessage.BlockTransferResponse31
+              .create(
+                Seq(
+                  aCommitCert(BlockMetadata.mk(targetEpoch, BlockNumber.First)),
+                  aCommitCert(BlockMetadata.mk(EpochNumber(targetEpoch + 1), BlockNumber(1L))),
+                ),
+                from = otherId,
+              )
+              .fakeSign
+          postponeFutureResponse(stateTransferManager, response, latestCompletedEpochLocally)
+
+          stateTransferManager.stateTransferNewEpoch(
+            targetEpoch,
+            Membership.forTesting(myId, Set(otherId), epochLength = EpochLength(2)),
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            nodesThatTimedOut = Seq.empty,
+            targetEpochO = None,
+          )(abort = fail(_))
+          context.runPipedMessages().discard
+
+          verifySentRequestInsteadOfWaiting(timeoutManager, p2pNetworkOutRef, targetEpoch)
+        }
+    }
+  }
+
   private def createStateTransferManager[E <: BaseIgnoringUnitTestEnv[E]](
       outputModuleRef: ModuleRef[Output.Message[E]] = fakeModuleExpectingSilence,
       p2pNetworkOutModuleRef: ModuleRef[P2PNetworkOut.Message],
@@ -737,8 +1280,12 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       ] = None,
       epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
         NonNegativeLong.tryCreate(0L),
+      consensusWindowSizeForStateTransferOfCommitCertificates: Option[PositiveInt] =
+        BftBlockOrdererConfig.DefaultConsensusWindowSizeForStateTransferOfCommitCertificates,
+      protocolVersion: ProtocolVersion = synchronizerProtocolVersion,
   ): StateTransferManager[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
+    implicit val synchronizerProtocolVersion: ProtocolVersion = protocolVersion
 
     val dependencies = ConsensusModuleDependencies[E](
       availability = fakeIgnoringModule,
@@ -749,7 +1296,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
     implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig(
       epochStateTransferHowManyFutureEpochsToDownloadInParallel =
-        epochStateTransferHowManyFutureEpochsToDownloadInParallel
+        epochStateTransferHowManyFutureEpochsToDownloadInParallel,
+      consensusWindowSizeForStateTransferOfCommitCertificates =
+        consensusWindowSizeForStateTransferOfCommitCertificates,
     )
 
     new StateTransferManager(

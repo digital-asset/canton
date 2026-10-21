@@ -36,7 +36,6 @@ class BadRootHashMessagesRequestProcessor(
       ephemeral,
       crypto,
       sequencerClient,
-      clock,
     ) {
 
   /** Sends `reject` for the given `rootHash`. Also ticks the record order publisher.
@@ -49,8 +48,17 @@ class BadRootHashMessagesRequestProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     synchronizeWithClosing(functionFullName) {
       for {
-        snapshot <- crypto.awaitSnapshot(timestamp)
+        currentSnapshotApproximation <- crypto.currentSnapshotApproximation
         requestId = RequestId(timestamp)
+
+        maxSequencingTime <- maxSequencingTimeForConfirmationResponse(
+          requestId,
+          currentSnapshotApproximation,
+        )
+        // Reused for both the inner response signing and the submission request signing below, so
+        // that both signatures are computed as of the same approximate time.
+        now = clock.now
+
         _ = reject.log()
         rejection = checked(
           ConfirmationResponses.tryCreate(
@@ -69,10 +77,18 @@ class BadRootHashMessagesRequestProcessor(
             sequencerClient.protocolVersion,
           )
         )
-        signedRejection <- signResponses(snapshot, rejection)
+        signedRejection <- signResponses(
+          currentSnapshotApproximation,
+          rejection,
+          now,
+          maxSequencingTime,
+        )
         _ <- sendResponses(
           requestId,
           Seq(signedRejection -> Recipients.cc(mediator)),
+          currentSnapshotApproximation,
+          now,
+          maxSequencingTime,
         )
       } yield ()
     }

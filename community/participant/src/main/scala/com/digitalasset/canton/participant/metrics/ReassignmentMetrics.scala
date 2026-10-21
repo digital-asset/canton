@@ -52,9 +52,9 @@ class ReassignmentMetrics private[metrics] (
       summary = "Number of unassignments and assignments submitted",
       description =
         """Records the unassignments and the assignments this participant submits, including the
-          |assignments submitted on this participant's own initiative once the exclusivity timeout of
-          |an unassignment has elapsed. The `type` label tells unassignments and assignments apart. A
-          |submission that is retried is recorded once per attempt.""",
+          |assignments submitted automatically on this participant's own initiative. The `type` label
+          |tells unassignments and assignments apart. A submission that is retried is recorded once
+          |per attempt.""",
       qualification = MetricQualification.Debug,
     )
   )

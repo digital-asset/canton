@@ -250,10 +250,11 @@ object ProtocolVersion {
       ProtocolVersion(32),
       ProtocolVersion(33),
       ProtocolVersion(34),
+      ProtocolVersion(35),
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v35, ProtocolVersion.v36)
+    NonEmpty.mk(List, ProtocolVersion.v36)
 
   // LF versions that should only be used with alpha/beta protocol versions
   val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
@@ -275,6 +276,8 @@ object ProtocolVersion {
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
       .map(pv => ProtocolVersion.createBeta(pv.v))
+
+  val newBoundsOnPV37: AlphaProtocolVersion = ProtocolVersion.v37
 
   val supported: NonEmpty[List[ProtocolVersion]] =
     (NonEmpty.mk(List, dev) ++ alpha ++ beta ++ stable).sorted
@@ -327,8 +330,16 @@ object ProtocolVersion {
     }
   }
 
-  // TODO(#32229) Remove this once we have a stable protocol version that supports transparency
-  lazy val transparency: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
+  // TODO(#32229) Remove this once we have a stable protocol version that supports transparency and encryption/decryption with ciphertext IDs
+  lazy val transparencyAndCiphertextId: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    dev
+
+  /** First protocol version with offline party replication over sequencer channels, including the
+    * v31 topology transactions that carry the party hosting states.
+    */
+  // TODO(#35499): OffPR with Sequencer Channels - Switch dev to 37
+  lazy val offPRWithSequencerChannels: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    dev
 
   /*
   Ensure the list of alpha versions is not empty (required for some tests)
@@ -353,7 +364,7 @@ object ProtocolVersion {
     ProtocolVersion.createAlpha(37)
 
   // Minimum stable protocol version introduced
-  lazy val minimum: ProtocolVersion = v35
+  lazy val minimum: ProtocolVersion = v36
 
   private def parseFromBuildInfo(pv: Seq[String]): List[ProtocolVersion] =
     pv.map(parseUncheckedS)

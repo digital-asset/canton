@@ -149,11 +149,6 @@ create_daml_upgrade_pull_request() {
 
   FIRST_COMMIT_EXCLUSIVE=$(commit_from_daml_version "$CANTON_DAML_VERSION")
   LAST_COMMIT_INCLUSIVE=$(commit_from_daml_version "$DAML_VERSION_TO_UPGRADE_TO")
-  # TODO(i27546) Remove adhoc handling once adhoc versions are no longer needed / used
-  if ! git merge-base --is-ancestor "$LAST_COMMIT_INCLUSIVE" main && [[ "$DAML_VERSION_TO_UPGRADE_TO" == *adhoc* ]]; then
-    echo "Daml version  $CANTON_DAML_VERSION commit $LAST_COMMIT_INCLUSIVE is not in main. Exiting." >&2
-    exit 1
-  fi
 
   cd $CANTON_DIR
 

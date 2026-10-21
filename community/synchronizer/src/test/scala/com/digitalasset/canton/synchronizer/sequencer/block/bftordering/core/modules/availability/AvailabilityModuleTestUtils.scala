@@ -69,6 +69,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 import scala.util.{Random, Try}
 
 private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBaseTest =>
@@ -111,10 +112,10 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
     Seq(anOrderingRequest, anOrderingRequestWithInvalidTag),
     anEpochNumber,
   )
-  protected val ABatchId = BatchId.from(ABatch)
+  protected val ABatchId = BatchId.from(ABatch, logger)
   protected val ABatchTuple = BatchIdAndEpochNumber(ABatchId, anEpochNumber)
-  protected val ANonEmptyBatchId = BatchId.from(ANonEmptyBatch)
-  protected val ABatchIdWithInvalidTags = BatchId.from(ABatchWithInvalidTags)
+  protected val ANonEmptyBatchId = BatchId.from(ANonEmptyBatch, logger)
+  protected val ABatchIdWithInvalidTags = BatchId.from(ABatchWithInvalidTags, logger)
   protected val OrderingTopologyNode0 = OrderingTopology.forTesting(Set(Node0))
   protected val MembershipNode0 = Membership.forTesting(Node0, OrderingTopologyNode0)
   protected val Node0Ack = AvailabilityAck(from = Node0, Signature.noSignature)
@@ -415,6 +416,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       customMessageAuthorizer: Option[MessageAuthorizer] = None,
       jitterConstructor: (BftBlockOrdererConfig, Random) => JitterGenerator =
         OutputFetchProtocolState.createJitterGenerator,
+      enableReDissemination: Boolean = false,
   )(implicit
       synchronizerProtocolVersion: ProtocolVersion,
       context: E#ActorContextT[Availability.Message[E]],
@@ -460,6 +462,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       new BftBlockOrdererConfig(
         outputFetchTimeout = BftBlockOrdererConfig.DefaultOutputFetchTimeout,
         availabilityMaxNonOrderedBatchesPerNode = maxNonOrderedBatchesPerNode,
+        availabilityDisseminationPatience = Option.when(enableReDissemination)(5.seconds),
       ),
       synchronizerProtocolVersion,
       MetricsContext.Empty,

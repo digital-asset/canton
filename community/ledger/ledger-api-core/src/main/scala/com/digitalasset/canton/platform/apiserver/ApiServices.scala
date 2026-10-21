@@ -10,11 +10,11 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
-import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.api.validation.*
+import com.digitalasset.canton.ledger.api.{DeprecatedApiGate, SubmissionIdGenerator}
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.*
@@ -129,6 +129,7 @@ object ApiServices {
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
       trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      deprecatedApiGate: DeprecatedApiGate,
       externalCallHandler: ExternalCallHandler,
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
       pureCryptoApi: CryptoPureApi,
@@ -418,7 +419,11 @@ object ApiServices {
       val trafficServiceO = trafficEnforcementBackendO
         .map(trafficClient =>
           new TrafficServiceAuthorization(
-            new ApiTrafficService(trafficClient.trafficServiceClient, loggerFactory),
+            new ApiTrafficService(
+              trafficClient.trafficServiceClient,
+              deprecatedApiGate,
+              loggerFactory,
+            ),
             authorizer,
           )
         )

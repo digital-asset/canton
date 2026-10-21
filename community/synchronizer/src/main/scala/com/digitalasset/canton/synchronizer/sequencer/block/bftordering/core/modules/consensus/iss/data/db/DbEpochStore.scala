@@ -19,6 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.{
   Block,
@@ -166,7 +167,10 @@ class DbEpochStore(
     val messageOrError = for {
       signedMessageProto <- Try(v30.SignedMessage.parseFrom(messageBytes)).toEither
         .leftMap(x => ProtoDeserializationError.OtherError(x.toString))
-      message <- SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage)(parse)(
+      message <- SignedMessage.fromProtoWithNodeId(
+        v30.ConsensusMessage,
+        SupportedVersions.ProtoData30,
+      )(parse)(
         signedMessageProto
       )
     } yield message

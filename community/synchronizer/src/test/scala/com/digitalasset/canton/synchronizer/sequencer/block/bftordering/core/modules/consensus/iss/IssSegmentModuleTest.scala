@@ -63,6 +63,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Availability,
   Consensus,
   ConsensusSegment,
+  ConsensusStatus,
   P2PNetworkOut,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
@@ -74,6 +75,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.time.{PositiveFiniteDuration, SimClock}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 import org.slf4j.event.Level
@@ -786,6 +788,90 @@ class IssSegmentModuleTest
         context.delayedMessages should matchPattern {
           case Seq(_: PbftNormalTimeout, _: PbftNormalTimeout) =>
         }
+        consensus.allFuturesHaveFinished shouldBe true
+      }
+
+      "request a missing pre-prepare after a weak quorum of prepares arrives first" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val availabilityBuffer =
+          new ArrayBuffer[Availability.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val availabilityRef = fakeRecordingModule(availabilityBuffer)
+        val parentBuffer =
+          new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val parentRef = fakeRecordingModule(parentBuffer)
+        val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
+        val p2pNetworkRef = fakeRecordingModule(p2pBuffer)
+        val remoteNode = otherIds(0)
+        val nodeCount = 1 + otherIds.size
+
+        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+          availabilityModuleRef = availabilityRef,
+          parentModuleRef = parentRef,
+          p2pNetworkOutModuleRef = p2pNetworkRef,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          otherNodes = otherIds.toSet,
+          leader = remoteNode,
+        )(epochInfo = SecondEpochInfo)
+
+        consensus.receive(ConsensusSegment.Start)
+        availabilityBuffer.clear()
+        context.delayedMessages should matchPattern { case Seq(_: PbftNormalTimeout) => }
+
+        val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(remoteNode))
+        val remotePrePrepare = PrePrepare
+          .create(
+            blockMetadata,
+            ViewNumber.First,
+            OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
+            CanonicalCommitSet.empty,
+            remoteNode,
+          )
+          .fakeSign
+        def basePrepare(from: BftNodeId) =
+          prepareFromPrePrepare(remotePrePrepare.message)(from = from)
+
+        consensus.receive(PbftSignedNetworkMessage(basePrepare(from = remoteNode)))
+        consensus.receive(PbftSignedNetworkMessage(basePrepare(from = otherIds(1))))
+        context.runPipedMessagesUntilNoMorePiped(consensus)
+
+        val epoch = Epoch(
+          SecondEpochInfo,
+          Membership.forTesting(myId, otherIds.toSet),
+          Membership.forTesting(myId, otherIds.toSet),
+        )
+        val epochStatuses = NonEmpty.mk(
+          Seq,
+          ConsensusStatus.SegmentStatus.InProgress(
+            ViewNumber.First,
+            Seq[ConsensusStatus.BlockStatus](
+              ConsensusStatus.BlockStatus.InProgress(
+                prePrepared = false,
+                preparesPresent = Seq.fill(nodeCount)(true),
+                commitsPresent = Seq.fill(nodeCount)(true),
+              ),
+              ConsensusStatus.BlockStatus.Complete,
+              ConsensusStatus.BlockStatus.Complete,
+            ),
+          ),
+          ConsensusStatus.SegmentStatus.Complete,
+          ConsensusStatus.SegmentStatus.Complete,
+          ConsensusStatus.SegmentStatus.Complete,
+        )
+        val expectedEpochStatus = ConsensusStatus.EpochStatus
+          .create(myId, epoch.info.number, epochStatuses)(synchronizerProtocolVersion)
+          .fakeSign
+
+        p2pBuffer should contain theSameElementsInOrderAs Seq[P2PNetworkOut.Message](
+          P2PNetworkOut.Multicast(
+            P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+              Consensus.RetransmissionsMessage.RetransmissionRequest(expectedEpochStatus)
+            ),
+            Set(remoteNode, otherIds(1)),
+          )
+        )
+        availabilityBuffer shouldBe empty
+        parentBuffer shouldBe empty
         consensus.allFuturesHaveFinished shouldBe true
       }
 

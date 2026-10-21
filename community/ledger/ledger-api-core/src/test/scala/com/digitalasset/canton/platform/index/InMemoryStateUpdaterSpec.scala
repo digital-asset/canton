@@ -1113,6 +1113,8 @@ object InMemoryStateUpdaterSpec {
       Offset.tryFromLong(2222L)
 
     val tx_rejected_offset: Offset = Offset.tryFromLong(3333L)
+    val tx_rejected_synchronizer_id = synchronizerId1
+    val tx_rejected_record_time = Timestamp(3)
 
     val tx_accepted_withFlatEventWitnesses_offset: Offset = Offset.tryFromLong(4444L)
     val tx_accepted_withoutFlatEventWitnesses_offset: Offset = Offset.tryFromLong(5555L)
@@ -1178,6 +1180,8 @@ object InMemoryStateUpdaterSpec {
       TransactionLogUpdate.TransactionRejected(
         offset = tx_rejected_offset,
         completionStreamResponse = tx_rejected_completionStreamResponse,
+        synchronizerId = tx_rejected_synchronizer_id.toProtoPrimitive,
+        recordTime = tx_rejected_record_time,
       )(emptyTraceContext)
 
     val lastOffset: Offset = tx_rejected_offset

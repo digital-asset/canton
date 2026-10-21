@@ -65,6 +65,7 @@ class InternalIndexServiceImpl(
               activeAt = validAt,
               rangeInfo = AcsRangeInfo.assertFromContinuationTokenBytes(continuationToken),
               configOverrides = None,
+              includeIncompleteReassignments = true,
             )(loggingContext)
         )(_.streamContinuationToken.some)
     }

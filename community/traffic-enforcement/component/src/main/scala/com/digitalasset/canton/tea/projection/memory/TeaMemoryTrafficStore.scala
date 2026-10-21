@@ -21,9 +21,12 @@ import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.{
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   AccountState,
+  CorrelationKey,
   DeltaEvent,
   EventId,
   EventSource,
+  PruneCounts,
+  SubmissionCorrelation,
   TeaTrafficStore,
   TrafficDelta,
 }
@@ -71,6 +74,31 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
   // Deduplication is global on (event_source, event_id), independent of the account, so we track
   // the set of keys seen across all accounts.
   private val seenKeys = scala.collection.mutable.Set.empty[EventKey]
+  private val correlations =
+    scala.collection.mutable.Map.empty[CorrelationKey, SubmissionCorrelation]
+
+  override def insertCorrelation(correlation: SubmissionCorrelation)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit] = EitherT {
+    FutureUnlessShutdown.pure(lock.exclusive {
+      if (correlations.contains(correlation.key))
+        Left(
+          TrafficEnforcementErrors.CorrelationConflict.Reject(
+            correlation.key.changeIdHash.toHexString,
+            correlation.key.submissionId,
+          )
+        )
+      else {
+        correlations.update(correlation.key, correlation)
+        Right(())
+      }
+    })
+  }
+
+  override def lookupCorrelation(key: CorrelationKey)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]] =
+    EitherT.rightT(lock.exclusive(correlations.get(key)))
 
   override def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
@@ -162,20 +190,25 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
     }
   }
 
-  override def pruneEvents(beforeInclusive: CantonTimestamp)(implicit
+  override def prune(beforeInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int] =
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, PruneCounts] =
     EitherT {
-      val prunedCount = lock.exclusive {
-        events.foldLeft(0) { case (count, (accountId, accountEvents)) =>
+      val prunedCounts = lock.exclusive {
+        val prunedEvents = events.foldLeft(0) { case (count, (accountId, accountEvents)) =>
           val (toPrune, toKeep) = accountEvents.partition { case (_, event) =>
             event.timestamp <= beforeInclusive
           }
           events.update(accountId, toKeep)
           count + toPrune.size
         }
+        val correlationsBefore = correlations.size
+        correlations.filterInPlace { case (_, correlation) =>
+          correlation.insertedAt > beforeInclusive
+        }.discard
+        PruneCounts(events = prunedEvents, correlations = correlationsBefore - correlations.size)
       }
-      FutureUnlessShutdown.pure[Either[TrafficEnforcementError, Int]](Right(prunedCount))
+      FutureUnlessShutdown.pure[Either[TrafficEnforcementError, PruneCounts]](Right(prunedCounts))
     }
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit

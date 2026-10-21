@@ -17,11 +17,17 @@ import com.digitalasset.canton.config.ConfigErrors.{
 }
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
-import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ApiDeprecation,
+  ProtocolVersionCompatibility,
+  ReleaseVersion,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
@@ -427,6 +433,31 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  "the deprecated API feature flags" should {
+    // The key named in the errors and docs must be the key the config reader reads.
+    val deprecation = ApiDeprecation.Canton37.Endpoints
+
+    def participantGate(files: Seq[File]): DeprecatedApiGate =
+      DeprecatedApiGate(
+        CantonConfig
+          .parseAndLoad(files.map(_.toJava), Some(DefaultPorts.create()))
+          .valueOrFail("config should load")
+          .participantNodeParametersByString("participant1")
+          .deprecatedApis
+      )
+
+    "enable the deprecated endpoints by default" in {
+      participantGate(Seq(simpleConf)).isEnabled(deprecation) shouldBe true
+    }
+
+    "disable the deprecated endpoints when the flag is false" in {
+      val flag = File.newTemporaryFile(suffix = ".conf").deleteOnExit()
+      val key = deprecation.featureFlag.replace("<participant>", "participant1")
+      flag.overwrite(s"$key = false").discard
+      participantGate(Seq(simpleConf, flag)).isEnabled(deprecation) shouldBe false
+    }
+  }
+
   "dumping config" should {
     def assertNoLeakage(configMapOverride: Map[String, String] = Map.empty) = {
       val config =
@@ -760,7 +791,18 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           ),
           "deprecated path",
         )
-      )
+      ) ++ Seq(
+        "enable-deprecated-endpoints-34",
+        "enable-deprecated-parameters-34",
+        "enable-deprecated-endpoints-35",
+      ).map { flag =>
+        (
+          (_: LogEntry).message should include(
+            s"Config path 'features.deprecated.$flag' is deprecated since 3.7.0"
+          ),
+          s"deprecated path 'features.deprecated.$flag'",
+        )
+      }
       loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
         {
           val parsed = CantonConfig.parseAndLoad(

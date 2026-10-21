@@ -171,7 +171,7 @@ trait HasVersionedMessageCompanionCommonF[F[_], ValueClass] {
         .map(_.deserializer)
         .toRight(
           OtherError(
-            s"Unable to find deserializer for version $protoVersion and message $name"
+            s"Unable to find deserializer for version $protoVersion and message $name. This indicates that the node is trying to parse a message with a proto version that is not supported anymore."
           )
         )
   }

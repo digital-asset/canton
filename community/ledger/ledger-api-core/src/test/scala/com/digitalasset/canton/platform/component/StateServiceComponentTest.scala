@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.component
 
+import com.digitalasset.canton.topology.SynchronizerId
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.annotation.unused
@@ -131,6 +132,43 @@ class StateServiceComponentTest extends AnyWordSpec with IndexComponentTest {
       index
         .highestOffsetBeforeOrFirstAt(synchronizer1, realCreateAfter._1.recordTime)
         .futureValue shouldEqual (Some(realOffsetAfter))
+    }
+
+    "not provide offset for the first record time on the ledger if exact match" in {
+      val synchronizer4: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer4")
+      val synch4Create1 =
+        creates(nextRecordTime, payloadLength = 10, synchronizer = synchronizer4)(size = 1)
+      ingestUpdates(synch4Create1)
+
+      index
+        .highestOffsetBeforeOrFirstAt(synchronizer4, synch4Create1._1.recordTime)
+        .futureValue shouldBe empty
+    }
+
+    "provide offset for the first record time on the ledger if its before the requested rt" in {
+      val synchronizer5: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer5")
+      val synch5Create1 =
+        creates(nextRecordTime, payloadLength = 10, synchronizer = synchronizer5)(size = 1)
+      val offset = ingestUpdates(synch5Create1)
+
+      index
+        .highestOffsetBeforeOrFirstAt(synchronizer5, synch5Create1._1.recordTime.addMicros(100))
+        .futureValue
+        .value shouldBe offset
+    }
+
+    "do not provide record time to offset should return the first offset when there are multiple events at the record time and one was already pruned" in {
+      val synch1Create =
+        creates(nextRecordTime, payloadLength = 10, synchronizer = synchronizer1)(size = 1)
+      val createTransactionOffset = ingestUpdates(synch1Create)
+      val topoTransactionOffset =
+        ingestTopologyEvents(parties = Set("alice"), recordTime = synch1Create._1.recordTime)
+      topoTransactionOffset should be > (createTransactionOffset)
+
+      index.prune(None, Vector.empty, createTransactionOffset, Vector.empty).futureValue
+      index
+        .highestOffsetBeforeOrFirstAt(synchronizer1, synch1Create._1.recordTime)
+        .futureValue shouldBe empty
     }
   }
 }

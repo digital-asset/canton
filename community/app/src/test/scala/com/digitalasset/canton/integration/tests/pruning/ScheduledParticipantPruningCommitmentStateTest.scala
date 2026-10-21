@@ -162,7 +162,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
           val openEnvelope = envelope
             .toOpenEnvelope(
               src.crypto.pureCrypto,
-              SynchronizerLimits.defaultFor(testedProtocolVersion),
+              SynchronizerLimits.default,
               testedProtocolVersion,
             )
             .valueOrFail("open envelopes")

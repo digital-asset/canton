@@ -113,8 +113,12 @@ class PruningITSpec
       } yield {
         pruningBenchmarkResult.value shouldBe ()
         txPrePruning.createEvents.size shouldBe 100
-        txPrePruning.consumingExercises.size shouldBe 49
-        acsPostPruning.numberOfCreatesPerTemplateName("Foo1") shouldBe 51
+        // The exact number of archivals is determined by the seed of the randomness provider,
+        // it is only approximately the configured 50% probability.
+        txPrePruning.consumingExercises.size shouldBe 51
+        // Everything that was not archived must still be active after pruning.
+        acsPostPruning.numberOfCreatesPerTemplateName("Foo1") shouldBe
+          txPrePruning.createEvents.size - txPrePruning.consumingExercises.size
         acsPostPruning.numberOfConsumingExercisesPerTemplateName("Foo1") shouldBe 0
         succeed
       }).futureValue

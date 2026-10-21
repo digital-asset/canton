@@ -106,12 +106,19 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
     Timed.source(
       metrics.services.index.getActiveContracts,
-      delegate.getActiveContracts(eventFormat, activeAt, rangeInfo, configOverrides),
+      delegate.getActiveContracts(
+        eventFormat,
+        activeAt,
+        rangeInfo,
+        configOverrides,
+        includeIncompleteReassignments,
+      ),
     )
 
   override def acs(

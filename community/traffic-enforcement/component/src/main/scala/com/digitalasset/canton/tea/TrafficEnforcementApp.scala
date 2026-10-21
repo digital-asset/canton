@@ -4,8 +4,8 @@
 package com.digitalasset.canton.tea
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -13,20 +13,26 @@ import com.digitalasset.canton.platform.apiserver.InProcessGrpcName
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.tea.ingestion.{TeaDebitIngestionService, TeaLedgerResources}
+import com.digitalasset.canton.tea.ingestion.{
+  TeaCreditIngestionService,
+  TeaDebitIngestionService,
+  TeaLedgerResources,
+}
 import com.digitalasset.canton.tea.projection.{
   CloseableProjection,
   EventSource,
+  ProjectionEvent,
   TeaProjectionFactory,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.tracing.TraceContextGrpc
+import com.digitalasset.canton.tracing.{TraceContextGrpc, Traced}
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.actor.typed.ActorSystem as TypedSystem
 import org.apache.pekko.actor.typed.scaladsl.adapter.ClassicActorSystemOps
 import org.apache.pekko.projection.ProjectionId
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -41,7 +47,7 @@ class TrafficEnforcementApp(
     ledgerApiPort: Port,
     service: TrafficEnforcementService,
     ledgerResources: TeaLedgerResources,
-    debitProjection: TeaProjectionFactory,
+    projectionFactory: TeaProjectionFactory,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 )(implicit untypedSystem: ActorSystem, typedSystem: TypedSystem[?], tracer: Tracer)
@@ -66,38 +72,63 @@ class TrafficEnforcementApp(
     .addService(new TrafficEnforcementServiceGrpc(service, loggerFactory))
     .build()
 
-  private val debitIngestionService =
+  private def createProjection(
+      projectionId: ProjectionId,
+      eventSource: EventSource,
+      grpcSourceFactory: Option[Long] => Source[Traced[ProjectionEvent], ?],
+  ): CloseableProjection =
+    new CloseableProjection(
+      projectionId,
+      untypedSystem.spawn(
+        projectionFactory.projection(projectionId, eventSource, grpcSourceFactory),
+        s"${projectionId.name}-$instanceId",
+      ),
+      loggerFactory,
+      timeouts,
+    )
+
+  // Projection for debits
+  private val debitIngestion = createProjection(
+    ProjectionId("debit-ingestion", "grpc-stream"),
+    EventSource.LedgerAPICompletions,
     new TeaDebitIngestionService(
       ledgerResources.client.completionService,
       ledgerResources.client.stateService,
       config.projection,
       loggerFactory,
-    )
-
-  private val debitProjectionId = ProjectionId("debit-ingestion", "grpc-stream")
-
-  // Projection for debits
-  private val debitIngestion = new CloseableProjection(
-    debitProjectionId,
-    untypedSystem.spawn(
-      debitProjection.projection(
-        debitProjectionId,
-        debitIngestionService.grpcSource,
-      ),
-      s"${debitProjectionId.name}-$instanceId",
-    ),
-    loggerFactory,
-    timeouts,
+    ).grpcSource,
   )
+
+  // Projection for credits, only started when paymasters are configured: without them no top-up can
+  // be trusted, and the top-up package might not even be uploaded on this participant.
+  private val creditIngestion: Option[CloseableProjection] =
+    if (config.projection.topUpPaymasters.isEmpty) {
+      noTracingLogger.info("No top-up paymasters configured, top-up ingestion is disabled")
+      None
+    } else
+      Some(
+        createProjection(
+          ProjectionId("credit-ingestion", "grpc-stream"),
+          EventSource.DamlTopUp,
+          new TeaCreditIngestionService(
+            ledgerResources.client.updateService,
+            ledgerResources.client.stateService,
+            config.projection,
+            loggerFactory,
+          ).grpcSource,
+        )
+      )
 
   // Start the in process gRPC server
   server.start().discard
 
   override def onClosed(): Unit =
     LifeCycle.close(
-      debitIngestion,
-      ledgerResources,
-      LifeCycle.toCloseableServer(server, logger, serverName),
+      (creditIngestion.toList ++ Seq(
+        debitIngestion,
+        ledgerResources,
+        LifeCycle.toCloseableServer(server, logger, serverName),
+      ))*
     )(logger)
 }
 
@@ -107,6 +138,7 @@ object TrafficEnforcementApp {
       instanceName: InstanceName,
       ledgerApiPort: Port,
       config: TrafficEnforcementServerConfig.Internal,
+      minimumPruningRetention: NonNegativeFiniteDuration,
       token: () => Option[String],
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
@@ -142,7 +174,6 @@ object TrafficEnforcementApp {
     val (projectionFactory, store) =
       TeaProjectionFactory.create(
         storage,
-        EventSource.LedgerAPICompletions,
         config.projection,
         loggerFactory,
         timeouts,
@@ -151,7 +182,13 @@ object TrafficEnforcementApp {
         onEventCommitted,
       )
 
-    val service = new TrafficEnforcementService(store, clock, loggerFactory)
+    val service = new TrafficEnforcementService(
+      store,
+      clock,
+      minimumPruningRetention,
+      metrics,
+      loggerFactory,
+    )
     new TrafficEnforcementApp(
       config,
       instanceName,

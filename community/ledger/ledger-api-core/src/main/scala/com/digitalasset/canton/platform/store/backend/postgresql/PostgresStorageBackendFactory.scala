@@ -32,7 +32,6 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
   override def createCompletionStorageBackend(
       stringInterning: StringInterning,
       ledgerEndCache: LedgerEndCache,
-      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
     new CompletionStorageBackendTemplate(stringInterning, ledgerEndCache, loggerFactory)
 
@@ -45,7 +44,6 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
-      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend =
     new PostgresEventStorageBackend(
       ledgerEndCache = ledgerEndCache,

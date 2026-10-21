@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.BootstrapDetector.BootstrapKind
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
@@ -56,6 +57,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.EpochStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
+  Availability,
   Consensus,
   ConsensusSegment,
   Output,
@@ -67,7 +69,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -294,6 +296,15 @@ final class IssConsensusModule[E <: Env[E]](
 
           dependencies.p2pNetworkOut.asyncSend(
             P2PNetworkOut.Network.TopologyUpdate(epochState.epoch.currentMembership)
+          )
+
+          // Propagate the topology to the availability module at the start of every epoch.
+          dependencies.availability.asyncSend(
+            Availability.Consensus.UpdateTopology(
+              newMembership,
+              newEpochNumber,
+              newCryptoProvider,
+            )
           )
 
           startConsensusForCurrentEpoch()
@@ -1044,7 +1055,7 @@ object IssConsensusModule {
       actualSender: BftNodeId,
   ): ParsingResult[SignedMessage[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]] =
     SignedMessage
-      .fromProtoWithNodeId(v30.ConsensusMessage)(from =>
+      .fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(from =>
         proto =>
           originalByteString =>
             parseConsensusNetworkMessage(from, Some(actualSender), proto)(originalByteString)
@@ -1127,14 +1138,41 @@ object IssConsensusModule {
   ): ParsingResult[Consensus.StateTransferMessage.StateTransferNetworkMessage] =
     message.message match {
       case v30.StateTransferMessage.Message.BlockRequest(value) =>
-        Consensus.StateTransferMessage.BlockTransferRequest.fromProto(from, value)(
+        Consensus.StateTransferMessage.BlockTransferRequest.fromProto(
+          from,
+          value,
+          SupportedVersions.ProtoData30,
+        )(
           originalByteString
         )
       case v30.StateTransferMessage.Message.BlockResponse(value) =>
-        Consensus.StateTransferMessage.BlockTransferResponse.fromProto(from, value)(
+        Consensus.StateTransferMessage.BlockTransferResponse30.fromProto(from, value)(
           originalByteString
         )
       case v30.StateTransferMessage.Message.Empty =>
+        Left(ProtoDeserializationError.OtherError("Empty Received"))
+    }
+
+  def parseStateTransferMessage31(
+      from: BftNodeId,
+      message: v31.StateTransferMessage,
+  )(
+      originalByteString: ByteString
+  ): ParsingResult[Consensus.StateTransferMessage.StateTransferNetworkMessage] =
+    message.message match {
+      case v31.StateTransferMessage.Message.BlockRequest(value) =>
+        Consensus.StateTransferMessage.BlockTransferRequest.fromProto(
+          from,
+          value,
+          SupportedVersions.ProtoData31,
+        )(
+          originalByteString
+        )
+      case v31.StateTransferMessage.Message.BlockResponse(value) =>
+        Consensus.StateTransferMessage.BlockTransferResponse31.fromProto(from, value)(
+          originalByteString
+        )
+      case v31.StateTransferMessage.Message.Empty =>
         Left(ProtoDeserializationError.OtherError("Empty Received"))
     }
 

@@ -812,6 +812,8 @@ class JsonV2Tests
                         contractId = contractId,
                         source = validSynchronizerId.toProtoPrimitive,
                         target = validSynchronizerId.toProtoPrimitive, // intentionally wrong
+                        overrideSourceValidationPackageId = None,
+                        overrideTargetValidationPackageId = None,
                       )
                     )
                   )
@@ -979,6 +981,7 @@ class JsonV2Tests
                 activeAtOffset = endOffset,
                 eventFormat = Some(allTransactionsFormat),
                 streamContinuationToken = None,
+                includeIncompleteReassignments = false,
               )
 
             val message = TextMessage(
@@ -1019,6 +1022,7 @@ class JsonV2Tests
                   activeAtOffset = endOffset,
                   eventFormat = Some(allTransactionsFormat),
                   streamContinuationToken = None,
+                  includeIncompleteReassignments = false,
                 )
                 .asJson,
               headers,
@@ -1049,6 +1053,7 @@ class JsonV2Tests
                   activeAtOffset = endOffset + 100,
                   eventFormat = Some(allTransactionsFormat),
                   streamContinuationToken = None,
+                  includeIncompleteReassignments = false,
                 )
                 .asJson,
               headers,

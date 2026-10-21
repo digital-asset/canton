@@ -30,4 +30,6 @@ export PARTICIPANT_HA=true
 export SYNCHRONIZER_HA=true
 test-full-system.sh
 
+export KNOWN_MISSING_SEQUENCER_BLOCK_METRICS="true"
+
 compute-and-publish-metrics.sh 30 90

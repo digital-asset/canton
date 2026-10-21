@@ -135,7 +135,7 @@ class TransactionConfirmationRequestFactoryV1Test
   }
 
   "A ConfirmationRequestFactory version 1 (uses ViewHash-based references)" must {
-    if (testedProtocolVersion < ProtocolVersion.transparency)
+    if (testedProtocolVersion < ProtocolVersion.transparencyAndCiphertextId)
       behave like transactionConfirmationRequestFactoryTest()
   }
 

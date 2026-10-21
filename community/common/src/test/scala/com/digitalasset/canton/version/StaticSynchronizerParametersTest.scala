@@ -10,6 +10,8 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{CryptoSchemes, RequiredEncryptionSpecs, RequiredSigningSpecs}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters.InvalidStaticSynchronizerParameters
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
+import com.google.protobuf.ByteString
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 /** This test ensures that [[StaticSynchronizerParameters]] cannot be deserialized from a proto
@@ -24,7 +26,7 @@ import org.scalatest.wordspec.AnyWordSpec
 final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
 
   private def mkSsp(protocolVersion: ProtocolVersion): StaticSynchronizerParameters =
-    createSsp(protocolVersion, SynchronizerLimits.defaultFor(protocolVersion)).value
+    createSsp(protocolVersion, SynchronizerLimits.default).value
 
   private def createSsp(
       protocolVersion: ProtocolVersion,
@@ -58,44 +60,37 @@ final class StaticSynchronizerParametersTest extends AnyWordSpec with BaseTest {
   }
 
   "StaticSynchronizerParameters" should {
-    "not be deserializable from protoV30 if PV=36" in {
-      val ssp = mkSsp(ProtocolVersion.v36)
+    "read serialized parameters from old protocol versions" in {
+      def parse(expectedPv: ProtocolVersion, expectedProtoVersion: Int): Assertion = {
 
-      StaticSynchronizerParameters.fromProtoV31(ssp.toProtoV31).value shouldBe ssp
+        val bs = ByteString.copyFrom(
+          getClass
+            .getResourceAsStream(s"/StaticSynchronizerParameters_pv=${expectedPv.v}.bs")
+            .readAllBytes()
+        )
 
-      inside(StaticSynchronizerParameters.fromProtoV30(ssp.toProtoV30)) {
-        case Left(InvariantViolation(_, error)) =>
-          error should include(
-            s"Synchronizer parameters with PV ${ProtocolVersion.v36} cannot be deserialized from ${ProtoVersion(30)}"
-          )
-        case other => fail(s"Unexpected result: $other")
+        val ssp = StaticSynchronizerParameters.fromTrustedByteString(())(bs).value
+
+        ssp.protoVersion shouldBe ProtoVersion(expectedProtoVersion)
+        ssp.protocolVersion shouldBe expectedPv
       }
+
+      parse(ProtocolVersion.v34, 30)
+      parse(ProtocolVersion.v36, 31)
     }
 
-    "not be deserializable from protoV31 if PV<36" in {
-      val ssp = mkSsp(ProtocolVersion.v35)
+    "not be deserializable from protoV31 if PV=dev" in {
+      val ssp = mkSsp(ProtocolVersion.dev)
 
-      StaticSynchronizerParameters.fromProtoV30(ssp.toProtoV30).value shouldBe ssp
+      StaticSynchronizerParameters.fromProtoV32(ssp.toProtoV32).value shouldBe ssp
 
       inside(StaticSynchronizerParameters.fromProtoV31(ssp.toProtoV31)) {
         case Left(InvariantViolation(_, error)) =>
           error should include(
-            s"Synchronizer parameters with PV ${ProtocolVersion.v35} cannot be deserialized from ${ProtoVersion(31)}"
+            s"Synchronizer parameters with PV ${ProtocolVersion.dev} cannot be deserialized from ${ProtoVersion(31)}"
           )
         case other => fail(s"Unexpected result: $other")
       }
-    }
-
-    // The invariant's message itself is covered by InvariantTest
-    "report the protocol version if the limits are not the default for PV<36" in {
-      val limits = SynchronizerLimits.defaultFor(ProtocolVersion.v36)
-      limits should not be SynchronizerLimits.max
-
-      val error = createSsp(ProtocolVersion.v35, limits).left.value.getMessage
-      error should startWith(
-        s"Invalid static synchronizer parameters for protocol version ${ProtocolVersion.v35}: synchronizerLimits "
-      )
-      error should include(s"expected ${SynchronizerLimits.max}, found $limits")
     }
   }
 }

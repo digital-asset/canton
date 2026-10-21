@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.messages.command.submission
 
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -22,6 +23,8 @@ final case class UnassignCommand(
     sourceSynchronizerId: Source[SynchronizerId],
     targetSynchronizerId: Target[SynchronizerId],
     contractId: Value.ContractId,
+    overrideSourceValidationPkgId: Option[LfPackageId],
+    overrideTargetValidationPkgId: Option[LfPackageId],
 )
 final case class AssignCommand(
     sourceSynchronizerId: Source[SynchronizerId],

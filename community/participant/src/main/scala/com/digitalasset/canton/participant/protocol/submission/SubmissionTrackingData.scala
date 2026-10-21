@@ -91,7 +91,7 @@ object SubmissionTrackingData
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
-      .storage(ReleaseProtocolVersion(ProtocolVersion.v35), v30.SubmissionTrackingData)(
+      .storage(ReleaseProtocolVersion(ProtocolVersion.v36), v30.SubmissionTrackingData)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )

@@ -3,18 +3,23 @@
 
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
+import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
   AssignedWrapper,
   UnassignedWrapper,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.integration.util.{
+  AcsInspection,
+  AutomaticAssignment,
+  EntitySyntax,
+  PartiesAllocator,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -25,7 +30,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.{ReassignmentCounter, config}
 
 import scala.jdk.CollectionConverters.*
 
@@ -48,23 +52,15 @@ abstract class RepairServiceIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S2M1_S2M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*
 
-        def disableAutomaticAssignment(
-            sequencer: LocalSequencerReference
-        ): Unit =
-          sequencer.topology.synchronizer_parameters
-            .propose_update(
-              sequencer.synchronizer_id,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-
-        disableAutomaticAssignment(sequencer1)
-        disableAutomaticAssignment(sequencer2)
+        AutomaticAssignment.disable(Seq(sequencer1), sequencer1.synchronizer_id)
+        AutomaticAssignment.disable(Seq(sequencer2), sequencer2.synchronizer_id)
 
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.synchronizers.connect_local(sequencer3, alias = acmeName)

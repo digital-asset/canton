@@ -128,7 +128,7 @@ class DbLockedConnectionPool private (
 
           logger.debug(s"Ramping up connection pool with ${poolSize.value} connections")
 
-          val pool = Range(0, poolSize.value).map { idx =>
+          val pool = (0 until poolSize.value).map { idx =>
             createPoolConnection(s"pool-$idx", DbLockMode.Shared)
           }
 

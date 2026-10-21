@@ -37,7 +37,12 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SingleUseCell}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  ErrorUtil,
+  FutureUnlessShutdownUtil,
+  SingleUseCell,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
@@ -458,10 +463,12 @@ class AcsReplicationAdminWorkflow(
       operation: String,
       submission: FutureUnlessShutdown[CommandResult],
   )(implicit traceContext: TraceContext): Unit =
-    futureSupervisor
-      .supervisedUS(operation)(submission)
-      .failOnShutdownToAbortException(operation)
-      .foreach(handleCommandResult(operation))
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      futureSupervisor
+        .supervisedUS(operation)(submission)
+        .map(handleCommandResult(operation)),
+      s"$operation failed during supervised background submission",
+    )
 
   // Effectively called from AdminWorkflowServices. Subscribers manage their own lifecycle separately.
   override def onClosed(): Unit =

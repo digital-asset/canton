@@ -8,6 +8,7 @@ import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.CommandRunner
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.db.{PostgresTestContainerSetup, PostgresTestDatabase}
 import com.digitalasset.canton.tracing.TraceContext
@@ -58,9 +59,7 @@ sealed trait PostgresDumpRestore extends DbDumpRestore with NamedLogging {
     logger.debug(s"Starting to restore dump for node $nodeName")
     for {
       // somehow, pg_restore -c -C doesn't seem to cleanup the database, so doing it separately
-      _ <- plugin
-        .recreateDatabaseForNodeWithName(nodeName)
-        .failOnShutdownToAbortException("restoreDump")
+      _ <- CantonGrpcUtil.shutdownAsGrpcError(plugin.recreateDatabaseForNodeWithName(nodeName))
       _ = logger.debug(s"Successfully recreated database for node $nodeName, now restoring dump")
       _ <- runDumpOrRestoreCommand(
         "pg_restore",

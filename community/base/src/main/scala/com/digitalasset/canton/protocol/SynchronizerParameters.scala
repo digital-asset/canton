@@ -191,8 +191,10 @@ object StaticSynchronizerParameters
   val defaultTopologyChangeDelayNonStandardClock: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.Zero // SimClock, RemoteClock
 
-  val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+  // TODO(#36696): Only needed to read the static parameters of pv34 predecessors
+  val versioningTable: VersioningTable = VersioningTable.withMinimumPvOverride(
+    minimumPvOverride = ProtocolVersion.v34,
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
       v30.StaticSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -204,7 +206,7 @@ object StaticSynchronizerParameters
       supportedProtoVersion(_)(fromProtoV31),
       _.toProtoV31,
     ),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.newBoundsOnPV37)(
       v32.StaticSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV32),
@@ -215,13 +217,73 @@ object StaticSynchronizerParameters
   private lazy val rpvForPv36: RepresentativeProtocolVersion[StaticSynchronizerParameters.type] =
     protocolVersionRepresentativeFor(ProtocolVersion.v36)
 
+  private lazy val rpvForNewBoundsOnPV37
+      : RepresentativeProtocolVersion[StaticSynchronizerParameters.type] =
+    protocolVersionRepresentativeFor(ProtocolVersion.newBoundsOnPV37)
+
+  // Proto v30 carries no limits: before PV36 they are the default that fromProtoV30 fills in,
+  // so a configured value cannot be silently dropped.
   private[protocol] val defaultSynchronizerLimitsUntil = DefaultValueUntilExclusive[
     StaticSynchronizerParameters,
     StaticSynchronizerParameters.type,
     SynchronizerLimits,
-  ](_.synchronizerLimits, "synchronizerLimits", rpvForPv36, SynchronizerLimits.max)
+  ](_.synchronizerLimits, "synchronizerLimits", rpvForPv36, SynchronizerLimits.default)
 
-  override val invariants = Seq(defaultSynchronizerLimitsUntil)
+  // Only v32 of the proto carries topology_limits and acs_commitment_limits, so before they cannot be configured. Pinning
+  // them to the default keeps a configured value from being silently dropped on the way to the wire.
+  private[protocol] val defaultTopologyLimitsUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    TopologyLimits,
+  ](
+    _.synchronizerLimits.topologyLimits,
+    "synchronizerLimits.topologyLimits",
+    rpvForNewBoundsOnPV37,
+    TopologyLimits.default,
+  )
+
+  private[protocol] val defaultAcsCommitmentLimitsUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    AcsCommitmentLimits,
+  ](
+    _.synchronizerLimits.acsCommitmentLimits,
+    "acsCommitmentLimits",
+    rpvForNewBoundsOnPV37,
+    AcsCommitmentLimits.default,
+  )
+
+  // Only v32 of the proto carries max_signatures_per_envelope
+  private[protocol] val defaultMaxSignaturesPerEnvelopeLimitUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    PositiveInt,
+  ](
+    _.synchronizerLimits.transactionProtocolLimits.maxSignaturesPerEnvelope,
+    "synchronizerLimits.transactionProtocolLimits.maxSignaturesPerEnvelope",
+    rpvForNewBoundsOnPV37,
+    TransactionProtocolLimits.default.maxSignaturesPerEnvelope,
+  )
+
+  // Only v32 of the proto carries max_quorum_size
+  private[protocol] val defaultMaxQuorumSizeUntil = DefaultValueUntilExclusive[
+    StaticSynchronizerParameters,
+    StaticSynchronizerParameters.type,
+    PositiveInt,
+  ](
+    _.synchronizerLimits.transactionProtocolLimits.maxQuorumSize,
+    "synchronizerLimits.transactionProtocolLimits.maxQuorumSize",
+    rpvForNewBoundsOnPV37,
+    TransactionProtocolLimits.default.maxQuorumSize,
+  )
+
+  override val invariants = Seq(
+    defaultSynchronizerLimitsUntil,
+    defaultTopologyLimitsUntil,
+    defaultAcsCommitmentLimitsUntil,
+    defaultMaxSignaturesPerEnvelopeLimitUntil,
+    defaultMaxQuorumSizeUntil,
+  )
 
   override def name: String = "static synchronizer parameters"
 
@@ -287,7 +349,7 @@ object StaticSynchronizerParameters
     val pvv = ProtocolVersionValidation.AlwaysValidation
 
     for {
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP, allowDeleted = true)
       _ <- checkProtoVersionCompatibility(protocolVersion, protoVersion)
 
       requiredSigningSpecsP <- requiredSigningSpecsOP.toRight(
@@ -365,7 +427,7 @@ object StaticSynchronizerParameters
       synchronizerParametersP.serial,
       synchronizerParametersP.enableTransparencyChecks,
       synchronizerParametersP.topologyChangeDelay,
-      Right(SynchronizerLimits.max),
+      Right(SynchronizerLimits.default),
     )
 
   def fromProtoV31(
@@ -547,8 +609,9 @@ object OnboardingRestriction extends PrettyPrintingCompanion[OnboardingRestricti
   *   stakeholder of the contract can initiate the assignment, if it has not yet happened. Moreover,
   *   if this timeout is zero, no automatic assignments will occur. Choose a low value, if you want
   *   to lower the time that contracts can be inactive due to ongoing reassignments. Choosing a high
-  *   value currently has no practical benefit, but will have benefits in a future version.
-  *   TODO(M41): Document those benefits
+  *   value currently has no practical benefit. This timeout only applies up to protocol version 36:
+  *   from protocol version 37, every stakeholder can initiate the assignment as soon as the
+  *   unassignment is completed, and automatic assignments are configured on the participant.
   * @param topologyChangeDelay
   *   determines the offset applied to the topology transactions before they become active, in order
   *   to support parallel transaction processing
@@ -757,7 +820,7 @@ object DynamicSynchronizerParameters
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.DynamicSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -958,9 +1021,6 @@ object DynamicSynchronizerParameters
       protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  // if there is no topology change delay defined (or not yet propagated), we'll use this one
-  val topologyChangeDelayIfAbsent: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero
-
   def fromProtoV30(
       synchronizerParametersP: v30.DynamicSynchronizerParameters
   ): ParsingResult[DynamicSynchronizerParameters] = {
@@ -1043,7 +1103,6 @@ object DynamicSynchronizerParameters
             "preparationTimeRecordTimeTolerance"
           )
         )
-        // TODO(i16458) enforce this field is always set when 3.x is stable
         .map(_.getOrElse(ledgerTimeRecordTimeTolerance))
 
       synchronizerParameters <-

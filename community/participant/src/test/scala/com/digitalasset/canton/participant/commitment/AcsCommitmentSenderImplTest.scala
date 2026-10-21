@@ -40,7 +40,6 @@ import com.digitalasset.canton.participant.store.{
   TestDigestUtils,
 }
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
-import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -51,6 +50,7 @@ import com.digitalasset.canton.protocol.messages.{
   DigestForCounterparticipant,
   ProtocolMessage,
 }
+import com.digitalasset.canton.protocol.{AcsCommitmentLimits, TestSynchronizerParameters}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.client.{SendResult, TestSequencerClientSend}
@@ -237,8 +237,12 @@ trait AcsCommitmentSenderImplTest
         participants = Seq(participant4),
         commitmentTick = sendTimestamp,
         unsentDigests = Seq(
-          DigestForCounterparticipant(hashedDigest0, participant2.toLf),
-          DigestForCounterparticipant(hashedDigest1, participant3.toLf),
+          DigestForCounterparticipant
+            .create(testedProtocolVersionValidation, hashedDigest0, participant2.toLf)
+            .value,
+          DigestForCounterparticipant
+            .create(testedProtocolVersionValidation, hashedDigest1, participant3.toLf)
+            .value,
         ),
       )
 
@@ -745,23 +749,25 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
     ),
     replacesOffset = None,
   )
-
+  import org.scalatest.EitherValues.*
   private def mkAcsCommitment(
       counterparticipantId: ParticipantId,
       hashedDigest: HashedDigest,
       fromExclusive: CantonTimestamp,
       toInclusive: CantonTimestamp,
-  ) = AcsCommitment.create(
-    synchronizerId = psid,
-    sender = participant1.toLf, // Can be hardcoded, as we only use this participant
-    counterparticipant = counterparticipantId.toLf,
-    period = CommitmentPeriod.tryCreate(
-      fromExclusive = fromExclusive,
-      toInclusive = toInclusive,
-    ),
-    digest = hashedDigest,
-    protocolVersion = ProtocolVersion.dev,
-  )
+  ) = AcsCommitment
+    .create(
+      synchronizerId = psid,
+      sender = participant1.toLf, // Can be hardcoded, as we only use this participant
+      counterparticipant = counterparticipantId.toLf,
+      period = CommitmentPeriod.tryCreate(
+        fromExclusive = fromExclusive,
+        toInclusive = toInclusive,
+      ),
+      digest = hashedDigest,
+      protocolVersion = ProtocolVersion.dev,
+    )
+    .value
 
   private def mkAcsCommitmentSummary(
       participants: Seq[ParticipantId],
@@ -769,15 +775,18 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
       batchIndex: NonNegativeInt = NonNegativeInt.zero,
       lastBatch: Boolean = true,
       unsentDigests: Seq[DigestForCounterparticipant] = Seq.empty,
-  ) = AcsCommitmentSummary.create(
-    psid = psid,
-    commitmentTick = commitmentTick,
-    addressedCounterparticipants = participants.map(_.toLf),
-    unsentDigests = unsentDigests,
-    batchIndex = batchIndex,
-    lastBatch = lastBatch,
-    protocolVersion = ProtocolVersion.dev,
-  )
+  ) = AcsCommitmentSummary
+    .create(
+      psid = psid,
+      commitmentTick = commitmentTick,
+      addressedCounterparticipants = participants.map(_.toLf),
+      unsentDigests = unsentDigests,
+      batchIndex = batchIndex,
+      lastBatch = lastBatch,
+      protocolVersion = ProtocolVersion.dev,
+      AcsCommitmentLimits.default,
+    )
+    .value
 
   private def splitMessages(
       batch: Batch[DefaultOpenEnvelope]

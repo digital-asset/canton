@@ -6,12 +6,12 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
-import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, HashPurpose, Salt, Signature}
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.AssignmentMediatorMessage
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{ReassignmentId, RootHash, Stakeholders, ViewHash, v30, v31}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -19,7 +19,17 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
-import com.digitalasset.canton.version.{ProtoVersion, *}
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedWrapper,
+  HasToByteString,
+  ProtoVersion,
+  ProtocolVersion,
+  ProtocolVersionValidation,
+  RepresentativeProtocolVersion,
+  VersionedProtoCodec,
+  VersioningCompanionContext,
+  VersioningCompanionContextMemoization,
+}
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -76,10 +86,9 @@ final case class AssignmentViewTree(
 }
 
 object AssignmentViewTree
-    extends VersioningCompanionContextTaggedPVValidation2[
+    extends VersioningCompanionContext[
       AssignmentViewTree,
-      Target,
-      HashOps,
+      (HashOps, Target[ProtocolVersionValidation]),
     ]
     with PrettyPrintingCompanion[AssignmentViewTree] {
 
@@ -91,7 +100,7 @@ object AssignmentViewTree
   override val name: String = "AssignmentViewTree"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ReassignmentViewTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ReassignmentViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )
@@ -108,15 +117,15 @@ object AssignmentViewTree
       hashOps,
     )
 
-  def fromProtoV30(context: (HashOps, Target[ProtocolVersion]))(
+  def fromProtoV30(context: (HashOps, Target[ProtocolVersionValidation]))(
       assignmentViewTreeP: v30.ReassignmentViewTree
   ): ParsingResult[AssignmentViewTree] = {
-    val (hashOps, expectedProtocolVersion) = context
+    val (hashOps, targetPVV) = context
     for {
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       res <- GenReassignmentViewTree.fromProtoV30(
-        AssignmentCommonData.fromByteString(expectedProtocolVersion.unwrap, hashOps),
-        AssignmentView.fromByteString(expectedProtocolVersion.unwrap, hashOps),
+        AssignmentCommonData.fromByteString(targetPVV.unwrap, hashOps, _),
+        AssignmentView.fromByteString(targetPVV.unwrap, hashOps, _),
       )((commonData, view) => AssignmentViewTree(commonData, view)(rpv, hashOps))(
         assignmentViewTreeP
       )
@@ -207,7 +216,7 @@ object AssignmentCommonData
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AssignmentCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -374,7 +383,7 @@ object AssignmentView
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentView)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.AssignmentView)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
@@ -530,10 +539,14 @@ object FullAssignmentTree extends PrettyPrintingCompanion[FullAssignmentTree] {
 
   def fromByteString(
       crypto: CryptoPureApi,
-      targetProtocolVersion: Target[ProtocolVersion],
+      targetPVV: Target[ProtocolVersionValidation],
   )(bytes: ByteString): ParsingResult[FullAssignmentTree] =
     for {
-      tree <- AssignmentViewTree.fromByteString(crypto, targetProtocolVersion)(bytes)
+      tree <- AssignmentViewTree.fromByteString(
+        targetPVV.value,
+        (crypto, targetPVV),
+        bytes,
+      )
       _ <- Either.cond(
         tree.isFullyUnblinded,
         (),

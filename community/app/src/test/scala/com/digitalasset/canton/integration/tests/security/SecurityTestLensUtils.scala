@@ -54,7 +54,7 @@ trait SecurityTestLensUtils {
   def traverseMessages[M <: SignedProtocolMessageContent](
       updateSignatureWith: M => Option[SyncCryptoApi],
       signingTimestampOverrides: Option[SigningTimestampOverrides] = None,
-      synchronizerLimits: SynchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+      synchronizerLimits: SynchronizerLimits = SynchronizerLimits.default,
   )(implicit
       executionContext: ExecutionContext
   ): Traversal[SubmissionRequest, M] =

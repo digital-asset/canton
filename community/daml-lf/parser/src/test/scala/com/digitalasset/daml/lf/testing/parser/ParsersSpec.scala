@@ -8,6 +8,7 @@ import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
+import org.scalatest.Inside.inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
@@ -429,9 +430,9 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
       )
 
       forEvery(failingTestCases) { stringToParse =>
-        parseExpr(stringToParse) shouldBe Left(
-          "enum type does not take type parameters at line 1, column 1"
-        )
+        inside(parseExpr(stringToParse)) { case Left(message) =>
+          message should startWith("enum type does not take type parameters at line 1, column 1")
+        }
       }
     }
 
@@ -935,9 +936,53 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
     }
 
     "rejects bad location annotations" in {
-      a[ParsingError] should be thrownBy e"loc(Mod, def, 0, 1, 2, 3) f g"
+      val error = the[InterpolationError] thrownBy e"loc(Mod, def, 0, 1, 2, 3) f g"
+      error.cause shouldBe a[ParsingError]
     }
   }
+
+  "error reporting" should {
+
+    "point to the offending token, on the right line, with the source line and a caret" in {
+      val error = the[InterpolationError] thrownBy e"""foo
+        bar )"""
+      val cause = error.cause
+      cause shouldBe a[ParsingError]
+      cause.position.line shouldBe 2
+      cause.position.column shouldBe 13
+      cause.description should include("bar )")
+      cause.description should include("^")
+    }
+
+    "report the line of the error in the Scala file for a single line string" in {
+      val line = currentLine + 1
+      val error = the[InterpolationError] thrownBy e"foo )"
+      error.callSite shouldBe Some(CallSite("ParsersSpec.scala", line))
+      error.getMessage should include(s"(error at ParsersSpec.scala:$line)")
+    }
+
+    "report the line of the error in the Scala file for a multi-line string" in {
+      val start = currentLine + 1
+      val error = the[InterpolationError] thrownBy e"""foo
+        bar )"""
+      error.cause.position.line shouldBe 2
+      error.getMessage should include(s"(error at ParsersSpec.scala:${start + 1})")
+    }
+
+    "report the line of the error in the Scala file for a package" in {
+      val start = currentLine + 1
+      val error = the[InterpolationError] thrownBy p"""metadata ( 'pkg' : '1.0.0' )
+        module Mod {
+          val x : Int64 = ;
+        }"""
+      val errorLine = error.cause.position.line
+      errorLine should be > 1
+      error.getMessage should include(s"(error at ParsersSpec.scala:${start + errorLine - 1})")
+    }
+  }
+
+  // Line of the caller of this method
+  private def currentLine: Int = new Throwable().getStackTrace()(1).getLineNumber
 
   private val keywords = Table(
     "Cons",

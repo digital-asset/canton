@@ -414,7 +414,7 @@ final class StateTransferBehavior[E <: Env[E]](
       traceContext: TraceContext
   ): Unit =
     dependencies.availability.asyncSend(
-      Availability.Consensus.UpdateTopologyDuringStateTransfer(
+      Availability.Consensus.UpdateTopology(
         newEpochTopology.membership,
         newEpochTopology.epochNumber,
         // TODO(#25220) If the onboarding/starting epoch (`e_start`) is always immediately before the one where
@@ -520,6 +520,7 @@ final class StateTransferBehavior[E <: Env[E]](
         loggerFactory,
         config.consensusEnableLogEndOfEpochProgress,
         config.consensusWindowSizeForRetransmissionOfCommitCertificates,
+        config.consensusExtraAllowedRetransmissionRequestsPerSecond,
         rateLimiterNanoTime = rateLimiterNanoTime,
       ),
       dependencies,

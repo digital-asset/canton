@@ -92,14 +92,14 @@ abstract class BaseSequencer(
                 estimatedSequencingTime.getOrElse(clock.now),
               )
               .leftMap(e => SubmissionRequestRefused(e))
-            isMemberEnabled <- EitherT.right[SequencerDeliverError](
-              isEnabled(submission.sender)
+            isMemberActive <- EitherT.right[SequencerDeliverError](
+              isActive(submission.sender)
             )
             _ <- EitherT.cond[FutureUnlessShutdown](
-              isMemberEnabled,
+              isMemberActive,
               (),
               SubmissionRequestRefused(
-                s"Member ${submission.sender} is disabled at the sequencer"
+                s"Member ${submission.sender} is not active at the sequencer"
               ),
             )
           } yield ()

@@ -14,12 +14,14 @@ import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
   PruneEventsRequest,
   PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import io.grpc.ServerServiceDefinition
+import io.grpc.{ServerServiceDefinition, Status}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -55,14 +57,22 @@ class TrafficEnforcementServiceGrpc(
     ).asGrpcResponse
   }
 
-  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+  override def prune(request: PruneRequest): Future[PruneResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     EitherT(
       service
-        .pruneEvents(request)
+        .prune(request)
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }
+
+  // The participant serves PruneEvents by calling Prune, so this server never receives it.
+  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
+    Future.failed(
+      Status.UNIMPLEMENTED
+        .withDescription("PruneEvents is not served by the traffic enforcement server")
+        .asRuntimeException()
+    )
 
   override def bindService(): ServerServiceDefinition =
     TrafficServiceGrpc.bindService(this, executionContext)

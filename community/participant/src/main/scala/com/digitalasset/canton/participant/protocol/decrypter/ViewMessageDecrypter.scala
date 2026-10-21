@@ -36,6 +36,7 @@ import scala.concurrent.ExecutionContext
 final case class ViewMessageDecrypter(
     participantId: ParticipantId,
     sessionKeyStore: ConfirmationRequestSessionKeyStore,
+    withTransparencyChecks: Boolean,
     protocolVersion: ProtocolVersion,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -50,7 +51,7 @@ final case class ViewMessageDecrypter(
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree
   ]] =
-    if (protocolVersion < ProtocolVersion.transparency)
+    if (protocolVersion < ProtocolVersion.transparencyAndCiphertextId)
       new ViewMessageDecrypterImplV1(
         participantId,
         sessionKeyStore,
@@ -64,6 +65,7 @@ final case class ViewMessageDecrypter(
         participantId,
         sessionKeyStore,
         snapshot,
+        withTransparencyChecks,
         protocolVersion,
         loggerFactory,
       ).decryptViews(batch, synchronizerLimits)

@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.pretty.{
 }
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.RootHashMessage.RootHashMessagePayloadCast
-import com.digitalasset.canton.protocol.{RootHash, v30, v31, v32}
+import com.digitalasset.canton.protocol.{RootHash, v30, v32}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -47,9 +47,6 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
 
   override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type] =
     RootHashMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
-
-  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-    v31.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
 
   override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
     v32.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
@@ -111,7 +108,7 @@ object RootHashMessage
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.RootHashMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.RootHashMessage)(
       supportedProtoVersionPVV(_)((pv, deserializer, proto) =>
         fromProtoV30(pv, deserializer)(proto)
       ),

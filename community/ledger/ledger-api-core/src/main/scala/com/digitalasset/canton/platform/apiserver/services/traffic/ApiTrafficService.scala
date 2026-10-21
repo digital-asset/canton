@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.platform.apiserver.services.traffic
 
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate.GatedFutureOps
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -13,11 +15,14 @@ import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
   PruneEventsRequest,
   PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.version.ApiDeprecation
 import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -29,6 +34,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class ApiTrafficService(
     // TODO(i35199): Streamline participant bootstrapping without dynamic loading: with streamlined instantiation we would be able to get rid of this CBN
     client: => RichTrafficServiceClient,
+    deprecatedApiGate: DeprecatedApiGate,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends TrafficService
@@ -63,18 +69,27 @@ class ApiTrafficService(
       .asGrpcFuture
   }
 
-  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+  override def prune(request: PruneRequest): Future[PruneResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     client
-      .pruneEvents(request)
+      .prune(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(
           RichTrafficServiceClient.normalizeTeaError(grpcError)
         )
       )
       .asGrpcFuture
+  }
+
+  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
+    prune(PruneRequest(request.beforeOrAt))
+      .map(response => PruneEventsResponse(prunedEventCount = response.prunedEventCount))
+      .gated(deprecatedApiGate, ApiDeprecation.Canton37.Endpoints, "TrafficService.PruneEvents")
   }
 
   override def bindService(): ServerServiceDefinition =

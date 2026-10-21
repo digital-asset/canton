@@ -54,7 +54,7 @@ class UpdatePointwiseQueries(
             $lookupKeyClause
            AND
             t.event_offset <= $ledgerEndOffset
-       """.as(EventSequentialIdFirstLast.singleOpt)(connection)
+       """.as(EventSequentialIdFirstLast.singleOpt)(connection).flatten
     }
   }
 }

@@ -5,7 +5,6 @@ syntax = "proto3";
 
 package com.digitalasset.canton.sequencer.admin.v30;
 
-import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v31/sequencing.proto";
 import "com/digitalasset/canton/protocol/v32/sequencing.proto";
 
@@ -22,10 +21,6 @@ service SequencerInitializationService {
   rpc InitializeSequencerFromGenesisState(stream InitializeSequencerFromGenesisStateRequest) returns (InitializeSequencerFromGenesisStateResponse) {
     option deprecated = true;
   }
-  // Deprecated in favor of InitializeSequencerFromOnboardingStateV2
-  rpc InitializeSequencerFromOnboardingState(stream InitializeSequencerFromOnboardingStateRequest) returns (InitializeSequencerFromOnboardingStateResponse) {
-    option deprecated = true;
-  }
   rpc InitializeSequencerFromLsuPredecessor(stream InitializeSequencerFromLsuPredecessorRequest) returns (InitializeSequencerFromLsuPredecessorResponse);
 
   rpc InitializeSequencerFromGenesisStateV2(stream InitializeSequencerFromGenesisStateV2Request) returns (InitializeSequencerFromGenesisStateV2Response);
@@ -39,8 +34,9 @@ message InitializeSequencerFromGenesisStateRequest {
   // the topology snapshot will be persisted in the synchronizer store of the sequencer
   bytes topology_snapshot = 1;
 
+  reserved 2; // was v30 parameter
+
   oneof parameters {
-    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 3;
     com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 4;
   }
@@ -56,8 +52,8 @@ message InitializeSequencerFromGenesisStateResponse {
 message InitializeSequencerFromLsuPredecessorRequest {
   bytes topology_snapshot = 1;
 
+  reserved 2; // was parameters v30
   oneof parameters {
-    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 4;
     com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters v32 = 6;
   }
@@ -74,15 +70,6 @@ message InitializeSequencerFromLsuPredecessorRequest {
 
 message InitializeSequencerFromLsuPredecessorResponse {}
 
-message InitializeSequencerFromOnboardingStateRequest {
-  bytes onboarding_state = 1;
-}
-
-message InitializeSequencerFromOnboardingStateResponse {
-  // Indicate if the initialized sequencer is replicated
-  bool replicated = 1;
-}
-
 // Includes sufficient detail for:
 //  - topology and additional bootstrap information
 message InitializeSequencerFromGenesisStateV2Request {
@@ -90,8 +77,8 @@ message InitializeSequencerFromGenesisStateV2Request {
   // the topology snapshot will be persisted in the synchronizer store of the sequencer
   bytes topology_snapshot = 1;
 
+  reserved 2; // was parameters v30
   oneof parameters {
-    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters_v30 = 2;
     com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters synchronizer_parameters_v31 = 3;
     com.digitalasset.canton.protocol.v32.StaticSynchronizerParameters synchronizer_parameters_v32 = 4;
   }

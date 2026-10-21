@@ -526,6 +526,8 @@ private[platform] object InMemoryStateUpdater {
           ),
         status = u.reasonTemplate.status,
       ),
+      synchronizerId = u.synchronizerId.toProtoPrimitive,
+      recordTime = u.recordTime.underlying,
     )(u.traceContext)
   }
 

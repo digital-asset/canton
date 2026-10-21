@@ -25,7 +25,9 @@ trait AbstractBenchtoolSandboxFixture extends CantonFixtureAbstract {
 
   override implicit lazy val patienceConfig: PatienceConfig = PatienceConfig(Span(2, Minutes))
 
-  protected def benchtoolFixture()(implicit
+  protected def benchtoolFixture(
+      maxInFlightCommands: Int = 1
+  )(implicit
       ec: ExecutionContext
   ): Future[(LedgerApiServices, Names, CommandSubmitter)] =
     for {
@@ -48,8 +50,13 @@ trait AbstractBenchtoolSandboxFixture extends CantonFixtureAbstract {
         ),
         // Making command generation deterministic w.r.t. parallelism
         commandGenerationParallelism = 1,
-        // Making command submission deterministic w.r.t. parallelism
-        maxInFlightCommandsOverride = Some(1),
+        // Command generation and command submission use independent randomness providers (see
+        // FooSubmission), and both stages draw in stream order, so the outcome stays deterministic
+        // even with several commands in flight.
+        // Note: keep this at 1 for configs with `allowNonTransientContracts`, where a consuming
+        // exercise targets a key created by an earlier command and therefore requires that command
+        // to be committed first.
+        maxInFlightCommandsOverride = Some(maxInFlightCommands),
       )
     } yield (
       apiServices,
@@ -58,14 +65,15 @@ trait AbstractBenchtoolSandboxFixture extends CantonFixtureAbstract {
     )
 
   protected def benchtoolFooSubmissionFixture(
-      submissionConfig: WorkflowConfig.FooSubmissionConfig
+      submissionConfig: WorkflowConfig.FooSubmissionConfig,
+      maxInFlightCommands: Int = 1,
   )(implicit ec: ExecutionContext): Future[(LedgerApiServices, AllocatedParties, FooSubmission)] =
     for {
-      (apiServices, _, submitter) <- benchtoolFixture()
+      (apiServices, _, submitter) <- benchtoolFixture(maxInFlightCommands)
       allocatedParties <- submitter.prepare(submissionConfig)
       foo = new FooSubmission(
         submitter = submitter,
-        maxInFlightCommands = 1,
+        maxInFlightCommands = maxInFlightCommands,
         submissionBatchSize = 1,
         allocatedParties = allocatedParties,
         names = new Names(),

@@ -9,7 +9,6 @@ import com.digitalasset.canton.synchronizer.sequencing.authentication.{
   MemberAuthenticator,
 }
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.tracing.TraceContextGrpc.TraceContextOptionsKey
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.*
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
@@ -29,8 +28,8 @@ private[p2p] class P2PCheckAuthenticationGrpcClientInterceptor(
       callOptions: CallOptions,
       next: Channel,
   ): ClientCall[ReqT, RespT] = {
-    val tcOpts = Option(callOptions.getOption(TraceContextOptionsKey))
-    implicit val traceContext: TraceContext = tcOpts.getOrElse(TraceContextGrpc.fromGrpcContext)
+    implicit val traceContext: TraceContext =
+      TraceContextGrpc.inferCallerTraceContext(callOptions)
 
     new AuthenticateServerSingleForwardingCall[ReqT, RespT](
       memberAuthenticationService,

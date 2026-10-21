@@ -37,6 +37,7 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.PackageMetadataViewConfig
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.config.TopologyConfigConverters.*
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsKeyId
@@ -527,6 +528,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         crashAfterFailedValidation = participantParameters.crashAfterFailedValidation,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
         acsCommitments = participantParameters.acsCommitments,
+        deprecatedApis = participantConfig.features.deprecated,
       )
     }
 
@@ -1211,6 +1213,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownComputeDelayConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig]
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
@@ -1616,6 +1621,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigReader: ConfigReader[ReplicationConfig] =
       deriveReader[ReplicationConfig]
+    lazy implicit final val deprecatedApiConfigReader: ConfigReader[DeprecatedApiConfig] =
+      deriveReader[DeprecatedApiConfig]
     implicit val participantFeaturesConfigReader: ConfigReader[ParticipantFeaturesConfig] =
       deriveReader[ParticipantFeaturesConfig]
 
@@ -2068,6 +2075,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownComputeDelayConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig] =
+      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig]
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
@@ -2437,6 +2447,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigWriter: ConfigWriter[ReplicationConfig] =
       deriveWriter[ReplicationConfig]
+    lazy implicit final val deprecatedApiConfigWriter: ConfigWriter[DeprecatedApiConfig] =
+      deriveWriter[DeprecatedApiConfig]
     implicit val participantFeaturesConfigWriter: ConfigWriter[ParticipantFeaturesConfig] =
       deriveWriter[ParticipantFeaturesConfig]
 

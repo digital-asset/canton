@@ -196,7 +196,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
                 closedEnvelope
                   .toOpenEnvelope(
                     hashOps,
-                    SynchronizerLimits.defaultFor(testedProtocolVersion),
+                    SynchronizerLimits.default,
                     testedProtocolVersion,
                   )
                   .valueOrFail("open envelopes")

@@ -340,7 +340,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .nonEmpty
@@ -356,7 +358,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -379,7 +383,15 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyTransactionContext.synchronizerLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -406,7 +418,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -429,7 +443,15 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyTransactionContext.synchronizerLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -456,7 +478,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -468,7 +492,15 @@ class ApiPartyManagementServiceSpec
                       _.partyToParticipant.optionalPartySigningKeys.set(None)
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyTransactionContext.synchronizerLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -521,7 +553,9 @@ class ApiPartyManagementServiceSpec
             val partyId = transactions
               .flatMap(tx =>
                 TopologyTransaction
-                  .fromByteString(testedProtocolVersion, tx.transaction)
+                  .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                    tx.transaction
+                  )
                   .value
                   .selectMapping[PartyToParticipant]
               )
@@ -549,7 +583,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.filter(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .nonEmpty
@@ -564,7 +600,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -600,7 +638,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -641,7 +681,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -756,7 +798,9 @@ class ApiPartyManagementServiceSpec
             // Remove the Namespace delegation generated by default
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[NamespaceDelegation]
                 .isDefined
@@ -779,7 +823,9 @@ class ApiPartyManagementServiceSpec
             // Remove the Namespace delegation generated by default
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[NamespaceDelegation]
                 .isDefined
@@ -892,7 +938,7 @@ class ApiPartyManagementServiceSpec
         val txs = response.topologyTransactions.toList
           .traverse(tx =>
             TopologyTransaction
-              .fromByteString(testedProtocolVersion, tx)
+              .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(tx)
           )
           .valueOrFail("unable to parse topology txs")
           .map(_.mapping)

@@ -18,6 +18,7 @@ import com.digitalasset.canton.protocol.{
   SequencingParametersWithValidity,
 }
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.BaseTopologySnapshot.HostingView
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.processing.*
 import com.digitalasset.canton.topology.store.UnknownOrUnvettedPackages
@@ -60,11 +61,12 @@ class ForwardingTopologySnapshot(
 
   override private[client] def loadActiveParticipantsOf(
       party: PartyId,
+      view: HostingView,
       participantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[PartyInfo] =
-    parent.loadActiveParticipantsOf(party, participantStates)
+    parent.loadActiveParticipantsOf(party, view, participantStates)
 
   override def inspectKeys(
       filterOwner: String,
@@ -154,11 +156,12 @@ class ForwardingTopologySnapshot(
 
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
+      view: HostingView,
       loadParticipantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit traceContext: TraceContext) =
-    parent.loadBatchActiveParticipantsOf(parties, loadParticipantStates)
+    parent.loadBatchActiveParticipantsOf(parties, view, loadParticipantStates)
 
   override def signingKeysWithThreshold(party: PartyId)(implicit
       traceContext: TraceContext
@@ -190,15 +193,32 @@ class CachingTopologySnapshot(
 
   override def timestamp: CantonTimestamp = parent.timestamp
 
-  private val partyCache: TracedAsyncLoadingCache[FutureUnlessShutdown, PartyId, PartyInfo] =
+  private def partyCacheFor(
+      view: HostingView,
+      name: String,
+  ): TracedAsyncLoadingCache[FutureUnlessShutdown, PartyId, PartyInfo] =
     ScaffeineCache.buildTracedAsync[FutureUnlessShutdown, PartyId, PartyInfo](
       cache = cachingConfigs.partyCache.buildScaffeine(loggerFactory),
       loader = implicit traceContext =>
-        party => parent.loadActiveParticipantsOf(party, loadParticipantStates(_)),
+        party => parent.loadActiveParticipantsOf(party, view, loadParticipantStates(_)),
       allLoader = Some(implicit traceContext =>
-        parties => parent.loadBatchActiveParticipantsOf(parties.toSeq, loadParticipantStates(_))
+        parties =>
+          parent.loadBatchActiveParticipantsOf(parties.toSeq, view, loadParticipantStates(_))
       ),
-    )(logger, "partyCache")
+    )(logger, name)
+
+  // One cache per view, so that a view is never answered from the other view's entries, and ACS
+  // commitments (which read the freeze-ignoring view) do not evict the default view's entries.
+  private val defaultPartyCache = partyCacheFor(HostingView.Default, "partyCache")
+  private val freezeIgnoringPartyCache =
+    partyCacheFor(HostingView.IgnoringFreeze, "freezeIgnoringPartyCache")
+
+  private def partyCache(
+      view: HostingView
+  ): TracedAsyncLoadingCache[FutureUnlessShutdown, PartyId, PartyInfo] = view match {
+    case HostingView.Default => defaultPartyCache
+    case HostingView.IgnoringFreeze => freezeIgnoringPartyCache
+  }
 
   private val participantCache: TracedAsyncLoadingCache[FutureUnlessShutdown, ParticipantId, Option[
     ParticipantAttributes
@@ -331,21 +351,23 @@ class CachingTopologySnapshot(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[Member, KeyCollection]] =
     keyCache.getAll(members).map(_.filter { case (_, keys) => !keys.isEmpty })
 
-  override def loadActiveParticipantsOf(
+  override private[client] def loadActiveParticipantsOf(
       party: PartyId,
+      view: HostingView,
       participantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[PartyInfo] =
-    partyCache.get(party)
+    partyCache(view).get(party)
 
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
+      view: HostingView,
       loadParticipantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
-  )(implicit traceContext: TraceContext) =
-    partyCache.getAll(parties)(traceContext)
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[PartyId, PartyInfo]] =
+    partyCache(view).getAll(parties)(traceContext)
 
   override def loadParticipantStates(
       participants: Seq[ParticipantId]

@@ -28,15 +28,17 @@ rate() {
 }
 
 print-bytes() {
-  if [[ $1 -le 10000 ]]; then
-    echo "$1 B"
-  elif [[ $1 -le 10000000 ]]; then
-    echo "$(($1 / 1000)) kB"
-  elif [[ $1 -le 10000000000 ]]; then
-    echo "$(($1 / 1000000)) MB"
-  else
-    echo "$(($1 / 1000000000)) GB"
-  fi
+  local val="${1:-0}"
+  awk -v b="$val" 'BEGIN {
+    if (b < 10000)
+      printf "%.0f B", b;
+    else if (b < 10000000)
+      printf "%.1f kB", b / 1000;
+    else if (b < 10000000000)
+      printf "%.2f MB", b / 1000000;
+    else
+      printf "%.2f GB", b / 1000000000;
+  }'
 }
 
 cat > "$SLACK_METRICS_FILE" <<EOI

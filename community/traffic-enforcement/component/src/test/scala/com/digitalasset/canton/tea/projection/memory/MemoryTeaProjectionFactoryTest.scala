@@ -27,6 +27,9 @@ class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaP
   // deduplication.
   override protected def offsetsArePersisted: Boolean = false
 
+  // The in-memory handler applies the deltas of an event one by one.
+  override protected def deltasAreAppliedAtomically: Boolean = false
+
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend = {
     implicit val ec: ExecutionContext = system.executionContext
     val memoryStore = new TeaMemoryTrafficStore(loggerFactory)

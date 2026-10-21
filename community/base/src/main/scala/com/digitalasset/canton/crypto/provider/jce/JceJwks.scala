@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.SigningKeySpec
 import com.digitalasset.canton.crypto.provider.jce
 import io.circe.Json
 import io.circe.syntax.*
+import org.bouncycastle.jcajce.interfaces.EdDSAPublicKey
 import org.bouncycastle.util.BigIntegers
 
 import java.nio.charset.StandardCharsets.UTF_8
@@ -39,7 +40,7 @@ object JceJwks {
   private def base64Url(bytes: Array[Byte]): String =
     Base64.getUrlEncoder.withoutPadding().encodeToString(bytes)
 
-  private sealed trait JwkFactory {
+  private[crypto] sealed trait JwkFactory {
 
     /** `kty` as defined by the JWK specification. */
     def kty: Jwk.Kty
@@ -51,7 +52,7 @@ object JceJwks {
     def additionalAttributes(javaPublicKey: JavaPublicKey): Either[JwksError, Map[String, Json]]
   }
 
-  private object JwkFactory {
+  private[crypto] object JwkFactory {
     def fromKeySpec: (SigningKeySpec => Either[JwksError, JwkFactory]) = {
       case SigningKeySpec.EcP256 => Right(JwkFactory.EcP256: JwkFactory)
       case SigningKeySpec.EcP384 => Right(JwkFactory.EcP384)
@@ -117,19 +118,28 @@ object JceJwks {
           val bigEndian = BigIntegers.asUnsignedByteArray(32, point.getY)
           val bytes = bigEndian.reverse
           if (point.isXOdd) bytes(31) = (bytes(31) | 0x80).toByte
-          Right(
-            Map(
-              "crv" -> Json.fromString("Ed25519"),
-              "x" -> Json.fromString(base64Url(bytes)),
-            )
-          )
+          Right(ed25519Attributes(bytes))
         }
+
+        // BouncyCastle only returns an EdECPublicKey if its multi-release classes are active.
+        // Otherwise, it returns a key implementing only its own interface, which directly
+        // provides the encoding defined in <https://datatracker.ietf.org/doc/html/rfc8032>.
+        case bced: EdDSAPublicKey =>
+          Right(ed25519Attributes(bced.getPointEncoding))
 
         case _ =>
           Left(
-            JwksError.KeyParameterExtractionError("EcCurve25519: Expecting EdECPublicKey")
+            JwksError.KeyParameterExtractionError(
+              "EcCurve25519: Expecting EdECPublicKey or EdDSAPublicKey"
+            )
           )
       }
+
+      private def ed25519Attributes(pointEncoding: Array[Byte]): Map[String, Json] =
+        Map(
+          "crv" -> Json.fromString("Ed25519"),
+          "x" -> Json.fromString(base64Url(pointEncoding)),
+        )
     }
 
     /** EcSecp256k1-based JWKS as defined in <https://datatracker.ietf.org/doc/html/rfc8812> */

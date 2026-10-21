@@ -157,15 +157,13 @@ object CommitSet extends PrettyPrintingCompanion[CommitSet] {
       crashAfterFailedValidation: Boolean,
       hostedOnboardingPartiesO: Option[HostedOnboardingParties],
   )(implicit loggingContext: ErrorLoggingContext): CommitSet = {
-    if (!activenessResult.isSuccessful) {
-      SyncServiceAlarm
-        .Warn(s"Request $requestId with failed activeness check is approved.")
-        .report()
-      loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
-      if (crashAfterFailedValidation) {
-        throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
-      }
-    }
+    alarmIfActivenessCheckFailed(
+      activenessResult.isSuccessful,
+      activenessResult,
+      requestId,
+      requestDescription = "Request",
+      crashAfterFailedValidation,
+    )
 
     val archivals = (consumedInputsOfHostedParties ++ transient).map {
       case (cid, hostedStakeholders) =>
@@ -255,4 +253,19 @@ object CommitSet extends PrettyPrintingCompanion[CommitSet] {
       hostedOnboardingPartiesO = None,
     )
 
+  private[protocol] def alarmIfActivenessCheckFailed(
+      activenessResultIsSuccessful: Boolean,
+      activenessResult: ActivenessResult,
+      requestId: RequestId,
+      requestDescription: String,
+      crashAfterFailedValidation: Boolean,
+  )(implicit loggingContext: ErrorLoggingContext): Unit =
+    if (!activenessResultIsSuccessful) {
+      val message = s"$requestDescription $requestId with failed activeness check is approved."
+      SyncServiceAlarm.Warn(message).report()
+      loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
+      if (crashAfterFailedValidation) {
+        throw new RuntimeException(message)
+      }
+    }
 }

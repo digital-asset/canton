@@ -352,11 +352,11 @@ class DbReassignmentStore(
         .leftMap(err => TopologyLookupError(lsid, ts, err.toString))
 
       hostingParticipants <- EitherT.right[ReassignmentStoreError](
-        snapshot.activeParticipantsOfParties(allStakeholders.toSeq)
+        snapshot.activeParticipantsOfPartiesWithInfoIgnoringFreeze(allStakeholders.toSeq)
       )
       locallyHostedStakeholders = hostingParticipants
         .collect {
-          case (party, participants) if participants.contains(participantId) => party
+          case (party, partyInfo) if partyInfo.participants.contains(participantId) => party
         }
         .toSet
         .diff(parties)

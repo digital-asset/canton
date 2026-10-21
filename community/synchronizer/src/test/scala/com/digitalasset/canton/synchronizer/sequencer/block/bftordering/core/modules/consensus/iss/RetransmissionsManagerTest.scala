@@ -11,9 +11,14 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager.{
+  MaxRetransmissionRequestBurstFactorPerNode,
+  RetransmissionRequestPeriod,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.{
   EpochStatusBuilder,
   PreviousEpochsRetransmissionsTracker,
@@ -689,7 +694,12 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       //  what allows retransmissions to keep refilling and avoids the view-change liveness failure.
       val rateLimiterNanos = new AtomicLong(0L)
       val manager =
-        createManager(networkOut, rateLimiterNanoTime = () => rateLimiterNanos.get())
+        createManager(
+          networkOut,
+          rateLimiterNanoTime = () => rateLimiterNanos.get(),
+          extraAllowedRetransmissionRequestsPerSecond =
+            DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond,
+        )
 
       val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
       val message = validRetransmissionRequest
@@ -712,8 +722,8 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
       // Exhaust the initial burst (protocol time and the rate-limiter source both held static).
       val burstSize =
-        (RetransmissionsManager.MaxRetransmissionRequestBurstFactorPerNode /
-          RetransmissionsManager.RetransmissionRequestPeriod.toSeconds.toDouble).toInt
+        (MaxRetransmissionRequestBurstFactorPerNode /
+          RetransmissionRequestPeriod.toSeconds.toDouble).toInt + DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond * MaxRetransmissionRequestBurstFactorPerNode.toInt
       (1 to burstSize).foreach(_ => sendRequest())
       context.runPipedMessages() should have size burstSize.toLong
 
@@ -726,11 +736,11 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
       // Advancing only the independent rate-limiter source (protocol time stays static) refills the
       //  limiter by one token, so retransmission request processing resumes.
-      rateLimiterNanos.addAndGet(
-        RetransmissionsManager.RetransmissionRequestPeriod.toNanos
-      )
-      sendRequest()
-      context.runPipedMessages() should have size 1
+      rateLimiterNanos.addAndGet(RetransmissionRequestPeriod.toNanos)
+      val allowedNewMessages =
+        1 + DefaultConsensusExtraAllowedRetransmissionRequestsPerSecond * RetransmissionRequestPeriod.toSeconds.toInt
+      (1 to allowedNewMessages).foreach(_ => sendRequest())
+      context.runPipedMessages() should have size allowedNewMessages.toLong
 
       // With no further advancement, the next request is rate-limited again.
       loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
@@ -745,6 +755,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       networkOut: ModuleRef[P2PNetworkOut.Message],
       windowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt] = None,
       previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
+      extraAllowedRetransmissionRequestsPerSecond: Int = 0,
       // Static by default (like a non-advancing sim clock), so tests exercise the burst deterministically.
       rateLimiterNanoTime: () => Long = () => 0L,
   ): RetransmissionsManager[ProgrammableUnitTestEnv] = {
@@ -758,6 +769,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       loggerFactory,
       logEndOfEpochProgress = true,
       windowSizeForRetransmissionOfCommitCertificates,
+      extraAllowedRetransmissionRequestsPerSecond,
       previousEpochsRetransmissionsTrackerO,
       rateLimiterNanoTime,
     )

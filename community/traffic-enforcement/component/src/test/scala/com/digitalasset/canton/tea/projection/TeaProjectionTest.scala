@@ -13,7 +13,8 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.tea.projection.TrafficDelta.{creditBalanceDelta, debitBalanceDelta}
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext, Traced, W3CTraceContext}
+import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.trace.{StatusCode, Tracer}
@@ -64,6 +65,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     */
   protected def offsetsArePersisted: Boolean
 
+  /** Whether all deltas of a projection event are committed in a single transaction. The DB
+    * backends persist them together with the offset, the in-memory backend applies them one by one.
+    */
+  protected def deltasAreAppliedAtomically: Boolean
+
   /** Build a fresh backend bound to the given actor system. */
   protected def createBackend()(implicit system: ActorSystem[?]): Backend
 
@@ -92,15 +98,24 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   }
 
   protected def projectionEvent(
-      account: AccountId,
-      delta: TrafficDelta,
       offset: Long,
       timestamp: CantonTimestamp,
-      eventSource: EventSource = EventSource.LedgerAPICompletions,
+      accountDelta: AccountDelta,
   ): ProjectionEvent =
-    ProjectionEvent(
-      account,
-      OffsetDeltaEvent(DeltaEvent(delta, timestamp, eventSource), offset),
+    ProjectionEvent.Single(offset, timestamp, accountDelta)
+
+  /** A projection event holding several deltas, as produced for a transaction with several top-ups.
+    */
+  protected def multiDeltaEvent(
+      offset: Long,
+      timestamp: CantonTimestamp,
+      firstNodeIdAndDelta: (Int, AccountDelta),
+      otherNodeIdAndDeltas: (Int, AccountDelta)*
+  ): ProjectionEvent =
+    ProjectionEvent.Multiple(
+      offset,
+      timestamp,
+      NonEmpty(Map, firstNodeIdAndDelta, otherNodeIdAndDeltas*),
     )
 
   private def tracedSource(
@@ -124,7 +139,7 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   ): Option[Long] => Source[Traced[ProjectionEvent], NotUsed] = { maybeOffset =>
     resumeOffsets.add(maybeOffset)
     val fromExclusive = maybeOffset.getOrElse(Long.MinValue)
-    tracedSource(events.filter(_.event.offset > fromExclusive), traceContext)
+    tracedSource(events.filter(_.offset > fromExclusive), traceContext)
   }
 
   /** The exporter isn't reset between tests, so each case gives its events its own trace context
@@ -159,7 +174,9 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
       sourceFactory: Option[Long] => Source[Traced[ProjectionEvent], NotUsed],
   ): ActorRef[ProjectionBehavior.Command] =
     testKit.spawn(
-      backend.newProjection().projection(projectionId, sourceFactory),
+      backend
+        .newProjection()
+        .projection(projectionId, EventSource.LedgerAPICompletions, sourceFactory),
       s"projection-${UUID.randomUUID()}",
     )
 
@@ -170,6 +187,15 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     testKit.stop(ref, 30.seconds)
 
   private val alice = AccountId.tryCreate("alice")
+  private val bob = AccountId.tryCreate("bob")
+
+  implicit class AccountDeltaOps(account: AccountId) {
+    def credit(value: Long): AccountDelta = AccountDelta(account, creditBalanceDelta(value))
+    def debit(value: Long): AccountDelta = AccountDelta(account, debitBalanceDelta(value))
+  }
+
+  private lazy val multiDeltaTraceContext: TraceContext =
+    W3CTraceContext("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01").toTraceContext
 
   def gaugeValue(name: MetricName, backend: Backend) =
     backend.metricsFactory.metrics
@@ -191,8 +217,8 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
         val t2 = t1.immediateSuccessor
         val eventSource = EventSource.LedgerAPICompletions
         val events = Seq(
-          projectionEvent(alice, creditBalanceDelta(10), offset = 1L, t1),
-          projectionEvent(alice, debitBalanceDelta(3), offset = 2L, t2),
+          projectionEvent(1L, t1, alice.credit(10)),
+          projectionEvent(2L, t2, alice.debit(3)),
         )
 
         val ref = spawnProjection(
@@ -243,9 +269,9 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
         // Offset 1 is delivered twice; the store deduplicates on the derived event id, so the
         // duplicate must neither be counted in the balance nor stored a second time.
         val events = Seq(
-          projectionEvent(alice, creditBalanceDelta(10), offset = 1L, t1),
-          projectionEvent(alice, creditBalanceDelta(10), offset = 1L, t1),
-          projectionEvent(alice, creditBalanceDelta(5), offset = 2L, t2),
+          projectionEvent(1L, t1, alice.credit(10)),
+          projectionEvent(1L, t1, alice.credit(10)),
+          projectionEvent(2L, t2, alice.credit(5)),
         )
 
         val ref = spawnProjection(testKit, backend, recordingSourceFactory(events))
@@ -261,15 +287,134 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
         } finally stopProjection(testKit, ref)
       }
 
+      "apply every delta of an event holding several deltas" in withProjection {
+        (testKit, backend) =>
+          val t1 = clock.now
+          val t2 = t1.immediateSuccessor
+          val eventSource = EventSource.LedgerAPICompletions
+          val events = Seq(
+            // Same account twice: the position suffix keeps the two deltas from being deduplicated
+            multiDeltaEvent(
+              offset = 1L,
+              t1,
+              (1, alice.credit(10)),
+              (2, alice.credit(10)),
+              (3, bob.credit(7)),
+            ),
+            projectionEvent(2L, t2, alice.debit(3)),
+          )
+
+          val ref = spawnProjection(
+            testKit,
+            backend,
+            recordingSourceFactory(events, traceContext = multiDeltaTraceContext),
+          )
+          try {
+            eventually() {
+              balanceOf(backend, alice) shouldBe Some(AccountState(alice, 3, 20, t2))
+              balanceOf(backend, bob) shouldBe Some(AccountState.credits(bob, 7, t1))
+            }
+            eventsOf(backend, alice, t1) should contain theSameElementsAs Seq(
+              DeltaEvent(creditBalanceDelta(10), t1, eventSource),
+              DeltaEvent(creditBalanceDelta(10), t1, eventSource),
+              DeltaEvent(debitBalanceDelta(3), t2, eventSource),
+            )
+            eventsOf(backend, bob, t1) shouldBe Seq(
+              DeltaEvent(creditBalanceDelta(7), t1, eventSource)
+            )
+            offsetGaugeValue(backend) shouldBe 2L
+            eventually() {
+              // One span per delta, not per event
+              spansOn(multiDeltaTraceContext).map(
+                spanAttribute(_, TeaProjectionFactory.OffsetAttribute)
+              ) should contain theSameElementsAs Seq("1", "1", "1", "2")
+            }
+          } finally stopProjection(testKit, ref)
+      }
+
+      "deduplicate an event holding several deltas when it is delivered again" in withProjection {
+        (testKit, backend) =>
+          val t1 = clock.now
+          val t2 = t1.immediateSuccessor
+          val multi = multiDeltaEvent(
+            offset = 1L,
+            t1,
+            (1, alice.credit(10)),
+            (2, bob.credit(7)),
+          )
+          val events = Seq(
+            multi,
+            multi,
+            projectionEvent(2L, t2, alice.credit(5)),
+          )
+
+          val ref = spawnProjection(testKit, backend, recordingSourceFactory(events))
+          try {
+            eventually() {
+              balanceOf(backend, alice) shouldBe Some(AccountState.credits(alice, 15, t2))
+            }
+            balanceOf(backend, bob) shouldBe Some(AccountState.credits(bob, 7, t1))
+            eventsOf(backend, alice, t1) should have size 2
+            eventsOf(backend, bob, t1) should have size 1
+          } finally stopProjection(testKit, ref)
+      }
+
+      "not commit any delta of an event when one of its deltas fails" in withProjection {
+        (testKit, backend) =>
+          val t1 = clock.now
+          val t2 = t1.immediateSuccessor
+          val maxCredit = NonNegativeLong.tryCreate(Long.MaxValue)
+          // Offset 1 maxes out bob's credits, so bob's delta in offset 2 can never be applied
+          val events = Seq(
+            projectionEvent(1L, t1, bob.credit(Long.MaxValue)),
+            multiDeltaEvent(
+              offset = 2L,
+              t2,
+              (1, alice.credit(5)),
+              (2, bob.credit(1)),
+            ),
+          )
+
+          // Retries and restarts make the exact number of logged WARN entries non-deterministic.
+          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+            {
+              val ref = spawnProjection(testKit, backend, recordingSourceFactory(events))
+              try {
+                // Alice's delta comes first. The DB backends roll it back together with bob's
+                // failing delta, the in-memory backend keeps it (and deduplicates it on retry).
+                val expectedAlice =
+                  if (deltasAreAppliedAtomically) None
+                  else Some(AccountState.credits(alice, 5, t2))
+                eventually() {
+                  balanceOf(backend, bob) shouldBe Some(AccountState.credits(bob, maxCredit, t1))
+                  balanceOf(backend, alice) shouldBe expectedAlice
+                }
+                always() {
+                  balanceOf(backend, alice) shouldBe expectedAlice
+                  eventsOf(backend, alice, t1) should have size expectedAlice.toList.size.toLong
+                  balanceOf(backend, bob) shouldBe Some(AccountState.credits(bob, maxCredit, t1))
+                  eventsOf(backend, bob, t1) should have size 1
+                }
+              } finally stopProjection(testKit, ref)
+            },
+            entries => {
+              entries should not be empty
+              forEvery(entries) { entry =>
+                entry.warningMessage should include("Error during envelope processing")
+              }
+            },
+          )
+      }
+
       "resume from the last processed offset after a restart" in withProjection {
         (testKit, backend) =>
           val t1 = clock.now
           val t2 = t1.immediateSuccessor
           val t3 = t2.immediateSuccessor
           val events = Seq(
-            projectionEvent(alice, creditBalanceDelta(10), offset = 1L, t1),
-            projectionEvent(alice, creditBalanceDelta(20), offset = 2L, t2),
-            projectionEvent(alice, creditBalanceDelta(30), offset = 3L, t3),
+            projectionEvent(1L, t1, alice.credit(10)),
+            projectionEvent(2L, t2, alice.credit(20)),
+            projectionEvent(3L, t3, alice.credit(30)),
           )
 
           // First run ingests everything.
@@ -305,10 +450,10 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           val t3 = t2.immediateSuccessor
           val t4 = t3.immediateSuccessor
           val allEvents = Seq(
-            projectionEvent(alice, creditBalanceDelta(10), offset = 1L, t1),
-            projectionEvent(alice, creditBalanceDelta(20), offset = 2L, t2),
-            projectionEvent(alice, creditBalanceDelta(30), offset = 3L, t3),
-            projectionEvent(alice, creditBalanceDelta(40), offset = 4L, t4),
+            projectionEvent(1L, t1, alice.credit(10)),
+            projectionEvent(2L, t2, alice.credit(20)),
+            projectionEvent(3L, t3, alice.credit(30)),
+            projectionEvent(4L, t4, alice.credit(40)),
           )
 
           // The first instance only ingests the first two events before the node "crashes".
@@ -342,7 +487,7 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
 
             val t1 = clock.now
             val events = Seq(
-              projectionEvent(alice, TrafficDelta.creditBalanceDelta(1), offset = 1L, t1)
+              projectionEvent(1L, t1, alice.credit(1))
             )
 
             val errorSource: Option[Long] => Source[Traced[ProjectionEvent], NotUsed] = o => {
@@ -377,8 +522,8 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           val t2 = t1.immediateSuccessor
           // Offset 1 maxes out the credit total, so offset 2 keeps failing to apply on top of it.
           val events = Seq(
-            projectionEvent(alice, creditBalanceDelta(Long.MaxValue), offset = 1L, t1),
-            projectionEvent(alice, creditBalanceDelta(1L), offset = 2L, t2),
+            projectionEvent(1L, t1, alice.credit(Long.MaxValue)),
+            projectionEvent(2L, t2, alice.credit(1L)),
           )
 
           // Retries and restarts make the exact number of logged WARN entries non-deterministic.

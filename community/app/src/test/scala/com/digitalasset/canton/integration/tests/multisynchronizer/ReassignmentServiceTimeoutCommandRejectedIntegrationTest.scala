@@ -4,10 +4,7 @@
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.{
-  DbConfig,
-  NonNegativeFiniteDuration as ConfigNonNegativeFiniteDuration,
-}
+import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.{CantonTimestamp, UnassignmentData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -26,6 +23,7 @@ import com.digitalasset.canton.integration.util.HasCommandRunnersHelpers.{
 }
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
 }
@@ -73,6 +71,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
@@ -83,17 +82,11 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
 
-        def disableAssignmentExclusivityTimeout(d: InitializedSynchronizer): Unit =
-          d.synchronizerOwners.foreach(
-            _.topology.synchronizer_parameters
-              .propose_update(
-                d.synchronizerId,
-                _.update(assignmentExclusivityTimeout = ConfigNonNegativeFiniteDuration.Zero),
-              )
-          )
+        def disableAutomaticAssignment(d: InitializedSynchronizer): Unit =
+          AutomaticAssignment.disable(d.synchronizerOwners, d.synchronizerId)
 
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(daName))
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(acmeName))
+        disableAutomaticAssignment(getInitializedSynchronizer(daName))
+        disableAutomaticAssignment(getInitializedSynchronizer(acmeName))
 
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
@@ -193,7 +186,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
                 )
               )
             )
-            .futureValue shouldBe None
+            .futureValueUS shouldBe None
 
           val unassignmentTs = CantonTimestamp
             .fromProtoTimestamp(unassignmentCompletion.synchronizerTime.value.recordTime.value)

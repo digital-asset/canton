@@ -487,24 +487,28 @@ class ValidatingTopologySnapshot(
 
   override private[client] def loadActiveParticipantsOf(
       party: PartyId,
+      view: BaseTopologySnapshot.HostingView,
       participantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[PartyTopologySnapshotClient.PartyInfo] =
-    verify(s"loadActiveParticipantsOf $party")(_.loadActiveParticipantsOf(party, participantStates))
+    verify(s"loadActiveParticipantsOf $party $view")(
+      _.loadActiveParticipantsOf(party, view, participantStates)
+    )
 
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
+      view: BaseTopologySnapshot.HostingView,
       loadParticipantStates: Seq[ParticipantId] => FutureUnlessShutdown[
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PartyId, PartyTopologySnapshotClient.PartyInfo]] =
-    verify(s"loadBatchActiveParticipantsOf $parties")(
-      _.loadBatchActiveParticipantsOf(parties, loadParticipantStates)
+    verify(s"loadBatchActiveParticipantsOf $parties $view")(
+      _.loadBatchActiveParticipantsOf(parties, view, loadParticipantStates)
     )
 
   override def inspectKnownParties(filterParty: String, filterParticipant: String, limit: Int)(

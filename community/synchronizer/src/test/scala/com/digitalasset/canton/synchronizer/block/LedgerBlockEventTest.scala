@@ -64,7 +64,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
         .deserializeSignedSubmissionRequest(
           testedProtocolVersion,
           defaultDecompressionPolicy,
-          SynchronizerLimits.defaultFor(testedProtocolVersion),
+          SynchronizerLimits.default,
         )(
           byteString
         )
@@ -77,7 +77,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
       LedgerBlockEvent.deserializeSignedSubmissionRequest(
         testedProtocolVersion,
         DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.zero)),
-        SynchronizerLimits.defaultFor(testedProtocolVersion),
+        SynchronizerLimits.default,
       )(
         byteString
       ) shouldBe Left(
@@ -91,7 +91,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
           .fromRawBlockEvent(
             testedProtocolVersion,
             defaultDecompressionPolicy,
-            SynchronizerLimits.defaultFor(testedProtocolVersion),
+            SynchronizerLimits.default,
           )(
             RawBlockEvent.Send(byteString, 0, sequencer.toProtoPrimitive)
           )

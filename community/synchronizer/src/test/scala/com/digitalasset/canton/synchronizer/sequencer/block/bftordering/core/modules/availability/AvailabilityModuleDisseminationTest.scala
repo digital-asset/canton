@@ -98,7 +98,7 @@ class AvailabilityModuleDisseminationTest
           epochNumber,
         )
 
-        verify(availabilityStore, times(1)).addBatch(BatchId.from(batch), batch)
+        verify(availabilityStore, times(1)).addBatch(BatchId.from(batch, logger), batch)
       }
     }
   }
@@ -421,7 +421,7 @@ class AvailabilityModuleDisseminationTest
         ),
         log => {
           log.level shouldBe Level.WARN
-          log.message should include("BatchId doesn't match digest")
+          log.message should include("doesn't match computed batch ID")
         },
       )
 
@@ -545,7 +545,11 @@ class AvailabilityModuleDisseminationTest
       loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch
-            .create(BatchId.from(tooFarInTheFutureBatch), tooFarInTheFutureBatch, from = Node1)
+            .create(
+              BatchId.from(tooFarInTheFutureBatch, logger),
+              tooFarInTheFutureBatch,
+              from = Node1,
+            )
         ),
         log => {
           log.level shouldBe Level.INFO
@@ -572,7 +576,7 @@ class AvailabilityModuleDisseminationTest
           Seq(anOrderingRequest, anOrderingRequest),
           anEpochNumber,
         )
-      val secondBatchId = BatchId.from(secondBatch)
+      val secondBatchId = BatchId.from(secondBatch, logger)
 
       val availability =
         createAndStartAvailability[ProgrammableUnitTestEnv](

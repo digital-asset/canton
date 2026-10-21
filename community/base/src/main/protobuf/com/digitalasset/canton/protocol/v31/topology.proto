@@ -25,9 +25,14 @@ import "scalapb/scalapb.proto";
 //  - removing a signing key: party namespace
 //  - changing the signing key threshold: party namespace
 //  - upgrading a participant permission or adding a new participant: namespaces from party and the participant namespace
+//    - exception: adding a participant in the Nominated state requires only the party namespace
 //  - downgrading a participant permission or removing a participant: party namespace OR the participant namespace
-//  - changing a participant's state to ONBOARDING: party namespace
-//  - changing a participant's state from ONBOARDING: participant namespace
+//  - moving a participant's hosting state forward (Nominated < Freezing < Onboarding < Active, states may be skipped):
+//    participant namespace
+//  - moving a participant's hosting state backward: party namespace, but validation rejects it whoever signs;
+//    a restart is a removal followed by a new nomination
+//    - Active -> Onboarding (setting the onboarding flag on a participant that already hosts the party) is such a
+//      backward move. In v30 it remains accepted with the party namespace.
 //  - the removal of a PTP must be authorized just by the party
 // revocation: Revoking a self-signed PTP does not prevent later re-creation of a PTP with the same partyId.
 //  To prevent further usage of the key associated with the party's namespace,
@@ -37,15 +42,15 @@ message PartyToParticipant {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   message HostingParticipant {
-    // The hosting states a participant moves through when it replicates the party,
-    // in the order NOMINATED, FREEZING, ONBOARDING, ACTIVE.
+    // The hosting states of a participant for the party, in their forward order:
+    // Nominated, Freezing, Onboarding, Active.
     enum HostingState {
       HOSTING_STATE_UNSPECIFIED = 0;
 
-      // the party has nominated the participant to host it; the participant has not yet started to replicate the party
+      // the party has nominated the participant to host it; the participant does not host the party yet
       HOSTING_STATE_NOMINATED = 1;
 
-      // the participant replicates the party's active contract set; the party is frozen while any participant is in this state
+      // the participant does not host the party yet; the party is frozen while any participant is in this state
       HOSTING_STATE_FREEZING = 2;
 
       // the participant receives the party's events but does not confirm (equivalent to the v30 onboarding flag)
@@ -81,7 +86,7 @@ message PartyToParticipant {
 
   // Contains protocol signing keys for the party used to authorize externally signed Daml transactions,
   // along with a signing threshold.
-  // The max number of keys is 20
+  // The max number of keys is the synchronizer's max_signing_keys_per_entity topology limit
   optional com.digitalasset.canton.crypto.v30.SigningKeysWithThreshold party_signing_keys = 4;
 }
 

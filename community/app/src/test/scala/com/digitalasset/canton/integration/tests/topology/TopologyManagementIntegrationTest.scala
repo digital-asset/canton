@@ -547,7 +547,11 @@ final class TopologyManagementIntegrationTest
       )
 
       PartyToKeyMapping
-        .fromProtoV30(testedProtocolVersionValidation, ptkProto)
+        .fromProtoV30(
+          testedProtocolVersionValidation,
+          testedTopologyLimits,
+          ptkProto,
+        )
         .isRight shouldBe true
     }
 
@@ -574,7 +578,11 @@ final class TopologyManagementIntegrationTest
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptkMappingDeserialized = deserialized.mapping.select[PartyToKeyMapping].value
       ptkMappingDeserialized.signingKeys.forgetNE should have size 1
       ptkMappingDeserialized.signingKeys.forgetNE.toSeq should contain theSameElementsAs Seq(
@@ -629,7 +637,11 @@ final class TopologyManagementIntegrationTest
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptpMappingDeserialized = deserialized.mapping.select[PartyToParticipant].value
       val hosting = ptpMappingDeserialized.participants
       hosting should have size 1

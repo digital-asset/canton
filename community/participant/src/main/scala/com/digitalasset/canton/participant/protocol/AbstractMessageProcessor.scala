@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
@@ -31,7 +32,6 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientSend,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId, Recipients}
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, LoggerUtil}
@@ -45,7 +45,6 @@ abstract class AbstractMessageProcessor(
     ephemeral: SyncEphemeralState,
     crypto: SynchronizerCryptoClient,
     sequencerClient: SequencerClientSend,
-    clock: Clock,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
@@ -82,19 +81,45 @@ abstract class AbstractMessageProcessor(
   protected def signResponses(
       ips: SynchronizerSnapshotSyncCryptoApi,
       responses: ConfirmationResponses,
+      now: CantonTimestamp,
+      maxSequencingTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SignedProtocolMessage[ConfirmationResponses]] =
     SignedProtocolMessage.trySignAndCreate(
       responses,
       ips,
-      None, // `ConfirmationResponses` are always signed with a `fixed` timestamp.
+      Some(
+        SigningTimestampOverrides(
+          approximateTimestamp = now,
+          validityPeriodEnd = Some(maxSequencingTime),
+        )
+      ),
     )
+
+  protected def maxSequencingTimeForConfirmationResponse(
+      requestId: RequestId,
+      currentSnapshotApproximation: SynchronizerSnapshotSyncCryptoApi,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[CantonTimestamp] =
+    // TODO(#36493): Check if we should replace this with findDynamicSynchronizerParameters
+    currentSnapshotApproximation.ipsSnapshot
+      .findDynamicSynchronizerParametersOrDefault(crypto.protocolVersion)
+      .map(synchronizerParameters =>
+        requestId.unwrap.add(synchronizerParameters.confirmationResponseTimeout.unwrap)
+      )
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(
       requestId: RequestId,
       messages: Seq[(ProtocolMessage, Recipients)],
+      // Both the snapshot and signing timestamp should be the same as those used to sign the inner
+      // `SignedProtocolMessage`. This helps prevent using two different session signing keys for the
+      // inner and outer signatures, and avoids unexpected validation errors during sequencer verification
+      // in `SubmissionRequestValidator.prevalidateEvent`.
+      currentSnapshotApproximation: SynchronizerSnapshotSyncCryptoApi,
+      // refers to the `clock.now` at the time of signing the responses
+      approximateTimestampForSigning: CantonTimestamp,
+      maxSequencingTime: CantonTimestamp,
       // use client.messageId. passed in here such that we can log it before sending
       messageId: Option[MessageId] = None,
   )(implicit
@@ -108,55 +133,46 @@ abstract class AbstractMessageProcessor(
       logger.trace(s"Request $requestId: ProtocolProcessor scheduling the sending of responses")
       def errorBody = s"Request $requestId: Failed to send responses"
 
-      for {
-        synchronizerParameters <- crypto.ips
-          .awaitSnapshot(requestId.unwrap)
-          .flatMap(snapshot =>
-            snapshot.findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
-          )
-
-        maxSequencingTime = requestId.unwrap.add(
-          synchronizerParameters.confirmationResponseTimeout.unwrap
+      val sendResult = sequencerClient
+        .sendAsync(
+          Batch.of(psid.protocolVersion, messages*),
+          currentSnapshotApproximation = Some(currentSnapshotApproximation),
+          timestamps = SendRequestTimestamps(
+            // We reuse the same `approximateTimestampForSigning` used to sign the inner response message, so that both
+            // signatures are computed as of the same approximate time (and thus consistently pick
+            // the same session signing key, if any).
+            approximateTimestampForSigning = approximateTimestampForSigning,
+            maxSequencingTime = maxSequencingTime,
+          ),
+          messageId = messageId.getOrElse(MessageId.randomMessageId()),
+          callback = SendCallback.log(s"Response message for request [$requestId]", logger),
+          trafficCostValidator = SequencerClient.TrafficCostValidator.NoTrafficCostValidation,
+          amplify = true,
+          // We want to use a shorter patience for the confirmation responses
+          useConfirmationResponseAmplificationParameters = true,
         )
 
-        sendResult = sequencerClient
-          .sendAsync(
-            Batch.of(psid.protocolVersion, messages*),
-            timestamps = SendRequestTimestamps(
-              // We use `clock.now` to stay consistent with how other submission requests are signed.
-              approximateTimestampForSigning = clock.now,
-              maxSequencingTime = maxSequencingTime,
-            ),
-            messageId = messageId.getOrElse(MessageId.randomMessageId()),
-            callback = SendCallback.log(s"Response message for request [$requestId]", logger),
-            trafficCostValidator = SequencerClient.TrafficCostValidator.NoTrafficCostValidation,
-            amplify = true,
-            // We want to use a shorter patience for the confirmation responses
-            useConfirmationResponseAmplificationParameters = true,
+      /*
+       Swallow Left errors to avoid stopping request processing, as sending response could fail for arbitrary reasons
+       if the sequencer rejects them (e.g. max sequencing time has elapsed).
+
+       Discard the inner future (actual send) and wait only on the outer future.
+       As a result, we don't wait on the send of confirmation responses.
+       */
+      sendResult.value.value.map {
+        case Left(err) =>
+          logger.warn(s"$errorBody: ${err.show}")
+
+        case Right(inner: EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]) =>
+          FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+            inner.valueOr { err =>
+              LoggerUtil
+                .logAtLevel(SendAsyncClientError.logLevel(err), s"$errorBody: ${err.show}")
+            },
+            failureMessage = errorBody,
+            level = Level.INFO,
           )
-
-        /*
-        Swallow Left errors to avoid stopping request processing, as sending response could fail for arbitrary reasons
-        if the sequencer rejects them (e.g. max sequencing time has elapsed).
-
-         Discard the inner future (actual send) and wait only on the outer future.
-         As a result, we don't wait on the send of confirmation responses.
-         */
-        _ <- sendResult.value.value.map {
-          case Left(err) =>
-            logger.warn(s"$errorBody: ${err.show}")
-
-          case Right(inner: EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit]) =>
-            FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-              inner.valueOr { err =>
-                LoggerUtil
-                  .logAtLevel(SendAsyncClientError.logLevel(err), s"$errorBody: ${err.show}")
-              },
-              failureMessage = errorBody,
-              level = Level.INFO,
-            )
-        }
-      } yield ()
+      }
     }
   }
 

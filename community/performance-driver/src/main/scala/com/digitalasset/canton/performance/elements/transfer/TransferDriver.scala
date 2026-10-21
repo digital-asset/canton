@@ -292,6 +292,8 @@ class TransferDriver(
   ): Boolean = if (ready.get() && !masterChanged.get())
     updateParticipantFlagAndReturnReady(master, processedAllIssuers = true)
   else {
+    // Update so the following queries to rate.available observe an updated value
+    rate.updateRate(CantonTimestamp.now())
     initExisting()
     val havePreapprovals = createTransferPreapprovals(master.data.traders.asScala.toSeq)
     val haveAssets =

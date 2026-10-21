@@ -7,7 +7,11 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.{LoggingConfig, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CachingConfigs,
+  LoggingConfig,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.*
@@ -15,6 +19,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.{CommonMockMetrics, TransactionViewMetrics}
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.{
   ParticipantAuthorizationError,
@@ -193,6 +198,8 @@ trait TransactionConfirmationRequestFactoryTest
       ] = ???
 
       override def saltsFromView(view: TransactionView): Iterable[Salt] = ???
+
+      override def metrics: TransactionViewMetrics = CommonMockMetrics.transactionViewMetrics
     }
 
     // we force view requests to be handled sequentially, which makes results deterministic and easier to compare
@@ -366,6 +373,7 @@ trait TransactionConfirmationRequestFactoryTest
           ResourceUtil.withResourceM(
             new SessionKeyStoreWithInMemoryCache(
               SessionEncryptionKeyCacheConfig(),
+              CachingConfigs.defaultTransparencyCheckCache,
               timeouts,
               loggerFactory,
             )
@@ -459,6 +467,7 @@ trait TransactionConfirmationRequestFactoryTest
           // we use the same store for two requests to simulate what would happen in a real scenario
           new SessionKeyStoreWithInMemoryCache(
             SessionEncryptionKeyCacheConfig(),
+            CachingConfigs.defaultTransparencyCheckCache,
             timeouts,
             loggerFactory,
           )
@@ -496,6 +505,7 @@ trait TransactionConfirmationRequestFactoryTest
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
             SessionEncryptionKeyCacheConfig(),
+            CachingConfigs.defaultTransparencyCheckCache,
             timeouts,
             loggerFactory,
           )
@@ -541,6 +551,7 @@ trait TransactionConfirmationRequestFactoryTest
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
             SessionEncryptionKeyCacheConfig(),
+            CachingConfigs.defaultTransparencyCheckCache,
             timeouts,
             loggerFactory,
           )
@@ -582,6 +593,7 @@ trait TransactionConfirmationRequestFactoryTest
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
             SessionEncryptionKeyCacheConfig(),
+            CachingConfigs.defaultTransparencyCheckCache,
             timeouts,
             loggerFactory,
           )
@@ -621,6 +633,7 @@ trait TransactionConfirmationRequestFactoryTest
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
             SessionEncryptionKeyCacheConfig(),
+            CachingConfigs.defaultTransparencyCheckCache,
             timeouts,
             loggerFactory,
           )

@@ -104,12 +104,9 @@ jobs:
           network-mode: host
 
       - name: Set Canton Protocol Version
-        env:
-          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
-        run: |
-          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
-          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
-        shell: bash
+        uses: ./.github/actions/test/set_canton_protocol_version
+        with:
+          protocol_version: ${{ inputs.protocol_version }}
 
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings

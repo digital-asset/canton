@@ -78,6 +78,7 @@ import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.platform.apiserver.services.tracking.StreamTracker
 import com.digitalasset.canton.platform.apiserver.update
 import com.digitalasset.canton.platform.apiserver.update.PartyRecordUpdateMapper
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
@@ -790,6 +791,7 @@ private[apiserver] final class ApiPartyManagementService private (
           // Note that pinning to a protocol version makes it not possible to use transactions
           // generated with an earlier protocol version (e.g in between synchronizer updates)
           ProtocolVersionValidation(protocolVersion),
+          TopologyTransactionDeserializationContext(SynchronizerLimits.default),
           signedTransaction.transaction,
         )
         .leftMap(error =>
