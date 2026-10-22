@@ -1,0 +1,20 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.sequencer.admin.v31;
+
+import "com/digitalasset/canton/sequencer/admin/v31/sequencer_initialization_snapshot.proto";
+import "scalapb/scalapb.proto";
+
+// Difference with v30:
+// - SequencerSnapshot is updated from v30 to v31
+message OnboardingStateForSequencerV2 {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  // versioned com.digitalasset.canton.topology.admin.v30.TopologyTransactions.Item
+  optional bytes topology_transaction = 1;
+  optional bytes static_synchronizer_parameters = 2;
+  SequencerSnapshot sequencer_snapshot = 3;
+}

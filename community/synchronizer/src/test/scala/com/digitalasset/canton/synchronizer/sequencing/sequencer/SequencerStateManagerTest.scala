@@ -122,14 +122,20 @@ class SequencerStateManagerTest
   @unused
   private lazy val aggregationId1 =
     aggregationRequest1Bob.content
-      .aggregationId(topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto)
+      .aggregationId(
+        topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto,
+        testedProtocolVersion,
+      )
       .value
   private lazy val aggregationRule2 = AggregationRule.senderDedup(testedProtocolVersion)
   private lazy val aggregationRequest2 = aggregationRequestFor(alice, aggregationRule2).futureValue
   @unused
   private lazy val aggregationId2 =
     aggregationRequest2.content
-      .aggregationId(topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto)
+      .aggregationId(
+        topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto,
+        testedProtocolVersion,
+      )
       .value
 
   private lazy val aggregationRequest3Alice =
@@ -137,7 +143,10 @@ class SequencerStateManagerTest
   @unused
   private lazy val aggregationId3 =
     aggregationRequest3Alice.content
-      .aggregationId(topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto)
+      .aggregationId(
+        topologyTransactionFactory.syncCryptoClient.crypto.pureCrypto,
+        testedProtocolVersion,
+      )
       .value
 
   private def withEnv[T](

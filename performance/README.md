@@ -216,6 +216,57 @@ What do you need to do next?
 
 Remember, you can always just exit the screen out using `CTRL-a d`. Don't exit the console ...
 
+### Resume the Process
+
+If the process has been stopped, you can resume it the same way from the screen, by calling the run script again:
+
+```
+./performance/run.sh ...
+```
+
+However, it will reuse the party ids from the beginning. If you want to resume where it left off, get the latest party number (or close to it), either by checking the logs or the `canton_performance_parties_allocated` metric. Then, set the env variable:
+
+```
+export ALLOCATED_PARTY_INITIAL_NUMBER=...
+```
+
+and then run the script again:
+
+```
+./performance/run.sh ...
+```
+
+### Speeding up the party growth
+
+1. Basic: change the `partyGrowthFactor` in `LongRunning.startup` (`performance.canton` script) to 1.
+2. More advanced (if you care only about party growth): change `enableLightweightParticipants` to `true`. Then run the following:
+
+```
+@ disable
+
+@ psc.get.addParticipants(1)
+res1: Int = 1
+
+@ psc.get.addParties(<nb_of_parties>, PositiveInt.tryCreate(500))
+```
+
+We need at least one participant to add parties. The number of parties can be large (tested with 1M). When running in screen, it can be left hanging.
+
+The second approach can speed up the party growth about 40 times. Parallelism above 500 gives only diminishing returns.
+
+Parties created with the second approach are not reflected in the `canton_performance_parties_allocated` metric (they have their own naming).
+
+Setting this config also helps (`participant.conf`):
+
+```
+participant {
+  topology {
+    dispatch-queue-backpressure-limit = 10000
+    broadcast-batch-size = 1000
+  }
+}
+```
+
 ## How to run with TLS
 
 By default, we copy the test certs we have from `community/app/src/test/resources/tls` into the performance tar

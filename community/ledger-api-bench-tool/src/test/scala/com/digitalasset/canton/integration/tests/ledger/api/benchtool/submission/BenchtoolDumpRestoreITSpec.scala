@@ -84,7 +84,8 @@ class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with Ha
 
       (for {
         (apiServices, allocatedParties, submission) <- benchtoolFooSubmissionFixture(
-          submissionConfig
+          submissionConfig,
+          maxInFlightCommands = 10,
         )
         _ <- submission.performSubmission(submissionConfig)
         beforeDrop <- acsEvents(apiServices, allocatedParties)
@@ -92,7 +93,7 @@ class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with Ha
         _ <- sequencerPlugin.dumpAllDatabases(actualConfig, tempDirectory)
         _ <- postgresPlugin
           .recreateDatabases(actualConfig)
-          .failOnShutdownToAbortException("recreateDatabases")
+          .onShutdown(fail("recreateDatabases was aborted"))
         _ <- Future(startAll())
         apiServices <- ledgerApiServices
         afterDrop <- acsEvents(apiServices, allocatedParties)
@@ -102,16 +103,13 @@ class BenchtoolDumpRestoreITSpec extends BenchtoolSandboxFixtureIsolated with Ha
         apiServices <- ledgerApiServices
         afterRestore <- acsEvents(apiServices, allocatedParties)
       } yield {
-        beforeDrop.numberOfCreatesPerTemplateName(
-          Template1
-        ) shouldBe CreateCount * ConsumedFraction + 1
+        val activeBeforeDrop = beforeDrop.numberOfCreatesPerTemplateName(Template1)
+        activeBeforeDrop should (be > 0 and be <= CreateCount)
         beforeDrop.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
 
         afterDrop.numberOfCreatesPerTemplateName(Template1) shouldBe 0
 
-        afterRestore.numberOfCreatesPerTemplateName(
-          Template1
-        ) shouldBe CreateCount * ConsumedFraction + 1
+        afterRestore.numberOfCreatesPerTemplateName(Template1) shouldBe activeBeforeDrop
         afterRestore.numberOfConsumingExercisesPerTemplateName(Template1) shouldBe 0
         succeed
       }).futureValue

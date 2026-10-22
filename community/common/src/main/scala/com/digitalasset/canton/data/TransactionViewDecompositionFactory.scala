@@ -7,11 +7,13 @@ import cats.data.{Chain, EitherT}
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.TransactionViewDecompositionFactory.RollbackState.firstChild
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.TransactionViewMetrics
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.ParticipantId
@@ -37,16 +39,6 @@ case object TransactionViewDecompositionFactory {
   final case class TransactionSubViewLimitExceeded(subViewCount: Int, limit: Int)
       extends TransactionViewLimitExceeded {
     val message: String = s"Number of subviews for a transaction exceeded $limit"
-  }
-
-  /** @param rootViewCount
-    *   number of root views that we generated from a transaction
-    * @param limit
-    *   maximum number of root views that a transaction may generate
-    */
-  final case class TransactionRootViewLimitExceeded(rootViewCount: Int, limit: Int)
-      extends TransactionViewLimitExceeded {
-    val message: String = s"Number of root views for a transaction exceeded $limit"
   }
 
   /** @param depth
@@ -251,23 +243,28 @@ case object TransactionViewDecompositionFactory {
   @SuppressWarnings(Array("org.wartremover.warts.SizeIs"))
   private def checkTransactionViewLimits(
       views: Seq[NewView],
-      optLimitConfig: Option[TransactionViewLimitConfig],
+      optLimits: Option[TransactionProtocolLimits],
+      metrics: TransactionViewMetrics,
   ): Either[TransactionViewLimitExceeded, Seq[NewView]] =
     // TODO (#35479): Inline Transaction View Limit Checking
-    optLimitConfig.fold[Either[TransactionViewLimitExceeded, Seq[NewView]]](Right(views)) {
-      limitConfig =>
-        def checkSubViewLimits(view: NewView): Either[TransactionViewLimitExceeded, NewView] =
-          if (view.viewCount > limitConfig.maxSubViews.value) {
-            Left(TransactionSubViewLimitExceeded(view.viewCount, limitConfig.maxSubViews.value))
-          } else {
-            Right(view)
-          }
+    optLimits.fold[Either[TransactionViewLimitExceeded, Seq[NewView]]](Right(views)) { limits =>
+      implicit val mc: MetricsContext = MetricsContext.Empty
 
-        if (views.length > limitConfig.maxRootViews.value) {
-          Left(TransactionRootViewLimitExceeded(views.length, limitConfig.maxRootViews.value))
+      val maxSubViews = limits.maxTransactionSubViews.value
+      val largestSubView = views.map(_.viewCount).maxOption
+
+      def checkSubViewLimits(view: NewView): Either[TransactionViewLimitExceeded, NewView] =
+        if (view.viewCount > maxSubViews) {
+          Left(TransactionSubViewLimitExceeded(view.viewCount, maxSubViews))
         } else {
-          views.traverse(checkSubViewLimits)
+          Right(view)
         }
+
+      largestSubView.foreach { viewCount =>
+        metrics.subViews.updateValue(viewCount)
+      }
+
+      views.traverse(checkSubViewLimits)
     }
 
   def fromTransaction(
@@ -276,7 +273,8 @@ case object TransactionViewDecompositionFactory {
       viewRbContext: RollbackContext,
       submittingAdminPartyO: Option[LfPartyId],
       factory: RollbackContextFactory,
-      limitConfig: Option[TransactionViewLimitConfig],
+      limits: Option[TransactionProtocolLimits],
+      metrics: TransactionViewMetrics,
   )(implicit
       ec: ExecutionContext,
       tc: TraceContext,
@@ -289,7 +287,7 @@ case object TransactionViewDecompositionFactory {
         submittingAdminPartyO,
         factory,
       )
-        .map(checkTransactionViewLimits(_, limitConfig))
+        .map(checkTransactionViewLimits(_, limits, metrics))
     )
 
   // This method is unsafe because it does not check the transaction view limits. Use `fromTransaction` instead.

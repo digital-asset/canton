@@ -75,6 +75,7 @@ class MockKmsDriver(
           s"KMS operation: $operation",
           (a: A) => s"KMS operation `$operation` succeeded with result: $a",
         )(result)
+        // Recovered in DriverKms.monitor
         .failOnShutdownToAbortException(operation)
         .leftMap { err =>
           KmsDriverException(

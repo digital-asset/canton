@@ -190,12 +190,12 @@ final class SequencerConnectionPoolMetricsIntegrationTest
                   val endpointsWithoutPsid = Seq(
                     "DownloadTopologyStateForInit",
                     "DownloadTopologyStateForInitHash",
+                    "GetTrafficStateForMember",
+                    "GetTime",
                   )
 
                   val endpointsNotCalled = Seq(
-                    "Logout",
-                    "GetTime",
-                    "GetTrafficStateForMember",
+                    "Logout"
                   )
 
                   forAll(metricsPerEndPoint) {

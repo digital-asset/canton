@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
 /** Core data model for traffic accounting used by the projection and its persistence layer.
@@ -22,12 +23,14 @@ import slick.jdbc.{GetResult, SetParameter}
   *     the total credits or the total debits column (see `debitAndCreditDeltas`). This keeps
   *     credits and debits auditable independently while still allowing negative values (clawbacks /
   *     refunds).
-  *   - [[DeltaEvent]] wraps a [[TrafficDelta]] with the metadata needed to persist and interpret
-  *     it: the CantonTimestamp and the [[EventSource]] (where the event originated, e.g. Ledger API
-  *     completions or the TEA API).
-  *   - [[OffsetDeltaEvent]] adds the input-stream `offset`, and [[ProjectionEvent]] ties that event
-  *     to an [[AccountId]]. These are the units flowing through the ingestion sources and the Pekko
-  *     projection.
+  *   - [[DeltaEvent]] is a persisted event as read back from the store: a [[TrafficDelta]] with its
+  *     CantonTimestamp and [[EventSource]] (where the event originated, e.g. Ledger API
+  *     completions, Daml top-ups or the TEA API).
+  *   - [[AccountDelta]] ties a [[TrafficDelta]] to an [[AccountId]]. Each account delta is
+  *     persisted as one event.
+  *   - [[ProjectionEvent]] groups one or more [[AccountDelta]] under the offset and timestamp of
+  *     the input stream element they come from. All its account deltas are persisted in the same
+  *     database transaction as the offset.
   *   - [[AccountState]] is the derived, cumulative view: total debits, total credits and the last
   *     update time for an account, with `balance = totalCredits - totalDebits`.
   */
@@ -74,12 +77,14 @@ final case class TrafficDelta(value: Long, eventType: EventType) extends PrettyP
   }
 }
 
-/** Event changing the balance of an account
+/** Persisted event that changed the balance of an account
   *
   * @param delta
-  *   delta to apply to the balance
+  *   delta applied to the balance
   * @param timestamp
   *   timestamp of the event
+  * @param eventSource
+  *   source the event originated from
   */
 final case class DeltaEvent(
     delta: TrafficDelta,
@@ -98,21 +103,51 @@ object DeltaEvent {
   }
 }
 
-/** Delta event with an offset
-  * @param deltaEvent
-  *   delta event
-  * @param offset
-  *   offset of the event
-  */
-final case class OffsetDeltaEvent(deltaEvent: DeltaEvent, offset: Long)
-
-/** A projection event coming from an input stream
+/** Delta to apply to a single account
   * @param account
   *   account tied to the event
-  * @param event
-  *   event
+  * @param delta
+  *   delta to apply to the balance
   */
-final case class ProjectionEvent(account: AccountId, event: OffsetDeltaEvent)
+final case class AccountDelta(account: AccountId, delta: TrafficDelta)
+
+sealed trait ProjectionEvent {
+
+  /** offset of the event in the input stream */
+  def offset: Long
+
+  /** timestamp of the event */
+  def timestamp: CantonTimestamp
+
+  /** deltas to apply to the account state. Their order must be deterministic for a given offset, as
+    * it determines the event ids (see [[deltasWithEventIds]]).
+    */
+  def deltasWithEventIds(projectionId: String): Seq[(AccountDelta, EventId)]
+}
+
+object ProjectionEvent {
+  final case class Single(
+      offset: Long,
+      timestamp: CantonTimestamp,
+      delta: AccountDelta,
+  ) extends ProjectionEvent {
+    override def deltasWithEventIds(projectionId: String): Seq[(AccountDelta, EventId)] =
+      Seq(delta -> EventId.tryCreate(s"$projectionId-$offset"))
+  }
+
+  final case class Multiple(
+      offset: Long,
+      timestamp: CantonTimestamp,
+      deltas: NonEmpty[Map[Int, AccountDelta]],
+  ) extends ProjectionEvent {
+    override def deltasWithEventIds(p: String): Seq[(AccountDelta, EventId)] =
+      deltas.toSeq.map { case (k, d) => d -> EventId.tryCreate(s"$p-$offset-$k") }
+  }
+
+  final case class Checkpoint(offset: Long, timestamp: CantonTimestamp) extends ProjectionEvent {
+    override def deltasWithEventIds(projectionId: String): Seq[(AccountDelta, EventId)] = Seq.empty
+  }
+}
 
 /** State of an account at a given point
   * @param account
@@ -231,7 +266,11 @@ object EventSource {
     */
   case object TeaAPI extends EventSource(1)
 
-  val values: Set[EventSource] = Set(LedgerAPICompletions, TeaAPI)
+  /** Events coming from the Daml TopUp contracts
+    */
+  case object DamlTopUp extends EventSource(2)
+
+  val values: Set[EventSource] = Set(LedgerAPICompletions, TeaAPI, DamlTopUp)
 
   private def fromCode(code: Short): EventSource =
     values

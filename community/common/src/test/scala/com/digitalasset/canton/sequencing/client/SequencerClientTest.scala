@@ -49,7 +49,6 @@ import com.digitalasset.canton.protocol.{
   StaticSynchronizerParameters,
   SynchronizerParametersLookup,
   TestSynchronizerParameters,
-  v31,
   v32,
 }
 import com.digitalasset.canton.sequencing.*
@@ -130,6 +129,7 @@ import com.digitalasset.canton.version.{
 }
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status
+import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
@@ -1705,6 +1705,8 @@ final class SequencerClientTest
       implicit val metricsContext: MetricsContext = MetricsContext.Empty
       client.send(
         batch,
+        // we send fake unsigned messages in the tests, so we let the sequencer client retrieve the latest snapshot itself.
+        currentSnapshotApproximation = None,
         messageId = messageId,
         amplify = amplify,
         useConfirmationResponseAmplificationParameters =
@@ -1811,13 +1813,6 @@ final class SequencerClientTest
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]] = ???
 
-    override def downloadTopologyStateForInit(
-        request: TopologyStateForInitRequest,
-        timeout: Duration,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] = ???
-
     private val subscriberRef = new AtomicReference[Option[Subscriber[?]]](None)
 
     // When using a parallel execution context, the order of asynchronous operations within the SequencerClient
@@ -1896,6 +1891,12 @@ final class SequencerClientTest
         : SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
       SubscriptionErrorRetryPolicyPekko.never
 
+    override def streamTopologyStateForInit(
+        request: TopologyStateForInitRequest,
+        timeout: Duration,
+    )(implicit
+        traceContext: TraceContext
+    ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] = ???
   }
 
   private class MockPool(clock: SimClock, firstSendAsyncResponseO: Option[SendAsyncResponse])
@@ -2133,9 +2134,6 @@ final class SequencerClientTest
 
     override protected val companionObj: AnyRef = TestProtocolMessage
 
-    override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-      v31.EnvelopeContent.SomeEnvelopeContent.Empty
-
     override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
       v32.EnvelopeContent.SomeEnvelopeContent.Empty
 
@@ -2229,6 +2227,7 @@ final class SequencerClientTest
         None,
         replayConfigO = None,
         topologyClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         LoggingConfig(),
         Some(trafficStateController),
         exitOnFatalErrors = mockExitOnFatalErrorO.nonEmpty, // only "exit" when exit mock specified
@@ -2338,6 +2337,7 @@ final class SequencerClientTest
         None,
         replayEnabled = false,
         topologyClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         LoggingConfig(),
         Some(trafficStateController),
         exitOnTimeout = false,

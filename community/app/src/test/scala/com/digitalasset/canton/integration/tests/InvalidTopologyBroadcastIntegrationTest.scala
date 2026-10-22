@@ -45,9 +45,11 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllMappings,
   CanSignSpecificMappings,
 }
+import com.digitalasset.canton.topology.transaction.KeyMapping.MaxKeys
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Replace}
 import com.digitalasset.canton.topology.{Member, PartyId}
 import com.digitalasset.canton.util.{MaliciousParticipantNode, SingleUseCell}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
@@ -193,7 +195,6 @@ class InvalidTopologyBroadcastIntegrationTest
       )
 
       // This will be rejected, as there is no authorization chain to the root certificate for newKey
-      // TODO(#19737): a security alert should be emitted and observed here as well
       registerTopologyMapping(
         namespaceDelegation,
         signedBy = newKey.fingerprint,
@@ -394,6 +395,13 @@ class InvalidTopologyBroadcastIntegrationTest
     "not send OTK or PTK with more than the allowed keys" in { implicit env =>
       import env.*
 
+      val maxKeys =
+        if (testedProtocolVersion >= ProtocolVersion.newBoundsOnPV37)
+          testedTopologyLimits.maxSigningKeysPerEntity.unwrap
+        else MaxKeys.unwrap
+
+      val expectedRejection = s"exceeding the maximum of $maxKeys"
+
       def submitAndAssertWarning(mapping: TopologyMapping): Unit =
         clue(s"submitting toxic ${mapping.code}") {
           loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
@@ -409,27 +417,21 @@ class InvalidTopologyBroadcastIntegrationTest
                 (
                   entry => {
                     entry.shouldBeCantonErrorCode(SyncServiceAlarm)
-                    entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
-                    )
+                    entry.warningMessage should include(expectedRejection)
                   },
                   "warning on participant",
                 ),
                 (
                   entry => {
                     entry.shouldBeCantonErrorCode(MalformedMessage)
-                    entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
-                    )
+                    entry.warningMessage should include(expectedRejection)
                   },
                   "warning on mediator",
                 ),
                 (
                   entry => {
                     entry.shouldBeCantonErrorCode(EnvelopeOpenerDeserializationError)
-                    entry.warningMessage should include(
-                      s"At most ${OwnerToKeyMapping.MaxKeys} key(s) can be specified"
-                    )
+                    entry.warningMessage should include(expectedRejection)
                   },
                   "warning on mediator",
                 ),
@@ -438,7 +440,7 @@ class InvalidTopologyBroadcastIntegrationTest
           )
         }
 
-      val tooManyKeys = Set.fill(OwnerToKeyMapping.MaxKeys + 1)(
+      val tooManyKeys = Set.fill(maxKeys + 1)(
         participant1.keys.secret.generate_signing_key(usage = SigningKeyUsage.ProtocolOnly)
       )
 

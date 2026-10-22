@@ -198,7 +198,7 @@ class ParticipantTopologyDispatcher(
               SynchronizerTrustCertificate(
                 participantId,
                 logicalSynchronizerId,
-                requiredFeatureFlagsForPV.toSeq,
+                requiredFeatureFlagsForPV,
               ),
               serial = None,
               signingKeys = Seq.empty,
@@ -450,7 +450,7 @@ private class SynchronizerOnboardingOutbox(
           ): SynchronizerRegistryError,
         )
       )
-      wrongVersion = applicable.filterNot(_.transaction.isEquivalentTo(protocolVersion))
+      wrongVersion = applicable.filterNot(_.transaction.isAdmissibleFor(protocolVersion))
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         Either.cond(
           wrongVersion.isEmpty,

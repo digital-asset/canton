@@ -84,7 +84,6 @@ trait DbLockingSupport extends NamedLogging {
       .createEventStorageBackend(
         ledgerEndCache = MutableLedgerEndCache(),
         stringInterning = new MockStringInterning,
-        loggerFactory = loggerFactory,
       )
 
   private val testDbLockMeta = DbLockMeta(

@@ -28,7 +28,7 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{Storage, StorageSingleFactory}
 import com.digitalasset.canton.store.IndexedStringStore
-import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
+import com.digitalasset.canton.synchronizer.sequencer.{SequencerMemberStatus, SequencerSnapshot}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopologyStoreId
@@ -132,9 +132,11 @@ class TopologyStateVerification(
         status = snapshot.status
           .copy(
             lowerBound = CantonTimestamp.MinValue,
-            members = snapshot.status.members.map(
-              _.copy(lastAcknowledged = None)
-            ),
+            members = snapshot.status.members.map {
+              case m: SequencerMemberStatus.Onboarding => m
+              case m: SequencerMemberStatus.Active => m.copy(lastAcknowledged = None)
+              case m: SequencerMemberStatus.Disabled => m.copy(lastAcknowledged = None)
+            },
           )
       )(snapshot.representativeProtocolVersion)
 

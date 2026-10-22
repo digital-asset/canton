@@ -165,6 +165,7 @@ trait SequencerRestartTest extends InFlightAggregationTestHelper { self: Communi
         val callback = SendCallback.future
         val sendAsync = client.send(
           batch,
+          currentSnapshotApproximation = None,
           timestamps = timestamps,
           aggregationRule =
             Some(AggregationRule.activeMediators(MediatorGroupIndex.zero, testedProtocolVersion)),

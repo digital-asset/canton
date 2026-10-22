@@ -60,7 +60,7 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
         val proto = mapping.toProtoPartyToParticipantV31.value
 
         proto shouldBe ptpV31(stateP)
-        PartyToParticipant.fromProtoV31(pvv, proto).value shouldBe mapping
+        PartyToParticipant.fromProtoV31(pvv, testedTopologyLimits, proto).value shouldBe mapping
       }
     }
 
@@ -68,6 +68,7 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
       PartyToParticipant
         .fromProtoV31(
           pvv,
+          testedTopologyLimits,
           ptpV31(v31.PartyToParticipant.HostingParticipant.HostingState.HOSTING_STATE_UNSPECIFIED),
         )
         .left
@@ -78,6 +79,7 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
       PartyToParticipant
         .fromProtoV31(
           pvv,
+          testedTopologyLimits,
           ptpV31(v31.PartyToParticipant.HostingParticipant.HostingState.Unrecognized(42)),
         )
         .left
@@ -86,7 +88,7 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
   }
 
   "PartyToParticipant v30" should {
-    "represent ONBOARDING as the onboarding flag and ACTIVE as no flag" in {
+    "represent Onboarding as the onboarding flag and Active as no flag" in {
       val mapping = ptp(HostingState.Onboarding)
       val proto = mapping.toProtoPartyToParticipantV30.value
 
@@ -107,10 +109,10 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
         ),
         partySigningKeys = None,
       )
-      PartyToParticipant.fromProtoV30(pvv, proto).value shouldBe mapping
+      PartyToParticipant.fromProtoV30(pvv, testedTopologyLimits, proto).value shouldBe mapping
     }
 
-    "reject NOMINATED and FREEZING" in {
+    "reject Nominated and Freezing" in {
       Seq(HostingState.Nominated, HostingState.Freezing).foreach { state =>
         val mapping = ptp(state)
 

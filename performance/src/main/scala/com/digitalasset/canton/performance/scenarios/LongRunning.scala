@@ -77,6 +77,8 @@ object LongRunning {
       pruningRetention: FiniteDuration = 7.days,
       otherSynchronizersRatio: Double = 0.5,
       disableTrafficControl: Boolean = sys.env.contains("DISABLE_TRAFFIC_CONTROL"),
+      allocatedPartyInitialNumber: Long =
+        sys.env.get("ALLOCATED_PARTY_INITIAL_NUMBER").fold(0L)(_.toLong),
   )(implicit
       consoleEnvironment: ConsoleEnvironment
   ): (MissionControl, Option[ParticipantSimulatorController]) = {
@@ -264,6 +266,7 @@ object LongRunning {
       baseSynchronizerId = baseSynchronizer.logical,
       otherSynchronizers = otherSynchronizers.map(_.logical),
       otherSynchronizersRatio = otherSynchronizersRatio,
+      allocatedPartyInitialNumber = allocatedPartyInitialNumber,
     )(consoleEnvironment.environment.executionContext)
 
     onClose.set(Some(() => mc.close()))

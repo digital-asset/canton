@@ -31,16 +31,14 @@ import grpc
 
 def get_topology_module(protocol_version: str):
     """Returns the correct protobuf module based on the protocol version."""
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
+    if protocol_version == "dev" or int(protocol_version) >= 37:
         return topology_v31_pb2
     return topology_v30_pb2
 
 
 def get_topology_version_number(protocol_version: str) -> int:
     """Returns the protobuf version number for UntypedVersionedMessage."""
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
+    if protocol_version == "dev" or int(protocol_version) >= 37:
         return 31
     return 30
 

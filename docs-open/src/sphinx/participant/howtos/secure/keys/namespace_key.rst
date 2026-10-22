@@ -154,7 +154,7 @@ Then, create the self-signed root namespace delegation, which is effectively a s
 as the trust anchor of the given namespace:
 
 .. snippet:: offline_root_namespace_key
-    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --root-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --target-pub-key "/tmp/canton/certs/root_public_key.der" --output "/tmp/canton/certs/root_namespace"
+    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --root-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --target-pub-key "/tmp/canton/certs/root_public_key.der" --protocol-version 36 --output "/tmp/canton/certs/root_namespace"
 
 Note that the root public key must be in the ``x509 SPKI DER`` format. For more information on Canton's supported key
 formats, please refer to the following :ref:`tables <canton_supported_key_formats>`.
@@ -215,7 +215,7 @@ steps are very similar to the root certificate, but the target is the public key
 and the ``--intermediate-delegation`` flag is used instead of ``--root-delegation``.
 
 .. snippet:: offline_root_namespace_key
-    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --intermediate-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/intermediate_key.pub" --output "/tmp/canton/certs/intermediate_namespace"
+    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --intermediate-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/intermediate_key.pub" --protocol-version 36 --output "/tmp/canton/certs/intermediate_namespace"
 
 Verify that the generated topology transaction (printed to stdout) is correct and refers to the correct keys.
 Once verified, the generated hash needs to be signed:
@@ -284,7 +284,7 @@ For example, to create a delegation that can only sign namespace delegations, le
 Then prepare, sign and assemble it as we did previously, except we use the ``--delegation-restrictions`` flag on the prepare script this time:
 
 .. snippet:: offline_root_namespace_key
-    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --delegation-restrictions PARTY_TO_PARTICIPANT,PARTY_TO_KEY_MAPPING --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/restricted_key.pub" --output "/tmp/canton/certs/restricted_key_namespace"
+    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --delegation-restrictions PARTY_TO_PARTICIPANT,PARTY_TO_KEY_MAPPING --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/restricted_key.pub" --protocol-version 36 --output "/tmp/canton/certs/restricted_key_namespace"
     .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: openssl pkeyutl -rawin -inkey "/tmp/canton/certs/root_private_key.der" -keyform DER -sign -in "/tmp/canton/certs/restricted_key_namespace.hash" -out "/tmp/canton/certs/restricted_key_namespace.signature"
     .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./assemble-cert.sh --prepared-transaction "/tmp/canton/certs/restricted_key_namespace.prep" --signature "/tmp/canton/certs/restricted_key_namespace.signature" --signature-algorithm "ed25519" --output "/tmp/canton/certs/restricted_key_namespace"
 
@@ -325,8 +325,8 @@ Generate revocation and new intermediate certificates
 Prepare revocation and new delegation certificates:
 
 .. snippet:: offline_root_namespace_key
-    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --revoke-delegation "/tmp/canton/certs/delegation_to_revoke.tx" --output "/tmp/canton/certs/revoked_delegation"
-    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --intermediate-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/new_intermediate_key.pub" --output "/tmp/canton/certs/new_delegation"
+    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --revoke-delegation "/tmp/canton/certs/delegation_to_revoke.tx" --protocol-version 36 --output "/tmp/canton/certs/revoked_delegation"
+    .. shell(cwd=community/app/src/pack/scripts/offline-root-key):: ./prepare-cert.sh --intermediate-delegation --root-pub-key "/tmp/canton/certs/root_public_key.der" --canton-target-pub-key "/tmp/canton/certs/new_intermediate_key.pub" --protocol-version 36 --output "/tmp/canton/certs/new_delegation"
 
 Sign revocation and new delegation certificates:
 

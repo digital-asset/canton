@@ -295,18 +295,6 @@ final case class EncryptedViewMessage[+VT <: ViewType](
 
   def encryptedSizeHint: Int = encryptedViews.sizeHint
 
-  private def toProtoV31: v31.EncryptedMultipleViewsMessage =
-    v31.EncryptedMultipleViewsMessage(
-      compressedViewTrees = encryptedViews.viewTrees.ciphertext,
-      viewHashes = viewHashes.map(_.toProtoPrimitive),
-      encryptionScheme = viewEncryptionScheme.toProtoEnum,
-      submittingParticipantSignature = submittingParticipantSignature.map(_.toProtoV30),
-      sessionKeyLookup =
-        viewEncryptionKeyRandomness.map(EncryptedViewMessage.serializeEncryptedRandomness),
-      physicalSynchronizerId = psid.toProtoPrimitive,
-      viewType = viewType.toProtoEnum,
-    )
-
   private def toProtoV32: v32.EncryptedMultipleViewsMessage =
     v32.EncryptedMultipleViewsMessage(
       compressedViewTrees = encryptedViews.viewTrees.ciphertext,
@@ -318,9 +306,6 @@ final case class EncryptedViewMessage[+VT <: ViewType](
       physicalSynchronizerId = psid.toProtoPrimitive,
       viewType = viewType.toProtoEnum,
     )
-
-  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-    v31.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
 
   override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
     v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV32)
@@ -374,14 +359,10 @@ object EncryptedViewMessage
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.EncryptedMultipleViewsMessage)(
-      supportedProtoVersionPVV(_)(EncryptedViewMessage.fromProtoV31),
-      _.toProtoV31,
-    ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.EncryptedMultipleViewsMessage)(
       supportedProtoVersionPVV(_)(EncryptedViewMessage.fromProtoV32),
       _.toProtoV32,
-    ),
+    )
   )
 
   def apply[VT <: ViewType](
@@ -400,67 +381,6 @@ object EncryptedViewMessage
     viewEncryptionScheme,
     submittingParticipantSignature,
   )(protocolVersionRepresentativeFor(protocolVersion))
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      encryptedViewMessageP: v31.EncryptedMultipleViewsMessage,
-  ): ParsingResult[EncryptedViewMessage[ViewType]] = {
-    val v31.EncryptedMultipleViewsMessage(
-      compressedViewTreesP,
-      viewHashesP,
-      encryptionSchemeP,
-      signatureP,
-      sessionKeyLookupP,
-      synchronizerIdP,
-      viewTypeP,
-    ) =
-      encryptedViewMessageP
-    for {
-      viewType <- ViewType.fromProtoEnum(viewTypeP)
-      viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
-        encryptionSchemeP,
-        "encryptionScheme",
-      )
-
-      signature <- signatureP.traverse(Signature.fromProtoV30)
-      viewHashesSeqP <- ProtoValidation.validateLength(
-        viewHashesP,
-        "view_hashes",
-        pvv,
-        ProtoValidation.MaxCollectionSize,
-      )
-      viewHashes <- parseRequiredNonEmpty(
-        ViewHash.fromProtoPrimitive,
-        "view_hashes",
-        viewHashesSeqP,
-      )
-
-      sessionKeyLookupSeqP <- ProtoValidation.validateLength(
-        sessionKeyLookupP,
-        "session_key_lookup",
-        pvv,
-        ProtoValidation.MaxCollectionSize,
-      )
-      viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
-        EncryptedViewMessage.deserializeEncryptedRandomness,
-        "session_key_lookup",
-        sessionKeyLookupSeqP,
-      )
-      synchronizerId <- ProtoValidation.validateThen(
-        synchronizerIdP,
-        "physical_synchronizer_id",
-        pvv,
-      )(PhysicalSynchronizerId.fromProtoPrimitive)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-    } yield new EncryptedViewMessage(
-      EncryptedMultipleViews(viewType, Encrypted.fromByteString(compressedViewTreesP)),
-      viewHashes,
-      viewEncryptionKeyRandomness,
-      synchronizerId,
-      viewEncryptionScheme,
-      signature,
-    )(rpv)
-  }
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,
@@ -545,7 +465,6 @@ object EncryptedViewMessage
           snapshot.ipsSnapshot.encryptionKeys(participantId)
         )
         .map(_.map(_.id).toSet)
-
       encryptedRandomnessForParticipant <- encrypted.viewEncryptionKeyRandomness
         .find(e => encryptionKeys.contains(e.encryptedFor))
         .toRight(
@@ -668,7 +587,7 @@ object EncryptedViewMessage
       decryptedMultiView <- eitherT(
         EncryptedMultipleViews
           .decrypt(
-            encrypted.psid.protocolVersion,
+            pureCrypto.staticSynchronizerParameters.protocolVersion,
             pureCrypto,
             viewKey,
             encrypted.encryptedViews.viewTrees,
@@ -760,6 +679,14 @@ object EncryptedViewMessageError extends PrettyPrintingCompanion[EncryptedViewMe
 
   override protected val pretty: Pretty[EncryptedViewMessageError] = adHocPrettyInstance
 
+  final case class TransparencyCheckError(
+      err: String
+  ) extends EncryptedViewMessageError
+
+  final case class SyncCryptoEncryptError(
+      err: SyncCryptoError.SyncCryptoEncryptionError
+  ) extends EncryptedViewMessageError
+
   final case class SessionKeyCreationError(
       err: EncryptionKeyCreationError
   ) extends EncryptedViewMessageError
@@ -769,7 +696,7 @@ object EncryptedViewMessageError extends PrettyPrintingCompanion[EncryptedViewMe
   ) extends EncryptedViewMessageError
 
   final case class SyncCryptoDecryptError(
-      syncCryptoError: SyncCryptoError
+      err: SyncCryptoError.SyncCryptoDecryptionError
   ) extends EncryptedViewMessageError
 
   final case class SymmetricDecryptError(

@@ -212,11 +212,21 @@ final class CommandsValidator(
               sourceSynchronizerId <- requireSynchronizerId(unassignCommand.value.source, "source")
               targetSynchronizerId <- requireSynchronizerId(unassignCommand.value.target, "target")
               cid <- requireContractId(unassignCommand.value.contractId, "contract_id")
+              overrideSourceValidationPkgId <- optionalPackageId(
+                unassignCommand.value.overrideSourceValidationPackageId,
+                "override_source_validation_package_id",
+              )
+              overrideTargetValidationPkgId <- optionalPackageId(
+                unassignCommand.value.overrideTargetValidationPackageId,
+                "override_target_validation_package_id",
+              )
             } yield Right(
               submission.UnassignCommand(
                 sourceSynchronizerId = Source(sourceSynchronizerId),
                 targetSynchronizerId = Target(targetSynchronizerId),
                 contractId = cid,
+                overrideSourceValidationPkgId = overrideSourceValidationPkgId,
+                overrideTargetValidationPkgId = overrideTargetValidationPkgId,
               )
             )
         }

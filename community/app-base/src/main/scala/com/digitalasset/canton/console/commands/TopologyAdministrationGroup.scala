@@ -42,6 +42,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
@@ -58,6 +59,7 @@ import com.digitalasset.canton.topology.store.{
   TimeQuery,
 }
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.MappingHash
@@ -194,6 +196,7 @@ class TopologyAdministrationGroup(
           SignedTopologyTransaction
             .fromByteString(
               ProtocolVersionValidation.AlwaysValidation,
+              TopologyTransactionDeserializationContext(SynchronizerLimits.default),
               bytes,
             )
             .leftMap(_.message)
@@ -434,15 +437,17 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.unbounded
         ),
     ): Unit =
-      consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommands.Write
-            .ImportTopologySnapshot(
-              topologyTransactions,
-              store,
-              synchronize,
-            )
-        )
+      TraceContext.withNewTraceContext("import_topology_snapshot") { implicit traceContext =>
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write
+              .ImportTopologySnapshot(
+                topologyTransactions,
+                store,
+                synchronize,
+              )
+          )
+        }
       }
 
     @Help.Summary("Loads topology transactions from a file into the specified topology store")
@@ -454,15 +459,18 @@ class TopologyAdministrationGroup(
           throw new IllegalArgumentException(s"import_topology_snapshot failed: ${err.getMessage}")
         }
       ResourceUtil.withResource(topologyTransactions) { inputStream =>
-        consoleEnvironment.run {
-          adminCommand(
-            TopologyAdminCommands.Write
-              .ImportTopologySnapshotV2(
-                inputStream,
-                store,
-                Some(consoleEnvironment.commandTimeouts.unbounded),
+        TraceContext.withNewTraceContext("import_topology_snapshot_fromV2") {
+          implicit traceContext =>
+            consoleEnvironment.run {
+              adminCommand(
+                TopologyAdminCommands.Write
+                  .ImportTopologySnapshotV2(
+                    inputStream,
+                    store,
+                    Some(consoleEnvironment.commandTimeouts.unbounded),
+                  )
               )
-          )
+            }
         }
       }
     }
@@ -482,15 +490,17 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.unbounded
         ),
     ): Unit =
-      consoleEnvironment.run {
-        adminCommand(
-          TopologyAdminCommands.Write
-            .ImportTopologySnapshotV2(
-              topologyTransactions.newInput(),
-              store,
-              synchronize,
-            )
-        )
+      TraceContext.withNewTraceContext("import_topology_snapshotV2") { implicit traceContext =>
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write
+              .ImportTopologySnapshotV2(
+                topologyTransactions.newInput(),
+                store,
+                synchronize,
+              )
+          )
+        }
       }
 
     def load(
@@ -519,7 +529,10 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transaction = SignedTopologyTransaction
-        .readFromTrustedFile(file)
+        .readFromTrustedFile(
+          TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+          file,
+        )
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -548,7 +561,10 @@ class TopologyAdministrationGroup(
     ): Unit = {
       val transactions = files.map { file =>
         SignedTopologyTransaction
-          .readFromTrustedFile(file)
+          .readFromTrustedFile(
+            TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+            file,
+          )
           .valueOr { err =>
             consoleEnvironment.run(
               CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -575,7 +591,10 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transactions = SignedTopologyTransactions
-        .readFromTrustedFile(file)
+        .readFromTrustedFile(
+          TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+          file,
+        )
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -2143,9 +2162,17 @@ class TopologyAdministrationGroup(
         removes: Seq[ParticipantId] = Nil,
         store: TopologyStoreId = TopologyStoreId.Authorized,
         serial: Option[PositiveInt] = None,
+        specifiedParticipantStates: Map[ParticipantId, HostingState],
+        requiresPartyToBeOnboarded: Boolean,
     ) = {
       val currentO = findCurrent(party, store)
-      val (existingPermissions, nextSerial, threshold, partySigningKeys) =
+      val (
+        existingPermissions,
+        nextSerial,
+        threshold,
+        partySigningKeys,
+        existingParticipantStates,
+      ) =
         currentO match {
           case Some(current) if current.context.operation == TopologyChangeOp.Remove =>
             (
@@ -2154,6 +2181,7 @@ class TopologyAdministrationGroup(
               Some(current.context.serial.increment),
               current.item.threshold,
               None,
+              SeqMap.empty[ParticipantId, HostingState],
             )
           case Some(current) =>
             (
@@ -2161,6 +2189,7 @@ class TopologyAdministrationGroup(
               Some(current.context.serial.increment),
               current.item.threshold,
               current.item.partySigningKeysWithThreshold,
+              SeqMap.from(current.item.participants.map(p => p.participantId -> p.state)),
             )
           case None =>
             (
@@ -2168,6 +2197,7 @@ class TopologyAdministrationGroup(
               Some(Right(PositiveInt.one)),
               PositiveInt.one,
               None,
+              SeqMap.empty[ParticipantId, HostingState],
             )
         }
       val newSerial =
@@ -2179,7 +2209,8 @@ class TopologyAdministrationGroup(
             )
           )
 
-      val newPermissions = new PartyToParticipantComputations(loggerFactory)
+      val computations = new PartyToParticipantComputations(loggerFactory)
+      val newPermissions = computations
         .computeNewPermissions(
           existingPermissions = existingPermissions,
           adds = adds,
@@ -2187,13 +2218,48 @@ class TopologyAdministrationGroup(
         )
         .valueOr(err => consoleEnvironment.raiseError(s"Unable to compute new permissions: $err"))
 
-      (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys)
+      // On released protocol versions, a participant without a specified state becomes Active, or
+      // Onboarding if added with requiresPartyToBeOnboarded, as released. So it does on stores
+      // without a synchronizer, such as the authorized store, as their protocol version is unknown.
+      val keepsHostingStates =
+        store match {
+          case TopologyStoreId.Synchronizer(Right(psid)) =>
+            psid.protocolVersion >= ProtocolVersion.v37
+          case TopologyStoreId.Synchronizer(Left(sid)) =>
+            resolveTargetProtocolVersion(sid) >= ProtocolVersion.v37
+          case _ => false
+        }
+
+      val newParticipantStates =
+        if (keepsHostingStates)
+          computations
+            .computeNewParticipantStates(
+              existingStates = existingParticipantStates,
+              adds = adds.map { case (pid, _) => pid },
+              removes = removes,
+              specifiedStates = specifiedParticipantStates,
+              requiresPartyToBeOnboarded = requiresPartyToBeOnboarded,
+            )
+            .valueOr(err =>
+              consoleEnvironment.raiseError(s"Unable to compute new participant states: $err")
+            )
+        else specifiedParticipantStates
+
+      (
+        existingPermissions,
+        newPermissions,
+        newSerial,
+        threshold,
+        partySigningKeys,
+        existingParticipantStates,
+        newParticipantStates,
+      )
     }
 
     private[canton] def hostingParticipants(
         newParticipants: Seq[(ParticipantId, ParticipantPermission)],
         participantsRequiringPartyToBeOnboarded: Seq[ParticipantId],
-        participantStates: Map[ParticipantId, HostingParticipant.HostingState],
+        participantStates: Map[ParticipantId, HostingState],
     ): Seq[HostingParticipant] = {
       val unknownParticipants = participantStates.keySet -- newParticipants.map(_._1)
       if (unknownParticipants.nonEmpty)
@@ -2202,11 +2268,11 @@ class TopologyAdministrationGroup(
               .mkString(", ")}"
         )
       val conflictingParticipants = participantsRequiringPartyToBeOnboarded.filter(pid =>
-        participantStates.get(pid).exists(_ != HostingParticipant.HostingState.Onboarding)
+        participantStates.get(pid).exists(_ != HostingState.Onboarding)
       )
       if (conflictingParticipants.nonEmpty)
         consoleEnvironment.raiseError(
-          s"Participants required to onboard the party have a hosting state other than ONBOARDING: ${conflictingParticipants
+          s"Participants required to onboard the party have a hosting state other than Onboarding: ${conflictingParticipants
               .mkString(", ")}"
         )
       newParticipants.map { case (pid, permission) =>
@@ -2222,7 +2288,6 @@ class TopologyAdministrationGroup(
       }
     }
 
-    // TODO(#35499): Revise description for participantStates when switching from dev to 37
     @Help.Summary("Change party to participant mapping")
     @Help.Description(
       """Change the association of a party to hosting participants.
@@ -2260,10 +2325,18 @@ class TopologyAdministrationGroup(
         |- requiresPartyToBeOnboarded: When set to true, indicate that the added participants need
         |  to first onboard the party independently from this call before the added participants
         |  fully host the party.
-        |- participantStates: The hosting states (Nominated, Freezing, Onboarding, Active) of the
-        |  participants hosting the party after this change. Participants not listed are Active,
-        |  or Onboarding if added with requiresPartyToBeOnboarded. Nominated and Freezing require
-        |  the dev protocol version and have no effect yet; only for internal testing.
+        |- participantStates: The hosting state (Nominated, Freezing, Onboarding, Active) of each
+        |  participant that hosts the party after this change. A participant without an entry
+        |  keeps its current state if it is not in adds. A participant in adds without an entry
+        |  becomes Onboarding if requiresPartyToBeOnboarded is true and Active otherwise, which
+        |  clears an existing onboarding flag; a Nominated or Freezing participant keeps its state
+        |  instead, as moving it forward must be explicit. On protocol versions without Nominated
+        |  and Freezing, and for the authorized store, a participant without an entry is
+        |  Onboarding if it is in adds and requiresPartyToBeOnboarded is true, and Active
+        |  otherwise, even if it currently has another state. Nominated and Freezing participants
+        |  do not host the party, and while any participant is Freezing, the Canton protocol
+        |  treats the party as if it were not hosted on any participant on the synchronizer.
+        |  Nominated and Freezing are supported only in protocol version 37 and higher.
         """
     )
     def propose_delta(
@@ -2279,11 +2352,27 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         requiresPartyToBeOnboarded: Boolean = false,
-        participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
+        participantStates: Map[ParticipantId, HostingState] = Map.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
 
-      val (existingPermissions, newPermissions, newSerial, threshold, partySigningKeys) =
-        computeDelta(party, adds, removes, store, serial)
+      val (
+        existingPermissions,
+        newPermissions,
+        newSerial,
+        threshold,
+        partySigningKeys,
+        existingParticipantStates,
+        newParticipantStates,
+      ) =
+        computeDelta(
+          party,
+          adds,
+          removes,
+          store,
+          serial,
+          participantStates,
+          requiresPartyToBeOnboarded,
+        )
 
       if (newPermissions.nonEmpty) {
         // issue a REPLACE
@@ -2301,7 +2390,7 @@ class TopologyAdministrationGroup(
           participantsRequiringPartyToBeOnboarded =
             if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
           partySigningKeys = partySigningKeys,
-          participantStates = participantStates,
+          participantStates = newParticipantStates,
         )
       } else {
         // we would remove the last participant, therefore we issue a REMOVE
@@ -2318,13 +2407,12 @@ class TopologyAdministrationGroup(
           store = store,
           forceFlags = forceFlags,
           partySigningKeys = partySigningKeys,
-          participantStates = participantStates,
+          participantStates = existingParticipantStates,
         )
 
       }
     }
 
-    // TODO(#35499): Revise description for participantStates when switching from dev to 37
     @Help.Summary("Replace party to participant mapping")
     @Help.Description(
       """Replace the association of a party to hosting participants.
@@ -2369,10 +2457,13 @@ class TopologyAdministrationGroup(
       |  - "<synchronizer id>": The topology transaction will be directly submitted to the
       |  specified synchronizer without storing it locally first. This also means it will _not_
       |  be synchronized to other synchronizers automatically.
-      |- participantStates: The hosting states (Nominated, Freezing, Onboarding, Active) of the
-      |  participants. Participants not listed are Active, or Onboarding if listed in
-      |  participantsRequiringPartyToBeOnboarded. Nominated and Freezing require the
-      |  dev protocol version and have no effect yet; only for internal testing.
+      |- participantStates: The hosting state (Nominated, Freezing, Onboarding, Active) of each
+      |  participant in newParticipants. A participant without an entry is Onboarding if it is
+      |  in participantsRequiringPartyToBeOnboarded, and Active otherwise. Nominated and
+      |  Freezing participants do not host the party, and while any participant is Freezing,
+      |  the Canton protocol treats the party as if it were not hosted on any participant on
+      |  the synchronizer. Nominated and Freezing are supported only in
+      |  protocol version 37 and higher.
       """
     )
     def propose(
@@ -2390,7 +2481,7 @@ class TopologyAdministrationGroup(
         store: TopologyStoreId = TopologyStoreId.Authorized,
         forceFlags: ForceFlags = ForceFlags.none,
         participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
-        participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
+        participantStates: Map[ParticipantId, HostingState] = Map.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
       val nodeStatus = instance.health.status
       val command = TopologyAdminCommands.Write.Propose(
@@ -2764,7 +2855,7 @@ class TopologyAdministrationGroup(
         mapping = SynchronizerTrustCertificate(
           participantId,
           synchronizerId,
-          featureFlags,
+          featureFlags.toSet,
         ),
         signedBy = Seq.empty,
         store = store.getOrElse(synchronizerId),

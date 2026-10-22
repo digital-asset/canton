@@ -453,10 +453,10 @@ class ProgrammableSequencer(
 
   override def adminServices: Seq[ServerServiceDefinition] = baseSequencer.adminServices
 
-  override def isEnabled(member: Member)(implicit
+  override def isActive(member: Member)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
-    baseSequencer.isEnabled(member)
+    baseSequencer.isActive(member)
 
   /** Return the last timestamp of the containing block of the provided timestamp. This is needed to
     * determine the effective timestamp to observe in topology processing, required to produce a
@@ -589,7 +589,7 @@ object ProgrammableSequencer {
             .flatMap(
               _.toOpenEnvelope(
                 participant.crypto.pureCrypto,
-                SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion),
+                SynchronizerLimits.default,
                 BaseTest.testedProtocolVersion,
               ).value.protocolMessage match {
                 case SignedProtocolMessage(

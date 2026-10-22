@@ -105,6 +105,11 @@ class ParallelIndexerSubscriptionSpec
 
   private lazy val executionContext = implicitly[ExecutionContext]
 
+  // This spec does not extend BaseTest, so `futureValue` would use the ScalaFutures default timeout of 150ms.
+  // On a loaded CI runner the futures occasionally take longer, so use the same patience as BaseTest.
+  implicit override val patienceConfig: PatienceConfig =
+    PatienceConfig(timeout = 60.seconds, interval = 25.millis)
+
   implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = ScalatestEqualityHelpers.DbDtoEq
   implicit val traceContext: TraceContext = TraceContext.empty
   private val serializableTraceContext =

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
@@ -15,6 +16,7 @@ import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlo
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
@@ -25,7 +27,6 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
-import com.digitalasset.canton.{BaseTest, config}
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration as JDuration
@@ -73,6 +74,7 @@ sealed trait ReassignmentPruningIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         // To ensure that pruning can happen quickly
@@ -95,10 +97,10 @@ sealed trait ReassignmentPruningIntegrationTest
 
         Seq((sequencer1, daId), (sequencer2, acmeId)).foreach { case (sequencer, synchronizerId) =>
           // Disable automatic assignment
+          AutomaticAssignment.disable(Seq(sequencer), synchronizerId)
           sequencer.topology.synchronizer_parameters.propose_update(
             synchronizerId,
             _.update(
-              assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero,
               reconciliationInterval = PositiveDurationSeconds(reconciliationInterval),
               confirmationResponseTimeout = confirmationResponseTimeout.toConfig,
               mediatorReactionTimeout = mediatorReactionTimeout.toConfig,

@@ -107,6 +107,17 @@ package object version {
       ValueClass <: HasRepresentativeProtocolVersion
   ] = VersioningCompanionMemoization2F[Either[String, *], ValueClass, ValueClass]
 
+  type VersioningCompanionContextMemoizationE[
+      ValueClass <: HasRepresentativeProtocolVersion,
+      Context,
+  ] = VersioningCompanionContextMemoization2F[
+    Either[String, *],
+    ValueClass,
+    Context,
+    ValueClass,
+    Unit,
+  ]
+
   type VersioningCompanionMemoization2E[
       ValueClass <: HasRepresentativeProtocolVersion,
       DeserializedValueClass <: HasRepresentativeProtocolVersion,

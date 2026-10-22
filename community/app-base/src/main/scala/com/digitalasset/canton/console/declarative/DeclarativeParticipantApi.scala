@@ -186,12 +186,12 @@ class DeclarativeParticipantApi(
 
     def proposeEnableMultiSynchronizerFeatureFlag(
         synchronizerId: SynchronizerId,
-        oldFeatureFlags: Seq[ParticipantTopologyFeatureFlag],
+        oldFeatureFlags: Set[ParticipantTopologyFeatureFlag],
     ): Either[String, SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate]] = {
       val mapping = SynchronizerTrustCertificate(
         participantId,
         synchronizerId,
-        featureFlags = (ParticipantTopologyFeatureFlag.EnableMultiSynchronizer +: oldFeatureFlags),
+        featureFlags = oldFeatureFlags + ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
       )
       for {
         nodeStatus <- getStatus.toRight("Unable to get status of node. Is the node started?")
@@ -217,7 +217,7 @@ class DeclarativeParticipantApi(
           synchronizerIds.traverse { sid =>
             for {
               current <- fetchSynchronizerTrustCertificate(sid.synchronizerId)
-              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Seq.empty)
+              currentFeatureFlags = current.headOption.map(_.item.featureFlags).getOrElse(Set.empty)
               shouldUpdate = !currentFeatureFlags.contains(
                 ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
               )
@@ -276,20 +276,41 @@ class DeclarativeParticipantApi(
       )
     )
 
-    def fetchHostedTuple(filterParty: String, synchronizerId: SynchronizerId) =
+    def fetchOwnEntries(
+        filterParty: String,
+        synchronizerId: SynchronizerId,
+    ): Either[String, Seq[((UniqueIdentifier, SynchronizerId), HostingParticipant)]] =
       fetchHosted(filterParty, synchronizerId).map(_.flatMap { party2Participant =>
-        val maybePermission = party2Participant.item.participants
+        party2Participant.item.participants
           .find(_.participantId == participantId)
-          .map(_.permission)
-        maybePermission
-          .map(permission =>
-            (
-              (party2Participant.item.partyId.uid, synchronizerId),
-              ParticipantPermissionConfig.fromInternal(permission),
-            )
-          )
+          .map(entry => ((party2Participant.item.partyId.uid, synchronizerId), entry))
           .toList
       })
+
+    // A Nominated or Freezing entry must move forward only through an explicit hosting state
+    // change. Adding or updating the party here would rewrite the entry to Active, and removing it
+    // would remove the party's whole mapping. Hence such parties are left alone.
+    def fetchHostedTuple(filterParty: String, synchronizerId: SynchronizerId) =
+      fetchOwnEntries(filterParty, synchronizerId).map(_.collect {
+        case (key, entry) if entry.state.canHost =>
+          (key, ParticipantPermissionConfig.fromInternal(entry.permission))
+      })
+
+    def skipIfAwaitingReplication(
+        wanted: ((UniqueIdentifier, SynchronizerId), ParticipantPermissionConfig)
+    ): Either[String, Option[((UniqueIdentifier, SynchronizerId), ParticipantPermissionConfig)]] = {
+      val (key @ (uid, synchronizerId), _) = wanted
+      fetchOwnEntries(uid.toProtoPrimitive, synchronizerId).map(
+        _.collectFirst { case (`key`, entry) if !entry.state.canHost => entry.state } match {
+          case Some(state) =>
+            logger.info(
+              s"Skipping party $uid on $synchronizerId: this participant's hosting state is $state"
+            )
+            None
+          case None => Some(wanted)
+        }
+      )
+    }
 
     def createTopologyTx(
         uid: UniqueIdentifier,
@@ -375,7 +396,7 @@ class DeclarativeParticipantApi(
 
     queryAdminApi(ListConnectedSynchronizers())
       .flatMap { synchronizerIds =>
-        val wanted = parties.flatMap { p =>
+        val configured = parties.flatMap { p =>
           val party =
             if (p.party.contains(UniqueIdentifier.delimiter))
               UniqueIdentifier.tryFromProtoPrimitive(p.party)
@@ -394,33 +415,35 @@ class DeclarativeParticipantApi(
             fetchHostedTuple(filterParty = "", synchronizerId)
           }
 
-        run[(UniqueIdentifier, SynchronizerId), ParticipantPermissionConfig](
-          "party",
-          removeParties,
-          checkSelfConsistency,
-          want = wanted,
-          fetch = _ => fetchAll(),
-          get = { case (uid, synchronizerId) =>
-            fetchHostedTuple(uid.toProtoPrimitive, synchronizerId).map(_.toList).flatMap {
-              case (_, v) :: Nil => Right(Some(v))
-              case Nil => Right(None)
-              case rst =>
-                Left(
-                  s"Multiple entries found for party $uid and synchronizer $synchronizerId: $rst"
-                )
-            }
-          },
-          add = { case ((uid, synchronizerId), permission) =>
-            createTopologyTx(uid, synchronizerId, permission.toNative)
-          },
-          upd = { case ((uid, synchronizerId), wantPermission, _) =>
-            createTopologyTx(uid, synchronizerId, wantPermission.toNative)
-          },
-          rm = { case ((u, s), current) =>
-            removeParty(u, s)
-          },
-          await = Some(awaitLedgerApiServer),
-        )
+        configured.traverse(skipIfAwaitingReplication).map(_.flatten).flatMap { wanted =>
+          run[(UniqueIdentifier, SynchronizerId), ParticipantPermissionConfig](
+            "party",
+            removeParties,
+            checkSelfConsistency,
+            want = wanted,
+            fetch = _ => fetchAll(),
+            get = { case (uid, synchronizerId) =>
+              fetchHostedTuple(uid.toProtoPrimitive, synchronizerId).map(_.toList).flatMap {
+                case (_, v) :: Nil => Right(Some(v))
+                case Nil => Right(None)
+                case rst =>
+                  Left(
+                    s"Multiple entries found for party $uid and synchronizer $synchronizerId: $rst"
+                  )
+              }
+            },
+            add = { case ((uid, synchronizerId), permission) =>
+              createTopologyTx(uid, synchronizerId, permission.toNative)
+            },
+            upd = { case ((uid, synchronizerId), wantPermission, _) =>
+              createTopologyTx(uid, synchronizerId, wantPermission.toNative)
+            },
+            rm = { case ((u, s), current) =>
+              removeParty(u, s)
+            },
+            await = Some(awaitLedgerApiServer),
+          )
+        }
       }
   }
 

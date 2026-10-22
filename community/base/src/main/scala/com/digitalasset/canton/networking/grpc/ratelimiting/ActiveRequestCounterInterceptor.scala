@@ -117,8 +117,9 @@ class ActiveRequestCounterInterceptor(
         val (grpcStatus, trailers) = cachedRejectionResponses.computeIfAbsent(
           fullMethodName,
           { _ =>
-            implicit val traceContext: TraceContext =
-              TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
+            // Use an empty trace context to prevent injecting the first rejected caller's Trace ID
+            // into the globally cached gRPC trailers.
+            implicit val traceContext: TraceContext = TraceContext.empty
             // we create a dummy error with "redacted-ip" ip address.
             // We use the very first `error` object we see so that the stack
             // trace is filled exactly once and not for every request.

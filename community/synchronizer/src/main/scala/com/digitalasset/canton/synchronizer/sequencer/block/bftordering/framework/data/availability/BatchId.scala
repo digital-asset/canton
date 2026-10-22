@@ -4,9 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability
 
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -26,10 +29,18 @@ object BatchId {
   def fromProto(value: ByteString): ParsingResult[BatchId] =
     Hash.fromProtoPrimitive(value).map(BatchId(_))
 
-  def from(orderingRequestBatch: OrderingRequestBatch): BatchId = {
-    val builder = Hash
-      .build(hashPurpose, HashAlgorithm.Sha256)
-    orderingRequestBatch.addToHashBuilder(builder)
+  def from(
+      orderingRequestBatch: OrderingRequestBatch,
+      logger: TracedLogger,
+  )(implicit protocolVersion: ProtocolVersion, traceContext: TraceContext): BatchId = {
+    logger.debug(
+      s"Computing batch ID for batch containing ${orderingRequestBatch.requests.size} requests " +
+        s"${orderingRequestBatch.requests
+            .map(_.value.headerString)
+            .mkString(", ")}"
+    )
+    val builder = Hash.build(hashPurpose, HashAlgorithm.Sha256)
+    orderingRequestBatch.addToHashBuilder(builder, logger)
     BatchId(builder.finish())
   }
 

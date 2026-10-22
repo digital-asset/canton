@@ -325,7 +325,7 @@ private[lf] object IdeLedgerRunner {
       expr = SEApp(compiledCommands, ArraySeq(SValue.SToken)),
       committers = committers,
       commitLocation = location,
-      limits = interpretation.Limits.Lenient,
+      limits = interpretation.LimitConfig.Off,
       interpretationConfig = interpretation.InterpretationConfig.Default,
       logger = machineLogger,
     )

@@ -69,6 +69,7 @@ class RetransmissionsManager[E <: Env[E]](
     logEndOfEpochProgress: Boolean,
     windowSizeForRetransmissionOfCommitCertificates: Option[PositiveInt],
     // Passed only in tests
+    consensusExtraAllowedRetransmissionRequestsPerSecond: Int,
     previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
     // Monotonic elapsed-time source (nanoseconds) for the request rate limiter, injectable in tests.
     rateLimiterNanoTime: () => Long = () => System.nanoTime(),
@@ -93,8 +94,11 @@ class RetransmissionsManager[E <: Env[E]](
 
   private val requestRateLimiter =
     new BftNodeRateLimiter(
-      maxTasksPerSecond =
-        NonNegativeNumeric.tryCreate(1.toDouble / RetransmissionRequestPeriod.toSeconds.toDouble),
+      maxTasksPerSecond = NonNegativeNumeric.tryCreate(
+        // we allow 1 request per node every RetransmissionRequestPeriod
+        // plus consensusExtraAllowedRetransmissionRequestsPerSecond to allow some requests from nodes that are missing pre-prepares are reaching a quorum of prepares
+        1.toDouble / RetransmissionRequestPeriod.toSeconds.toDouble + consensusExtraAllowedRetransmissionRequestsPerSecond.toDouble
+      ),
       maxBurstFactor = PositiveDouble.tryCreate(MaxRetransmissionRequestBurstFactorPerNode),
       timeSource = rateLimiterNanoTime(),
     )

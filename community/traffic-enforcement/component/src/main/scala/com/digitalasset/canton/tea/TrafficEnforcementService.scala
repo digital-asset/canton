@@ -8,11 +8,14 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.tea.TrafficEnforcementErrors.UnsafeToPrune
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   EventId,
@@ -23,8 +26,8 @@ import com.digitalasset.canton.tea.projection.{
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -38,6 +41,8 @@ import scala.concurrent.ExecutionContext
 class TrafficEnforcementService(
     store: TeaTrafficStore,
     clock: Clock,
+    minimumPruningRetention: NonNegativeFiniteDuration,
+    metrics: TrafficEnforcementMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -116,11 +121,11 @@ class TrafficEnforcementService(
     }
   }
 
-  def pruneEvents(request: PruneEventsRequest)(implicit
+  def prune(request: PruneRequest)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[RpcError, PruneEventsResponse]] = {
+  ): FutureUnlessShutdown[Either[RpcError, PruneResponse]] = {
 
-    val result: EitherT[FutureUnlessShutdown, RpcError, PruneEventsResponse] = for {
+    val result: EitherT[FutureUnlessShutdown, RpcError, PruneResponse] = for {
       ts <- EitherT.fromEither[FutureUnlessShutdown](
         ProtoConverter
           .parseRequired(
@@ -130,9 +135,20 @@ class TrafficEnforcementService(
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
-      pruneResult <- store.pruneEvents(ts).leftWiden[RpcError]
+      safeBeforeOrAt = clock.now.minus(minimumPruningRetention.asJava)
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        ts <= safeBeforeOrAt,
+        (),
+        UnsafeToPrune.Reject(ts, safeBeforeOrAt, minimumPruningRetention): RpcError,
+      )
+      pruneResult <- store.prune(ts).leftWiden[RpcError]
     } yield {
-      PruneEventsResponse(pruneResult)
+      metrics.markPrunedRows("events", pruneResult.events)
+      metrics.markPrunedRows("correlations", pruneResult.correlations)
+      PruneResponse(
+        prunedEventCount = pruneResult.events,
+        prunedCorrelationCount = pruneResult.correlations,
+      )
     }
 
     result.value

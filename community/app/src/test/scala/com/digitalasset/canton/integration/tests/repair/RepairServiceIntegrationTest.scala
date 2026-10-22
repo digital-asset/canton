@@ -848,8 +848,12 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
   )(implicit env: FixtureParam): Assertion = {
     import env.*
 
-    // If multi-synchronizer support is enabled, the purge will be represented as an Unassigned event, otherwise as a synthetic Archive event
-    val multiSynchronizerSupport = participant1.config.parameters.enableAllLedgerApiReassignments
+    // If enableAllLedgerApiReassignments is set, the purge is represented as an Unassigned event. Otherwise, it is
+    // represented as an Unassigned event if the reassignment counter is non-zero, and as a synthetic Archive event
+    // if the reassignment counter is zero.
+    val multiSynchronizerSupport =
+      participant1.config.parameters.enableAllLedgerApiReassignments ||
+        contract.reassignmentCounter != ReassignmentCounter.Genesis
 
     val eventFormat = EventFormat(
       filtersByParty =
@@ -1164,6 +1168,202 @@ sealed trait RepairServiceMultiSynchronizerTests extends RepairServiceIntegratio
   }
 }
 
+/** Contains tests that ONLY work when enableAllLedgerApiReassignments = false, i.e. when repairs
+  * are represented as Created/Archive events for contracts with a zero reassignment counter and as
+  * Assigned/Unassigned events otherwise.
+  */
+sealed trait RepairServiceMixedRepresentationTests extends RepairServiceIntegrationTest {
+
+  /** Returns the updates on `daId` referencing any of the `contracts`, starting after
+    * `beginOffsetExclusive`
+    */
+  private def repairUpdatesOnDa(
+      contracts: Seq[RepairContract],
+      alice: PartyId,
+      bob: PartyId,
+      beginOffsetExclusive: Long,
+      expectedUpdates: Int,
+  )(implicit env: TestConsoleEnvironment): Seq[UpdateService.UpdateWrapper] = {
+    import env.*
+
+    val contractIds = contracts.map(_.contract.contractId.coid).toSet
+    val eventFormat = EventFormat(
+      filtersByParty =
+        Map(alice.toProtoPrimitive -> Filters(Nil), bob.toProtoPrimitive -> Filters(Nil)),
+      filtersForAnyParty = None,
+      verbose = true,
+    )
+
+    participant1.ledger_api.updates.updates(
+      beginOffsetExclusive = beginOffsetExclusive,
+      updateFormat = UpdateFormat(
+        includeReassignments = Some(eventFormat),
+        includeTransactions = Some(
+          TransactionFormat(
+            eventFormat = Some(eventFormat),
+            transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+          )
+        ),
+        includeTopologyEvents = None,
+      ),
+      completeAfter = PositiveInt.tryCreate(expectedUpdates),
+      synchronizerFilter = Some(daId.logical),
+      resultFilter = {
+        case UpdateService.TransactionWrapper(transaction) =>
+          transaction.events.exists { event =>
+            event.event.created.exists(c => contractIds.contains(c.contractId)) ||
+            event.event.exercised.exists(e => contractIds.contains(e.contractId))
+          }
+        case assigned: UpdateService.AssignedWrapper =>
+          assigned.events.exists(_.createdEvent.exists(c => contractIds.contains(c.contractId)))
+        case unassigned: UpdateService.UnassignedWrapper =>
+          unassigned.events.exists(e => contractIds.contains(e.contractId))
+        case _ => false
+      },
+    )
+  }
+
+  "RepairServiceMixedRepresentationTests" must {
+    "run test only with disabled `enableAllLedgerApiReassignments`" in { implicit env =>
+      import env.*
+
+      participants.local.foreach { participant =>
+        assert(
+          !participant.config.parameters.enableAllLedgerApiReassignments,
+          s"enableAllLedgerApiReassignments must be false for ${participant.name} in this test suite",
+        )
+      }
+    }
+  }
+
+  "RepairService (mixed representation)" should {
+    "represent added and purged contracts depending on their reassignment counter" in {
+      implicit env =>
+        withParticipantsInitialized { (alice, bob) =>
+          withContractFromParticipant2AndAcme(alice, bob) { zeroCounterContract =>
+            withContractFromParticipant2AndAcme(alice, bob) { contract =>
+              import env.*
+
+              val nonZeroCounterContract =
+                contract.copy(reassignmentCounter = ReassignmentCounter(3))
+              val contracts = Seq(zeroCounterContract, nonZeroCounterContract)
+              val contractIds = contracts.map(_.contract.contractId.coid)
+
+              val zeroCounterCid = zeroCounterContract.contract.contractId.coid
+              val nonZeroCounterCid = nonZeroCounterContract.contract.contractId.coid
+
+              clue("Add a contract with zero and a contract with non-zero reassignment counter") {
+                val offsetBeforeAdd = participant1.ledger_api.state.end()
+
+                participant1.repair.add(
+                  daId,
+                  testedProtocolVersion,
+                  contracts,
+                  contractImportMode = Validation,
+                )
+
+                val updates = repairUpdatesOnDa(
+                  contracts,
+                  alice,
+                  bob,
+                  offsetBeforeAdd,
+                  expectedUpdates = 2,
+                )
+
+                // The contract with zero reassignment counter is represented as a Created event
+                val createdEvents = updates.collect {
+                  case UpdateService.TransactionWrapper(transaction) =>
+                    transaction.events.flatMap(_.event.created)
+                }.flatten
+                createdEvents.map(_.contractId) should contain theSameElementsAs Seq(
+                  zeroCounterCid
+                )
+
+                // The contract with non-zero reassignment counter is represented as an Assigned event
+                val assignedEvent = updates
+                  .collect { case assigned: UpdateService.AssignedWrapper =>
+                    assigned.events
+                  }
+                  .flatten
+                  .loneElement
+                assignedEvent.createdEvent.value.contractId shouldBe nonZeroCounterCid
+                assignedEvent.reassignmentCounter shouldBe 3L
+                assignedEvent.source shouldBe daId.logical.toProtoPrimitive
+                assignedEvent.target shouldBe daId.logical.toProtoPrimitive
+
+                updates.collect { case unassigned: UpdateService.UnassignedWrapper =>
+                  unassigned
+                } shouldBe empty
+              }
+
+              clue("The active contracts expose the correct reassignment counters") {
+                val activeContracts = participant1.ledger_api.state.acs
+                  .active_contracts_of_party(alice)
+                  .filter(c => contractIds.contains(c.getCreatedEvent.contractId))
+                  .map(c => c.getCreatedEvent.contractId -> c.reassignmentCounter)
+                  .toMap
+
+                activeContracts shouldBe Map(zeroCounterCid -> 0L, nonZeroCounterCid -> 3L)
+              }
+
+              clue("Purge both contracts") {
+                val offsetBeforePurge = participant1.ledger_api.state.end()
+
+                participant1.repair.purge(daName, contracts.map(_.contract.contractId))
+
+                val updates = repairUpdatesOnDa(
+                  contracts,
+                  alice,
+                  bob,
+                  offsetBeforePurge,
+                  expectedUpdates = 2,
+                )
+
+                // The contract with zero reassignment counter is represented as an Archive event
+                val archiveEvent = updates
+                  .collect { case UpdateService.TransactionWrapper(transaction) =>
+                    transaction.events.flatMap(_.event.exercised)
+                  }
+                  .flatten
+                  .loneElement
+                archiveEvent.contractId shouldBe zeroCounterCid
+                archiveEvent.consuming shouldBe true
+                archiveEvent.choice shouldBe "Archive"
+
+                // The contract with non-zero reassignment counter is represented as an Unassigned event
+                val unassignedEvent = updates
+                  .collect { case unassigned: UpdateService.UnassignedWrapper =>
+                    unassigned.events
+                  }
+                  .flatten
+                  .loneElement
+                unassignedEvent.contractId shouldBe nonZeroCounterCid
+                unassignedEvent.reassignmentCounter shouldBe 3L
+                unassignedEvent.source shouldBe daId.logical.toProtoPrimitive
+                unassignedEvent.target shouldBe daId.logical.toProtoPrimitive
+
+                updates.collect { case assigned: UpdateService.AssignedWrapper =>
+                  assigned
+                } shouldBe empty
+              }
+
+              withSynchronizerConnected(daName) {
+                eventually() {
+                  contracts.foreach { c =>
+                    participant1.testing
+                      .pcs_search(daName, exactId = c.contract.contractId.coid)
+                      .headOption
+                      .map(_._1) shouldBe Some(false)
+                  }
+                }
+              }
+            }
+          }
+        }
+    }
+  }
+}
+
 sealed trait RepairServiceBftSequencerPostgresTest {
   self: SharedEnvironment =>
   registerPlugin(new UsePostgres(loggerFactory))
@@ -1183,6 +1383,7 @@ sealed trait RepairServiceBftSequencerPostgresTest {
 class RepairServiceIntegrationTestPostgresStableLf
     extends RepairServiceIntegrationTestStableLf
     with RepairServiceBftSequencerPostgresTest
+    with RepairServiceMixedRepresentationTests
 
 class RepairServiceIntegrationTestPostgresStableLf_MultiSync
     extends RepairServiceIntegrationTestStableLf

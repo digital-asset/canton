@@ -12,16 +12,15 @@ manual_stability_test:
     - print_tests:
         context:
           - datadog  #seem to fail because of lack of datadog api key
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     # Test alerting jobs are not needed because the manual stability tests always fail on error
     - stability_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         succeed_on_error: false
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -40,15 +39,14 @@ manual_stability_sequential_test:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - stability_sequential_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         succeed_on_error: false
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -67,14 +65,13 @@ manual_sequential_test:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - sequential_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -94,15 +91,14 @@ manual_stability_crash_recovery_test:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - stability_crash_recovery_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         succeed_on_error: false
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -122,14 +118,13 @@ manual_smoke_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - smoke_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -156,7 +151,6 @@ manual_adhoc_daml_update:
     - daml_upgrade_pr:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -179,7 +173,6 @@ manual_generate_data_continuity_dumps:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -188,7 +181,6 @@ manual_generate_data_continuity_dumps:
         is_nightly_workflow: false
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -205,14 +197,12 @@ manual_protocol_continuity_tests:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - protocol_continuity_test_all:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -229,7 +219,6 @@ manual_ledger_api_compatibility_test_36:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -238,7 +227,6 @@ manual_ledger_api_compatibility_test_36:
         protocol_version: "36"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -256,15 +244,14 @@ manual_toxiproxy_slow_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
 
     - toxiproxy_test_slow:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -274,11 +261,9 @@ manual_toxiproxy_slow_test:
     # Included so that we have a way of manually running all slow toxiproxy tests.
     # It's a bit of a hack, as the job may also run tests no related to toxiproxy.
     - unstable_test_slow:
-        name: unstable_test_slow_36
-        protocol_version: "36"
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -294,7 +279,6 @@ manual_start_release_process:
         script_argument: "create_release_pr"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -312,7 +296,6 @@ manual_open_source_code_drop:
         enforce_date: false
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -329,12 +312,12 @@ manual_topology_chaos_test:
           - azure-self-cache
           - maven-mirror
     - topology_chaos_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         name: topology_chaos_test_specific
         run_all_ops_test: false
         test_repetitions: 20
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -342,13 +325,13 @@ manual_topology_chaos_test:
         requires:
           - print_tests
     - topology_chaos_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         name: topology_chaos_test_all
         run_all_ops_test: true # run separate test quarantining all-ops chaos test until stable
         num_test_buckets: "1"
         test_repetitions: 20
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -363,7 +346,6 @@ manual_test_pv_36:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -372,7 +354,6 @@ manual_test_pv_36:
         protocol_version: "36"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -391,7 +372,6 @@ manual_test_pv_37:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -400,7 +380,6 @@ manual_test_pv_37:
         protocol_version: "37"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -419,7 +398,6 @@ manual_test_pv_dev:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -428,7 +406,6 @@ manual_test_pv_dev:
         protocol_version: "dev"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -447,7 +424,6 @@ manual_snapshot_release:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -455,7 +431,6 @@ manual_snapshot_release:
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -466,7 +441,6 @@ manual_snapshot_release:
     - package_jsonapi:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -477,7 +451,6 @@ manual_snapshot_release:
     - package_sequencer_driver_api:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -488,7 +461,6 @@ manual_snapshot_release:
     - assembly_ledger_api_test_tool:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -499,7 +471,6 @@ manual_snapshot_release:
     - package_kms_driver:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -510,7 +481,6 @@ manual_snapshot_release:
     - build_scaladoc:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -519,14 +489,12 @@ manual_snapshot_release:
 # TODO(i29845): Fix and re-enable
 #    - build_systematic_testing_inventory:
 #        context:
-#          - artifactory
 #          - azure-self-cache
 #        requires:
 #          - compile
     - release_test:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -540,7 +508,6 @@ manual_snapshot_release:
     - publish_libraries:
         context:
         - datadog
-        - artifactory
         - azure-self-cache
         - gpg-signing
         - maven-mirror
@@ -553,7 +520,6 @@ manual_snapshot_release:
     - publish_release:
         context:
         - datadog
-        - artifactory
         - azure-self-cache
         - gpg-signing
         - maven-mirror
@@ -598,7 +564,6 @@ manual_override_java_version_for_tests:
         name: manual_compile_with_project_default_java
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -609,10 +574,10 @@ manual_override_java_version_for_tests:
               - /release-line-.*/
     - test:
         name: manual_test_with_java_<< parameters.manual_override_java_version_for_tests >>
+        protocol_version: << pipeline.parameters.protocol_version >>
         override_java_version_for_tests: << parameters.manual_override_java_version_for_tests >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -636,14 +601,12 @@ manual_unstable_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -652,9 +615,9 @@ manual_unstable_test:
         requires:
           - compile
     - unstable_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -677,14 +640,12 @@ manual_release_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - package_kms_driver:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -695,7 +656,6 @@ manual_release_test:
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -706,7 +666,6 @@ manual_release_test:
     - release_test:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - aws_kms_testing
@@ -732,14 +691,12 @@ manual_performance_runner_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -750,7 +707,6 @@ manual_performance_runner_test:
     - test_performance_runner:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -764,14 +720,12 @@ manual_blackduck:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -782,7 +736,6 @@ manual_blackduck:
     - blackduck:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -797,7 +750,6 @@ manual_nightly_integration_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -808,7 +760,6 @@ manual_nightly_integration_test:
         protocol_version: "36"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -824,14 +775,12 @@ manual_cn_topology_snapshot_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - nightly_cn_topology_snapshot_test_only:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -846,14 +795,13 @@ manual_nightly_test_sequencer:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - nightly_integration_test_sequencer_only:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -867,7 +815,6 @@ manual_nightly_test_bftordering:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -876,7 +823,6 @@ manual_nightly_test_bftordering:
         protocol_version: "36"
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -890,14 +836,12 @@ manual_nightly_test_upgrades_matrix_and_check:
     - print_tests:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - nightly_test_upgrades_matrix_and_check:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -914,14 +858,13 @@ manual_model_based_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - model_based_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -938,14 +881,13 @@ manual_model_based_external_parties_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - model_based_external_parties_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -959,14 +901,13 @@ manual_generate_transaction_snapshot:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - generate_transaction_snapshot:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -981,119 +922,18 @@ manual_benchmark_transaction_snapshot:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - benchmark_transaction_snapshot:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
           - gcp_daml-lf-snapshot-data
         requires:
           - compile
-
-manual_docs_replication_test:
-  when:
-    equal: [ docs-replication-test, << pipeline.parameters.manual_job >> ]
-  jobs:
-    - compile:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-    - package_community:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        is_nightly_workflow: false
-        is_manual: true
-        requires:
-          - compile
-    - build_scaladoc:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        requires:
-          - compile # optional dependency, introduced to save credits in case of compile errors
-    - replicate_docs:
-        env: test
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        requires:
-          - package_community
-          - build_scaladoc
-
-manual_docs_replication_prod:
-  when:
-    equal: [ docs-replication-prod, << pipeline.parameters.manual_job >> ]
-  jobs:
-    - compile:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-    - package_community:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        is_nightly_workflow: false
-        is_manual: true
-        requires:
-          - compile
-    - build_scaladoc:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        requires:
-          - compile # optional dependency, introduced to save credits in case of compile errors
-    - replicate_docs:
-        env: prod
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-        requires:
-          - package_community
-          - build_scaladoc
-
-
-manual_build_canton_local_cache:
-  when:
-    equal: [ build-canton-local-cache, << pipeline.parameters.manual_job >> ]
-  jobs:
-    - build_canton_local_cache:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
 
 manual_test_ping:
   when:
@@ -1102,14 +942,12 @@ manual_test_ping:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - package_community:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -1120,7 +958,6 @@ manual_test_ping:
     - test_ping_windows:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
         filters:
@@ -1131,7 +968,6 @@ manual_test_ping:
     - test_ping_arm:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
         filters:
@@ -1147,15 +983,14 @@ manual_external_party_tests:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - external_parties_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         name: manual_test_external_parties
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -1174,14 +1009,13 @@ manual_variations_test:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
     - variations_test:
+        protocol_version: << pipeline.parameters.protocol_version >>
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -1197,7 +1031,6 @@ manual_postgres_conformance_tests:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -1206,7 +1039,6 @@ manual_postgres_conformance_tests:
         postgres_version: 14
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images
@@ -1234,7 +1066,6 @@ manual_test_scala3:
     - compile:
         context:
           - datadog
-          - artifactory
           - azure-self-cache
           - maven-mirror
           - da-images

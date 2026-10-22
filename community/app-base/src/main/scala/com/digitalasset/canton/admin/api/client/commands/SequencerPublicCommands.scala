@@ -104,8 +104,6 @@ object SequencerPublicCommands {
     ): Either[String, ConsoleStaticSynchronizerParameters] =
       response.parameters match {
         case Parameters.Empty => Left("Synchronizer parameters should not be empty")
-        case Parameters.V30(value) =>
-          ConsoleStaticSynchronizerParameters.fromProtoV30(value).leftMap(_.message)
         case Parameters.V31(value) =>
           ConsoleStaticSynchronizerParameters.fromProtoV31(value).leftMap(_.message)
         case Parameters.V32(value) =>

@@ -33,12 +33,13 @@ import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{ProtocolVersionChecksAsyncWordSpec, *}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
@@ -276,6 +277,7 @@ class ConfirmationRequestAndResponseProcessorTest
         syncCryptoApi,
         mediatorId,
         sequencerSend,
+        clock,
         loggerFactory,
       )
     private val timeTracker: SynchronizerTimeTracker = mock[SynchronizerTimeTracker]
@@ -953,7 +955,7 @@ class ConfirmationRequestAndResponseProcessorTest
           FutureUnlessShutdown.pure(
             parties
               .map(party =>
-                party -> PartyInfo(
+                party -> PartyInfo.forTesting(
                   PositiveInt.one,
                   Map(participant -> ParticipantAttributes(Confirmation)),
                 )
@@ -1907,6 +1909,62 @@ class ConfirmationRequestAndResponseProcessorTest
             entry.shouldBeCantonError(
               MediatorError.InvalidMessage,
               _ shouldBe s"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: ${Set(observer, extra, signatory)}. Rejecting request...",
+            )
+          },
+        )
+      } yield succeed
+    }
+
+    "reject request if some informee is frozen" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+      // The signatory's mapping lists participant1 as Active, but the Freezing entry of
+      // participant2 freezes the signatory, so it has no host
+      val topologyWithFrozenSignatory = TestingTopology
+        .from(
+          synchronizers = Set(synchronizerId),
+          topology = Map(
+            submitter -> Map(participant1 -> ParticipantPermission.Confirmation),
+            signatory -> Map(
+              participant1 -> ParticipantPermission.Confirmation,
+              participant2 -> ParticipantPermission.Confirmation,
+            ),
+            observer -> Map(participant1 -> ParticipantPermission.Observation),
+            extra -> Map(participant1 -> ParticipantPermission.Observation),
+          ),
+          mediatorGroups = Set(mediatorGroup0(NonEmpty.mk(Seq, mediatorId))),
+          sequencerGroup = sequencerGroup,
+        )
+        .withHostingStates(Map(signatory -> Map(participant2 -> HostingState.Freezing)))
+        .value
+      val synchronizerSyncCryptoApi =
+        TestingIdentityFactory(
+          topologyWithFrozenSignatory,
+          loggerFactory,
+          dynamicSynchronizerParameters = initialSynchronizerParameters,
+          crypto,
+        ).forOwnerAndSynchronizer(mediatorId, synchronizerId)
+      val sut = new Fixture(synchronizerSyncCryptoApi)
+
+      val request =
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+
+      for {
+        _ <- loggerFactory.assertLogs(
+          sut.processor
+            .processRequest(
+              requestId,
+              notSignificantCounter,
+              requestIdTs.plusSeconds(20),
+              decisionTime,
+              addRecipients(request),
+              rootHashMessages,
+              batchAlsoContainsTopologyTransaction = false,
+            )
+            .failOnShutdown,
+          entry => {
+            entry.level shouldBe Level.WARN
+            entry.shouldBeCantonError(
+              MediatorError.InvalidMessage,
+              _ shouldBe s"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: $signatory. Rejecting request...",
             )
           },
         )

@@ -329,6 +329,27 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
       coinsAtTargetParticipant.size shouldBe numContractsInCreateBatch
     }
 
+    clue("verify ACS replication status") {
+      val tpStatus = targetParticipant.parties.get_acs_replication_status(addPartyRequestId)
+      val spStatus = sourceParticipant.parties.get_acs_replication_status(addPartyRequestId)
+
+      tpStatus.hasCompleted shouldBe true
+      spStatus.hasCompleted shouldBe true
+
+      tpStatus.ptpTopologyTransaction.value shouldEqual spStatus.ptpTopologyTransaction.value
+
+      val tpReplicationProgress = tpStatus.replicationProgress.value
+      val spReplicationProgress = spStatus.replicationProgress.value
+
+      tpReplicationProgress.processedContractCount shouldBe expectedNumContracts
+      spReplicationProgress.processedContractCount shouldBe expectedNumContracts
+
+      tpReplicationProgress.acsHashO.value shouldEqual spReplicationProgress.acsHashO.value
+
+      tpReplicationProgress.fullyProcessedAcs shouldBe true
+      spReplicationProgress.fullyProcessedAcs shouldBe true
+    }
+
     clue(s"Double check that the onboarding flag has been cleared")(
       eventually()((targetParticipant +: partyOwners).map { node =>
         val ptpOnboarded = node.topology.party_to_participant_mappings

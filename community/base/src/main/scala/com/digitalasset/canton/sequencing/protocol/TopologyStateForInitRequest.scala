@@ -34,7 +34,7 @@ object TopologyStateForInitRequest extends VersioningCompanion[TopologyStateForI
   override val name: String = "TopologyStateForInitRequest"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.DownloadTopologyStateForInitRequest
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),

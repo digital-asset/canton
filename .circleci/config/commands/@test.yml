@@ -517,12 +517,15 @@ set_canton_protocol_version:
       type: string
   steps:
     - run:
-        name: Set optionally specified protocol version
+        name: Set protocol version
         command: |
-          if [[ -n "<< parameters.protocol_version >>" ]]; then
-            echo "export CANTON_PROTOCOL_VERSION=<< parameters.protocol_version >>" >> $BASH_ENV
-            echo "Canton will use protocol version << parameters.protocol_version >>"
+          if [[ -z "<< parameters.protocol_version >>" ]]; then
+            echo "ERROR: protocol_version is empty."
+            echo "If you triggered a manual workflow, pass the 'protocol_version' pipeline parameter ('dev' or '36', '37', etc.)."
+            exit 1
           fi
+          echo "export CANTON_PROTOCOL_VERSION=<< parameters.protocol_version >>" >> $BASH_ENV
+          echo "Canton will use protocol version << parameters.protocol_version >>"
 
 allow_automatic_protocol_version:
   steps:

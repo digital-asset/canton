@@ -9,6 +9,9 @@ trait RandomnessProvider {
     */
   def randomAsciiString(n: Int): String
   def randomNatural(n: Int): Int // 0 <= randomNatural(n) < n
+  def split(): RandomnessProvider = RandomnessProvider.forSeed(
+    randomNatural(Int.MaxValue).toLong
+  )
 }
 
 object RandomnessProvider {

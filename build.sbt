@@ -125,6 +125,7 @@ generateNewRootNamespaceBufImage := {
   // Create a lighter buf image for offline root key scripts
   val requiredTypes = List(
     "com.digitalasset.canton.protocol.v30.TopologyTransaction",
+    "com.digitalasset.canton.protocol.v31.TopologyTransaction",
     "com.digitalasset.canton.version.v1.UntypedVersionedMessage",
     "com.digitalasset.canton.protocol.v30.SignedTopologyTransaction",
     "com.digitalasset.canton.crypto.v30.SigningPublicKey",

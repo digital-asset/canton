@@ -13,13 +13,16 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationEvent,
   AuthorizationLevel,
   GenericTopologyEvent,
+  TopologyEvent,
 }
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.DefaultTestIdentities.sequencerId
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.PositiveSignedTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.{
@@ -56,6 +59,8 @@ final class TopologyTransactionDiffTest
     with BaseTest
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
+  import TopologyTransactionDiffTest.*
+
   private lazy val topologyFactory =
     new TestingOwnerWithKeys(sequencerId, loggerFactory, executorService)
 
@@ -72,15 +77,20 @@ final class TopologyTransactionDiffTest
   private def ptpOB(
       partyId: PartyId,
       participants: List[(ParticipantId, (ParticipantPermission, Boolean))],
-  ): SignedTopologyTransaction[Replace, PartyToParticipant] = {
-
-    val mapping = PartyToParticipant.tryCreate(
+  ): SignedTopologyTransaction[Replace, PartyToParticipant] =
+    ptpHosts(
       partyId,
-      PositiveInt.one,
       participants.map { case (participant, (permission, onboarding)) =>
         HostingParticipant(participant, permission, onboarding)
       },
     )
+
+  private def ptpHosts(
+      partyId: PartyId,
+      hosts: List[HostingParticipant],
+  ): SignedTopologyTransaction[Replace, PartyToParticipant] = {
+
+    val mapping = PartyToParticipant.tryCreate(partyId, PositiveInt.one, hosts)
 
     val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction
       .create(
@@ -516,6 +526,96 @@ final class TopologyTransactionDiffTest
       }
     }
 
+    "derive events from hosting states" onlyRunWithOrGreaterThan ProtocolVersion.v37 when {
+      val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
+
+      // Alice is Active on p1 throughout; only p2's entry changes.
+      def aliceWithP2(
+          state: Option[HostingState],
+          permission: ParticipantPermission = ParticipantPermission.Confirmation,
+      ): List[SignedTopologyTransaction[Replace, TopologyMapping]] =
+        List(
+          ptpHosts(
+            alice,
+            HostingParticipant(p1, ParticipantPermission.Submission, HostingState.Active) ::
+              state.map(HostingParticipant(p2, permission, _)).toList,
+          )
+        )
+
+      def p2Event(event: AuthorizationEvent): Set[TopologyEvent] =
+        Set(PartyToParticipantAuthorization(alice.toLf, p2.toLf, event))
+
+      val noEntry = Option.empty[HostingState]
+      val nominated = Some(HostingState.Nominated)
+      val freezing = Some(HostingState.Freezing)
+      val onboarding = Some(HostingState.Onboarding)
+      val active = Some(HostingState.Active)
+
+      // One case per forward transition of p2's entry, sorted by `before`, then `after`.
+      // Backward moves (e.g. Active -> Onboarding, Onboarding -> Freezing) are not covered:
+      // topology validation is to reject them (#36492).
+      val transitions = Seq(
+        HostingStateTransition(noEntry, nominated, None),
+        HostingStateTransition(noEntry, freezing, None),
+        HostingStateTransition(noEntry, onboarding, Some(Onboarding(Confirmation))),
+        HostingStateTransition(noEntry, active, Some(Added(Confirmation))),
+        HostingStateTransition(nominated, noEntry, None),
+        HostingStateTransition(nominated, freezing, None),
+        HostingStateTransition(nominated, onboarding, Some(Onboarding(Confirmation))),
+        HostingStateTransition(nominated, active, Some(Added(Confirmation))),
+        HostingStateTransition(freezing, noEntry, None),
+        HostingStateTransition(freezing, onboarding, Some(Onboarding(Confirmation))),
+        HostingStateTransition(freezing, active, Some(Added(Confirmation))),
+        HostingStateTransition(onboarding, noEntry, Some(Revoked)),
+        HostingStateTransition(onboarding, active, Some(Added(Confirmation))),
+        HostingStateTransition(active, noEntry, Some(Revoked)),
+      )
+
+      transitions.foreach { transition =>
+        s"emit ${transition.expected.fold("no event")(_.toString)} for ${transition.describe}" in {
+          TopologyTransactionDiff(
+            synchronizerId,
+            aliceWithP2(transition.before),
+            aliceWithP2(transition.after),
+            p1,
+          ).map(_.topologyEvents) shouldBe transition.expected.map(p2Event)
+        }
+      }
+
+      "emit ChangedTo for a permission change of an Onboarding or Active entry" in {
+        forAll(Seq(HostingState.Onboarding, HostingState.Active)) { state =>
+          TopologyTransactionDiff(
+            synchronizerId,
+            aliceWithP2(Some(state), ParticipantPermission.Confirmation),
+            aliceWithP2(Some(state), ParticipantPermission.Observation),
+            p1,
+          ).map(_.topologyEvents) shouldBe Some(p2Event(ChangedTo(Observation)))
+        }
+      }
+
+      "emit no event for a permission change of a Nominated or Freezing entry" in {
+        forAll(Seq(HostingState.Nominated, HostingState.Freezing)) { state =>
+          TopologyTransactionDiff(
+            synchronizerId,
+            aliceWithP2(Some(state), ParticipantPermission.Confirmation),
+            aliceWithP2(Some(state), ParticipantPermission.Observation),
+            p1,
+          ) shouldBe None
+        }
+      }
+
+      "flag the local onboarding on Freezing -> Onboarding" in {
+        val diff = TopologyTransactionDiff(
+          synchronizerId,
+          aliceWithP2(Some(HostingState.Freezing)),
+          aliceWithP2(Some(HostingState.Onboarding)),
+          p2,
+        ).value
+        diff.onboardingLocalParty shouldBe true
+        diff.abortingOnboardingLocalParty shouldBe false
+      }
+    }
+
     "synchronizer parameters changes" should {
       val tx1 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(1))
       val tx2 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(2))
@@ -598,6 +698,19 @@ final class TopologyTransactionDiffTest
           TopologyTransactionDiff.updateId(synchronizerId, oldState, List(tx2, tx3))
         updateIdWithParams should not be updateIdWithoutParams
       }
+    }
+  }
+}
+
+object TopologyTransactionDiffTest {
+  private final case class HostingStateTransition(
+      before: Option[HostingState],
+      after: Option[HostingState],
+      expected: Option[AuthorizationEvent],
+  ) {
+    def describe: String = {
+      def show(state: Option[HostingState]) = state.fold("<>")(_.toString)
+      s"${show(before)} -> ${show(after)}"
     }
   }
 }

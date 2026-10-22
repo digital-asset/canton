@@ -20,6 +20,7 @@ import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByPainter
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
   GetEngineAbortStatus,
@@ -125,6 +126,7 @@ class ModelConformanceCheckerTest
       LoggingConfig(),
       useLegacyContractIdVersionV11 = false,
       loggerFactory,
+      CommonMockMetrics.transactionViewMetrics,
     ).transactionTreeFactory
 
   private val exampleFactory = new ExampleFactory(testEngine)

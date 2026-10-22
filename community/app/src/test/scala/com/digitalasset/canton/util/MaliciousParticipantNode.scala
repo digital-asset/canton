@@ -9,7 +9,11 @@ import com.daml.ledger.javaapi as javab
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CachingConfigs,
+  ProcessingTimeout,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.{
@@ -108,6 +112,7 @@ class MaliciousParticipantNode(
 
   private def sendRequestBatchToSequencer(
       batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
@@ -119,6 +124,7 @@ class MaliciousParticipantNode(
       _ <- sequencerClient()
         .send(
           batch,
+          currentSnapshotApproximation = currentSnapshotApproximation,
           timestamps = SendRequestTimestamps(
             approximateTimestampForSigning = approximateTimestampForSigning,
             maxSequencingTime = maxSequencingTime,
@@ -159,6 +165,7 @@ class MaliciousParticipantNode(
     ResourceUtil.withResourceM(
       new SessionKeyStoreWithInMemoryCache(
         SessionEncryptionKeyCacheConfig(),
+        CachingConfigs.defaultTransparencyCheckCache,
         timeouts,
         loggerFactory,
       )
@@ -237,7 +244,7 @@ class MaliciousParticipantNode(
           rootHashMessage -> rootHashRecipients,
         )
         batch = Batch.of(sourceProtocolVersion.unwrap, messages*)
-        _ <- sendRequestBatchToSequencer(batch, now, maxSequencingTime)
+        _ <- sendRequestBatchToSequencer(batch, Some(cryptoSnapshot), now, maxSequencingTime)
       } yield ()
     }
   }
@@ -295,6 +302,7 @@ class MaliciousParticipantNode(
     ResourceUtil.withResourceM(
       new SessionKeyStoreWithInMemoryCache(
         SessionEncryptionKeyCacheConfig(),
+        CachingConfigs.defaultTransparencyCheckCache,
         timeouts,
         loggerFactory,
       )
@@ -390,7 +398,7 @@ class MaliciousParticipantNode(
           rootHashMessage -> rootHashRecipients,
         )
         batch = Batch.of(targetProtocolVersion.unwrap, messages*)
-        _ <- sendRequestBatchToSequencer(batch, now, maxSequencingTime)
+        _ <- sendRequestBatchToSequencer(batch, Some(cryptoSnapshot), now, maxSequencingTime)
       } yield ()
     }
   }
@@ -419,6 +427,7 @@ class MaliciousParticipantNode(
 
     sendRequestBatchToSequencer(
       Batch.of(protocolVersion, broadcast -> recipients),
+      None,
       approximateTimestampForSigning = now,
       maxSequencingTime = maxSequencingTime,
     )
@@ -442,6 +451,7 @@ class MaliciousParticipantNode(
     val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
     sendRequestBatchToSequencer(
       Batch.of(protocolVersion, topologyBroadcasts.map(_ -> recipients)*),
+      None,
       approximateTimestampForSigning = now,
       maxSequencingTime = maxSequencingTime,
     )
@@ -546,6 +556,7 @@ class MaliciousParticipantNode(
   ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = ResourceUtil.withResourceM(
     new SessionKeyStoreWithInMemoryCache(
       SessionEncryptionKeyCacheConfig(),
+      CachingConfigs.defaultTransparencyCheckCache,
       timeouts,
       loggerFactory,
     )
@@ -574,7 +585,12 @@ class MaliciousParticipantNode(
       batch <- EitherT
         .right(modifiedConfirmationRequest.asBatch(cryptoSnapshot.ipsSnapshot))
       modifiedBatch = batch.map(envelopeInterceptor)
-      sendResult <- sendRequestBatchToSequencer(modifiedBatch, now, maxSequencingTime)
+      sendResult <- sendRequestBatchToSequencer(
+        modifiedBatch,
+        Some(cryptoSnapshot),
+        now,
+        maxSequencingTime,
+      )
     } yield sendResult
   }
 }

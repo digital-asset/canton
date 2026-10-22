@@ -144,6 +144,15 @@ jobs:
         shell: bash
         run: mkdir -p /tmp/canton/data-continuity-dumps
 
+      - name: Allow automatic protocol version selection
+        if: steps.guards.outputs.result != 'true'
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will select the protocol version automatically"
+        shell: bash
+
       - name: Run data continuity dump tests
         if: steps.guards.outputs.result != 'true'
         uses: ./.github/actions/test/run_tests

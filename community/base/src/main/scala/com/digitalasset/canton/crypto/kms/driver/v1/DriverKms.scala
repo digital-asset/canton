@@ -38,8 +38,7 @@ import io.opentelemetry.context.Context
 
 import java.util.concurrent.ExecutorService
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.control.NonFatal
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /** An internal KMS implementation based on an external KMS driver. */
 class DriverKms(
@@ -84,19 +83,21 @@ class DriverKms(
     logger.trace(s"Calling KMS driver for $operation")
 
     val requestF =
-      try {
-        synchronizeWithClosing(functionFullName) {
-          FutureUnlessShutdown.recoverFromAbortException {
-            futureSupervisor.supervised(s"KMS Driver: $operation") {
-              driverMethod(traceContext.context)
+      // Catch any exception thrown by the driver outside of a failed future and return a failed future
+      FutureUnlessShutdown
+        .fromTry(
+          Try(
+            synchronizeWithClosing(functionFullName) {
+              futureSupervisor.supervisedUS(s"KMS Driver: $operation") {
+                // First recover the exception and then apply supervision. Otherwise the supervisor will log the tunnel exception
+                FutureUnlessShutdown.recoverFromAbortException(
+                  driverMethod(traceContext.context)
+                )
+              }
             }
-          }
-        }
-      } catch {
-        case NonFatal(e) =>
-          // Catch any exception thrown by the driver outside of a failed future and return a failed future
-          FutureUnlessShutdown.failed(e)
-      }
+          )
+        )
+        .flatten
 
     EitherTUtil
       .fromFuture(requestF, mapErr)

@@ -66,7 +66,7 @@ class RecipientsTreeTest extends AnyWordSpec with BaseTest {
   "serialization and deserialization" should {
     "preserve the same thing" in {
 
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = SynchronizerLimits.default
 
       val serialized = t5.toProtoV30
       val deserialized =

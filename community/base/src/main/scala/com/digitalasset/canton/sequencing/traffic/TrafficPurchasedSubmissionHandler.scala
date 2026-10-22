@@ -8,8 +8,8 @@ import cats.implicits.catsSyntaxAlternativeSeparate
 import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
+import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -46,6 +46,8 @@ class TrafficPurchasedSubmissionHandler(
   /** Send a signed traffic purchased entry request.
     * @param member
     *   recipient of the new balance
+    * @param isMemberActive
+    *   whether the member is active or not.
     * @param serial
     *   monotonically increasing serial number for the request
     * @param totalTrafficPurchased
@@ -57,6 +59,7 @@ class TrafficPurchasedSubmissionHandler(
     */
   def sendTrafficPurchasedRequest(
       member: Member,
+      isMemberActive: Boolean,
       serial: PositiveInt,
       totalTrafficPurchased: NonNegativeLong,
       sequencerClient: SequencerClientSend,
@@ -71,6 +74,7 @@ class TrafficPurchasedSubmissionHandler(
     val protocolVersion: ProtocolVersion = cryptoApi.psid.protocolVersion
 
     def send(
+        currentSnapshotApproximation: SynchronizerSnapshotSyncCryptoApi,
         approximateTimestampForSigning: CantonTimestamp,
         maxSequencingTimes: NonEmpty[Seq[CantonTimestamp]],
         batch: Batch[OpenEnvelope[SignedProtocolMessage[SetTrafficPurchasedMessage]]],
@@ -90,6 +94,7 @@ class TrafficPurchasedSubmissionHandler(
             synchronizerTimeTracker,
             batch,
             aggregationRule,
+            currentSnapshotApproximation,
             approximateTimestampForSigning,
             maxSequencingTime,
           ).value
@@ -111,16 +116,16 @@ class TrafficPurchasedSubmissionHandler(
     }
 
     for {
-      topology <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
-      snapshot = topology.ipsSnapshot
+      currentSnapshotApproximation <- EitherT.liftF(cryptoApi.currentSnapshotApproximation)
+      ipsSnapshot = currentSnapshotApproximation.ipsSnapshot
       trafficParams <- EitherT
         .fromOptionF(
-          snapshot.trafficControlParameters(protocolVersion),
+          ipsSnapshot.trafficControlParameters(protocolVersion),
           TrafficControlErrors.TrafficControlDisabled.Error(),
         )
       sequencerGroup <- EitherT
         .liftF(
-          snapshot
+          ipsSnapshot
             .sequencerGroup()
             .map(
               _.getOrElse(
@@ -130,9 +135,8 @@ class TrafficPurchasedSubmissionHandler(
               )
             )
         )
-      activeSequencers <- EitherT.fromOption[FutureUnlessShutdown](
-        NonEmpty
-          .from(sequencerGroup.active),
+      _ <- EitherT.fromOption[FutureUnlessShutdown](
+        NonEmpty.from(sequencerGroup.active),
         ErrorUtil.invalidState(
           "No active sequencers found on the synchronizer. There should at least be one sequencer."
         ),
@@ -154,7 +158,7 @@ class TrafficPurchasedSubmissionHandler(
         .liftF(
           SignedProtocolMessage.trySignAndCreate(
             setTrafficPurchasedMessage,
-            topology,
+            currentSnapshotApproximation,
             Some(
               SigningTimestampOverrides(
                 approximateTimestamp = now,
@@ -163,27 +167,30 @@ class TrafficPurchasedSubmissionHandler(
             ),
           )
         )
+      synchronizerGroup = RecipientsTree.recipientsLeaf(
+        NonEmpty.mk(Set, SequencersOfSynchronizer)
+      )
+      // We can't address inactive members in the recipients list and therefore don't address the
+      // receiving member if they're inactive to still support topping up inactive members
+      recipients =
+        if (isMemberActive)
+          Recipients(
+            NonEmpty.mk(
+              Seq,
+              RecipientsTree.ofMembers(
+                NonEmpty.mk(Set, member), // Root of recipient tree: recipient of the top-up
+                Seq(synchronizerGroup),
+              ),
+            )
+          )
+        else Recipients(NonEmpty.mk(Seq, synchronizerGroup))
+
       batch = Batch.of(
         protocolVersion = protocolVersion,
         // This recipient tree structure allows the recipient of the top-up to verify that the sequencers were also addressed
-        signedTrafficPurchasedMessage -> Recipients(
-          NonEmpty.mk(
-            Seq,
-            RecipientsTree.ofMembers(
-              NonEmpty.mk(Set, member), // Root of recipient tree: recipient of the top-up
-              Seq(
-                RecipientsTree.recipientsLeaf( // Leaf of the tree: sequencers of synchronizer group
-                  NonEmpty.mk(
-                    Set,
-                    SequencersOfSynchronizer: Recipient,
-                  )
-                )
-              ),
-            ),
-          )
-        ),
+        signedTrafficPurchasedMessage -> recipients,
       )
-      _ <- send(now, maxSequencingTimes, batch, aggregationRule)
+      _ <- send(currentSnapshotApproximation, now, maxSequencingTimes, batch, aggregationRule)
     } yield ()
   }
 
@@ -192,6 +199,7 @@ class TrafficPurchasedSubmissionHandler(
       synchronizerTimeTracker: SynchronizerTimeTracker,
       batch: Batch[DefaultOpenEnvelope],
       aggregationRule: AggregationRule,
+      currentSnapshotApproximation: SynchronizerSnapshotSyncCryptoApi,
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
@@ -204,6 +212,7 @@ class TrafficPurchasedSubmissionHandler(
       _ <- sequencerClient
         .send(
           batch,
+          currentSnapshotApproximation = Some(currentSnapshotApproximation),
           aggregationRule = Some(aggregationRule),
           timestamps = SendRequestTimestamps(
             approximateTimestampForSigning = approximateTimestampForSigning,

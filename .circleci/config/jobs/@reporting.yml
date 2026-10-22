@@ -33,11 +33,3 @@ blackduck:
         name: Blackduck Run Artifacts
         path: /home/circleci/blackduck/runs
     - cleanup_build_job
-
-nightly_reporting:
-  executor: canton-small-docker
-  steps:
-    - checkout # we need our ci scripts
-    - run:
-        name: report open issues without milestone
-        command: scripts/ci/reporting/report-open-issues-without-milestone.sh

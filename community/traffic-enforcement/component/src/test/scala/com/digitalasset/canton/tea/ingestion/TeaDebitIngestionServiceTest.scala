@@ -11,10 +11,8 @@ import com.digitalasset.canton.ledger.client.services.completions.CompletionServ
 import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.tea.projection.{
+  AccountDelta,
   AccountId,
-  DeltaEvent,
-  EventSource,
-  OffsetDeltaEvent,
   ProjectionEvent,
   TrafficDelta,
 }
@@ -161,15 +159,12 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
       )
 
       runEvents(service.grpcSource(beginOffset = Some(0L))) shouldBe Seq(
-        ProjectionEvent(
-          alice,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(3),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
-            offset = 5L,
+        ProjectionEvent.Single(
+          offset = 5L,
+          timestamp = defaultRecordTime,
+          delta = AccountDelta(
+            account = alice,
+            delta = TrafficDelta.debitBalanceDelta(3),
           ),
         )
       )
@@ -186,26 +181,20 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
       )
 
       runEvents(service.grpcSource(beginOffset = Some(0L))) shouldBe Seq(
-        ProjectionEvent(
-          alice,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(2),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
-            1L,
+        ProjectionEvent.Single(
+          1L,
+          defaultRecordTime,
+          AccountDelta(
+            account = alice,
+            delta = TrafficDelta.debitBalanceDelta(2),
           ),
         ),
-        ProjectionEvent(
-          bob,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(4),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
-            3L,
+        ProjectionEvent.Single(
+          3L,
+          defaultRecordTime,
+          AccountDelta(
+            account = bob,
+            delta = TrafficDelta.debitBalanceDelta(4),
           ),
         ),
       )

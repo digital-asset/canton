@@ -10,7 +10,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   endpointToProto,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
-import com.digitalasset.canton.tracing.TraceContextGrpc.TraceContextOptionsKey
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.Metadata.BinaryMarshaller
 import io.grpc.{
@@ -36,8 +35,8 @@ private[p2p] class P2PAddEndpointHeaderGrpcClientInterceptor(
       callOptions: CallOptions,
       next: Channel,
   ): ClientCall[ReqT, RespT] = {
-    val tcOpts = Option(callOptions.getOption(TraceContextOptionsKey))
-    implicit val traceContext: TraceContext = tcOpts.getOrElse(TraceContextGrpc.fromGrpcContext)
+    implicit val traceContext: TraceContext =
+      TraceContextGrpc.inferCallerTraceContext(callOptions)
 
     new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](
       next.newCall(method, callOptions)

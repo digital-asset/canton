@@ -18,6 +18,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.{CommonMockMetrics, TransactionViewMetrics}
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
@@ -40,6 +41,7 @@ import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -48,6 +50,7 @@ import scala.concurrent.Future
 final class NextGenTransactionTreeFactoryTest
     extends AsyncWordSpec
     with BaseTest
+    with BeforeAndAfterEach
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
@@ -55,6 +58,8 @@ final class NextGenTransactionTreeFactoryTest
     TransactionViewDecompositionFactory.RollbackState.empty.enterRollback
   private val rollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
   private val rolledBackContext = rollbackContextFactory.fromRollbackState(rolledBackState)
+  private val transactionViewMetrics: TransactionViewMetrics =
+    CommonMockMetrics.transactionViewMetrics
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id =>
     EitherT.fromEither[FutureUnlessShutdown](
@@ -141,6 +146,12 @@ final class NextGenTransactionTreeFactoryTest
   private val testedContractIdVersions: Seq[CantonContractIdVersion] =
     CantonContractIdVersion.all
 
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+
+    transactionViewMetrics.treeDepth.updateValue(0)
+  }
+
   forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
@@ -156,6 +167,7 @@ final class NextGenTransactionTreeFactoryTest
           factory.cryptoOps,
           TestContractHasher.Async,
           loggerFactory,
+          transactionViewMetrics,
         )
 
       def createTransactionTree(
@@ -195,9 +207,10 @@ final class NextGenTransactionTreeFactoryTest
           forEvery(factory.standardHappyCases) { example =>
             lazy val treeFactory = createTransactionTreeFactory()
 
-            val maxParseDepth = example.rootViews
+            val largestParseDepth = example.rootViews
               .map(_.parseDepth)
               .maxOption
+            val maxParseDepth = largestParseDepth
               .filter(_ > 0)
               .fold(PositiveInt.one)(PositiveInt.tryCreate)
 
@@ -207,7 +220,10 @@ final class NextGenTransactionTreeFactoryTest
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
                 maxTreeDepth = maxParseDepth,
-              ).value.flatMap(_ should equal(Right(example.transactionTree)))
+              ).value.flatMap { v =>
+                v should equal(Right(example.transactionTree))
+                transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth.getOrElse(0)
+              }
             }
 
             PositiveInt.create(maxParseDepth.value - 1).foreach { maxDepthMinusOne =>
@@ -220,6 +236,8 @@ final class NextGenTransactionTreeFactoryTest
                 ).value.flatMap(e =>
                   inside(e) { case Left(TransactionViewLimitError(message)) =>
                     message shouldBe s"The parse depth of the transaction view exceeded $maxDepthMinusOne"
+                    transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth
+                      .getOrElse(0)
                   }
                 )
               }

@@ -67,12 +67,12 @@ echo "***** Running Mediator Replay Test..."
 
 terminate-subprocesses
 
-# Bypass missing trader metrics for replay runs
+# Bypass missing metrics for replay runs
 export KNOWN_MISSING_FAILED_TRADER_METRICS="true"
 export KNOWN_MISSING_PARTICIPANT_METRICS="true"
 export KNOWN_MISSING_TX_METRICS="true"
 
-#We only have mediator logs
+# We only have mediator logs
 export COMMON_LOG_FILE="$SYNCHRONIZERS_LOG_FILE"
 
 export UPDATES_LOAD_METRICS_FILE="mediator1.daml.sequencer-client.handler.sequencer-events.csv"

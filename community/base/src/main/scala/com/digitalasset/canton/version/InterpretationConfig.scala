@@ -10,9 +10,8 @@ object InterpretationConfig {
   def forProtocolVersion(protocolVersion: ProtocolVersion): LfInterpretationConfig =
     protocolVersion match {
       // Do not map to Dev versions, remove mapping
-      case ProtocolVersion.v35 => LfInterpretationConfig.Stable
-      case ProtocolVersion.v36 => LfInterpretationConfig.Stable
-      case ProtocolVersion.v37 => LfInterpretationConfig.Stable
+      case ProtocolVersion.v36 => LfInterpretationConfig.V36
+      case ProtocolVersion.v37 => LfInterpretationConfig.V37
       case pv if pv.isDev || pv.isAlpha => LfInterpretationConfig.Dev
       case other => throw new IllegalArgumentException(s"Unsupported protocol version: $other")
     }

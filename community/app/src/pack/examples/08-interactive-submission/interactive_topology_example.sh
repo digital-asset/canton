@@ -8,10 +8,29 @@ set -euo pipefail  # Exit on error, prevent unset vars, fail pipeline on first e
 # Source the utility script
 source "$(dirname "$0")/utils.sh"
 
-# Read GRPC_ENDPOINT, SYNCHRONIZER_ID, and PROTOCOL_VERSION from arguments
-GRPC_ENDPOINT="${1:-"localhost:$(jq -r .participant1.adminApi canton_ports.json)"}"
-SYNCHRONIZER_ID="${2:-}"
-PROTOCOL_VERSION="${3:-30}"
+PROTOCOL_VERSION="37"
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --protocol-version)
+      PROTOCOL_VERSION="$2"
+      shift 2
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#POSITIONAL_ARGS[@]} -gt 2 ]]; then
+  echo "Error: unexpected argument ${POSITIONAL_ARGS[2]}, use --protocol-version to set the protocol version"
+  exit 1
+fi
+
+# Read GRPC_ENDPOINT and SYNCHRONIZER_ID from arguments
+GRPC_ENDPOINT="${POSITIONAL_ARGS[0]:-"localhost:$(jq -r .participant1.adminApi canton_ports.json)"}"
+SYNCHRONIZER_ID="${POSITIONAL_ARGS[1]:-}"
 
 PROTO_VERSION=$(get_topology_version_number "$PROTOCOL_VERSION")
 

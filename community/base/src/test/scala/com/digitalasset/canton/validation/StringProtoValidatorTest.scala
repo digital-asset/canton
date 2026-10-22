@@ -17,11 +17,11 @@ class StringProtoValidatorTest extends AnyWordSpec with EitherValues with Matche
 
   "ProtoValidator[String] unconditional check" should {
     "accept clean content" in {
-      validator.validate("ok", field).value shouldBe "ok"
+      validator.validateAlways("ok", field).value shouldBe "ok"
     }
 
     "reject bad content" in {
-      validator.validate(bad, field).left.value shouldBe a[StringConversionError]
+      validator.validateAlways(bad, field).left.value shouldBe a[StringConversionError]
     }
   }
 

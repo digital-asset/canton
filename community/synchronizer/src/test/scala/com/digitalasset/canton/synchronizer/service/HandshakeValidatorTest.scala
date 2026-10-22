@@ -103,33 +103,31 @@ final class HandshakeValidatorTest extends AsyncWordSpec with BaseTest {
 
   }
 
-  "bail if pv35 connection doesn't include a binary" in {
+  "bail if connection doesn't include a binary" in {
     // testedProtocolVersion is lower than minimum protocol version
     HandshakeValidator
       .clientIsCompatible(
-        serverProtocolVersion = ProtocolVersion.v35,
-        Seq(35),
-        minClientVersionP = Some(34),
-        Some("Not the same binary but is okay"),
+        serverProtocolVersion = ProtocolVersion.latest,
+        clientVersionsP = Seq(ProtocolVersion.latest.v),
+        minClientVersionP = Some(ProtocolVersion.latest.v - 1),
+        clientBinaryVersion = Some("Not the same binary but is okay"),
         disableReleaseVersionHandshakeCheck = false,
       )
       .valueOrFail("Handshake should have succeeded")
 
     val status = HandshakeValidator
       .clientIsCompatible(
-        serverProtocolVersion = ProtocolVersion.v35,
-        Seq(35),
-        minClientVersionP = Some(34),
-        None,
+        serverProtocolVersion = ProtocolVersion.latest,
+        clientVersionsP = Seq(ProtocolVersion.latest.v),
+        minClientVersionP = Some(ProtocolVersion.latest.v - 1),
+        clientBinaryVersion = None,
         disableReleaseVersionHandshakeCheck = false,
       )
       .left
       .value
 
     status.getDescription should include(
-      "he server is running protocol 35 and does not support clients with binary"
+      s"The server is running protocol ${ProtocolVersion.latest} and does not support clients with binary"
     )
-
   }
-
 }

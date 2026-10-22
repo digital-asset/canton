@@ -618,6 +618,7 @@ class TransactionProcessingSteps(
       ViewMessageDecrypter(
         participantId,
         sessionKeyStore,
+        withTransparencyChecks = staticSynchronizerParameters.enableTransparencyChecks,
         protocolVersion,
         futureSupervisor,
         loggerFactory,

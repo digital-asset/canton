@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -153,6 +153,7 @@ object ListDecentralizedNamespaceDefinitionResult {
       itemProto <- ProtoConverter.required("item", value.item)
       item <- DecentralizedNamespaceDefinition.fromProtoV30(
         ProtocolVersionValidation.AlwaysValidation,
+        SynchronizerLimits.default.topologyLimits,
         itemProto,
       )
     } yield ListDecentralizedNamespaceDefinitionResult(context, item)
@@ -172,7 +173,11 @@ object ListOwnerToKeyMappingResult {
       context <- BaseResult.fromProtoV30(contextProto)
       item <- value.item match {
         case v30.ListOwnerToKeyMappingResponse.Result.Item.V30(i) =>
-          OwnerToKeyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, i)
+          OwnerToKeyMapping.fromProtoV30(
+            ProtocolVersionValidation.AlwaysValidation,
+            SynchronizerLimits.default.topologyLimits,
+            i,
+          )
         case v30.ListOwnerToKeyMappingResponse.Result.Item.Empty =>
           ProtoConverter.required("item", None)
       }
@@ -194,7 +199,11 @@ object ListPartyToKeyMappingResult {
       context <- BaseResult.fromProtoV30(contextProto)
       item <- value.item match {
         case v30.ListPartyToKeyMappingResponse.Result.Item.V30(i) =>
-          PartyToKeyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, i)
+          PartyToKeyMapping.fromProtoV30(
+            ProtocolVersionValidation.AlwaysValidation,
+            SynchronizerLimits.default.topologyLimits,
+            i,
+          )
         case v30.ListPartyToKeyMappingResponse.Result.Item.Empty =>
           ProtoConverter.required("item", None)
       }
@@ -289,9 +298,17 @@ object ListPartyToParticipantResult {
       context <- BaseResult.fromProtoV30(contextProto)
       item <- value.item match {
         case v30.ListPartyToParticipantResponse.Result.Item.V30(mappingP) =>
-          PartyToParticipant.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, mappingP)
+          PartyToParticipant.fromProtoV30(
+            ProtocolVersionValidation.AlwaysValidation,
+            SynchronizerLimits.default.topologyLimits,
+            mappingP,
+          )
         case v30.ListPartyToParticipantResponse.Result.Item.V31(mappingP) =>
-          PartyToParticipant.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, mappingP)
+          PartyToParticipant.fromProtoV31(
+            ProtocolVersionValidation.AlwaysValidation,
+            SynchronizerLimits.default.topologyLimits,
+            mappingP,
+          )
         case v30.ListPartyToParticipantResponse.Result.Item.Empty =>
           ProtoConverter.required("item", None)
       }

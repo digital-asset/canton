@@ -13,6 +13,7 @@ import com.daml.ledger.api.v2.state_service.{
   GetActiveContractsResponse,
   GetConnectedSynchronizersRequest,
   GetConnectedSynchronizersResponse,
+  GetLatestPrunedOffsetsRequest,
   GetLedgerEndRequest,
   GetLedgerEndResponse,
 }
@@ -39,6 +40,7 @@ class StateServiceClient(
       eventFormat: EventFormat,
       validAtOffset: Long,
       token: Option[String],
+      includeIncompleteReassignments: Boolean = true,
   )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
     ClientAdapter
       .serverStreaming(
@@ -46,6 +48,7 @@ class StateServiceClient(
           activeAtOffset = validAtOffset,
           eventFormat = Some(eventFormat),
           streamContinuationToken = None,
+          includeIncompleteReassignments = includeIncompleteReassignments,
         ),
         LedgerClient.stubWithTracing(service, token.orElse(getDefaultToken())).getActiveContracts,
       )
@@ -55,12 +58,18 @@ class StateServiceClient(
       eventFormat: EventFormat,
       validAtOffset: Long,
       token: Option[String] = None,
+      includeIncompleteReassignments: Boolean = true,
   )(implicit
       materializer: Materializer,
       traceContext: TraceContext,
   ): Future[Seq[ActiveContract]] =
     for {
-      contracts <- getActiveContractsSource(eventFormat, validAtOffset, token).runWith(Sink.seq)
+      contracts <- getActiveContractsSource(
+        eventFormat,
+        validAtOffset,
+        token,
+        includeIncompleteReassignments,
+      ).runWith(Sink.seq)
       active = contracts
         .map(_.contractEntry)
         .collect { case ContractEntry.ActiveContract(value) =>
@@ -83,6 +92,14 @@ class StateServiceClient(
       token: Option[String] = None
   )(implicit traceContext: TraceContext): Future[Long] =
     getLedgerEnd(Seq(), token).map(_.offset)
+
+  def getParticipantPrunedUpToOffset(
+      token: Option[String] = None
+  )(implicit traceContext: TraceContext): Future[Long] =
+    LedgerClient
+      .stubWithTracing(service, token.orElse(getDefaultToken()))
+      .getLatestPrunedOffsets(GetLatestPrunedOffsetsRequest())
+      .map(_.participantPrunedUpToInclusive)
 
   def getConnectedSynchronizers(
       party: String,

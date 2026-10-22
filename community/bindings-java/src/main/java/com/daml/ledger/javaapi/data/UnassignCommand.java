@@ -6,7 +6,9 @@ package com.daml.ledger.javaapi.data;
 import com.daml.ledger.api.v2.ReassignmentCommandOuterClass;
 import org.checkerframework.checker.nullness.qual.NonNull;
 
+import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class UnassignCommand extends ReassignmentCommand {
 
@@ -16,11 +18,30 @@ public final class UnassignCommand extends ReassignmentCommand {
 
   private final @NonNull String target;
 
+  private final @NonNull Optional<String> overrideSourceValidationPackageId;
+
+  private final @NonNull Optional<String> overrideTargetValidationPackageId;
+
+  public UnassignCommand(
+      @NonNull String contractId,
+      @NonNull String source,
+      @NonNull String target,
+      @NonNull Optional<String> overrideSourceValidationPackageId,
+      @NonNull Optional<String> overrideTargetValidationPackageId) {
+    this.contractId = contractId;
+    this.source = source;
+    this.target = target;
+    this.overrideSourceValidationPackageId = overrideSourceValidationPackageId;
+    this.overrideTargetValidationPackageId = overrideTargetValidationPackageId;
+  }
+
   public UnassignCommand(
       @NonNull String contractId, @NonNull String source, @NonNull String target) {
     this.contractId = contractId;
     this.source = source;
     this.target = target;
+    this.overrideSourceValidationPackageId = Optional.empty();
+    this.overrideTargetValidationPackageId = Optional.empty();
   }
 
   @NonNull
@@ -38,6 +59,16 @@ public final class UnassignCommand extends ReassignmentCommand {
     return target;
   }
 
+  @NonNull
+  public Optional<String> getOverrideSourceValidationPackageId() {
+    return overrideSourceValidationPackageId;
+  }
+
+  @NonNull
+  public Optional<String> getOverrideTargetValidationPackageId() {
+    return overrideTargetValidationPackageId;
+  }
+
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
@@ -45,12 +76,20 @@ public final class UnassignCommand extends ReassignmentCommand {
     UnassignCommand that = (UnassignCommand) o;
     return Objects.equals(contractId, that.contractId)
         && Objects.equals(source, that.source)
-        && Objects.equals(target, that.target);
+        && Objects.equals(target, that.target)
+        && Objects.equals(overrideSourceValidationPackageId, that.overrideSourceValidationPackageId)
+        && Objects.equals(
+            overrideTargetValidationPackageId, that.overrideTargetValidationPackageId);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(contractId, source, target);
+    return Objects.hash(
+        contractId,
+        source,
+        target,
+        overrideSourceValidationPackageId,
+        overrideTargetValidationPackageId);
   }
 
   @Override
@@ -59,24 +98,51 @@ public final class UnassignCommand extends ReassignmentCommand {
         + "contractId='"
         + contractId
         + '\''
-        + ", source="
+        + ", source='"
         + source
-        + ", target="
+        + '\''
+        + ", target='"
         + target
+        + '\''
+        + ", overrideSourceValidationPackageId="
+        + overrideSourceValidationPackageId
+        + ", overrideTargetValidationPackageId="
+        + overrideTargetValidationPackageId
         + '}';
   }
 
   public ReassignmentCommandOuterClass.UnassignCommand toProto() {
-    return ReassignmentCommandOuterClass.UnassignCommand.newBuilder()
-        .setContractId(this.contractId)
-        .setSource(this.source)
-        .setTarget(this.target)
-        .build();
+
+    ReassignmentCommandOuterClass.UnassignCommand.Builder builder =
+        ReassignmentCommandOuterClass.UnassignCommand.newBuilder()
+            .setContractId(this.contractId)
+            .setSource(this.source)
+            .setTarget(this.target);
+
+    this.overrideSourceValidationPackageId.ifPresent(builder::setOverrideSourceValidationPackageId);
+    this.overrideTargetValidationPackageId.ifPresent(builder::setOverrideTargetValidationPackageId);
+
+    return builder.build();
   }
 
   public static UnassignCommand fromProto(
       ReassignmentCommandOuterClass.UnassignCommand unassignCommand) {
+
+    Optional<String> overrideSourceValidationPackageId =
+        unassignCommand.getOverrideSourceValidationPackageId().isEmpty()
+            ? Optional.empty()
+            : Optional.of(unassignCommand.getOverrideSourceValidationPackageId());
+
+    Optional<String> overrideTargetValidationPackageId =
+        unassignCommand.getOverrideTargetValidationPackageId().isEmpty()
+            ? Optional.empty()
+            : Optional.of(unassignCommand.getOverrideTargetValidationPackageId());
+
     return new UnassignCommand(
-        unassignCommand.getContractId(), unassignCommand.getSource(), unassignCommand.getTarget());
+        unassignCommand.getContractId(),
+        unassignCommand.getSource(),
+        unassignCommand.getTarget(),
+        overrideSourceValidationPackageId,
+        overrideTargetValidationPackageId);
   }
 }

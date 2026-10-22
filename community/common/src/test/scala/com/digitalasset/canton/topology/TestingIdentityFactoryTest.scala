@@ -6,11 +6,16 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SynchronizerParameters}
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
+  SynchronizerLimits,
+  SynchronizerParameters,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
@@ -19,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   PartyToParticipant,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
 }
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -351,8 +357,11 @@ class TestingIdentityFactoryTest
         .partyToParticipantTxs()
         .toSeq
         .flatMap { tx =>
+          // Bytes the testing topology just produced, so the limits are never read.
           TopologyTransaction
-            .fromTrustedByteString(())(tx.transaction.toByteStringChecked)
+            .fromTrustedByteString(
+              TopologyTransactionDeserializationContext(SynchronizerLimits.default)
+            )(tx.transaction.toByteStringChecked)
             .value
             .selectMapping[PartyToParticipant]
         }
@@ -373,12 +382,13 @@ class TestingIdentityFactoryTest
 
     val onboardingTopology = TestingTopology(topology =
       Map(
-        party1.toLf -> PartyInfo.nonConsortiumPartyInfo(
+        party1.toLf -> PartyInfo.forTesting(
+          PositiveInt.one,
           Map(
             participant1 -> ParticipantAttributes(ParticipantPermission.Confirmation),
             participant2 ->
               ParticipantAttributes(ParticipantPermission.Confirmation, onboarding = true),
-          )
+          ),
         )
       )
     )
@@ -398,7 +408,7 @@ class TestingIdentityFactoryTest
       storedHostingStates(topology) shouldBe states
     }
 
-    "store entries with onboarding = true as ONBOARDING" in {
+    "store entries with onboarding = true as Onboarding" in {
       storedHostingStates(onboardingTopology) shouldBe Map(
         participant1 -> HostingState.Active,
         participant2 -> HostingState.Onboarding,
@@ -419,7 +429,7 @@ class TestingIdentityFactoryTest
         .value should include("conflict with onboarding = true")
     }
 
-    "reject NOMINATED and FREEZING on a protocol version without them" onlyRunWhen (pv =>
+    "reject Nominated and Freezing on a protocol version without them" onlyRunWhen (pv =>
       !supportsAllHostingStates(pv)
     ) in {
       Seq(HostingState.Nominated, HostingState.Freezing).foreach { state =>

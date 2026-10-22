@@ -71,7 +71,7 @@ final class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.HardcodedDefault,
-          SynchronizerLimits.defaultFor(testedProtocolVersion),
+          SynchronizerLimits.default,
         )
         .value
       decompressed.timestamp shouldBe event.timestamp
@@ -85,7 +85,7 @@ final class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one)),
-          SynchronizerLimits.defaultFor(testedProtocolVersion),
+          SynchronizerLimits.default,
         )
         .left
         .value shouldBe a[DecompressionFailed]

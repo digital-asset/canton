@@ -53,7 +53,6 @@ class LedgerApiStore(
     ledgerApiDbSupport.storageBackendFactory.createEventStorageBackend(
       ledgerEndCache,
       stringInterningView,
-      loggerFactory,
     )
   private val stringInterningStorageBackend =
     ledgerApiDbSupport.storageBackendFactory.createStringInterningStorageBackend

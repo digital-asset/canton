@@ -610,10 +610,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *   - Is the reassignment id consistent with the reassignment data?
     *   - the multi-synchronizer topology feature flag should be set on all participants hosting a
     *     stakeholder.
-    *
-    * TODO(#34870): Handle a failed activeness check here: log a warning, or crash if
-    * `crashAfterFailedValidation` is set. A local activeness failure must not turn into a
-    * rejection, as participants do not agree on the activeness result.
     */
   def checkPhase7Validations(
       commonValidationResult: ReassignmentValidationResult.CommonValidationResult

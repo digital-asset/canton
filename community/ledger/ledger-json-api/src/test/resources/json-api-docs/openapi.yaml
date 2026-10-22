@@ -2414,12 +2414,54 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/traffic/prune:
+    post:
+      description: |-
+        Prune events from the event log and submission correlations that are older than a given timestamp.
+        Submission correlations record the account each submission is charged to.
+        Permissioned only to Ledger API admin users.
+        The timestamp must be at least the participant's max deduplication duration in the past
+        (7 days by default), otherwise the request is rejected with TRAFFIC_UNSAFE_TO_PRUNE.
+        WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+        WARNING: If a submission's correlation is pruned before its completion arrives, the submission is NOT debited.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: postV2TrafficPrune
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PruneRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PruneResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
   /v2/traffic/events/prune:
     post:
       description: |-
-        Prune events from the event log that are older than a given timestamp.
+        Served by POST /v2/traffic/prune, and returns only the number of pruned events.
         Permissioned only to Ledger API admin users.
-        WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+
+        Deprecated since Canton 3.7, disabled by default in Canton 3.8 and removed in Canton 3.9 (disable it earlier with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = false`). Use POST /v2/traffic/prune instead.
 
         NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
       operationId: postV2TrafficEventsPrune
@@ -2448,6 +2490,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -4334,13 +4377,21 @@ components:
             The page token only works if subsequent requests:
 
             - are executed on the same participant,
-            - use the same active_at_offset and event_format,
+            - use the same active_at_offset, event_format and include_incomplete_reassignments,
             - and the participant's store was not pruned to after the active_at_offset.
 
             If not specified, the first page of the active contracts snapshot will be returned.
 
             Optional: can be empty
           type: string
+        includeIncompleteReassignments:
+          description: |-
+            If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+            based on the specified event_format.
+            If this flag is set to false, Incomplete Reassignments will be omitted.
+
+            Optional
+          type: boolean
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       type: object
@@ -4375,13 +4426,22 @@ components:
 
             - subsequent request must be executed on the same participant with the same version of canton,
             - subsequent request must have the same active_at_offset,
-            - subsequent request must have the same event_format
+            - subsequent request must have the same event_format,
+            - subsequent request must have the same include_incomplete_reassignments
             - and the participant must not have been pruned after the active_at_offset.
 
             If not specified, the whole active contracts snapshot will be returned.
 
             Optional: can be empty
           type: string
+        includeIncompleteReassignments:
+          description: |-
+            If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+            based on the specified event_format.
+            If this flag is set to false, Incomplete Reassignments will be omitted.
+
+            Optional
+          type: boolean
     GetCompletionByHashRequest:
       title: GetCompletionByHashRequest
       type: object
@@ -5038,8 +5098,8 @@ components:
             The interface that a matching contract must implement.
             The ``interface_id`` needs to be valid: corresponding interface should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -7178,6 +7238,40 @@ components:
             Required
           type: integer
           format: int32
+    PruneRequest:
+      title: PruneRequest
+      type: object
+      required:
+      - beforeOrAt
+      properties:
+        beforeOrAt:
+          description: |-
+            The timestamp before which events and submission correlations should be pruned.
+            Events and submission correlations with a timestamp less than or equal to this value will be pruned.
+
+            Required
+          type: string
+    PruneResponse:
+      title: PruneResponse
+      type: object
+      required:
+      - prunedEventCount
+      - prunedCorrelationCount
+      properties:
+        prunedEventCount:
+          description: |-
+            The number of events that were pruned.
+
+            Required
+          type: integer
+          format: int32
+        prunedCorrelationCount:
+          description: |-
+            The number of submission correlations that were pruned.
+
+            Required
+          type: integer
+          format: int32
     Reassignment:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
@@ -7597,8 +7691,8 @@ components:
             A template for which the payload should be included in the response.
             The ``template_id`` needs to be valid: corresponding template should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -7819,6 +7913,19 @@ components:
 
             Required
           type: string
+        overrideSourceValidationPackageId:
+          description: |-
+            The package id used to validate the contract on the source synchronizer.
+
+            Optional
+          type: string
+        overrideTargetValidationPackageId:
+          description: |-
+            The package id used to validate the contract on the target synchronizer. This
+            package id will also become the representative package id used in the created event.
+
+            Optional
+          type: string
     UnassignedEvent:
       title: UnassignedEvent
       description: Records that a contract has been unassigned, and it becomes unusable
@@ -7893,7 +8000,8 @@ components:
           description: |-
             Assignment exclusivity
             Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-            Defined for reassigning participants.
+            Defined for reassigning participants, up to protocol version 36.
+            Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
             Optional
           type: string

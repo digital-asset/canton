@@ -316,7 +316,7 @@ trait StoreBasedTopologySnapshotTest
     "get correct synchronizer limits" in {
       val fixture = new Fixture()
 
-      val expectedSynchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val expectedSynchronizerLimits = SynchronizerLimits.default
       val synchronizerLimits = fixture.client.getSynchronizerLimits
 
       synchronizerLimits shouldBe expectedSynchronizerLimits

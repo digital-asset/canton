@@ -110,7 +110,7 @@ object InteractiveConsole extends NoTracing {
                 logger.error(
                   s"Running bootstrap script failed with an exception (${x.getMessage}$additionalMessage)!"
                 )
-                logger.debug("Ammonite exception thrown is", x)
+                logger.info("Ammonite exception thrown is", x)
                 (a, repl.interp.watchedValues.toSeq)
               case Some(x) =>
                 logger.error(s"Running bootstrap script failed with $x")

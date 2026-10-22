@@ -49,6 +49,9 @@ object SubmissionRequestType {
   case object TimeProof extends SubmissionRequestType {
     override def name: String = "time proof"
   }
+  case object TopUpPreOnboarding extends SubmissionRequestType {
+    override def name: String = "top up pre-onboarding"
+  }
   final case class Unexpected(description: String) extends SubmissionRequestType {
     override def name: String = "unexpected"
   }
@@ -81,6 +84,7 @@ object SubmissionRequestType {
         case (ParticipantId(_), true, false, false, false) => Commitment
         case (SequencerId(_), true, false, true, false) => TopUp
         case (SequencerId(_), false, true, true, false) => TopUpMed
+        case (SequencerId(_), false, false, true, false) => TopUpPreOnboarding
         case (SequencerId(_), false, true, false, false) => LsuSequencingTest
         case (_, false, false, false, true) => TopologyTransaction
         case (_, false, false, false, false) => TimeProof

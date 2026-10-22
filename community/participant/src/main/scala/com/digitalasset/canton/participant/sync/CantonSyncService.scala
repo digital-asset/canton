@@ -126,7 +126,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -1098,7 +1098,7 @@ class CantonSyncService(
       }
       operation = PendingOnboardingTransactions(
         transactions.sortBy(TopologyStore.initialParticipantDispatchingOrder),
-        ProtocolVersion.latest,
+        ReleaseProtocolVersion(ProtocolVersion.latest),
       )
         .toPendingOperation(synchronizerId, config.synchronizerAlias)
       _ <- pendingOnboardingTransactionsStore
@@ -1841,17 +1841,33 @@ class CantonSyncService(
               .Reject(s"Unable to resolve $synchronizerId to a connected physical synchronizer id")
           )
 
-      def lookupPsids(source: Source[SynchronizerId], target: Target[SynchronizerId]): Either[
+      def lookupAndCheckPsids(
+          source: Source[SynchronizerId],
+          target: Target[SynchronizerId],
+          hasPkgValidationOverrides: Boolean,
+      ): Either[
         RequestValidationErrors.InvalidArgument.Reject,
         (Source[PhysicalSynchronizerId], Target[PhysicalSynchronizerId]),
       ] = for {
         sourcePsid <- lookupPsid(source.unwrap).map(Source(_))
         targetPsid <- lookupPsid(target.unwrap).map(Target(_))
+        _ <- Either.cond(
+          !hasPkgValidationOverrides || (sourcePsid.unwrap.protocolVersion > ProtocolVersion.v36 && targetPsid.unwrap.protocolVersion > ProtocolVersion.v36),
+          (),
+          RequestValidationErrors.InvalidArgument
+            .Reject(
+              s"Can only use validation package overrides when both source and target synchronizers are running protocol version ${ProtocolVersion.v37} or later. Source: ${sourcePsid.unwrap.protocolVersion}, Target: ${targetPsid.unwrap.protocolVersion}"
+            ),
+        )
       } yield (sourcePsid, targetPsid)
 
       ReassignmentCommandsBatch.create(reassignmentCommands) match {
         case Right(unassigns: ReassignmentCommandsBatch.Unassignments) =>
-          lookupPsids(unassigns.source, unassigns.target) match {
+          lookupAndCheckPsids(
+            unassigns.source,
+            unassigns.target,
+            unassigns.hasPkgValidationOverrides,
+          ) match {
             case Right((sourcePsid, targetPsid)) =>
               doReassignment(
                 psid = sourcePsid.unwrap
@@ -1868,6 +1884,8 @@ class CantonSyncService(
                   contractIds = unassigns.contractIds,
                   targetSynchronizer = targetPsid,
                   sourceTopology = Source(sourceTopology),
+                  overrideSourceValidationPkgIds = unassigns.overrideSourceValidationPkgIds,
+                  overrideTargetValidationPkgIds = unassigns.overrideTargetValidationPkgIds,
                 )
               }
 

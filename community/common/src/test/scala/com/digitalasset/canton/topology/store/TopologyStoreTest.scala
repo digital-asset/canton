@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.store
 import cats.syntax.option.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.topology.TopologyStateHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -483,7 +483,9 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               pureCrypto = testData.factory.syncCryptoClient.crypto.pureCrypto,
               store = store,
-              BatchAggregatorConfig.defaultsForTesting,
+              BatchingConfig().copy(
+                topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
+              ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
@@ -647,7 +649,9 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
-              BatchAggregatorConfig.defaultsForTesting,
+              BatchingConfig().copy(
+                topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
+              ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
@@ -853,13 +857,14 @@ trait TopologyStoreTest
             _ <- new InitialTopologySnapshotValidator(
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
-              BatchAggregatorConfig.defaultsForTesting,
+              BatchingConfig().copy(
+                topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
+              ),
               TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
               Some(defaultStaticSynchronizerParameters),
               timeouts,
               futureSupervisor = futureSupervisor,
               loggerFactory,
-              cleanupTopologySnapshot = false,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
               .valueOrFail("topology bootstrap")
 
@@ -1997,6 +2002,64 @@ trait TopologyStoreTest
 
         }
 
+      }
+
+      "findStoredByHashes" should {
+        "return no records for an empty set of hashes" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "findStoredByHashes_empty")
+          store.findStoredByHashes(CantonTimestamp.MaxValue, Set.empty).map(_ shouldBe empty)
+        }
+
+        "match single lookups across batches, rejection filters, and exclusive timestamps" in {
+          val store = mk(synchronizer1_p1p2_physicalSynchronizerId, "findStoredByHashes_mixed")
+          val ts1 = CantonTimestamp.Epoch
+          val ts2 = ts1.plusSeconds(10)
+          val rejected = TopologyTransactionRejection.Authorization.NotAuthorizedByNamespaceKey
+          val transactions = Seq(nsd_p1, nsd_p2, otk_p1, otk_p2)
+          val hashes = transactions.map(_.hash).toSet
+
+          for {
+            _ <- store.update(
+              SequencedTime(ts1),
+              EffectiveTime(ts1),
+              removals = Map.empty,
+              additions = Seq(
+                ValidatedTopologyTransaction(nsd_p1),
+                ValidatedTopologyTransaction(nsd_p2, Some(rejected)),
+                ValidatedTopologyTransaction(otk_p1),
+              ),
+            )
+            _ <- store.update(
+              SequencedTime(ts2),
+              EffectiveTime(ts2),
+              removals = Map.empty,
+              additions = Seq(ValidatedTopologyTransaction(nsd_p1, Some(rejected))),
+            )
+            _ <- MonadUtil.sequentialTraverse_(
+              Seq(ts1, ts1.immediateSuccessor, ts2, ts2.immediateSuccessor)
+            ) { asOf =>
+              MonadUtil.sequentialTraverse_(Seq(false, true)) { includeRejected =>
+                for {
+                  batch <- store.findStoredByHashes(asOf, hashes, includeRejected)
+                  singles <- MonadUtil.sequentialTraverse(transactions) { tx =>
+                    store.findStored(asOf, tx, includeRejected).map(_.map(tx.hash -> _))
+                  }
+                } yield {
+                  batch shouldBe singles.flatten.toMap
+                }
+              }
+            }
+            latest <- store.findStoredByHashes(
+              CantonTimestamp.MaxValue,
+              hashes,
+              includeRejected = true,
+            )
+          } yield {
+            latest.keySet shouldBe Set(nsd_p1.hash, nsd_p2.hash, otk_p1.hash)
+            latest(nsd_p1.hash).validFrom shouldBe EffectiveTime(ts2)
+            latest(nsd_p1.hash).rejectionReason shouldBe Some(rejected.asString300)
+          }
+        }
       }
 
       "filterProvidesAdditionalSignatures" should {
