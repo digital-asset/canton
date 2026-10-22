@@ -83,6 +83,14 @@ package api {
       identityProviderId: IdentityProviderId,
   )
 
+  sealed abstract class UserRight extends Product with Serializable {
+    def getParty: Option[Ref.Party] = None
+  }
+
+  sealed abstract class UserRightForParty(party: Ref.Party) extends UserRight {
+    override def getParty: Option[Ref.Party] = Some(party)
+  }
+
   sealed abstract class Feature extends Product with Serializable
 
   object Feature {
