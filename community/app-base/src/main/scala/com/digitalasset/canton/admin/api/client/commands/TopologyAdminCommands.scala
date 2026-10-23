@@ -18,6 +18,8 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
@@ -37,8 +39,9 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
 }
-import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
+import com.digitalasset.canton.util.GrpcStreamingUtils
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
@@ -55,7 +58,7 @@ import io.grpc.{Context, ManagedChannel}
 
 import java.io.{ByteArrayInputStream, InputStream}
 import java.time.Instant
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 object TopologyAdminCommands {
@@ -928,7 +931,12 @@ object TopologyAdminCommands {
       ) =
         ProtoConverter
           .parseRequired(
-            SignedTopologyTransactions.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _),
+            SignedTopologyTransactions
+              .fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+                _,
+              ),
             "result",
             response.result,
           )
@@ -1067,7 +1075,7 @@ object TopologyAdminCommands {
     ): Either[String, T] = {
 
       // TODO(#32231): Revise when the feature (signingKeyUsageProtoV31) is actually implemented.
-      // We force to v31 ONLY if v30 validation explicitly fails (e.g. a PartyToParticipant hosting state is NOMINATED or FREEZING)
+      // We force to v31 ONLY if v30 validation explicitly fails (e.g. a PartyToParticipant hosting state is Nominated or Freezing)
       val useV31 = mapping
         .canBeSerializedTo(ProtoVersion(30))
         .isLeft || ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion)
@@ -1178,7 +1186,8 @@ object TopologyAdminCommands {
         topologySnapshot: ByteString,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
-    ) extends BaseWriteCommand[
+    )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
+        extends BaseWriteCommand[
           ImportTopologySnapshotRequest,
           ImportTopologySnapshotResponse,
           Unit,
@@ -1203,7 +1212,7 @@ object TopologyAdminCommands {
           service.withDeadline(null).importTopologySnapshot,
           bytes =>
             ImportTopologySnapshotRequest(
-              ByteString.copyFrom(bytes),
+              bytes,
               Some(store.toProtoV30),
               waitToBecomeEffective.map(_.toProtoPrimitive),
             ),
@@ -1218,7 +1227,8 @@ object TopologyAdminCommands {
         topologySnapshotStream: InputStream,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
-    ) extends BaseWriteCommand[
+    )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
+        extends BaseWriteCommand[
           Unit,
           ImportTopologySnapshotV2Response,
           Unit,
@@ -1230,18 +1240,16 @@ object TopologyAdminCommands {
           service: TopologyManagerWriteServiceStub,
           request: Unit,
       ): Future[ImportTopologySnapshotV2Response] =
-        ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
-          GrpcStreamingUtils.streamToServer(
-            service.importTopologySnapshotV2,
-            bytes =>
-              ImportTopologySnapshotV2Request(
-                ByteString.copyFrom(bytes),
-                Some(store.toProtoV30),
-                waitToBecomeEffective.map(_.toProtoPrimitive),
-              ),
-            inputStream,
-          )
-        }
+        GrpcStreamingUtils.streamToServer(
+          service.importTopologySnapshotV2,
+          bytes =>
+            ImportTopologySnapshotV2Request(
+              bytes,
+              Some(store.toProtoV30),
+              waitToBecomeEffective.map(_.toProtoPrimitive),
+            ),
+          topologySnapshotStream,
+        )
 
       override protected def handleResponse(
           response: ImportTopologySnapshotV2Response
@@ -1281,7 +1289,12 @@ object TopologyAdminCommands {
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
           )((tx, _) =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
+            SignedTopologyTransaction
+              .fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+                tx,
+              )
           )
           .leftMap(_.message)
     }
@@ -1320,8 +1333,11 @@ object TopologyAdminCommands {
             val serializedHash = generatedTransaction.transactionHash
             for {
               parsedTopologyTransaction <-
-                TopologyTransaction
-                  .fromByteString(ProtocolVersionValidation.AlwaysValidation, serializedTransaction)
+                TopologyTransaction.fromByteString(
+                  ProtocolVersionValidation.AlwaysValidation,
+                  TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+                  serializedTransaction,
+                )
               // We don't really need the hash from the response here because we can re-build it from the deserialized
               // topology transaction. But users of the API without access to this code wouldn't be able to do that,
               // which is why the hash is returned by the API. Let's still verify that they match here.
@@ -1430,6 +1446,7 @@ object TopologyAdminCommands {
           SignedTopologyTransaction
             .fromProtoV30(
               ProtocolVersionValidation.AlwaysValidation,
+              TopologyTransactionDeserializationContext(SynchronizerLimits.default),
               _,
             )
             .leftMap(_.message)
@@ -1503,7 +1520,11 @@ object TopologyAdminCommands {
         .toRight("no transaction in response")
         .flatMap(
           SignedTopologyTransaction
-            .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
+            .fromProtoV30(
+              ProtocolVersionValidation.AlwaysValidation,
+              TopologyTransactionDeserializationContext(SynchronizerLimits.default),
+              _,
+            )
             .leftMap(_.message)
             .flatMap(tx =>
               tx.selectMapping[M]

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -18,6 +19,8 @@ object ReassignmentCommand {
       sourceSynchronizer: Source[SynchronizerId],
       targetSynchronizer: Target[SynchronizerId],
       contractId: Value.ContractId,
+      overrideSourceValidationPkgId: Option[LfPackageId],
+      overrideTargetValidationPkgId: Option[LfPackageId],
   ) extends ReassignmentCommand
 
   final case class Assign(

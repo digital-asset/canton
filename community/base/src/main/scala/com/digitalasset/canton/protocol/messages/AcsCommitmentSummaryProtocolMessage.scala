@@ -4,36 +4,38 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.option.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{
   HashPurpose,
   Signature,
   SigningKeyUsage,
   SyncCryptoApi,
-  SyncCryptoError,
   SynchronizerCryptoClient,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v31, v32}
+import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
-  UnsupportedProtoCodec,
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
 
 import scala.concurrent.ExecutionContext
 
-final case class AcsCommitmentSummaryProtocolMessage(
+final case class AcsCommitmentSummaryProtocolMessage private (
     acsCommitmentSummary: AcsCommitmentSummary,
     signature: Signature,
 ) extends UnsignedProtocolMessage
@@ -48,64 +50,88 @@ final case class AcsCommitmentSummaryProtocolMessage(
     AcsCommitmentSummaryProtocolMessage.type
   ] = AcsCommitmentSummaryProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
-  override protected[messages] def toProtoSomeEnvelopeContentV31
-      : v31.EnvelopeContent.SomeEnvelopeContent =
-    throw new UnsupportedOperationException(
-      s"${this.getClass.getSimpleName} cannot be serialized to envelope content v31"
-    )
-
   override protected[messages] def toProtoSomeEnvelopeContentV32
       : v32.EnvelopeContent.SomeEnvelopeContent =
     v32.EnvelopeContent.SomeEnvelopeContent.AcsCommitmentSummaryProtocolMessage(toProtoV32)
 
-  private def toProtoV32: v32.AcsCommitmentSummaryProtocolMessage =
+  private def toProtoV32: v32.AcsCommitmentSummaryProtocolMessage = {
+    val summaryBytes = acsCommitmentSummary.toByteString
     v32.AcsCommitmentSummaryProtocolMessage(
-      acsCommitmentSummary = acsCommitmentSummary.toByteString,
+      acsCommitmentSummary = summaryBytes,
       signature = signature.toProtoV30.some,
     )
+  }
 }
 
 object AcsCommitmentSummaryProtocolMessage
-    extends VersioningCompanionContext[AcsCommitmentSummaryProtocolMessage, ProtocolVersion] {
+    extends VersioningCompanionContext[
+      AcsCommitmentSummaryProtocolMessage,
+      AcsCommitmentDeserializationContext,
+    ] {
 
   override def name: String = "AcsCommitmentSummaryProtocolMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v32.AcsCommitmentSummaryProtocolMessage
     )(
-      supportedProtoVersion(_)(fromProtoV32),
+      supportedProtoVersionPVV(_)(fromProtoV32),
       _.toProtoV32,
-    ),
+    )
   )
 
+  def create(
+      acsCommitmentSummary: AcsCommitmentSummary,
+      signature: Signature,
+      sizeLimit: PositiveInt,
+  ): Either[String, AcsCommitmentSummaryProtocolMessage] = {
+    val pvv = ProtocolVersionValidation.PV(acsCommitmentSummary.psid.protocolVersion)
+
+    ProtoValidation
+      .validateLength(
+        acsCommitmentSummary.toByteString,
+        "acs_commitment_summary",
+        pvv,
+        ValidationParam(ProtocolVersion.newBoundsOnPV37 -> sizeLimit),
+      )
+      .leftMap(_.message)
+      .map(_ => new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature))
+  }
+
   private[messages] def fromProtoV32(
-      expectedProtocolVersion: ProtocolVersion,
+      pvv: ProtocolVersionValidation,
+      context: AcsCommitmentDeserializationContext,
       message: v32.AcsCommitmentSummaryProtocolMessage,
   ): ParsingResult[AcsCommitmentSummaryProtocolMessage] = {
-    val v32.AcsCommitmentSummaryProtocolMessage(acsCommitmentSummaryP, signaturesP) = message
+    val v32.AcsCommitmentSummaryProtocolMessage(acsCommitmentSummaryP, signatureP) = message
+
     for {
-      acsCommitmentSummary <- AcsCommitmentSummary.fromByteString(
-        expectedProtocolVersion,
+      acsCommitmentSummary <- ProtoValidation.validateLengthThen(
         acsCommitmentSummaryP,
-      )
-      signatures <- ProtoConverter.parseRequired(
+        "acs_commitment_summary",
+        pvv,
+        ValidationParam(
+          ProtocolVersion.newBoundsOnPV37 -> context.synchronizerLimits.acsCommitmentLimits.maxCommitmentSummarySizeBytes
+        ),
+      )(AcsCommitmentSummary.fromByteString(pvv, context, _))
+
+      signature <- ProtoConverter.parseRequired(
         Signature.fromProtoV30,
-        "signatures",
-        signaturesP,
+        "signature",
+        signatureP,
       )
-    } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signatures)
+    } yield new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
   }
 
   // TODO(#34736) Re-use more code for signing and verifying instead of copy-pasting
   def signAndCreate(
       cryptoApi: SynchronizerCryptoClient,
       acsCommitmentSummary: AcsCommitmentSummary,
+      sizeLimit: PositiveInt,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, SyncCryptoError, AcsCommitmentSummaryProtocolMessage] = {
+  ): EitherT[FutureUnlessShutdown, String, AcsCommitmentSummaryProtocolMessage] = {
     val hashPurpose = HashPurpose.AcsCommitmentSummary
     val serialization = acsCommitmentSummary.getCryptographicEvidence
 
@@ -113,8 +139,11 @@ object AcsCommitmentSummaryProtocolMessage
 
     for {
       snapshot <- EitherT.liftF(cryptoApi.awaitSnapshot(acsCommitmentSummary.commitmentTick))
-      signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None)
-    } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
+      signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None).leftMap(_.toString)
+      protocolMessage <- EitherT.fromEither(
+        create(acsCommitmentSummary, signature, sizeLimit)
+      )
+    } yield protocolMessage
   }
 
   def verifySignature(

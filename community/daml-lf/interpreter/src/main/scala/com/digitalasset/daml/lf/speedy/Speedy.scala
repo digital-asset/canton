@@ -183,7 +183,7 @@ private[lf] object Speedy {
       val committers: Set[Party],
       /* Commit location, if a script commit is in progress. */
       val commitLocation: Option[Location],
-      val limits: interpretation.Limits,
+      val limits: interpretation.LimitConfig,
       costModel: CostModel,
       initialGasBudget: Option[CostModel.Cost],
       initialEnvSize: Int,
@@ -576,7 +576,7 @@ private[lf] object Speedy {
           interpretation.InterpretationConfig.Default,
         contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
         commitLocation: Option[Location] = None,
-        limits: interpretation.Limits = interpretation.Limits.Lenient,
+        limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
         costModel: CostModel = CostModel.Empty,
         initialGasBudget: Option[CostModel.Cost] = None,
         initialEnvSize: Int = 512,
@@ -1124,7 +1124,7 @@ private[lf] object Speedy {
         committers: Set[Party],
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-        limits: interpretation.Limits = interpretation.Limits.Lenient,
+        limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
     )(implicit loggingContext: NamedLoggingContext): UpdateMachine = {
       val updateSE: SExpr = compiledPackages.compiler.unsafeCompile(updateE)
       fromUpdateSExpr(
@@ -1154,7 +1154,7 @@ private[lf] object Speedy {
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
         interpretationConfig: interpretation.InterpretationConfig =
           interpretation.InterpretationConfig.Default,
-        limits: interpretation.Limits = interpretation.Limits.Lenient,
+        limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
     ): UpdateMachine =
       UpdateMachine(
         compiledPackages = compiledPackages,

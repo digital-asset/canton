@@ -24,6 +24,7 @@ import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.google.protobuf.ByteString
 import org.openjdk.jmh.annotations.*
 import org.openjdk.jmh.infra.Blackhole
+import org.scalatest.Assertions
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Await
@@ -36,7 +37,7 @@ import scala.concurrent.duration.Duration
 @Threads(1)
 @BenchmarkMode(Array(Mode.AverageTime))
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
-class AsymmetricEncryptionBenchmark extends TestEssentials {
+class AsymmetricEncryptionBenchmark extends TestEssentials with Assertions {
 
   implicit val ec: scala.concurrent.ExecutionContext = Threading.newExecutionContext(
     loggerFactory.threadName + "-env-ec",
@@ -72,7 +73,7 @@ class AsymmetricEncryptionBenchmark extends TestEssentials {
         crypto
           .generateEncryptionKey(EcP256)
           .value
-          .failOnShutdownToAbortException("prepareRun"),
+          .onShutdown(fail("prepareRun aborted")),
         Duration.Inf,
       )
       .fold(err => throw new RuntimeException(s"Failed to create a EcP256 key: $err"), identity)
@@ -82,7 +83,7 @@ class AsymmetricEncryptionBenchmark extends TestEssentials {
       crypto
         .generateEncryptionKey(Rsa2048)
         .value
-        .failOnShutdownToAbortException("prepareRun"),
+        .onShutdown(fail("prepareRun aborted")),
       Duration.Inf,
     )
     .fold(err => throw new RuntimeException(s"Failed to create a Rsa2048 key: $err"), identity)

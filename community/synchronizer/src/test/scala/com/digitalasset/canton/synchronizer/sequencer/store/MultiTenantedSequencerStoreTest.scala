@@ -104,11 +104,11 @@ trait MultiTenantedSequencerStoreTest
         for {
           registeredAlice <- store.registerMember(alice, ts(0))
           aliceId = registeredAlice.memberId
-          aliceRegisteredFrom = registeredAlice.registeredFrom
+          aliceRegisteredFrom = registeredAlice.registeredFrom.value
 
           registeredBob <- store.registerMember(bob, ts(0))
           bobId = registeredBob.memberId
-          bobRegisteredFrom = registeredBob.registeredFrom
+          bobRegisteredFrom = registeredBob.registeredFrom.value
 
           _ <- writeDelivers(sequencer1, bobId)(1)
           _ <- writeDelivers(sequencer2, aliceId)(2, 3, 4, 5)
@@ -143,7 +143,7 @@ trait MultiTenantedSequencerStoreTest
         for {
           registeredAlice <- store.registerMember(alice, ts(0))
           aliceId = registeredAlice.memberId
-          aliceRegisteredFrom = registeredAlice.registeredFrom
+          aliceRegisteredFrom = registeredAlice.registeredFrom.value
 
           _ <- writeDelivers(sequencer1, aliceId)(1, 4)
           _ <- writeDelivers(sequencer2, aliceId)(2, 5)
@@ -184,7 +184,7 @@ trait MultiTenantedSequencerStoreTest
         for {
           registeredAlice <- store.registerMember(alice, ts(0))
           aliceId = registeredAlice.memberId
-          aliceRegisteredFrom = registeredAlice.registeredFrom
+          aliceRegisteredFrom = registeredAlice.registeredFrom.value
 
           // deliver event 7 is ahead of all other events, but won't be included in s1's watermark
           _ <- writeDelivers(sequencer1, aliceId)(1, 7, 8)
@@ -229,7 +229,7 @@ trait MultiTenantedSequencerStoreTest
         for {
           registeredAlice <- store.registerMember(alice, ts(0))
           aliceId = registeredAlice.memberId
-          aliceRegisteredFrom = registeredAlice.registeredFrom
+          aliceRegisteredFrom = registeredAlice.registeredFrom.value
 
           _ <- writeDelivers(sequencer1, aliceId)(1, 4)
           _ <- writeDelivers(sequencer2, aliceId)(2, 5)

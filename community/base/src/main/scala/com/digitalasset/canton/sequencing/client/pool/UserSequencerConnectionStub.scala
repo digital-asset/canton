@@ -23,6 +23,8 @@ import com.digitalasset.canton.sequencing.protocol.{
   TopologyStateForInitResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.duration.Duration
 
@@ -74,13 +76,12 @@ trait UserSequencerConnectionStub extends NamedLogging {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, Option[CantonTimestamp]]
 
-  def downloadTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(implicit
+  def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(implicit
       traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    SequencerConnectionStubError,
+  ): Either[SequencerConnectionStubError, Source[
     TopologyStateForInitResponse,
-  ]
+    NotUsed,
+  ]]
 
   def subscribe[E](
       request: SubscriptionRequest,

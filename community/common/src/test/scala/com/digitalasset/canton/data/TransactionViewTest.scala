@@ -144,7 +144,12 @@ final class TransactionViewTest
           val decoded = TransactionView
             .fromByteString(
               testedProtocolVersion,
-              (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+              TransactionViewDeserializationContext(
+                hashOps,
+                DepthCounter.NoLimit,
+                testedProtocolVersion,
+                SynchronizerLimits.default.transactionProtocolLimits,
+              ),
             )(encoded)
             .value
           decoded shouldBe expected
@@ -904,10 +909,11 @@ final class TransactionViewTest
         val deserialized = TransactionView
           .fromByteString(
             testedProtocolVersion,
-            (
+            TransactionViewDeserializationContext(
               hashOps,
               DepthCounter.withLimit(testedProtocolVersion, actualDepth),
               testedProtocolVersion,
+              SynchronizerLimits.default.transactionProtocolLimits,
             ),
           )(bytes)
           .value
@@ -917,7 +923,12 @@ final class TransactionViewTest
 
         TransactionView.fromByteString(
           testedProtocolVersion,
-          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+          TransactionViewDeserializationContext(
+            hashOps,
+            DepthCounter.withLimit(testedProtocolVersion, expected),
+            testedProtocolVersion,
+            SynchronizerLimits.default.transactionProtocolLimits,
+          ),
         )(bytes) shouldBe Left(NestingTooDeep(expected))
 
       }
@@ -934,7 +945,12 @@ final class TransactionViewTest
         val deserialized = TransactionView
           .fromByteString(
             testedProtocolVersion,
-            (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+            TransactionViewDeserializationContext(
+              hashOps,
+              DepthCounter.NoLimit,
+              testedProtocolVersion,
+              SynchronizerLimits.default.transactionProtocolLimits,
+            ),
           )(bytes)
           .value
 
@@ -944,7 +960,12 @@ final class TransactionViewTest
 
         TransactionView.fromByteString(
           testedProtocolVersion,
-          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+          TransactionViewDeserializationContext(
+            hashOps,
+            DepthCounter.withLimit(testedProtocolVersion, expected),
+            testedProtocolVersion,
+            SynchronizerLimits.default.transactionProtocolLimits,
+          ),
         )(bytes) shouldBe Left(NestingTooDeep(expected))
       }
     }

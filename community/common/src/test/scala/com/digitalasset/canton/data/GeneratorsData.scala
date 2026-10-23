@@ -692,7 +692,7 @@ final class GeneratorsData(
       subviewHashes = subviews.trySubviewHashes
       pureCrypto = ExampleTransactionFactory.pureCrypto
       subviewReferencesAndKeys <-
-        (if (protocolVersion < ProtocolVersion.transparency)
+        (if (protocolVersion < ProtocolVersion.transparencyAndCiphertextId)
            Gen.const(subviewHashes.map(ByViewHash(_)).toList)
          else
            subviewHashes.toList.traverse(_ => Arbitrary.arbitrary[ByCiphertextId])).map(

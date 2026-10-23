@@ -299,7 +299,7 @@ message PartyToParticipant {
 
   // Contains protocol signing keys for the party used to authorize externally signed Daml transactions,
   // along with a signing threshold.
-  // The max number of keys is 20
+  // The max number of keys is the synchronizer's max_signing_keys_per_entity topology limit
   optional com.digitalasset.canton.crypto.v30.SigningKeysWithThreshold party_signing_keys = 6;
 }
 // [doc-entry-end: PartyToParticipant]

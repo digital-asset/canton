@@ -16,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalactic.source
 import org.scalatest.Assertion
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -36,6 +37,11 @@ trait BftSequencerBaseTest extends BaseTest {
       pos: source.Position
   ): A =
     loggerFactory.assertLogs(SuppressionRule.FullSuppression)(within, assertions*)(pos)
+
+  protected final def assertWarns[A](within: => A, assertions: (LogEntry => Assertion)*)(implicit
+      pos: source.Position
+  ): A =
+    loggerFactory.assertLogs(SuppressionRule.LevelAndAbove(Level.WARN))(within, assertions*)(pos)
 
   protected final def assertNoLogs[A](within: => A)(implicit
       pos: source.Position

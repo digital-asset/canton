@@ -281,7 +281,7 @@ object FutureSupervisor {
           // Use the direct execution context so that the supervision follow-up steps doesn't affect task-based scheduling
           // because the follow-up is run on the future itself.
           implicit val directExecutionContext: ExecutionContext =
-            new DirectExecutionContext(errorLoggingContext.noTracingLogger)
+            DirectExecutionContext(errorLoggingContext.noTracingLogger)
           fut.thereafter {
             case Success(_) =>
               val time = elapsed(itm)

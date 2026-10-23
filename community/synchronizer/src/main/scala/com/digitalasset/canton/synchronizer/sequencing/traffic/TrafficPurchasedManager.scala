@@ -19,18 +19,22 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.traffic.TrafficPurchased
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.store.{RegisteredMember, SequencerStore}
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager.{
   PendingBalanceUpdate,
+  PrePurchaseMinimumProtocolVersion,
   TrafficPurchasedAlreadyPruned,
   TrafficPurchasedForMember,
   TrafficPurchasedManagerError,
+  isPrePurchaseSupported,
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficPurchasedStore
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, Mutex}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.github.blemale.scaffeine.Scaffeine
 
 import java.util.concurrent.atomic.AtomicReference
@@ -49,11 +53,13 @@ import scala.concurrent.ExecutionContext
   */
 class TrafficPurchasedManager(
     val store: TrafficPurchasedStore,
+    sequencerStore: SequencerStore,
     trafficConfig: SequencerTrafficConfig,
     futureSupervisor: FutureSupervisor,
     sequencerMetrics: SequencerMetrics,
     override protected val timeouts: ProcessingTimeout,
     lsuSequencingBounds: Option[LsuSequencingBounds],
+    protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
@@ -133,6 +139,34 @@ class TrafficPurchasedManager(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Updating traffic purchased entry: $balance")
     for {
+      registeredMemberO <- sequencerStore.lookupMember(balance.member)
+      // Registering a member that is only onboarding requires a protocol version whose sequencer snapshot
+      // can represent it (PV37 and above). Below that, drop the purchase instead of registering the member:
+      // the v30 snapshot would encode the onboarding member as disabled, which would corrupt the state of
+      // any sequencer subsequently onboarded from this one.
+      // Sequenced purchases are not expected to reach this branch: a TrafficPurchase is only valid if signed
+      // by a threshold of sequencers, and below PV37 an honest sequencer only signs purchases for members it
+      // knows as registered. So it would take a quorum of malicious sequencers to get here (the recipient
+      // check at sequencing time helps, but is not a guarantee since a malicious node can drop the recipient).
+      // This branch therefore only guards against a broken invariant.
+      _ <-
+        if (registeredMemberO.isEmpty && !isPrePurchaseSupported(protocolVersion)) {
+          logger.warn(
+            s"Ignoring traffic purchased entry $balance for '${balance.member}': the member is not" +
+              s" registered on the synchronizer, and purchasing traffic for members that are not yet" +
+              s" registered requires protocol version $PrePurchaseMinimumProtocolVersion or higher (this synchronizer" +
+              s" runs protocol version $protocolVersion)."
+          )
+          FutureUnlessShutdown.unit
+        } else applyTrafficPurchased(balance, registeredMemberO)
+    } yield updateAndCompletePendingUpdates(balance.sequencingTimestamp)
+  }
+
+  private def applyTrafficPurchased(
+      balance: TrafficPurchased,
+      registeredMemberO: Option[RegisteredMember],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    for {
       balances <- trafficPurchased.compute(
         balance.member,
         (_, oldBalanceO) => {
@@ -166,16 +200,25 @@ class TrafficPurchasedManager(
       shouldInsert = balances.trafficPurchasedMap.lastOption.forall { case (_, cachedBalance) =>
         cachedBalance == balance
       }
-      _ <- if (shouldInsert) store.store(balance) else FutureUnlessShutdown.unit
+      _ <-
+        if (shouldInsert)
+          // Traffic can be purchased for a member that is not yet onboarded, so register it if necessary
+          registeredMemberO
+            .fold[FutureUnlessShutdown[Unit]] {
+              logger.info(s"Registering '${balance.member}' as `Onboarding` member")
+              sequencerStore
+                .registerOnboardingMember(balance.member, balance.sequencingTimestamp)
+                .map(_ => ())
+            }(_ => FutureUnlessShutdown.unit)
+            .flatMap(_ => store.store(balance))
+        else FutureUnlessShutdown.unit
     } yield {
       // Increment the metrics
       sequencerMetrics.trafficControl.balanceUpdateProcessed.inc()
       sequencerMetrics.trafficControl.trafficConsumption
         .extraTrafficPurchased(MetricsContext("member" -> balance.member.toString))
         .updateValue(balance.extraTrafficPurchased.value)
-      updateAndCompletePendingUpdates(balance.sequencingTimestamp)
     }
-  }
 
   /** Get the balance valid at the given timestamp from the provided sorted map
     */
@@ -419,6 +462,15 @@ class TrafficPurchasedManager(
 }
 
 object TrafficPurchasedManager {
+
+  /** Lowest protocol version that supports purchasing traffic for members that are not registered
+    * yet, as its sequencer snapshot can represent onboarding members
+    */
+  val PrePurchaseMinimumProtocolVersion: ProtocolVersion = ProtocolVersion.v37
+
+  def isPrePurchaseSupported(protocolVersion: ProtocolVersion): Boolean =
+    protocolVersion >= PrePurchaseMinimumProtocolVersion
+
   sealed trait TrafficPurchasedManagerError extends Product with Serializable
   final case class TrafficPurchasedAlreadyPruned(member: Member, timestamp: CantonTimestamp)
       extends TrafficPurchasedManagerError

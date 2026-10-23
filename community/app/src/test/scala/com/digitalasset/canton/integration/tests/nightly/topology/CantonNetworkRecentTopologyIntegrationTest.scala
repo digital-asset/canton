@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.topology
 
+import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.upgrade.CantonNetworkTopologyIntegrationTestBase
@@ -17,6 +18,7 @@ import com.digitalasset.canton.util.{FutureUtil, GrpcStreamingUtils}
 import com.google.cloud.storage.Storage.BlobListOption
 import com.google.cloud.storage.StorageOptions
 import io.circe.parser as circeParser
+import monocle.macros.syntax.lens.*
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.apache.commons.io.FilenameUtils
 import org.apache.pekko.stream.Materializer
@@ -40,7 +42,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
 
   // We need very high timeouts here as the mainnet snapshot especially is huge
   // and takes very long to validate
-  private val timeout = 2.hours
+  private val timeout = 3.hours
 
   /** Name of the GCP bucket that contains the CN topology snapshots */
   private val bucketName = "cn-topology-snapshots"
@@ -57,6 +59,11 @@ trait CantonNetworkRecentTopologyIntegrationTest
         import env.*
         participant1.start()
       }
+      .addConfigTransforms(
+        // We need to run this suite with a lot of extra memory to allow the snapshot to load
+        _.focus(_.parameters.startupMemoryCheckConfig.reportingLevel)
+          .replace(ReportingLevel.Ignore)
+      )
 
   /** Download the latest onboarding-state file from the GCP bucket for [[environmentName]].
     *
@@ -177,7 +184,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
       val transactions =
         try {
           GrpcStreamingUtils
-            .parseDelimitedFromTrusted(in, OnboardingStateForSequencerV2)
+            .parseDelimitedFromTrustedF(in, OnboardingStateForSequencerV2)
             .value
             .flatMap(_.topologySnapshot)
         } finally in.close()
@@ -194,7 +201,6 @@ trait CantonNetworkRecentTopologyIntegrationTest
         // Index value is not important, it just needs to be an index that isn't used by default by the node
         topoStoreIdx = 11,
         snapshot.get().value,
-        cleanupTopologyState = false,
         timeout,
         physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
       ).discard
@@ -209,7 +215,6 @@ trait CantonNetworkRecentTopologyIntegrationTest
         // Index value is not important, it just needs to be an index that isn't used by default by the node
         topoStoreIdx = 12,
         snapshot.get().value,
-        cleanupTopologyState = false,
         timeout,
         physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
         validateInitialTopologySnapshot = false,

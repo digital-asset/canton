@@ -16,6 +16,8 @@ import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
   PruneEventsRequest,
   PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -46,6 +48,9 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
       Future.successful(
         UpdateAccountResponse(Some(GetAccountResponse(request.accountId, 0L)))
       )
+
+    override def prune(request: PruneRequest): Future[PruneResponse] =
+      Future.successful(PruneResponse(0, 0))
 
     override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
       Future.successful(PruneEventsResponse(0))

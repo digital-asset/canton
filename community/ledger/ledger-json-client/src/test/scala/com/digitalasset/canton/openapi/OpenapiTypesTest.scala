@@ -11,6 +11,8 @@ import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
   PruneEventsRequest,
   PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -1101,6 +1103,18 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.UpdateAccountResponse,
         ](
           openapi.UpdateAccountResponse.fromJson
+        ),
+        Mapping[
+          PruneRequest,
+          openapi.PruneRequest,
+        ](
+          openapi.PruneRequest.fromJson
+        ),
+        Mapping[
+          PruneResponse,
+          openapi.PruneResponse,
+        ](
+          openapi.PruneResponse.fromJson
         ),
         Mapping[
           PruneEventsRequest,

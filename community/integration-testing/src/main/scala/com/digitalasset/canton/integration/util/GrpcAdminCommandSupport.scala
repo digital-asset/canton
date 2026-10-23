@@ -106,6 +106,7 @@ private[integration] object GrpcServices {
   object StateService {
     val stub: Channel => StateServiceStub = proto.state_service.StateServiceGrpc.stub
     val getActiveContracts = stub.streamingCommand(_.getActiveContracts)
+    val getActiveContractsPage = stub.syncCommand(_.getActiveContractsPage)
     val getConnectedSynchronizers = stub.syncCommand(_.getConnectedSynchronizers)
   }
 }

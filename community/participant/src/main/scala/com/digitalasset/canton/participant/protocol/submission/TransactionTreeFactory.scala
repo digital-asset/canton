@@ -21,6 +21,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.metrics.TransactionViewMetrics
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
   TransactionTreeConversionError,
@@ -94,6 +95,9 @@ trait TransactionTreeFactory {
     */
   def saltsFromView(view: TransactionView): Iterable[Salt]
 
+  /** Where to emit transaction view metrics.
+    */
+  def metrics: TransactionViewMetrics
 }
 
 object TransactionTreeFactory {
@@ -108,6 +112,7 @@ object TransactionTreeFactory {
       cryptoOps: HashOps & HmacOps,
       hasher: ContractHasher,
       loggerFactory: NamedLoggerFactory,
+      metrics: TransactionViewMetrics,
   )(implicit ex: ExecutionContext): TransactionTreeFactory =
     new NextGenTransactionTreeFactory(
       submittingParticipant,
@@ -116,6 +121,7 @@ object TransactionTreeFactory {
       cryptoOps,
       hasher,
       loggerFactory,
+      metrics,
     )
 
   def contractInstanceLookup(

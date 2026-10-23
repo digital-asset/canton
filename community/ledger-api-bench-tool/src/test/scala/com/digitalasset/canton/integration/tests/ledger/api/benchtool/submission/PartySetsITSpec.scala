@@ -78,7 +78,8 @@ class PartySetsITSpec
       )
       (for {
         (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
-          submissionConfig
+          submissionConfig,
+          maxInFlightCommands = 10,
         )
         configDesugaring = new ConfigEnricher(
           allocatedParties,
@@ -129,21 +130,21 @@ class PartySetsITSpec
         { // Party from party set
           cp(
             discard(
-              ledgerEffectsResults_fooParty87.numberOfCreatesPerTemplateName("Foo1") shouldBe 4
+              ledgerEffectsResults_fooParty87.numberOfCreatesPerTemplateName("Foo1") shouldBe 8
             )
           )
           cp(
             discard(
               ledgerEffectsResults_fooParty87.numberOfNonConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 8
+              ) shouldBe 16
             )
           )
           cp(
             discard(
               ledgerEffectsResults_fooParty87.numberOfConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 1
+              ) shouldBe 3
             )
           )
         }
@@ -164,7 +165,7 @@ class PartySetsITSpec
             discard(
               ledgerEffectsResults_fooPartySet.numberOfConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 4
+              ) shouldBe 3
             )
           )
         }
@@ -188,7 +189,7 @@ class PartySetsITSpec
             discard(
               ledgerEffectsResults_fooPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 4
+              ) shouldBe 3
             )
           )
         }
@@ -209,7 +210,7 @@ class PartySetsITSpec
             discard(
               ledgerEffectsResults_barPartySet.numberOfConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 2
+              ) shouldBe 0
             )
           )
         }
@@ -218,7 +219,7 @@ class PartySetsITSpec
             discard(
               ledgerEffectsResults_barPartyNamePrefix.numberOfCreatesPerTemplateName(
                 "Foo1"
-              ) shouldBe 5
+              ) shouldBe 4
             )
           )
           cp(
@@ -226,14 +227,14 @@ class PartySetsITSpec
               ledgerEffectsResults_barPartyNamePrefix
                 .numberOfNonConsumingExercisesPerTemplateName(
                   "Foo1"
-                ) shouldBe 10
+                ) shouldBe 8
             )
           )
           cp(
             discard(
               ledgerEffectsResults_barPartyNamePrefix.numberOfConsumingExercisesPerTemplateName(
                 "Foo1"
-              ) shouldBe 2
+              ) shouldBe 0
             )
           )
         }

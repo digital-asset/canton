@@ -70,7 +70,7 @@ object ParticipantMetadata
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ParticipantMetadata)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ParticipantMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

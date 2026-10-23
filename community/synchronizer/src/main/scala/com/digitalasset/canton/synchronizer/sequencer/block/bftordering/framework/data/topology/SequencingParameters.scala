@@ -255,7 +255,7 @@ object SequencingParameters
   override def versioningTable: data.topology.SequencingParameters.VersioningTable =
     VersioningTable(
       ProtoVersion(31) ->
-        VersionedProtoCodec(ProtocolVersion.v35)(
+        VersionedProtoCodec(ProtocolVersion.v36)(
           v31.DynamicSequencingParametersPayload
         )(
           supportedProtoVersion(_)(SequencingParameters.fromProto31),

@@ -232,18 +232,6 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
       )
     }
 
-  def recreateDatabases(): Future[Unit] =
-    pgPlugin match {
-      case Some(postgresPlugin) =>
-        dbNames.forgetNE.parTraverse_(db =>
-          postgresPlugin
-            .recreateDatabaseForNodeWithName(db)
-            .failOnShutdownToAbortException("recreateDatabases")
-        )
-      case _ =>
-        warnNoPlugin(functionFullName)
-    }
-
   def dumpDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false): Future[Unit] =
     dumpDatabases(dbNames, tempDirectory, forceLocal)
 

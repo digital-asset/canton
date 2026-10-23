@@ -80,6 +80,7 @@ object SequencerClientFactory {
       recordingConfigForMember: Member => Option[RecordingConfig],
       replayConfigForMember: Member => Option[ReplayConfig],
       metrics: SequencerClientMetrics,
+      bftTopologyForInitDownloader: BftTopologyForInitDownloader,
       loggingConfig: LoggingConfig,
       exitOnFatalErrors: Boolean,
       namedLoggerFactory: NamedLoggerFactory,
@@ -189,8 +190,15 @@ object SequencerClientFactory {
                   s"Failed to retrieve traffic state from synchronizer for $member: $err"
                 )
               }
-
           } yield result
+
+        def getApproximateSequencingTime: FutureUnlessShutdown[CantonTimestamp] =
+          syncCryptoApi.currentSnapshotApproximation
+            .flatMap(_.ipsSnapshot.memberFirstKnownAt(member))
+            .map {
+              case Some((sequencedTime, _)) => sequencedTime.value
+              case None => clock.now
+            }
 
         val sequencerTransports = SequencerTransports.from(
           sequencerConnections.sequencerTrustThreshold,
@@ -242,10 +250,21 @@ object SequencerClientFactory {
               EitherT.pure[FutureUnlessShutdown, CreateError](None)
             } else getTrafficStateWithConnectionPool _
 
+          // On a first connection we have neither a stored event nor a predecessor to anchor on,
+          // so the traffic state would not be queried. Thus, we need to find an approximate
+          // timestamp to use in the query.
+          isFirstConnection = latestSequencedTimestampO.isEmpty && synchronizerPredecessor.isEmpty
+          firstConnectionTimestamp <-
+            if (isFirstConnection && trafficControlEnabled && member.code != MediatorId.Code)
+              EitherT.right(getApproximateSequencingTime.map(Some(_)))
+            else
+              EitherT.pure[FutureUnlessShutdown, CreateError](None)
+
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
           trafficInitTimestampO = latestSequencedTimestampO
             .orElse(synchronizerPredecessor.map(_.upgradeTime))
+            .orElse(firstConnectionTimestamp)
             /*
             Mediator nodes don't expose traffic.
             This also prevent them from connecting to the sequencer during LSU before upgrade time, which
@@ -338,6 +357,7 @@ object SequencerClientFactory {
           recorderO,
           replayConfigForMember(member),
           syncCryptoApi,
+          bftTopologyForInitDownloader,
           loggingConfig,
           Some(trafficStateController),
           exitOnFatalErrors,

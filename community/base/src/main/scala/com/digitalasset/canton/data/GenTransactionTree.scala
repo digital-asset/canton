@@ -303,6 +303,7 @@ object GenTransactionTree extends PrettyPrintingCompanion[GenTransactionTree] {
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       context: (GenTransactionTreeDeserializationContext, ProtocolVersion),
       protoTransactionTree: v30.GenTransactionTree,
   ): ParsingResult[GenTransactionTree] = {
@@ -315,14 +316,15 @@ object GenTransactionTree extends PrettyPrintingCompanion[GenTransactionTree] {
         .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.submitterMetadata,
           SubmitterMetadata.fromByteString(
-            expectedProtocolVersion,
+            pvv,
             SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits),
+            _,
           ),
         )
       commonMetadata <- MerkleTree
         .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.commonMetadata,
-          CommonMetadata.fromByteString(expectedProtocolVersion, hashOps),
+          CommonMetadata.fromByteString(pvv, hashOps, _),
         )
       _commonMetadataUnblinded <- commonMetadata.unwrap.leftMap(_ =>
         InvariantViolation(field = "GenTransactionTree.commonMetadata", error = "is blinded")
@@ -330,25 +332,29 @@ object GenTransactionTree extends PrettyPrintingCompanion[GenTransactionTree] {
       participantMetadata <- MerkleTree
         .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.participantMetadata,
-          ParticipantMetadata.fromByteString(expectedProtocolVersion, hashOps),
+          ParticipantMetadata.fromByteString(pvv, hashOps, _),
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
       rootViews <- MerkleSeq.fromProtoV30(
+        pvv,
         (
-          (
-            hashOps,
-            (bytes: ByteString, depthCounter: DepthCounter) =>
-              TransactionView.fromByteString(
+          hashOps,
+          (bytes: ByteString, depthCounter: DepthCounter) =>
+            TransactionView.fromByteString(
+              pvv,
+              TransactionViewDeserializationContext(
+                hashOps,
+                depthCounter,
                 expectedProtocolVersion,
-                (hashOps, depthCounter, expectedProtocolVersion),
-              )(bytes),
-            DepthCounter.withLimit(
-              expectedProtocolVersion,
-              synchronizerLimits.transactionProtocolLimits.maxTransactionTreeDepth.value,
+                synchronizerLimits.transactionProtocolLimits,
+              ),
+              bytes,
             ),
+          DepthCounter.withLimit(
+            pvv,
+            synchronizerLimits.transactionProtocolLimits.maxTransactionTreeDepth.value,
           ),
-          expectedProtocolVersion,
         ),
         rootViewsP,
       )

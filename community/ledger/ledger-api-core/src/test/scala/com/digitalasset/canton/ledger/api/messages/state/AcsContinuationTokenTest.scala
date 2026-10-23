@@ -5,7 +5,10 @@ package com.digitalasset.canton.ledger.api.messages.state
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
+import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.api.messages.state.AcsContinuationToken.Checksum
+import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
@@ -15,6 +18,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable.{HashMap, TreeMap}
+import scala.util.chaining.scalaUtilChainingOps
 
 class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValues {
   private val eventFormat = EventFormat(
@@ -22,7 +26,8 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     filtersForAnyParty = None,
     verbose = false,
   )
-  private val originalRequest = GetActiveContractsRequest(125, Some(eventFormat), None)
+  private val originalRequest =
+    GetActiveContractsRequest(125, Some(eventFormat), None, includeIncompleteReassignments = false)
   private val participantId = Ref.ParticipantId.assertFromString("Ledger")
   private val originalRequestChecksum =
     AcsContinuationToken.calcChecksum(originalRequest, participantId)
@@ -33,6 +38,11 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
 
   private implicit val elc: ErrorLoggingContext =
     ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)(TraceContext.empty)
+
+  private val errorString =
+    "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. " +
+      "Tokens used in ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
+      "with the same Canton participant running the same Canton version."
 
   "AcsContinuationToken" should "successfully decode an untampered token from the request" in {
     val checksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
@@ -47,9 +57,19 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     val decodedToken =
       AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in ACS " +
-        "requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
-        "with the same Canton participant running the same Canton version."
+      errorString
+    )
+  }
+
+  it should "fail if different includeIncompleteReassignments flag is used" in {
+    val differentRequest = originalRequest.copy(
+      includeIncompleteReassignments = !originalRequest.includeIncompleteReassignments
+    )
+    val checksum = AcsContinuationToken.calcChecksum(differentRequest, participantId)
+    val decodedToken =
+      AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
+    decodedToken.left.value.getStatus.getDescription should equal(
+      errorString
     )
   }
 
@@ -62,9 +82,7 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     val decodedToken =
       AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in " +
-        "ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
-        "with the same Canton participant running the same Canton version."
+      errorString
     )
   }
 
@@ -77,9 +95,7 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     val decodedToken =
       AcsContinuationToken.decodeAndValidate(checksum, encodedToken)
     decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_CONTINUATION_TOKEN(8,0): The submitted command contains an invalid continuation token. Tokens used in " +
-        "ACS requests must be taken from a valid GetActiveContractsResponse and used with the same EventFormat settings, " +
-        "with the same Canton participant running the same Canton version."
+      errorString
     )
   }
 
@@ -107,7 +123,12 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
       filtersForAnyParty = None,
       verbose = false,
     )
-    val originalRequest = GetActiveContractsRequest(125, Some(eventFormatHashMap), None)
+    val originalRequest = GetActiveContractsRequest(
+      125,
+      Some(eventFormatHashMap),
+      None,
+      includeIncompleteReassignments = false,
+    )
     val originalRequestChecksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
     val originalPointer = AcsContinuationPointerActiveContracts(sequentialId)
     val newToken = AcsContinuationToken.activeContracts(sequentialId, originalRequestChecksum)
@@ -121,9 +142,39 @@ class AcsContinuationTokenTest extends AnyFlatSpec with Matchers with EitherValu
     decodedToken.value should equal(originalPointer)
   }
 
+  it should "reject a token issued with a previous token version" in {
+    // checksum of originalRequest as calculated by TokenVersion = 1
+    // (which did not include the includeIncompleteReassignments flag)
+    val previousVersionChecksum = calcChecksumV1(originalRequest, participantId)
+    val previousVersionToken =
+      AcsContinuationToken.activeContracts(sequentialId, previousVersionChecksum)
+    val checksum = AcsContinuationToken.calcChecksum(originalRequest, participantId)
+    val decodedToken =
+      AcsContinuationToken.decodeAndValidate(checksum, previousVersionToken)
+    decodedToken.left.value.getStatus.getDescription should equal(
+      errorString
+    )
+  }
+
+  // Capture the previous version of the checksum calculation for testing purposes. It differs from
+  // the current implementation by token version and the absence of includeIncompleteReassignments flag.
+  private def calcChecksumV1(
+      request: GetActiveContractsRequest,
+      participantId: LedgerParticipantId,
+  ) =
+    Hash
+      .build(HashPurpose.AcsContinuationToken, HashAlgorithm.Sha256)
+      .addLong(request.activeAtOffset)
+      .addOptional(request.eventFormat, UpdateFormatHashUtils.hashEventFormat)
+      .addInt(1)
+      .addString(participantId)
+      .finish()
+      .pipe(PageTokenUtils.toChecksum)
+      .pipe(Checksum(_))
+
   it should "calculate the same checksum all the time" in {
     originalRequestChecksum should equal(
-      Checksum(ByteString.copyFrom(Array[Byte](87, -103, -53, 56)))
+      Checksum(ByteString.copyFrom(Array[Byte](111, -68, -89, 79)))
     )
   }
 }

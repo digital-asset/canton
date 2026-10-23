@@ -216,6 +216,8 @@ import com.digitalasset.canton.tea.v1.{
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
+  PruneRequest as TeaPruneRequest,
+  PruneResponse as TeaPruneResponse,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
@@ -242,6 +244,7 @@ import io.scalaland.chimney.dsl.*
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ScheduledExecutorService
+import scala.annotation.nowarn
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -1396,7 +1399,10 @@ object LedgerApiCommands {
   object UpdateService {
 
     sealed trait UpdateWrapper {
+      def commandId: Option[String]
       def updateId: String
+      def paidTrafficCost: Option[Long]
+
       def isUnassignment = this match {
         case _: UnassignedWrapper => true
         case _ => false
@@ -1413,12 +1419,18 @@ object LedgerApiCommands {
     }
     final case class TransactionWrapper(transaction: Transaction) extends UpdateWrapper {
       override def updateId: String = transaction.updateId
+      override def commandId: Option[String] = Some(transaction.commandId)
+
+      override def paidTrafficCost: Option[Long] = transaction.paidTrafficCost
 
       override def synchronizerId: String = transaction.synchronizerId
     }
     final case class TopologyTransactionWrapper(topologyTransaction: TopologyTransaction)
         extends UpdateWrapper {
       override def updateId: String = topologyTransaction.updateId
+      override def commandId: Option[String] = None
+
+      override def paidTrafficCost: Option[Long] = None
 
       override def synchronizerId: String = topologyTransaction.synchronizerId
 
@@ -1429,6 +1441,9 @@ object LedgerApiCommands {
     }
     sealed trait ReassignmentWrapper extends UpdateWrapper {
       override def updateId: String = reassignment.updateId
+      override def commandId: Option[String] = Some(reassignment.commandId)
+
+      override def paidTrafficCost: Option[Long] = reassignment.paidTrafficCost
 
       def reassignment: Reassignment
     }
@@ -1870,6 +1885,8 @@ object LedgerApiCommands {
         submitter: LfPartyId,
         submissionId: String,
         contractIds: Seq[LfContractId],
+        overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId],
+        overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId],
         source: SynchronizerId,
         target: SynchronizerId,
     ) extends BaseCommand[SubmitReassignmentRequest, SubmitReassignmentResponse, Unit] {
@@ -1880,14 +1897,18 @@ object LedgerApiCommands {
               workflowId = workflowId,
               userId = userId,
               commandId = commandId,
-              submitter = submitter.toString,
+              submitter = submitter,
               commands = contractIds.map(contractId =>
                 ReassignmentCommand(
                   ReassignmentCommand.Command.UnassignCommand(
                     UnassignCommand(
-                      contractId = contractId.coid.toString,
+                      contractId = contractId.coid,
                       source = source.toProtoPrimitive,
                       target = target.toProtoPrimitive,
+                      overrideSourceValidationPackageId =
+                        overrideSourceValidationPackageIds.get(contractId),
+                      overrideTargetValidationPackageId =
+                        overrideTargetValidationPackageIds.get(contractId),
                     )
                   )
                 )
@@ -2355,6 +2376,8 @@ object LedgerApiCommands {
         source: SynchronizerId,
         target: SynchronizerId,
         eventFormat: Option[EventFormat],
+        overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId],
+        overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId],
     ) extends BaseCommand[
           SubmitAndWaitForReassignmentRequest,
           SubmitAndWaitForReassignmentResponse,
@@ -2376,6 +2399,10 @@ object LedgerApiCommands {
                         contractId = contractId.coid.toString,
                         source = source.toProtoPrimitive,
                         target = target.toProtoPrimitive,
+                        overrideSourceValidationPackageId =
+                          overrideSourceValidationPackageIds.get(contractId),
+                        overrideTargetValidationPackageId =
+                          overrideTargetValidationPackageIds.get(contractId),
                       )
                     )
                   )
@@ -2492,6 +2519,7 @@ object LedgerApiCommands {
         verbose: Boolean = true,
         timeout: FiniteDuration,
         includeCreatedEventBlob: Boolean = false,
+        includeIncompleteReassignments: Boolean,
     )(override implicit val loggingContext: ErrorLoggingContext)
         extends BaseCommand[GetActiveContractsRequest, AutoCloseable, AutoCloseable]
         with SubscribeBase[
@@ -2528,6 +2556,7 @@ object LedgerApiCommands {
             activeAtOffset = activeAtOffset,
             eventFormat = Some(EventFormat(parties.map((_, filter)).toMap, None, verbose)),
             streamContinuationToken = None,
+            includeIncompleteReassignments = includeIncompleteReassignments,
           )
         )
       }
@@ -2800,6 +2829,22 @@ object LedgerApiCommands {
         service.updateAccount(request)
     }
 
+    final case class Prune(
+        beforeInclusive: CantonTimestamp
+    ) extends BaseCommand[
+          TeaPruneRequest,
+          TeaPruneResponse,
+        ] {
+      override protected def createRequest(): Either[String, TeaPruneRequest] =
+        Right(TeaPruneRequest(beforeInclusive.toProtoTimestamp.some))
+
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: TeaPruneRequest,
+      ): Future[TeaPruneResponse] =
+        service.prune(request)
+    }
+
     final case class PruneEvents(
         beforeInclusive: CantonTimestamp
     ) extends BaseCommand[
@@ -2809,6 +2854,7 @@ object LedgerApiCommands {
       override protected def createRequest(): Either[String, PruneEventsRequest] =
         Right(PruneEventsRequest(beforeInclusive.toProtoTimestamp.some))
 
+      @nowarn("cat=deprecation")
       override protected def submitRequest(
           service: TrafficServiceStub,
           request: PruneEventsRequest,

@@ -31,7 +31,7 @@ object MultiSynchronizerFeatureFlag {
           p.id,
           synchronizerId,
           featureFlags =
-            currentFeatureFlags :+ ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
+            (currentFeatureFlags + ParticipantTopologyFeatureFlag.EnableMultiSynchronizer).toSeq,
         )
       } else ()
 
@@ -65,9 +65,8 @@ object MultiSynchronizerFeatureFlag {
         p.topology.synchronizer_trust_certificates.propose(
           p.id,
           synchronizerId,
-          featureFlags = currentFeatureFlags.filterNot(
-            _ == ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
-          ),
+          featureFlags =
+            (currentFeatureFlags - ParticipantTopologyFeatureFlag.EnableMultiSynchronizer).toSeq,
         )
       else ()
       eventually() {

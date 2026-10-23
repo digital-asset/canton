@@ -136,7 +136,7 @@ final case class SynchronizerParametersConfig(
           StaticSynchronizerParameters.defaultTopologyChangeDelay
         )
       newSynchronizerLimits = synchronizerLimits.getOrElse(
-        SynchronizerLimits.defaultFor(protocolVersion)
+        SynchronizerLimits.default
       )
       staticSynchronizerParameters <- StaticSynchronizerParameters
         .create(

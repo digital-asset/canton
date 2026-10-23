@@ -42,6 +42,7 @@ private[routing] class SynchronizerSelectorFactory(
       admissibleSynchronizers <- admissibleSynchronizersComputation.forParties(
         submitters = submitters,
         informees = transactionData.informees,
+        prescribedSynchronizerO = transactionData.prescribedSynchronizerIdO,
         synchronizerState = synchronizerState,
       )
     } yield new SynchronizerSelector(

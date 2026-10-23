@@ -7,7 +7,7 @@ import cats.Order.*
 import cats.data.EitherT
 import cats.kernel.Order
 import cats.syntax.either.*
-import cats.syntax.option.*
+import cats.syntax.flatMap.*
 import cats.syntax.order.*
 import cats.{Functor, Show}
 import com.daml.metrics.api.MetricsContext
@@ -50,7 +50,7 @@ import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BytesUnit, ErrorUtil, MonadUtil, retry}
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.nonempty.NonEmpty
 import com.github.blemale.scaffeine.Scaffeine
@@ -138,27 +138,17 @@ sealed trait Payload extends IdOrPayload
 
 /** Payload with a assigned id and content as bytes */
 final case class BytesPayload(id: PayloadId, content: ByteString) extends Payload {
-  def decodeBatchAndTrim(
-      protocolVersion: ProtocolVersion,
-      member: Member,
-  ): Batch[ClosedEnvelope] = {
-    val fullBatch = decodeBatch(protocolVersion)
-    Batch.trimForMember(fullBatch, member)
-  }
+  def decodeBatchAndTrim(member: Member): Batch[ClosedEnvelope] =
+    Batch.trimForMember(decodeBatch(), member)
 
-  def decodeBatch(
-      protocolVersion: ProtocolVersion
-  ): Batch[ClosedEnvelope] = {
-    // No decompression nor size bound needed: the database is trusted.
-    val noLimitFromStore = DecompressionPolicy.MaxValueUnsafe
+  def decodeBatch(): Batch[ClosedEnvelope] =
+    // No decompression bound needed: the database is trusted. Without validation, the limits are
+    // not read.
     Batch
-      .fromByteString(
-        ProtocolVersionValidation.PV(protocolVersion),
-        BatchDeserializationContext(noLimitFromStore, SynchronizerLimits.max),
-        content,
-      )
+      .fromTrustedByteString(
+        BatchDeserializationContext(DecompressionPolicy.MaxValueUnsafe, SynchronizerLimits.default)
+      )(content)
       .valueOr(err => throw new DbDeserializationException(err.toString))
-  }
 }
 
 /** Sequencer events in a structure suitable for persisting in our events store. The payload type is
@@ -419,11 +409,84 @@ object SaveWatermarkError {
   final case class WatermarkUnexpectedlyChanged(message: String) extends SaveWatermarkError
 }
 
-final case class RegisteredMember(
-    memberId: SequencerMemberId,
-    registeredFrom: CantonTimestamp,
-    enabled: Boolean,
-)
+sealed abstract class MemberLifeCycleStatus(val value: Short)
+
+object MemberLifeCycleStatus {
+  case object Onboarding extends MemberLifeCycleStatus(0)
+  case object Active extends MemberLifeCycleStatus(1)
+  case object Disabled extends MemberLifeCycleStatus(2)
+
+  implicit val setParameterMemberLifeCycleStatus: SetParameter[MemberLifeCycleStatus] = (k, pp) =>
+    pp.setShort(k.value)
+
+  implicit val getResultMemberLifeCycleStatus: GetResult[MemberLifeCycleStatus] = GetResult { r =>
+    r.nextShort() match {
+      case Onboarding.value => Onboarding
+      case Active.value => Active
+      case Disabled.value => Disabled
+      case unknown =>
+        throw new DbDeserializationException(s"Unknown member lifecycle status id: $unknown")
+    }
+  }
+}
+
+sealed trait RegisteredMember {
+  def memberId: SequencerMemberId
+
+  def status: MemberLifeCycleStatus
+
+  /** The timestamp from which the member is registered. Not yet defined while the member is
+    * onboarding, or if it was disabled before onboarding completed.
+    */
+  def registeredFrom: Option[CantonTimestamp]
+}
+
+object RegisteredMember {
+  final case class Onboarding(memberId: SequencerMemberId) extends RegisteredMember {
+    override val status: MemberLifeCycleStatus = MemberLifeCycleStatus.Onboarding
+    override val registeredFrom: Option[CantonTimestamp] = None
+  }
+
+  final case class Active(memberId: SequencerMemberId, registeredAt: CantonTimestamp)
+      extends RegisteredMember {
+    override val status: MemberLifeCycleStatus = MemberLifeCycleStatus.Active
+    override val registeredFrom: Option[CantonTimestamp] = Some(registeredAt)
+  }
+
+  /** A member can be disabled while it is still onboarding, in which case it never got a
+    * registration timestamp.
+    */
+  final case class Disabled(memberId: SequencerMemberId, registeredAt: Option[CantonTimestamp])
+      extends RegisteredMember {
+    override val status: MemberLifeCycleStatus = MemberLifeCycleStatus.Disabled
+    override val registeredFrom: Option[CantonTimestamp] = registeredAt
+  }
+
+  def create(
+      memberId: SequencerMemberId,
+      registeredFrom: Option[CantonTimestamp],
+      status: MemberLifeCycleStatus,
+  ): RegisteredMember = status match {
+    case MemberLifeCycleStatus.Onboarding => Onboarding(memberId)
+    case MemberLifeCycleStatus.Disabled => Disabled(memberId, registeredFrom)
+    case MemberLifeCycleStatus.Active =>
+      Active(
+        memberId,
+        registeredFrom.getOrElse(
+          throw new DbDeserializationException(
+            s"Member $memberId is active but has no registration timestamp"
+          )
+        ),
+      )
+  }
+
+  implicit val getRegisteredMemberResult: GetResult[RegisteredMember] = GetResult { r =>
+    val memberId = implicitly[GetResult[SequencerMemberId]].apply(r)
+    val registeredFrom = implicitly[GetResult[Option[CantonTimestamp]]].apply(r)
+    val status = implicitly[GetResult[MemberLifeCycleStatus]].apply(r)
+    create(memberId, registeredFrom, status)
+  }
+}
 
 /** Used for verifying what pruning is doing in tests */
 @VisibleForTesting
@@ -514,18 +577,49 @@ trait SequencerStore
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
-  /** Wrapper around `registerMemberInternal` that also updates the cache.
+  /** Wrapper around `registerOnboardingMemberInternal` that also invalidates the cached member.
+    *
+    * The cache is invalidated rather than updated, as the returned member may already be outdated
+    * by a concurrent [[registerMember]], whose result must not be overwritten in the cache.
+    */
+  def registerOnboardingMember(
+      member: Member,
+      timestamp: CantonTimestamp,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[RegisteredMember] =
+    registerOnboardingMemberInternal(member, timestamp).map { onboardingMember =>
+      memberCache.invalidate(member)
+      onboardingMember
+    }
+
+  /** Registers a member with status [[MemberLifeCycleStatus.Onboarding]] from the given timestamp
+    * onwards. The onboarding timestamp is kept once the member is registered, so that [[status]]
+    * can still report the member as onboarding at earlier times.
+    *
+    * If for some reason the member already exists, it is left unchanged.
+    */
+  protected def registerOnboardingMemberInternal(
+      member: Member,
+      timestamp: CantonTimestamp,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[RegisteredMember]
+
+  /** Wrapper around `registerMemberInternal` that also invalidates the cached member.
+    *
+    * The cache is invalidated rather than updated, as the returned member may already be outdated
+    * by a concurrent [[disableMember]], whose result must not be overwritten in the cache.
     */
   def registerMember(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[RegisteredMember] =
     registerMemberInternal(member, timestamp).map { registeredMember =>
-      memberCache.put(member, registeredMember.some)
+      memberCache.invalidate(member)
       registeredMember
     }
 
   /** Register the provided member. Should be idempotent if member is already registered and return
     * the existing id.
+    *
+    * If the member exists with status [[MemberLifeCycleStatus.Onboarding]], its status will be set
+    * to active and the registeredAt timestamp will be updated
     */
   protected def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -564,7 +658,7 @@ trait SequencerStore
   ): FutureUnlessShutdown[Boolean] =
     lookupMember(member)
       .map { regMemberO =>
-        val registered = regMemberO.exists(_.registeredFrom <= time)
+        val registered = regMemberO.flatMap(_.registeredFrom).exists(_ <= time)
         logger.trace(s"Checked if member $member is registered at time $time: $registered")
         registered
       }
@@ -574,7 +668,7 @@ trait SequencerStore
   ): FutureUnlessShutdown[Map[Member, Boolean]] =
     lookupMembers(members).map(
       _.view
-        .mapValues(_.exists(_.registeredFrom <= time))
+        .mapValues(_.flatMap(_.registeredFrom).exists(_ <= time))
         .toMap
     )
 
@@ -864,10 +958,31 @@ trait SequencerStore
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SequencerMemberId, CantonTimestamp]]
 
-  /** Build a status object representing the current state of the sequencer. */
+  /** Build a status object representing the current state of the sequencer.
+    *
+    * Includes the members registered at or before `now`, and the members onboarding at or before
+    * `now`. The latter are reported as onboarding even if they were registered after `now`, as a
+    * snapshot taken at `now` contains the traffic purchased for them before their registration.
+    */
   def status(now: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SequencerPruningStatus]
+
+  /** Status at `now` of a member that is either registered or onboarding at `now` */
+  protected def memberStatusAt(
+      member: Member,
+      registeredMember: RegisteredMember,
+      now: CantonTimestamp,
+      lastAcknowledged: Option[CantonTimestamp],
+  ): SequencerMemberStatus =
+    registeredMember match {
+      case RegisteredMember.Active(_, registeredAt) if registeredAt <= now =>
+        SequencerMemberStatus.Active(member, registeredAt, lastAcknowledged)
+      case RegisteredMember.Disabled(_, registeredAt) if registeredAt.forall(_ <= now) =>
+        SequencerMemberStatus.Disabled(member, registeredAt, lastAcknowledged)
+      // Still onboarding, or only registered after `now`
+      case _ => SequencerMemberStatus.Onboarding(member)
+    }
 
   /** Count records currently stored by the sequencer. Used for pruning tests. */
   @VisibleForTesting
@@ -958,10 +1073,6 @@ trait SequencerStore
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, PruningError, SequencerPruningResult] = {
-    val disabledClients = status.disabledClients
-
-    logger.debug(show"Pruning Sequencer: disabled-members: ${disabledClients.members}")
-
     val safeTimestamp = status.safePruningTimestamp
     logger.debug(s"Safe pruning timestamp is [$safeTimestamp]")
 
@@ -1077,16 +1188,29 @@ trait SequencerStore
       _ <- EitherT.right(
         MonadUtil
           .parTraverseWithLimit_(batchingConfig.parallelism)(snapshot.status.members.toSeq) {
-            memberStatus =>
-              for {
-                registeredMember <- registerMember(memberStatus.member, memberStatus.registeredAt)
-                _ <-
-                  if (!memberStatus.enabled) disableMember(memberStatus.member)
-                  else FutureUnlessShutdown.unit
-                _ <- memberStatus.lastAcknowledged.fold(FutureUnlessShutdown.unit)(ack =>
-                  acknowledge(registeredMember.memberId, ack)
+            // The snapshot does not carry the onboarding timestamps. Onboarding from the snapshot
+            // timestamp is enough, as this sequencer cannot serve snapshots for earlier times.
+            case SequencerMemberStatus.Onboarding(member) =>
+              registerOnboardingMember(member, lastTs)
+            case SequencerMemberStatus.Active(member, registeredAt, lastAcknowledged) =>
+              registerMember(member, registeredAt).flatMap { registeredMember =>
+                lastAcknowledged.fold(FutureUnlessShutdown.unit)(
+                  acknowledge(registeredMember.memberId, _)
                 )
-              } yield ()
+              }
+            case SequencerMemberStatus.Disabled(member, registeredAt, lastAcknowledged) =>
+              // A member disabled while it was still onboarding has no registration timestamp
+              // so if registeredAt is not set we register as onboarding member, otherwise we
+              // register as active member. After that we disable the member.
+              //
+              // Should the operation fail, we can retry the operation as it is idempotent.
+              registeredAt
+                .fold(registerOnboardingMember(member, lastTs))(registerMember(member, _))
+                .flatMap { registeredMember =>
+                  lastAcknowledged.fold(FutureUnlessShutdown.unit)(
+                    acknowledge(registeredMember.memberId, _)
+                  ) >> disableMember(member)
+                }
           }
       )
       _ <- EitherT.right(updatePrunedPreviousEventTimestamps(snapshot.previousTimestamps.filterNot {

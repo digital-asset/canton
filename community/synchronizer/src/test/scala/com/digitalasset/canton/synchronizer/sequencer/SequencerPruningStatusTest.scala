@@ -18,12 +18,12 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         lowerBound = ts(0),
         now = ts(15),
         members = Set(
-          SequencerMemberStatus(
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daSequencerId,
             registeredAt = ts(8),
             ts(10).some,
           ),
-          SequencerMemberStatus(
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daMediator,
             registeredAt = ts(7),
             ts(12).some,
@@ -40,12 +40,12 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         lowerBound = ts(0),
         now = ts(15),
         members = Set(
-          SequencerMemberStatus(
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daSequencerId,
             registeredAt = ts(8),
             ts(15).some,
           ),
-          SequencerMemberStatus(
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daMediator,
             registeredAt = ts(7),
             None,
@@ -62,7 +62,7 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
         lowerBound = ts(0),
         now = ts(12),
         members = Set(
-          SequencerMemberStatus(
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daSequencerId,
             registeredAt = ts(3),
             None,
@@ -73,18 +73,20 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
       status.safePruningTimestamp shouldBe ts(3)
     }
 
-    "ignore member entirely if they are disabled" in {
+    "ignore member entirely if they are onboarding or disabled" in {
       val status = SequencerPruningStatus(
         lowerBound = ts(0),
         now = ts(12),
         members = Set(
-          SequencerMemberStatus(
-            member = DefaultTestIdentities.daSequencerId,
-            registeredAt = ts(1),
-            ts(2).some,
-            enabled = false, // this is the key bit..
+          SequencerMemberStatus.Onboarding(
+            member = DefaultTestIdentities.daSequencerId
           ),
-          SequencerMemberStatus(
+          SequencerMemberStatus.Disabled(
+            member = DefaultTestIdentities.daSequencerId,
+            registeredAt = ts(3).some,
+            ts(4).some,
+          ),
+          SequencerMemberStatus.Active(
             member = DefaultTestIdentities.daMediator,
             registeredAt = ts(2),
             ts(12).some,
@@ -94,6 +96,41 @@ class SequencerPruningStatusTest extends BaseTestWordSpec {
 
       // as although the sequencer hasn't read up until this point, it is disabled
       status.safePruningTimestamp shouldBe ts(12)
+    }
+  }
+
+  "v30 encoding" should {
+    "be possible once members without a registration timestamp are left out" in {
+      val active = SequencerMemberStatus.Active(
+        member = DefaultTestIdentities.daMediator,
+        registeredAt = ts(2),
+        ts(5).some,
+      )
+      val disabled = SequencerMemberStatus.Disabled(
+        member = DefaultTestIdentities.daSequencerId,
+        registeredAt = ts(3).some,
+        None,
+      )
+      val status = SequencerPruningStatus(
+        lowerBound = ts(0),
+        now = ts(12),
+        members = Set(
+          SequencerMemberStatus.Onboarding(member = DefaultTestIdentities.participant1),
+          SequencerMemberStatus.Disabled(
+            member = DefaultTestIdentities.participant2,
+            registeredAt = None,
+            None,
+          ),
+          active,
+          disabled,
+        ),
+      )
+
+      status.toProtoV30.left.value should include("Cannot serialize")
+      val statusP = status.withoutUnregisteredMembers.toProtoV30.value
+      SequencerPruningStatus.fromProtoV30(statusP).value shouldBe status.copy(
+        members = Set(active, disabled)
+      )
     }
   }
 }

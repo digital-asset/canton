@@ -14,7 +14,7 @@ import com.daml.ledger.api.v2.value.Value.Sum.Party
 import com.daml.ledger.api.v2.value.{RecordField, Value}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -314,6 +314,23 @@ sealed trait OnlinePartyReplicationNegotiationTest
         logger.info(s"SP status: $spStatus")
         assert(tpStatus.hasCompleted, "Target participant must complete")
         assert(spStatus.hasCompleted, "Source participant must complete")
+
+        val acsReplicationTpStatus =
+          targetParticipant.parties.get_acs_replication_status(addPartyRequestId)
+        val acsReplicationSpStatus =
+          sourceParticipant.parties.get_acs_replication_status(addPartyRequestId)
+        assert(
+          acsReplicationTpStatus.hasCompleted,
+          "Target participant must complete ACS replication",
+        )
+        assert(
+          acsReplicationSpStatus.hasCompleted,
+          "Source participant must complete ACS replication",
+        )
+        acsReplicationSpStatus.ptpTopologyTransaction.value shouldEqual
+          acsReplicationTpStatus.ptpTopologyTransaction.value
+        acsReplicationTpStatus.replicationProgress.value.fullyProcessedAcs shouldBe true
+        acsReplicationTpStatus.replicationProgress.value.processedContractCount shouldBe NonNegativeLong.zero
 
         val tpLapiStatus = targetParticipant.ledger_api.parties.get_add_party_status(
           alice,

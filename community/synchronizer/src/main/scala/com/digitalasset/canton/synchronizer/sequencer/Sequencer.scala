@@ -114,9 +114,10 @@ trait Sequencer
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
 
-  /** True if registered member has not been disabled.
+  /** True if registered member is active, i.e. is not in onboarding state and has not been
+    * disabled.
     */
-  def isEnabled(member: Member)(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
+  def isActive(member: Member)(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
 
   private[sequencer] def registerMemberInternal(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

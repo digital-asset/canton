@@ -466,7 +466,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             logger,
             timeouts,
             new SymbolicPureCrypto(),
-            SynchronizerLimits.defaultFor(synchronizerProtocolVersion),
+            SynchronizerLimits.default,
             requestInspector,
             epochChecker,
             // Deterministic, monotonic elapsed-time source derived from the simulation clock so that

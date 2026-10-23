@@ -71,11 +71,11 @@ final class LsuMinimumSequencingTimeIntegrationTest
       val errorMessage =
         s"Cannot submit before or at the lower bound for sequencing time $upgradeTime; time is currently at ${environment.clock.now}"
       sequencer2.underlying.value.sequencer.client
-        .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
+        .send(Batch(Nil, testedProtocolVersion), None)(TraceContext.empty, MetricsContext.Empty)
         .futureValueUS shouldBe Left(RequestRefused(SendAsyncErrorDirect(errorMessage)))
 
       mediator2.underlying.value.replicaManager.mediatorRuntime.value.mediator.sequencerClient
-        .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
+        .send(Batch(Nil, testedProtocolVersion), None)(TraceContext.empty, MetricsContext.Empty)
         .futureValueUS should matchPattern {
         case Left(
               RequestRefused(

@@ -137,6 +137,11 @@ object ReassignmentValidation {
   def isMultiSynchronizerFlagRequired(psid: PhysicalSynchronizerId): Boolean =
     psid.protocolVersion < ProtocolVersion.v37
 
+  /** The assignment exclusivity timeout is only enforced up to protocol version 36.
+    */
+  def isAssignmentExclusivityEnforced(psid: PhysicalSynchronizerId): Boolean =
+    psid.protocolVersion <= ProtocolVersion.v36
+
   def checkStakeholders(
       reassignmentRequest: FullReassignmentViewTree
   ): Either[ReassignmentValidationError, Unit] = {
@@ -257,6 +262,18 @@ object ReassignmentValidation {
         topologySnapshot.timestamp,
       )
       .leftMap(u => PackageIdUnknownOrUnvetted(contractIds, u.unknownTo, synchronizerId))
+
+  def validateMaxSerializationVersion(
+      reassignmentRef: ReassignmentRef,
+      targetPsId: Target[PhysicalSynchronizerId],
+      batch: ContractsReassignmentBatch,
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    if (targetPsId.unwrap.protocolVersion > ProtocolVersion.v36)
+      checkMaxSerializationVersion(reassignmentRef, targetPsId, batch)
+    else
+      EitherT.rightT[FutureUnlessShutdown, ReassignmentValidationError](())
 
   def checkMaxSerializationVersion(
       reassignmentRef: ReassignmentRef,

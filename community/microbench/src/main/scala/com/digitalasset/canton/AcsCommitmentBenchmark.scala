@@ -234,7 +234,7 @@ class AcsCommitmentBenchmark
           processor.processBatchInternal(ts.forgetRefinement, batch)
         }
     } yield {}
-    Await.result(prepare.failOnShutdownToAbortException("prepareRun"), Duration.Inf)
+    Await.result(prepare.onShutdown(fail("prepareRun aborted")), Duration.Inf)
   }
 
   @Benchmark
@@ -250,7 +250,7 @@ class AcsCommitmentBenchmark
     } yield wait
 
     val p: Unit =
-      Await.result(publish.failOnShutdownToAbortException("localParticipantCatchup"), Duration.Inf)
+      Await.result(publish.onShutdown(fail("localParticipantCatchup aborted")), Duration.Inf)
     blackHole.consume(p)
   }
 
@@ -268,7 +268,7 @@ class AcsCommitmentBenchmark
       updateRunWithNewMinimumTimestamp(incrementSeconds)
       ()
     }
-    Await.result(updateTimes.failOnShutdownToAbortException("updateTimes"), Duration.Inf)
+    Await.result(updateTimes.onShutdown(fail("updateTimes aborted")), Duration.Inf)
   }
 
   @TearDown(Level.Iteration)
@@ -280,7 +280,7 @@ class AcsCommitmentBenchmark
       processor.close()
       store.close()
     }
-    Await.result(tearDown.failOnShutdownToAbortException("iterationTeardown"), Duration.Inf)
+    Await.result(tearDown.onShutdown(fail("iterationTeardown aborted")), Duration.Inf)
   }
 
   @TearDown(Level.Trial)
@@ -437,6 +437,7 @@ class AcsCommitmentBenchmark
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],

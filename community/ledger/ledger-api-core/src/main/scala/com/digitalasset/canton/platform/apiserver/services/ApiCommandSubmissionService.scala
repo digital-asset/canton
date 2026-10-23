@@ -178,6 +178,8 @@ final class ApiCommandSubmissionService(
                       sourceSynchronizer = unassignCommand.sourceSynchronizerId,
                       targetSynchronizer = unassignCommand.targetSynchronizerId,
                       contractId = unassignCommand.contractId,
+                      overrideSourceValidationPkgId = unassignCommand.overrideSourceValidationPkgId,
+                      overrideTargetValidationPkgId = unassignCommand.overrideTargetValidationPkgId,
                     )
                 },
               )

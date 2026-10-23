@@ -226,9 +226,11 @@ class QueueBasedSynchronizerOutboxTest
       }
       val finalResult = transactions.map(_ => responses.next())
       val localProcessingF = for {
-        _ <- MonadUtil.sequentialTraverse(transactions) { x =>
-          if (dropBroadcast) logger.debug(s"Dropping $x")
-          else logger.debug(s"Processing $x")
+        _ <- {
+          transactions.foreach { x =>
+            if (dropBroadcast) logger.debug(s"Dropping $x")
+            else logger.debug(s"Processing $x")
+          }
           if (autoFlush) flushBlocker.get().outcome_(())
           val ts = CantonTimestamp.now()
           if (finalResult.forall(_ == State.Accepted) && !dropBroadcast) {
@@ -236,18 +238,21 @@ class QueueBasedSynchronizerOutboxTest
             for {
               _ <- flushBlocker.get().futureUS
               _ = flushBlocker.set(PromiseUnlessShutdown.unsupervised())
+              validated = transactions.map(x => ValidatedTopologyTransaction(x, rejections.next()))
               _ <- store
                 .update(
                   SequencedTime(ts),
                   EffectiveTime(ts),
-                  additions = List(ValidatedTopologyTransaction(x, rejections.next())),
+                  additions = validated,
                   // dumbed down version of how to "append" ValidatedTopologyTransactions:
-                  removals = Option
-                    .when(x.operation == TopologyChangeOp.Remove)(
-                      x.mapping.uniqueKey -> (x.serial.some, Set.empty[TxHash])
+                  removals = validated
+                    .filter(tx =>
+                      tx.rejectionReason.isEmpty && tx.operation == TopologyChangeOp.Remove
                     )
-                    .toList
-                    .toMap,
+                    .groupBy(_.mapping.uniqueKey)
+                    .map { case (key, txs) =>
+                      key -> (txs.maxBy(_.serial.value).serial.some, Set.empty[TxHash])
+                    },
                 )
               _ <- MonadUtil.when(topologyClientConnected.get())(
                 targetClient
@@ -255,7 +260,9 @@ class QueueBasedSynchronizerOutboxTest
                     SequencedTime(ts),
                     EffectiveTime(ts),
                     SequencerCounter(3),
-                    if (rejections.isEmpty) Seq(x) else Seq.empty,
+                    validated
+                      .filter(tx => tx.rejectionReason.isEmpty && !tx.transaction.isProposal)
+                      .map(_.transaction),
                   )
               )
 

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
@@ -18,6 +19,7 @@ import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.TransactionViewMetrics
 import com.digitalasset.canton.participant.protocol.submission.NextGenTransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
@@ -53,6 +55,7 @@ class NextGenTransactionTreeFactory(
     cryptoOps: HashOps & HmacOps,
     hasher: ContractHasher,
     override protected val loggerFactory: NamedLoggerFactory,
+    override val metrics: TransactionViewMetrics,
 )(implicit ec: ExecutionContext)
     extends TransactionTreeFactory
     with NamedLogging {
@@ -72,11 +75,13 @@ class NextGenTransactionTreeFactory(
     */
   private def checkRootViewParseDepth(
       maxTreeDepth: PositiveInt
-  )(view: TransactionView): EitherT[FutureUnlessShutdown, TransactionTreeDepthLimitExceeded, Unit] =
+  )(
+      parseDepth: Int
+  ): EitherT[FutureUnlessShutdown, TransactionTreeDepthLimitExceeded, Unit] =
     EitherT.cond(
-      view.parseDepth <= maxTreeDepth.value,
+      parseDepth <= maxTreeDepth.value,
       (),
-      TransactionTreeDepthLimitExceeded(view.parseDepth, maxTreeDepth.value),
+      TransactionTreeDepthLimitExceeded(parseDepth, maxTreeDepth.value),
     )
 
   override def createTransactionTree(
@@ -116,7 +121,10 @@ class NextGenTransactionTreeFactory(
       protocolVersion,
     )
 
-    val limitConfig = TransactionViewLimitConfig(protocolLimits)
+    // Transaction view limits are applied on submission paths
+    val viewLimits = Option.when(protocolVersion >= ProtocolVersion.v36)(protocolLimits)
+    // The synchronizer limits apply from PV36 on; before, the parse depth is unbounded
+    val maxTreeDepth = viewLimits.fold(PositiveInt.MaxValue)(_.maxTransactionTreeDepth)
     val rootViewDecompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
@@ -124,8 +132,8 @@ class NextGenTransactionTreeFactory(
         rollbackContextFactory.empty,
         Some(participantId.adminParty.toLf),
         rollbackContextFactory,
-        // Transaction view limits are applied on submission paths
-        Option.when(protocolVersion >= ProtocolVersion.v36)(limitConfig),
+        viewLimits,
+        metrics,
       )
 
     val commonMetadata = CommonMetadata
@@ -180,8 +188,13 @@ class NextGenTransactionTreeFactory(
         topologySnapshot,
       )
 
+      parseDepths = rootViews.map(_.parseDepth)
+      _ = parseDepths.maxOption.foreach(pd =>
+        metrics.treeDepth.updateValue(pd)(MetricsContext.Empty)
+      )
+
       _ <- MonadUtil
-        .sequentialTraverse(rootViews)(checkRootViewParseDepth(limitConfig.maxTreeDepth))
+        .sequentialTraverse_(parseDepths)(checkRootViewParseDepth(maxTreeDepth))
         .leftMap[TransactionViewLimitError](
           _.transformInto[TransactionViewLimitError]
         )
@@ -792,6 +805,7 @@ class NextGenTransactionTreeFactory(
         submittingParticipantO.map(_.adminParty.toLf),
         rollbackContextFactory,
         None, // Transaction view limits are not applied on validation paths
+        metrics,
       )
 
     val rolledBackEffect = rbContext.inRollback && transactionEffectful(transaction.unwrap)

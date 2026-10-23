@@ -52,9 +52,31 @@ final class GeneratorsProtocol(
       topologyChangeDelay <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
       enableTransparencyChecks <- Arbitrary.arbitrary[Boolean]
       serial <- Arbitrary.arbitrary[NonNegativeInt]
-      synchronizerLimits <- GeneratorsVersion.defaultValueGen(
+
+      allLimits <- GeneratorsVersion.defaultValueGen(
         protocolVersion,
         StaticSynchronizerParameters.defaultSynchronizerLimitsUntil,
+      )
+      maxSignaturesPerEnvelope =
+        StaticSynchronizerParameters.defaultMaxSignaturesPerEnvelopeLimitUntil
+          .orValue(allLimits.transactionProtocolLimits.maxSignaturesPerEnvelope, protocolVersion)
+      maxQuorumSize =
+        StaticSynchronizerParameters.defaultMaxQuorumSizeUntil
+          .orValue(allLimits.transactionProtocolLimits.maxQuorumSize, protocolVersion)
+      transactionProtocolLimits = allLimits.transactionProtocolLimits.copy(
+        maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
+        maxQuorumSize = maxQuorumSize,
+      )
+      topologyLimits = StaticSynchronizerParameters.defaultTopologyLimitsUntil
+        .orValue(allLimits.topologyLimits, protocolVersion)
+
+      acsCommitmentLimits = StaticSynchronizerParameters.defaultAcsCommitmentLimitsUntil
+        .orValue(allLimits.acsCommitmentLimits, protocolVersion)
+
+      synchronizerLimits = allLimits.copy(
+        transactionProtocolLimits = transactionProtocolLimits,
+        topologyLimits = topologyLimits,
+        acsCommitmentLimits = acsCommitmentLimits,
       )
       parameters = StaticSynchronizerParameters
         .create(

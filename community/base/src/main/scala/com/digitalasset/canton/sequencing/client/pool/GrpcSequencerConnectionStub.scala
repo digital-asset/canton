@@ -177,7 +177,6 @@ class GrpcSequencerConnectionStub(
       synchronizerParametersE = synchronizerParametersP.parameters match {
         case Parameters.Empty =>
           Left(ProtoDeserializationError.FieldNotSet("GetSynchronizerParameters.parameters"))
-        case Parameters.V30(parameters) => StaticSynchronizerParameters.fromProtoV30(parameters)
         case Parameters.V31(parameters) => StaticSynchronizerParameters.fromProtoV31(parameters)
         case Parameters.V32(parameters) => StaticSynchronizerParameters.fromProtoV32(parameters)
       }

@@ -102,7 +102,7 @@ class SynchronizerOnboardingOutboxTest
   private lazy val otkMapping =
     OwnerToKeyMapping.tryCreate(participant, NonEmpty(Seq, signingKey, encryptionKey))
   private lazy val stcMapping =
-    SynchronizerTrustCertificate(participant, DefaultTestIdentities.synchronizerId, Seq.empty)
+    SynchronizerTrustCertificate(participant, DefaultTestIdentities.synchronizerId, Set.empty)
   private lazy val onboardingMappings = Seq(nsdMapping, otkMapping, stcMapping)
 
   private lazy val namespaceDelegation = sign(nsdMapping)

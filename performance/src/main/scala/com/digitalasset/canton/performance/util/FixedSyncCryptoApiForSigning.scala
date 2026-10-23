@@ -170,6 +170,11 @@ class FixedSyncCryptoApiForSigning(
     ): FutureUnlessShutdown[Map[LfPartyId, PartyTopologySnapshotClient.PartyInfo]] =
       notImplementedUS
 
+    override def activeParticipantsOfPartiesWithInfoIgnoringFreeze(parties: Seq[LfPartyId])(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[LfPartyId, PartyTopologySnapshotClient.PartyInfo]] =
+      notImplementedUS
+
     override def activeParticipantsOf(party: LfPartyId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Map[ParticipantId, ParticipantAttributes]] = notImplementedUS

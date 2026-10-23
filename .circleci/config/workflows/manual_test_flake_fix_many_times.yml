@@ -4,7 +4,6 @@ jobs:
   - compile:
       context:
         - datadog
-        - artifactory
         - azure-self-cache
         - maven-mirror
         - da-images
@@ -15,7 +14,6 @@ jobs:
       protocol_version: << pipeline.parameters.protocol_version >>
       context:
         - datadog
-        - artifactory
         - azure-self-cache
         - maven-mirror
         - aws_kms_testing

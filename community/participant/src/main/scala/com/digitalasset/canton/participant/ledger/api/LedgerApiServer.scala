@@ -17,6 +17,7 @@ import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.http.HttpApiServer
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.localstore.*
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
@@ -439,6 +440,7 @@ object LedgerApiServer {
         apiContractService = apiContractService,
         safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
         trafficEnforcementBackendO = trafficEnforcementBackendO,
+        deprecatedApiGate = DeprecatedApiGate(parameters.deprecatedApis),
         externalCallHandler = externalCallHandler,
         lookupTopologyClient = lookupTopologyClient,
         lookupSynchronizerCryptoClient = lookupSynchronizerCryptoClient,

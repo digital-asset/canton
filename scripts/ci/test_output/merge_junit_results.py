@@ -122,40 +122,39 @@ def list_not_passed_tests(records):
     return tests
 
 
+UNKNOWN_SUITE_NAME = "unknown"
+
+
+def count_attrs(records):
+    statuses = [record["status"] for record in records]
+    return {
+        "tests": str(len(statuses)),
+        "failures": str(statuses.count("failure")),
+        "errors": str(statuses.count("error")),
+        "skipped": str(statuses.count("skipped")),
+    }
+
+
 def write_merged_junit(records, output_file):
-    root = ET.Element("testsuite")
-
-    failures = 0
-    errors = 0
-    skipped = 0
-
+    # One testsuite per classname so consumers keyed on the suite (e.g. Datadog
+    # Test Optimization) see the test class instead of a single merged suite.
+    by_suite = {}
     for key in sorted(records.keys()):
         record = records[key]
-        testcase = ET.SubElement(root, "testcase", record["attrs"])
+        suite_name = record["attrs"].get("classname", "").strip() or UNKNOWN_SUITE_NAME
+        by_suite.setdefault(suite_name, []).append(record)
 
-        status = record["status"]
-        if status == "failure":
-            failures += 1
-        elif status == "error":
-            errors += 1
-        elif status == "skipped":
-            skipped += 1
-
-        detail = record["detail"]
-        if detail is not None:
-            detail_elem = ET.SubElement(testcase, detail["tag"], detail["attrib"])
-            detail_elem.text = detail["text"]
-
-    total = len(records)
-    root.attrib.update(
-        {
-            "name": "merged-junit-results",
-            "tests": str(total),
-            "failures": str(failures),
-            "errors": str(errors),
-            "skipped": str(skipped),
-        }
+    root = ET.Element(
+        "testsuites", {"name": "merged-junit-results", **count_attrs(records.values())}
     )
+    for suite_name, suite_records in by_suite.items():
+        suite = ET.SubElement(root, "testsuite", {"name": suite_name, **count_attrs(suite_records)})
+        for record in suite_records:
+            testcase = ET.SubElement(suite, "testcase", record["attrs"])
+            detail = record["detail"]
+            if detail is not None:
+                detail_elem = ET.SubElement(testcase, detail["tag"], detail["attrib"])
+                detail_elem.text = detail["text"]
 
     tree = ET.ElementTree(root)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
@@ -167,6 +166,7 @@ def self_test():
     test_parse_testcases_counts_parse_errors()
     test_rerun_records_override_first_run_records()
     test_write_merged_junit_sets_summary_counts()
+    test_write_merged_junit_groups_testcases_by_classname()
     print("All self-checks passed")
 
 
@@ -247,21 +247,22 @@ def test_rerun_records_override_first_run_records():
 
 
 def test_write_merged_junit_sets_summary_counts():
+    classname = "com.digitalasset.canton.integration.tests.version.ProtobufCompatibilityReaderTest"
     with tempfile.TemporaryDirectory() as tmp:
         output_file = os.path.join(tmp, "merged", "TEST-merged.xml")
         records = {
             "a": {
-                "attrs": {"classname": "a.C", "name": "pass"},
+                "attrs": {"classname": classname, "name": "pass"},
                 "status": "passed",
                 "detail": None,
             },
             "b": {
-                "attrs": {"classname": "a.C", "name": "fail"},
+                "attrs": {"classname": classname, "name": "fail"},
                 "status": "failure",
                 "detail": {"tag": "failure", "attrib": {}, "text": "boom"},
             },
             "c": {
-                "attrs": {"classname": "a.C", "name": "skip"},
+                "attrs": {"classname": classname, "name": "skip"},
                 "status": "skipped",
                 "detail": {"tag": "skipped", "attrib": {}, "text": "n/a"},
             },
@@ -274,6 +275,56 @@ def test_write_merged_junit_sets_summary_counts():
         assert root.attrib.get("failures") == "1", f"Unexpected failures count: {root.attrib!r}"
         assert root.attrib.get("errors") == "0", f"Unexpected errors count: {root.attrib!r}"
         assert root.attrib.get("skipped") == "1", f"Unexpected skipped count: {root.attrib!r}"
+
+
+def test_write_merged_junit_groups_testcases_by_classname():
+    proto_test = "com.digitalasset.canton.integration.tests.version.ProtobufCompatibilityReaderTest"
+    beta_test = (
+        "com.digitalasset.canton.integration.tests.version.BetaVersionSupportIntegrationTest"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        output_file = os.path.join(tmp, "merged", "TEST-merged.xml")
+        records = {
+            "a": {
+                "attrs": {
+                    "classname": proto_test,
+                    "name": "pass",
+                },
+                "status": "passed",
+                "detail": None,
+            },
+            "b": {
+                "attrs": {
+                    "classname": beta_test,
+                    "name": "fail",
+                },
+                "status": "failure",
+                "detail": {"tag": "failure", "attrib": {}, "text": "boom"},
+            },
+            "c": {
+                "attrs": {"name": "no class"},
+                "status": "passed",
+                "detail": None,
+            },
+        }
+
+        write_merged_junit(records, output_file)
+        root = ET.parse(output_file).getroot()
+
+        suites = {s.attrib["name"]: s for s in root.findall("testsuite")}
+        expected_suites = sorted([proto_test, beta_test, UNKNOWN_SUITE_NAME])
+        assert sorted(suites) == expected_suites, f"Unexpected suites: {sorted(suites)!r}"
+        assert suites[proto_test].attrib["tests"] == "1", (
+            f"Unexpected ProtobufCompatibilityReaderTest attrs: {suites[proto_test].attrib!r}"
+        )
+        assert suites[beta_test].attrib["failures"] == "1", (
+            f"Unexpected BetaVersionSupportIntegrationTest attrs: {suites[beta_test].attrib!r}"
+        )
+        assert suites[proto_test].attrib["failures"] == "0", (
+            f"Unexpected ProtobufCompatibilityReaderTest attrs: {suites[proto_test].attrib!r}"
+        )
+        assert root.attrib.get("tests") == "3", f"Unexpected root attrs: {root.attrib!r}"
+        assert len(root.findall(".//testcase")) == 3, "Expected all testcases to remain reachable"
 
 
 def main():

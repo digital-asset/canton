@@ -3,14 +3,17 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.FullUnassignmentTree
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.integration.util.{
+  AutomaticAssignment,
+  EntitySyntax,
+  PartiesAllocator,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -65,6 +68,7 @@ final class Phase7ReassigningParticipantIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
         import env.*
@@ -115,10 +119,7 @@ final class Phase7ReassigningParticipantIntegrationTest
 
         // Disable the automatic assignment, so that the assignment below is the only one submitted
         Seq(sequencer1, sequencer2).foreach { sequencer =>
-          sequencer.topology.synchronizer_parameters.propose_update(
-            sequencer.synchronizer_id,
-            _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-          )
+          AutomaticAssignment.disable(Seq(sequencer), sequencer.synchronizer_id)
         }
 
         signatory = "signatory".toPartyId(participant1)

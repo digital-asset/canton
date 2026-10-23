@@ -41,6 +41,8 @@ trait SubmitDummyReassignment extends TestCommands { self: ServiceCallWithMainAc
                 "synchronizer1::12209bffe879cda98fa69f7bab97e002705cdb927b11d53c41f0b78b4c07a72a7a7a",
               target =
                 "synchronizer2::12209bffe879cda98fa69f7bab97e002705cdb927b11d53c41f0b78b4c07a72a7a7b",
+              overrideSourceValidationPackageId = None,
+              overrideTargetValidationPackageId = None,
             )
           )
         )

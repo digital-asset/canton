@@ -29,6 +29,9 @@ trait ImportContractsIntegrationTestBase
     with SharedEnvironment
     with EntitySyntax {
 
+  /** If true, all imported contracts are represented as Assigned events. Otherwise, contracts with
+    * a zero reassignment counter are represented as Created events, the others as Assigned events.
+    */
   protected def enableAllLedgerApiReassignments: Boolean
 
   private var alice: PartyId = _
@@ -129,22 +132,15 @@ trait ImportContractsIntegrationTestBase
 
           participant3.synchronizers.disconnect_all()
 
-          if (enableAllLedgerApiReassignments) {
-            participant3.repair.import_acs(daId, file.canonicalPath)
+          participant3.repair.import_acs(daId, file.canonicalPath)
 
-            val reassignedContract = participant3.ledger_api.state.acs
-              .active_contracts_of_party(alice)
-              .filter(_.getCreatedEvent.contractId == reassignedContractCid.coid)
-              .loneElement
+          val reassignedContract = participant3.ledger_api.state.acs
+            .active_contracts_of_party(alice)
+            .filter(_.getCreatedEvent.contractId == reassignedContractCid.coid)
+            .loneElement
 
-            withClue("Reassignment counter should be two after two reassignments") {
-              reassignedContract.reassignmentCounter shouldBe 2
-            }
-          } else {
-            assertThrowsAndLogsCommandFailures(
-              participant3.repair.import_acs(daId, file.canonicalPath),
-              _.errorMessage should include("with a non-zero reassignment counter"),
-            )
+          withClue("Reassignment counter should be two after two reassignments") {
+            reassignedContract.reassignmentCounter shouldBe 2
           }
         }
     }
@@ -244,95 +240,88 @@ trait ImportContractsIntegrationTestBase
 
           participant3.synchronizers.disconnect_all()
 
-          if (enableAllLedgerApiReassignments) {
-            val contractInstance =
-              participant1.underlying.value.sync.participantNodePersistentState.value.contractStore
-                .lookup(cid)
-                .value
-                .futureValueUS
-                .value
-
-            // Capture pre-existing active contracts established during the preceding sequential test cases
-            val preexistingCids = participant3.ledger_api.state.acs
-              .active_contracts_of_party(charlie)
-              .map(c => LfContractId.assertFromString(c.getCreatedEvent.contractId))
-
-            // Simulate crash via direct persistence injection
-            val targetStores =
-              participant3.underlying.value.sync.participantNodePersistentState.value
-            val targetAcsStore = participant3.underlying.value.sync.stateInspection
-              .getAcsInspection(daId)
+          val contractInstance =
+            participant1.underlying.value.sync.participantNodePersistentState.value.contractStore
+              .lookup(cid)
               .value
-              .activeContractStore
+              .futureValueUS
+              .value
 
-            clue("Inject dirty records preserving reassignment counter 2") {
-              targetStores.contractStore.storeContracts(Seq(contractInstance)).futureValueUS
+          // Capture pre-existing active contracts established during the preceding sequential test cases
+          val preexistingCids = participant3.ledger_api.state.acs
+            .active_contracts_of_party(charlie)
+            .map(c => LfContractId.assertFromString(c.getCreatedEvent.contractId))
 
-              val dirtyRepairCounter = RepairCounter.Genesis.increment.value
-              val dirtyReassignmentCounter =
-                ReassignmentCounter.Genesis.increment.value.increment.value
-              val dirtyToc = TimeOfChange(CantonTimestamp.now(), Some(dirtyRepairCounter))
+          // Simulate crash via direct persistence injection
+          val targetStores =
+            participant3.underlying.value.sync.participantNodePersistentState.value
+          val targetAcsStore = participant3.underlying.value.sync.stateInspection
+            .getAcsInspection(daId)
+            .value
+            .activeContractStore
 
-              targetAcsStore
-                .markContractsAdded(Seq((cid, dirtyReassignmentCounter, dirtyToc)))
-                .value
-                .futureValueUS
-            }
+          clue("Inject dirty records preserving reassignment counter 2") {
+            targetStores.contractStore.storeContracts(Seq(contractInstance)).futureValueUS
 
-            clue(
-              "Verify simulated mid-crash state: Internal store has the contract, Ledger API lacks it"
-            ) {
-              val internalStates = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
-              internalStates.get(cid) shouldBe defined
+            val dirtyRepairCounter = RepairCounter.Genesis.increment.value
+            val dirtyReassignmentCounter =
+              ReassignmentCounter.Genesis.increment.value.increment.value
+            val dirtyToc = TimeOfChange(CantonTimestamp.now(), Some(dirtyRepairCounter))
 
-              participant3.ledger_api.state.acs
-                .of_party(charlie)
-                .map(_.contractId) shouldNot contain(cid.coid)
-            }
-
-            clue("Execute post-crash recovery retry via repair.import_acs") {
-              participant3.repair.import_acs(daId, file.canonicalPath)
-            }
-
-            eventually() {
-              val postRecoveryLedgerCids = participant3.ledger_api.state.acs
-                .of_party(charlie)
-                .map(_.contractId)
-
-              // Recovered contract is visible on the Ledger API
-              postRecoveryLedgerCids should contain(cid.coid)
-
-              // Pre-existing contracts remain visible on the Ledger API
-              postRecoveryLedgerCids should contain allElementsOf preexistingCids.map(_.coid)
-
-              // Internal store contains both recovered and pre-existing contract records
-              val internalStatesTarget = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
-              internalStatesTarget.get(cid) shouldBe defined
-
-              // Filter pre-existing CIDs down to those associated with daId to verify their internal store records
-              val preexistingDaCids = preexistingCids.filter(postRecoveryLedgerCids.contains)
-              if (preexistingDaCids.nonEmpty) {
-                val internalStatesPreexisting =
-                  targetAcsStore.fetchStates(preexistingDaCids).futureValueUS
-                preexistingDaCids.foreach { pCid =>
-                  internalStatesPreexisting.get(pCid) shouldBe defined
-                }
-              }
-
-              val reassignedContract = participant3.ledger_api.state.acs
-                .active_contracts_of_party(charlie)
-                .filter(_.getCreatedEvent.contractId == cid.coid)
-                .loneElement
-
-              reassignedContract.reassignmentCounter shouldBe 2
-            }
-
-          } else {
-            assertThrowsAndLogsCommandFailures(
-              participant3.repair.import_acs(daId, file.canonicalPath),
-              _.errorMessage should include("with a non-zero reassignment counter"),
-            )
+            targetAcsStore
+              .markContractsAdded(Seq((cid, dirtyReassignmentCounter, dirtyToc)))
+              .value
+              .futureValueUS
           }
+
+          clue(
+            "Verify simulated mid-crash state: Internal store has the contract, Ledger API lacks it"
+          ) {
+            val internalStates = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
+            internalStates.get(cid) shouldBe defined
+
+            participant3.ledger_api.state.acs
+              .of_party(charlie)
+              .map(_.contractId) shouldNot contain(cid.coid)
+          }
+
+          clue("Execute post-crash recovery retry via repair.import_acs") {
+            participant3.repair.import_acs(daId, file.canonicalPath)
+          }
+
+          eventually() {
+            val postRecoveryLedgerCids = participant3.ledger_api.state.acs
+              .of_party(charlie)
+              .map(_.contractId)
+
+            // Recovered contract is visible on the Ledger API
+            postRecoveryLedgerCids should contain(cid.coid)
+
+            // Pre-existing contracts remain visible on the Ledger API
+            postRecoveryLedgerCids should contain allElementsOf preexistingCids.map(_.coid)
+
+            // Internal store contains both recovered and pre-existing contract records
+            val internalStatesTarget = targetAcsStore.fetchStates(Seq(cid)).futureValueUS
+            internalStatesTarget.get(cid) shouldBe defined
+
+            // Filter pre-existing CIDs down to those associated with daId to verify their internal store records
+            val preexistingDaCids = preexistingCids.filter(postRecoveryLedgerCids.contains)
+            if (preexistingDaCids.nonEmpty) {
+              val internalStatesPreexisting =
+                targetAcsStore.fetchStates(preexistingDaCids).futureValueUS
+              preexistingDaCids.foreach { pCid =>
+                internalStatesPreexisting.get(pCid) shouldBe defined
+              }
+            }
+
+            val reassignedContract = participant3.ledger_api.state.acs
+              .active_contracts_of_party(charlie)
+              .filter(_.getCreatedEvent.contractId == cid.coid)
+              .loneElement
+
+            reassignedContract.reassignmentCounter shouldBe 2
+          }
+
         }
     }
   }

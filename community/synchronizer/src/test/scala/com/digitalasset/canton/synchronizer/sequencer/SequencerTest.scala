@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
-import com.digitalasset.canton.protocol.{v31, v32}
+import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
@@ -204,9 +204,6 @@ class SequencerTest
       fail("shouldn't be used")
 
     override protected val companionObj: AnyRef = TestProtocolMessage
-
-    override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-      v31.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
       v32.EnvelopeContent.SomeEnvelopeContent.Empty

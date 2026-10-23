@@ -28,8 +28,6 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   InitializeSequencerFromGenesisStateV2Response,
   InitializeSequencerFromLsuPredecessorRequest,
   InitializeSequencerFromLsuPredecessorResponse,
-  InitializeSequencerFromOnboardingStateRequest,
-  InitializeSequencerFromOnboardingStateResponse,
   InitializeSequencerFromOnboardingStateV2Request,
   InitializeSequencerFromOnboardingStateV2Response,
 }
@@ -40,7 +38,6 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.{
   InitializeSequencerResponse,
 }
 import com.digitalasset.canton.synchronizer.sequencer.{
-  OnboardingStateForSequencer,
   OnboardingStateForSequencerV2,
   SequencerSnapshot,
 }
@@ -90,8 +87,6 @@ class GrpcSequencerInitializationService(
           parameters: InitializeSequencerFromGenesisStateRequest.Parameters,
       ) => {
         val synchronizerParametersE = parameters match {
-          case InitializeSequencerFromGenesisStateRequest.Parameters.V30(ssp) =>
-            StaticSynchronizerParameters.fromProtoV30(ssp)
           case InitializeSequencerFromGenesisStateRequest.Parameters.V31(ssp) =>
             StaticSynchronizerParameters.fromProtoV31(ssp)
           case InitializeSequencerFromGenesisStateRequest.Parameters.V32(ssp) =>
@@ -128,8 +123,6 @@ class GrpcSequencerInitializationService(
     )(contextFromFirstRequest = req => Success((req.parameters, req.ignorePsidCheck))) {
       case ((parameters, ignoreLsuPsidCheck), source) =>
         val synchronizerParametersE = parameters match {
-          case InitializeSequencerFromLsuPredecessorRequest.Parameters.V30(ssp) =>
-            StaticSynchronizerParameters.fromProtoV30(ssp)
           case InitializeSequencerFromLsuPredecessorRequest.Parameters.V31(ssp) =>
             StaticSynchronizerParameters.fromProtoV31(ssp)
           case InitializeSequencerFromLsuPredecessorRequest.Parameters.V32(ssp) =>
@@ -208,10 +201,6 @@ class GrpcSequencerInitializationService(
       parseMessage = StoredTopologyTransaction.parseDelimitedFromTrusted(_),
     )(contextFromFirstRequest = req => Success(req.parameters)) { (parameters, source) =>
       val synchronizerParametersE = parameters match {
-        case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV30(
-              ssp
-            ) =>
-          StaticSynchronizerParameters.fromProtoV30(ssp)
         case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
               ssp
             ) =>
@@ -439,42 +428,6 @@ class GrpcSequencerInitializationService(
         )
       )
     )
-
-  override def initializeSequencerFromOnboardingState(
-      responseObserver: StreamObserver[InitializeSequencerFromOnboardingStateResponse]
-  ): StreamObserver[InitializeSequencerFromOnboardingStateRequest] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    GrpcStreamingUtils.streamFromClient(
-      _.onboardingState,
-      _ => (),
-      (onboardingState: ByteString, _: Unit) =>
-        initializeSequencerFromOnboardingState(onboardingState),
-      responseObserver,
-    )
-  }
-
-  private def initializeSequencerFromOnboardingState(
-      onboardingState: ByteString
-  )(implicit traceContext: TraceContext) = {
-    val res = for {
-      onboardingState <- EitherT.fromEither[Future](
-        OnboardingStateForSequencer
-          // according to @rgugliel-da, this is safe to do here.
-          // the caller of this endpoint could get the onboarding state from various sequencers
-          // and compare them for byte-for-byte equality, to increase the confidence that this
-          // is safe to deserialize
-          .fromTrustedByteString(onboardingState)
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-      )
-      replicated <- initializeSequencerFromOnboardingStateInternal(
-        onboardingState.topologySnapshot,
-        onboardingState.staticSynchronizerParameters,
-        onboardingState.sequencerSnapshot,
-      )
-
-    } yield InitializeSequencerFromOnboardingStateResponse(replicated)
-    mapErrNew(res)
-  }
 
   override def initializeSequencerFromOnboardingStateV2(
       responseObserver: StreamObserver[InitializeSequencerFromOnboardingStateV2Response]

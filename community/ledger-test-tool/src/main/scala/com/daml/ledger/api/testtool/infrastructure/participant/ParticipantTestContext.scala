@@ -266,16 +266,19 @@ trait ParticipantTestContext extends UserManagementTestContext {
       templateIds: Seq[Identifier] = Seq.empty,
       interfaceFilters: Seq[(Identifier, IncludeInterfaceView)] = Seq.empty,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): GetActiveContractsRequest
   def activeContracts(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]]
   def activeContractsWithVariants(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]]
   def activeContractResponses(
       request: GetActiveContractsRequest
@@ -285,12 +288,14 @@ trait ParticipantTestContext extends UserManagementTestContext {
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]]
   def activeContractsByTemplateIdWithVariants(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]]
 
   def contract(

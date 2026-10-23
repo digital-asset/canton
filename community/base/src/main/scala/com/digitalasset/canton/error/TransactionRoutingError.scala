@@ -15,6 +15,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.RoutingErrorGroup
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.nonempty.NonEmpty
 
 sealed trait TransactionRoutingError extends TransactionError with Product with Serializable
@@ -181,6 +182,21 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingError
     }
+
+    @Explanation(
+      """The provided submission id is invalid."""
+    )
+    @Resolution("Resubmit the command with a valid submission id.")
+    object InvalidSubmissionId
+        extends ErrorCode(
+          id = "INVALID_SUBMISSION_ID",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      final case class Error(submissionId: String, issue: String)
+          extends TransactionErrorImpl(cause = s"$issue. Provided submission id: $submissionId")
+          with TransactionRoutingError
+    }
   }
 
   object TopologyErrors extends ErrorGroup() {
@@ -278,6 +294,34 @@ object TransactionRoutingError extends RoutingErrorGroup {
           extends TransactionErrorImpl(
             cause =
               "The participant is not connected to any synchronizer where the given informees are known."
+          )
+          with TransactionRoutingError
+
+    }
+
+    @Explanation(
+      """This error indicates that the request could be routed if none of its parties were frozen. A party is
+    frozen on a synchronizer while one of its hosting participants has the Freezing hosting state. While frozen,
+    the party has no hosting participants on that synchronizer, so no request that involves it can be routed there."""
+    )
+    @Resolution(
+      """Retry after the freeze ends, that is, once no hosting participant of the party has the Freezing hosting
+    state on the synchronizer."""
+    )
+    object FrozenParties
+        extends ErrorCode(
+          id = "FROZEN_PARTIES",
+          // Same category as UNKNOWN_SUBMITTERS and UNKNOWN_INFORMEES, so that clients that do not know
+          // this code handle it like a request that involves a party without hosts
+          ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+        ) {
+
+      // Lists at most 3 parties: the description is truncated after 512 characters, and party ids
+      // are about 75 characters long
+      final case class Error(frozenParties: Set[LfPartyId])
+          extends TransactionErrorImpl(
+            cause = s"Retry after the freeze ends. The request involves frozen parties: ${LoggerUtil
+                .limitForLogging(frozenParties.map(_.toString).toSeq.sorted, maxItems = 3)}"
           )
           with TransactionRoutingError
 

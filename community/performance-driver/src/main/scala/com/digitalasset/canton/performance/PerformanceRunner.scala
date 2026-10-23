@@ -329,6 +329,7 @@ class PerformanceRunner(
     config: PerformanceRunnerConfig,
     metricsRegistry: MetricsFactoryProvider,
     val loggerFactory: NamedLoggerFactory,
+    allocatedPartyInitialNumber: Long = 0,
 )(implicit val ec: ExecutionContextExecutor)
     extends NamedLogging
     with AutoCloseable
@@ -427,6 +428,7 @@ class PerformanceRunner(
                   baseSynchronizerId = config.baseSynchronizerId,
                   otherSynchronizers = config.otherSynchronizers,
                   otherSynchronizersRatio = config.otherSynchronizersRatio,
+                  allocatedPartyInitialNumber = allocatedPartyInitialNumber,
                 )
               case isr: DvpIssuer =>
                 new dvp.IssuerDriver(

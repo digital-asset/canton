@@ -4,7 +4,11 @@
 package com.digitalasset.canton.participant.sync
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CacheConfigWithTimeout,
+  ProcessingTimeout,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
@@ -63,6 +67,7 @@ class SyncEphemeralState(
     metrics: ConnectedSynchronizerMetrics,
     exitOnFatalFailures: Boolean,
     sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+    transparencyCheckCacheConfig: CacheConfigWithTimeout,
     override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
@@ -88,7 +93,7 @@ class SyncEphemeralState(
     new ReassignmentSynchronizer(loggerFactory, timeouts)
 
   val sessionKeyStore: SessionKeyStore =
-    SessionKeyStore(sessionKeyCacheConfig, timeouts, loggerFactory)
+    SessionKeyStore(sessionKeyCacheConfig, transparencyCheckCacheConfig, timeouts, loggerFactory)
 
   val requestJournal =
     new RequestJournal(

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -10,11 +11,11 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.platform.config.TrafficAccountingConfig
-import com.digitalasset.canton.tea.v1.{TrafficServiceGrpc, UpdateAccountRequest}
-import com.google.protobuf.timestamp.Timestamp
+import com.digitalasset.canton.tea.v1.{PruneEventsRequest, TrafficServiceGrpc, UpdateAccountRequest}
 import monocle.Monocle.toAppliedFocusOps
 
 import java.util.UUID
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
 abstract class TrafficServiceAdminAuthIT extends AdminServiceCallAuthTests {
@@ -47,16 +48,29 @@ final class UpdateAccountAuthIT extends TrafficServiceAdminAuthIT {
       )
 }
 
-final class PruneEventsAuthIT extends TrafficServiceAdminAuthIT {
-  override def serviceCallName: String = "TrafficService#PruneEvents"
+final class PruneAuthIT extends TrafficServiceAdminAuthIT {
+  override def serviceCallName: String = "TrafficService#Prune"
 
   override def serviceCall(
       context: ServiceCallContext
   )(implicit env: TestConsoleEnvironment): Future[Any] =
     stub(TrafficServiceGrpc.stub(channel), context.token)
-      .pruneEvents(
-        com.digitalasset.canton.tea.v1.PruneEventsRequest(
-          beforeOrAt = Some(Timestamp.defaultInstance)
+      .prune(
+        com.digitalasset.canton.tea.v1.PruneRequest(
+          beforeOrAt = Some(CantonTimestamp.MinValue.toProtoTimestamp)
         )
+      )
+}
+
+final class PruneEventsAuthIT extends TrafficServiceAdminAuthIT {
+  override def serviceCallName: String = "TrafficService#PruneEvents"
+
+  @nowarn("cat=deprecation")
+  override def serviceCall(
+      context: ServiceCallContext
+  )(implicit env: TestConsoleEnvironment): Future[Any] =
+    stub(TrafficServiceGrpc.stub(channel), context.token)
+      .pruneEvents(
+        PruneEventsRequest(beforeOrAt = Some(CantonTimestamp.MinValue.toProtoTimestamp))
       )
 }

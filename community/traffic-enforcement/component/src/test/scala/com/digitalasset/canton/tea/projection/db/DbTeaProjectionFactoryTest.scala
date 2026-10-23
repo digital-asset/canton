@@ -17,7 +17,6 @@ import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.Pr
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.projection.{
-  EventSource,
   TeaProjectionFactory,
   TeaProjectionTest,
   TeaTrafficStore,
@@ -49,6 +48,9 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   // resumes exactly where the previous one left off.
   override protected def offsetsArePersisted: Boolean = true
 
+  // The deltas of an event and the offset bump run in the same DB transaction.
+  override protected def deltasAreAppliedAtomically: Boolean = true
+
   // The store is a stateless query wrapper; data isolation between tests is provided by cleanDb.
   // The execution context comes from HasExecutionContext (mixed in via DbTest).
   private lazy val dbStore: TeaDbTrafficStore =
@@ -74,7 +76,6 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
           storage.underlying,
           loggerFactory,
           dbStore,
-          EventSource.LedgerAPICompletions,
           ProjectionConfig(),
           metrics,
         )

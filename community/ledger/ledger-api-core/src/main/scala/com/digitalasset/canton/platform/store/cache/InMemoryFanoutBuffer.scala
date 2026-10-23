@@ -14,6 +14,7 @@ import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, Mutex}
+import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.protobuf.ByteString
 
 import scala.collection.Searching.{Found, InsertionPoint, SearchResult}
@@ -50,6 +51,8 @@ class InMemoryFanoutBuffer(
     Map.empty[ByteString, TransactionLogUpdate.TransactionAccepted]
   @volatile private[cache] var _rejectionsByHash =
     Map.empty[ByteString, Vector[TransactionLogUpdate.TransactionRejected]]
+  @volatile private[cache] var _synchronizerRecordTimes =
+    Map.empty[String, Vector[TransactionLogUpdate]] // Elements in the vectors are ordered by offset
 
   private val bufferMetrics = metrics.services.index.inMemoryFanoutBuffer
   private val pushTimer = bufferMetrics.push
@@ -92,6 +95,12 @@ class InMemoryFanoutBuffer(
             val existing = _rejectionsByHash.getOrElse(hash, Vector.empty)
             _rejectionsByHash = _rejectionsByHash.updated(hash, rejected +: existing)
           }
+          val synchronizerId = entry.synchronizerId
+
+          _synchronizerRecordTimes = _synchronizerRecordTimes.updatedWith(synchronizerId) {
+            case Some(v) => Some(v :+ entry)
+            case None => Some(Vector(entry))
+          }
         }
       }),
     )
@@ -124,6 +133,44 @@ class InMemoryFanoutBuffer(
     val rejections = _rejectionsByHash.getOrElse(hash, Vector.empty)
     (accepted, rejections)
   }
+
+  def lookupLastOffsetBeforeOrFirstAtRecordTime(
+      synchronizerId: String,
+      recordTime: Timestamp,
+  ): Option[TransactionLogUpdate] =
+    _synchronizerRecordTimes.get(synchronizerId).flatMap { updatesForSynchronizer =>
+      updatesForSynchronizer.headOption match {
+        case Some(value)
+            if value.recordTime >= recordTime => // If equal we can't tell if part of this record time was already evicted or not -- fall back to persistence
+          // If it is greater, then for sure the record time is not in the buffer.
+          None
+        case None => // This should not happen
+          noTracingLogger
+            .warn(s"Internal inconsistency: empty update for synchronizer $synchronizerId")
+          None
+        case _ => // We are able to answer the query
+          val updatesForSynchronizerRecordTimeOffsetView =
+            updatesForSynchronizer.view.map(tlu => (tlu.recordTime, tlu.offset))
+          val insertionPoint =
+            updatesForSynchronizerRecordTimeOffsetView.search((recordTime, Offset.firstOffset))
+          // View has exactly the same indexind as the original collection, so we just use the index with the collection.
+          insertionPoint match {
+            case Found(
+                  foundIndex
+                ) => // This is only possible if we hit the very first offset element.
+              Some(updatesForSynchronizer(foundIndex))
+            case InsertionPoint(insertionPoint) =>
+              // The searched updated should be inserted between the last rt before the requested rt and the first entry of rt = requested rt (or the rt after this if no exact match)
+              updatesForSynchronizer
+                .lift(insertionPoint)
+                .filter(_.recordTime == recordTime)
+                .orElse(
+                  updatesForSynchronizer.lift(insertionPoint - 1)
+                )
+
+          }
+      }
+    }
 
   /** Lookup the accepted transaction log update by update id. */
   private def lookup(
@@ -168,6 +215,7 @@ class InMemoryFanoutBuffer(
     _lookupMap = Map.empty
     _acceptedByHash = Map.empty
     _rejectionsByHash = Map.empty
+    _synchronizerRecordTimes = Map.empty
   })
 
   private def ensureSize(targetSize: Int)(implicit traceContext: TraceContext): Unit = (
@@ -193,7 +241,7 @@ class InMemoryFanoutBuffer(
     }
   )
 
-  private def dropOldest(dropCount: Int): Unit = (lock.exclusive {
+  private def dropOldest(dropCount: Int): Unit = lock.exclusive {
     val (evicted, remainingBufferLog) = _bufferLog.splitAt(dropCount)
     val lookupKeysToEvict: View[String] =
       evicted.view.map(_._2).flatMap(extractEntryFromMap).map(_._1)
@@ -216,7 +264,13 @@ class InMemoryFanoutBuffer(
         case _ => acc // nothing buffered for this hash; leave the map unchanged
       }
     }
-  })
+
+    val evictedPerSynchronizerCount = evicted.groupMapReduce(_._2.synchronizerId)(_ => 1)(_ + _)
+    _synchronizerRecordTimes = evictedPerSynchronizerCount.foldLeft(_synchronizerRecordTimes) {
+      case (map, (synchronizerId, evictedCount)) =>
+        map.updatedWith(synchronizerId)(_.map(_.drop(evictedCount)).filter(_.nonEmpty))
+    }
+  }
 
   private def extractEntryFromMap(
       transactionLogUpdate: TransactionLogUpdate

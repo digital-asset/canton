@@ -201,7 +201,7 @@ trait IndexComponentTest
     // this mimics protocol processing that stores contracts and retrieves their internal contract ids afterward
     testServices.participantContractStore.participantContractStore
       .storeContracts(contracts)
-      .failOnShutdownToAbortException("storeContracts")
+      .onShutdown(fail("storeContracts"))
       .flatMap(_ =>
         testServices.participantContractStore
           .lookupBatchedInternalIdsNonReadThrough(
@@ -1018,6 +1018,7 @@ trait IndexComponentTest
         activeAt = Some(Offset.tryFromLong(activeAt)),
         rangeInfo = rangeInfo,
         configOverrides = None,
+        includeIncompleteReassignments = false,
       )
       .runWith(Sink.seq)
       .futureValue

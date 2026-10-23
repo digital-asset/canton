@@ -53,7 +53,7 @@ sealed abstract class LsuSuccessorIntegrationTest extends LsuBase {
             staticSynchronizerParameters = S1M1.staticSynchronizerParameters.copy(
               protocolVersion = currentPV,
               serial = currentSerial,
-              synchronizerLimits = SynchronizerLimits.defaultFor(currentPV),
+              synchronizerLimits = SynchronizerLimits.default,
             )
           )
         )

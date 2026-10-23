@@ -17,6 +17,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -71,7 +72,7 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
             store: TopologyStoreId = TopologyStoreId.Authorized,
             forceFlags: ForceFlags = ForceFlags.none,
             participantsRequiringPartyToBeOnboarded: Seq[ParticipantId] = Nil,
-            participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
+            participantStates: Map[ParticipantId, HostingState] = Map.empty,
         ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
           val env = node.consoleEnvironment
           val synchronize = Some(env.commandTimeouts.bounded)
@@ -188,42 +189,10 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
             signingKeysAdds: Set[SigningPublicKey] = Set.empty,
             signingKeysRemoves: Set[Fingerprint] = Set.empty,
             newSigningThreshold: Option[PositiveInt] = None,
-            participantStates: Map[ParticipantId, HostingParticipant.HostingState] = Map.empty,
+            participantStates: Map[ParticipantId, HostingState] = Map.empty,
         ): SignedTopologyTransaction[TopologyChangeOp, PartyToParticipant] = {
           val env = node.consoleEnvironment
           val synchronize = Some(env.commandTimeouts.bounded)
-
-          val (
-            existingPermissions,
-            newPermissions,
-            newSerial,
-            threshold,
-            partySigningKeys,
-          ) =
-            node.topology.party_to_participant_mappings.computeDelta(
-              party.partyId,
-              adds,
-              removes,
-              store,
-              serial,
-            )
-
-          val newSigningKeys =
-            partySigningKeys.map { case SigningKeysWithThreshold(keys, threshold) =>
-              SigningKeysWithThreshold.tryCreate(
-                NonEmpty
-                  .from(
-                    keys.filterNot(k =>
-                      signingKeysRemoves.contains(k.fingerprint)
-                    ) ++ signingKeysAdds
-                  )
-                  .getOrElse(
-                    throw new IllegalStateException("New signing keys set is empty")
-                  )
-                  .toSeq,
-                newSigningThreshold.getOrElse(threshold),
-              )
-            }
 
           party match {
             case _: PartyId =>
@@ -241,34 +210,71 @@ trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues
                 requiresPartyToBeOnboarded = requiresPartyToBeOnboarded,
                 participantStates = participantStates,
               )
-            case _: ExternalParty if newPermissions.nonEmpty =>
-              propose(
-                node = node,
-                newParticipants = newPermissions.toSeq,
-                threshold = threshold,
-                operation = TopologyChangeOp.Replace,
-                serial = newSerial,
-                mustFullyAuthorize = mustFullyAuthorize,
-                store = store,
-                forceFlags = forceFlags,
-                participantsRequiringPartyToBeOnboarded =
-                  if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
-                partySigningKeys = newSigningKeys,
-                participantStates = participantStates,
-              )
             case _: ExternalParty =>
-              propose(
-                node = node,
-                newParticipants = existingPermissions.toSeq,
-                threshold = threshold,
-                operation = TopologyChangeOp.Remove,
-                serial = newSerial,
-                mustFullyAuthorize = mustFullyAuthorize,
-                store = store,
-                forceFlags = forceFlags,
-                partySigningKeys = newSigningKeys,
-                participantStates = participantStates,
-              )
+              val (
+                existingPermissions,
+                newPermissions,
+                newSerial,
+                threshold,
+                partySigningKeys,
+                existingParticipantStates,
+                newParticipantStates,
+              ) =
+                node.topology.party_to_participant_mappings.computeDelta(
+                  party.partyId,
+                  adds,
+                  removes,
+                  store,
+                  serial,
+                  participantStates,
+                  requiresPartyToBeOnboarded,
+                )
+
+              val newSigningKeys =
+                partySigningKeys.map { case SigningKeysWithThreshold(keys, threshold) =>
+                  SigningKeysWithThreshold.tryCreate(
+                    NonEmpty
+                      .from(
+                        keys.filterNot(k =>
+                          signingKeysRemoves.contains(k.fingerprint)
+                        ) ++ signingKeysAdds
+                      )
+                      .getOrElse(
+                        throw new IllegalStateException("New signing keys set is empty")
+                      )
+                      .toSeq,
+                    newSigningThreshold.getOrElse(threshold),
+                  )
+                }
+
+              if (newPermissions.nonEmpty)
+                propose(
+                  node = node,
+                  newParticipants = newPermissions.toSeq,
+                  threshold = threshold,
+                  operation = TopologyChangeOp.Replace,
+                  serial = newSerial,
+                  mustFullyAuthorize = mustFullyAuthorize,
+                  store = store,
+                  forceFlags = forceFlags,
+                  participantsRequiringPartyToBeOnboarded =
+                    if (requiresPartyToBeOnboarded) adds.map(_._1) else Nil,
+                  partySigningKeys = newSigningKeys,
+                  participantStates = newParticipantStates,
+                )
+              else
+                propose(
+                  node = node,
+                  newParticipants = existingPermissions.toSeq,
+                  threshold = threshold,
+                  operation = TopologyChangeOp.Remove,
+                  serial = newSerial,
+                  mustFullyAuthorize = mustFullyAuthorize,
+                  store = store,
+                  forceFlags = forceFlags,
+                  partySigningKeys = newSigningKeys,
+                  participantStates = existingParticipantStates,
+                )
           }
         }
       }

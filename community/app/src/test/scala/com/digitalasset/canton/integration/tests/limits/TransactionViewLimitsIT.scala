@@ -120,12 +120,6 @@ class TransactionViewLimitsIT
         "T",
         Map("owner" -> party1, "watcher" -> party1, "value" -> 0),
       )
-      val createCmd2 = ledger_api_utils.create(
-        TransactionLimitTestsPkgId,
-        "TransactionLimitTests",
-        "T",
-        Map("owner" -> party1, "watcher" -> party1, "value" -> 1),
-      )
       val cid =
         getFirstContractId(participant1.ledger_api.commands.submit(Seq(party1), Seq(createCmd1)))
       val twoViewCmd = ledger_api_utils.exercise(
@@ -143,17 +137,6 @@ class TransactionViewLimitsIT
         "SingleRootAndView",
         Map.empty,
         cid.coid,
-      )
-
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.ledger_api.commands.submit(Seq(party1), Seq(createCmd1, createCmd2)),
-        entry => {
-          entry.shouldBeCantonErrorCode(TransactionProcessor.SubmissionErrors.MalformedRequest)
-          entry.errorMessage should include("Request failed for participant1")
-          entry.errorMessage should include(
-            "TransactionViewLimitError(Number of root views for a transaction exceeded 1)"
-          )
-        },
       )
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](

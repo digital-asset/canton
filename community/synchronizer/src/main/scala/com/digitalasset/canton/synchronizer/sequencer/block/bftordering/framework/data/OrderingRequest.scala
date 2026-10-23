@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.crypto.HashBuilder
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -44,12 +45,18 @@ final case class OrderingRequest(
   def isTagValid: Boolean =
     ValidTags.contains(tag)
 
-  def addToHashBuilder(hashBuilder: HashBuilder): Unit =
+  def addToHashBuilder(
+      hashBuilder: HashBuilder
+  )(implicit protocolVersion: ProtocolVersion): Unit = {
     hashBuilder
       .addByteString(payload)
       .addString(tag)
-      .addString(orderingStartInstant.toString)
       .discard
+
+    if (protocolVersion < ProtocolVersion.v37) {
+      hashBuilder.addString(orderingStartInstant.toString).discard
+    }
+  }
 
   def headerString: String =
     s"(tag=$tag, messageId=$messageId, payloadSize=${payload.size()}, orderingStartInstant=$orderingStartInstant)"
@@ -96,11 +103,36 @@ final case class OrderingRequestBatch private (
     ]
 ) extends HasProtocolVersionedWrapper[OrderingRequestBatch] {
 
-  def addToHashBuilder(hashBuilder: HashBuilder): Unit = {
+  def addToHashBuilder(
+      hashBuilder: HashBuilder,
+      logger: TracedLogger,
+  )(implicit protocolVersion: ProtocolVersion, traceContext: TraceContext): Unit = {
+    logger.debug(s"Adding epoch number $epochNumber to hash builder")
     hashBuilder.addLong(epochNumber)
+    val useOldHashFormat = protocolVersion < ProtocolVersion.v37
+    if (useOldHashFormat)
+      logger.debug(
+        s"Synchronizer protocol version is $protocolVersion, " +
+          "using old (< PV37) hash format: " +
+          s"adding ${requests.size} requests to hash builder, " +
+          s"each with hardcoded representative protocol version 34 and request trace context"
+      )
+    else
+      logger.debug(
+        s"Synchronizer protocol version is $protocolVersion, " +
+          "using new (>= PV37) hash format: " +
+          s"adding ${requests.size} requests to hash builder, " +
+          "each without representative protocol version nor request trace context"
+      )
     requests.foreach { request =>
-      hashBuilder.addInt(representativeProtocolVersion.representative.toProtoPrimitive)
-      hashBuilder.addString(traceContextForHashBuilder(request.traceContext))
+      if (useOldHashFormat) {
+        // In protocol versions < v37, we used to add the representative protocol version to the hash builder. Since
+        // v37 we no longer do. The rpv have since changed, but in all versions before v37 rpv was always 34. So that is
+        // value we use here.
+        val requestTraceContext = request.traceContext
+        hashBuilder.addInt(34)
+        hashBuilder.addString(traceContextForHashBuilder(requestTraceContext))
+      }
       request.value.addToHashBuilder(hashBuilder)
     }
   }
@@ -160,7 +192,7 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
       batch: v30.Batch
   ): ParsingResult[OrderingRequestBatch] =
     for {
-      rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData)
+      rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
       requests = batch.orderingRequests.map { protoOrderingRequest =>
         Traced.fromPair[OrderingRequest](
           (
@@ -181,8 +213,8 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
 
   override val versioningTable: framework.data.OrderingRequestBatch.VersioningTable =
     VersioningTable(
-      SupportedVersions.ProtoData ->
-        VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.Batch)(
+      SupportedVersions.ProtoData30 ->
+        VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.Batch)(
           supportedProtoVersion(_)(fromProtoV30),
           _.toProtoV30,
         )

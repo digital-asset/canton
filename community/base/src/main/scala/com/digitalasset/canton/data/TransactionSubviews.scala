@@ -12,10 +12,10 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{RootHash, ViewHash, v30}
+import com.digitalasset.canton.protocol.{RootHash, TransactionProtocolLimits, ViewHash, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion}
+import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -116,20 +116,24 @@ object TransactionSubviews extends PrettyPrintingCompanion[TransactionSubviews] 
   )
 
   private[data] def fromProtoV30(
-      context: (HashOps, ProtocolVersion),
+      pvv: ProtocolVersionValidation,
+      context: TransactionSubviewsDeserializationContext,
       depthCounter: DepthCounter,
       subviewsPO: Option[v30.MerkleSeq],
   ): ParsingResult[TransactionSubviews] = {
-    val (hashOps, expectedProtocolVersion) = context
+    val TransactionSubviewsDeserializationContext(hashOps, expectedProtocolVersion, limits) =
+      context
     for {
       subviewsP <- ProtoConverter.required("ViewNode.subviews", subviewsPO)
       tvParser = (bytes: ByteString, tvDepth: DepthCounter) =>
         TransactionView.fromByteString(
-          expectedProtocolVersion,
-          (hashOps, tvDepth, expectedProtocolVersion),
-        )(bytes)
+          pvv,
+          TransactionViewDeserializationContext(hashOps, tvDepth, expectedProtocolVersion, limits),
+          bytes,
+        )
       subviews <- MerkleSeq.fromProtoV30(
-        ((hashOps, tvParser, depthCounter), expectedProtocolVersion),
+        pvv,
+        (hashOps, tvParser, depthCounter),
         subviewsP,
       )
     } yield TransactionSubviews(subviews)
@@ -163,3 +167,18 @@ object TransactionSubviews extends PrettyPrintingCompanion[TransactionSubviews] 
   }
 
 }
+
+/** Context required to deserialize TransactionSubviews
+  *
+  * @param hashOps
+  *   hash operations
+  * @param pv
+  *   protocol version
+  * @param limits
+  *   protocol limits
+  */
+final case class TransactionSubviewsDeserializationContext(
+    hashOps: HashOps,
+    pv: ProtocolVersion,
+    limits: TransactionProtocolLimits,
+)

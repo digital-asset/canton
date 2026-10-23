@@ -165,6 +165,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -190,6 +191,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -210,6 +212,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
   }
@@ -220,6 +223,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         activeAtOffset = 15,
         eventFormat = None,
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
   }

@@ -804,9 +804,9 @@ private[bftordering] final class P2PGrpcConnectionManager(
             authenticationContextO,
             maybeSequencerIdFromAuthenticationPromiseUS,
             maybeAuthenticateStub(
-              BftOrderingServiceGrpc
-                .stub(potentiallyCheckedChannel)
-                .withOption(TraceContextGrpc.TraceContextOptionsKey, traceContext)
+              TraceContextGrpc.addTraceContextToCallOptions(
+                BftOrderingServiceGrpc.stub(potentiallyCheckedChannel)
+              )
             ),
           )
         )
@@ -1068,6 +1068,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
                 val peerSender =
                   new PeerSender(
                     callSendingStreamObserver,
+                    isOutgoingConnection = true,
                     p2pConnectionManagementConfig.flowControlEnabled,
                     p2pConnectionManagementConfig.flowControlBuffer,
                     p2pConnectionManagementConfig.flowControlBufferDropNewest,
@@ -1302,6 +1303,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       val peerSender =
         new PeerSender(
           callSendingStreamObserver,
+          isOutgoingConnection = false,
           p2pConnectionManagementConfig.flowControlEnabled,
           p2pConnectionManagementConfig.flowControlBuffer,
           p2pConnectionManagementConfig.flowControlBufferDropNewest,
@@ -1526,6 +1528,7 @@ private[bftordering] object P2PGrpcConnectionManager {
   // Non-final for mocking in tests
   class PeerSender(
       val grpcStreamObserver: CallStreamObserver[BftOrderingMessage],
+      val isOutgoingConnection: Boolean,
       flowControlEnabled: Boolean,
       maxSendQueueSize: PositiveInt,
       dropNewest: Boolean,

@@ -183,6 +183,69 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
     pagesWithSize100 should contain theSameElementsInOrderAs createSlices(100, allContracts)
   }
 
+  it should "exclude incomplete reassignments from the ACS stream if not requested" in {
+    val party = Ref.Party.assertFromString("party8")
+    setupEvents(party)
+
+    val eventFormat = EventFormat(
+      filtersByParty = Map(party -> CumulativeFilter.templateWildcardFilter()),
+      filtersForAnyParty = None,
+      verbose = false,
+    )
+
+    val allEntries = getAcsF(eventFormat, None).futureValue
+    allEntries should have length (4 + 4 + 3 * 4)
+    val expectedActiveContracts = allEntries.filter(_.contractEntry.isActiveContract)
+    // sanity check: the setup contains both active contracts and incomplete reassignments
+    expectedActiveContracts should not be empty
+    expectedActiveContracts.size should be < allEntries.size
+
+    val onlyActiveContracts =
+      getAcsF(eventFormat, None, includeIncompleteReassignments = false).futureValue
+    onlyActiveContracts.foreach(_.contractEntry.isActiveContract shouldBe true)
+    onlyActiveContracts should contain theSameElementsInOrderAs expectedActiveContracts
+
+    // continuation from every element yields the rest of the active contracts only
+    onlyActiveContracts.indices.foreach { i =>
+      val continuation = getAcsF(
+        eventFormat,
+        Some(onlyActiveContracts(i).streamContinuationToken),
+        includeIncompleteReassignments = false,
+      ).futureValue
+      (onlyActiveContracts.take(i + 1) ++ continuation) should equal(onlyActiveContracts)
+    }
+
+    // pagination covers exactly the active contracts
+    def getAllPages(pageSize: Int) = Vector.unfold(None: Option[ByteString]) { continuationToken =>
+      getAcsF(
+        eventFormat,
+        continuationToken,
+        Some(pageSize),
+        includeIncompleteReassignments = false,
+      )
+        .map(page =>
+          if (page.isEmpty) None
+          else Some(page -> page.lastOption.map(_.streamContinuationToken))
+        )
+        .futureValue
+    }
+    Seq(1, 2, 100).foreach { pageSize =>
+      getAllPages(pageSize) should contain theSameElementsInOrderAs createSlices(
+        pageSize,
+        onlyActiveContracts,
+      )
+    }
+
+    // continuing from an incomplete reassignment pointer yields nothing if those are excluded
+    val firstIncompleteToken =
+      allEntries.find(!_.contractEntry.isActiveContract).value.streamContinuationToken
+    getAcsF(
+      eventFormat,
+      Some(firstIncompleteToken),
+      includeIncompleteReassignments = false,
+    ).futureValue shouldBe empty
+  }
+
   it should "successfully re-insert contracts if not found" in {
     val party = Ref.Party.assertFromString("party9")
     val (tx, _) = mkTransaction(createContract(party))
@@ -319,6 +382,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       eventFormat: EventFormat,
       continuationToken: Option[ByteString],
       limit: Option[Int] = None,
+      includeIncompleteReassignments: Boolean = true,
   ) =
     continuationToken.traverse(token =>
       AcsContinuationToken.decodeAndValidate(AcsContinuationToken.emptyChecksum, token)
@@ -337,6 +401,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
               limit = limit.map(_.toLong),
             ),
             configOverrides = None,
+            includeIncompleteReassignments = includeIncompleteReassignments,
           )
           .runWith(Sink.collection)
           .map(_.toVector)

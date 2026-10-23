@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -167,6 +167,22 @@ class UnassignmentValidationTest
       validation.isSuccessful.futureValueUS shouldBe true
     }
 
+    "only compute the assignment exclusivity up to protocol version 36" in {
+      def assignmentExclusivity(protocolVersion: ProtocolVersion) =
+        performValidation(
+          targetPsid = Target(
+            PhysicalSynchronizerId(
+              targetSynchronizer.unwrap.logical,
+              NonNegativeInt.zero,
+              protocolVersion,
+            )
+          )
+        ).futureValueUS.value.assignmentExclusivity
+
+      assignmentExclusivity(ProtocolVersion.v36) shouldBe defined
+      assignmentExclusivity(ProtocolVersion.v37) shouldBe None
+    }
+
     val invalidContractReason = "invalid-contract"
     val failingContractValidator =
       new TestValidator(Map((contract.contractId, invalidPackageId) -> invalidContractReason))
@@ -206,7 +222,7 @@ class UnassignmentValidationTest
 
     val unvettedPackageId = LfPackageId.assertFromString("unvetted-package-id")
 
-    "create a common validation failure if the source validation package is unvetted" in {
+    s"create a common validation failure if the source validation package is unvetted" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       val result = performValidation(
         sourceValidationPackageId = Some(unvettedPackageId)
       ).futureValueUS.value
@@ -238,7 +254,9 @@ class UnassignmentValidationTest
 
     }
 
-    "create a reassigning participant validation failure if the contract serialization version is not supported by the target synchronize" onlyRunWithOrLessThan ProtocolVersion.latest in {
+    "create a reassigning participant validation failure if the contract serialization version is not supported by the target synchronize" onlyRunWhen (
+      pv => pv > ProtocolVersion.v36 && pv < ProtocolVersion.dev
+    ) in {
 
       val devContract =
         ExampleContractFactory.modify(contract, version = Some(LfSerializationVersion.VDev))
@@ -532,6 +550,7 @@ class UnassignmentValidationTest
       submitter: LfPartyId = signatory,
       validatingParticipant: ParticipantId = confirmingParticipant,
       identityFactory: TestingIdentityFactory = identityFactory,
+      targetPsid: Target[PhysicalSynchronizerId] = targetSynchronizer,
       targetTopology: Target[TopologySnapshot] = Target(identityFactory.topologySnapshot()),
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       sourceValidationPackageId: Option[LfPackageId] = None,
@@ -542,7 +561,7 @@ class UnassignmentValidationTest
         .apply(
           contract = contract,
           sourceSynchronizer = sourceSynchronizer,
-          targetSynchronizer = targetSynchronizer,
+          targetSynchronizer = targetPsid,
           identityFactory = identityFactory,
           targetTimestamp = Target(CantonTimestamp.Epoch),
           sourceValidationPackageId = sourceValidationPackageId,

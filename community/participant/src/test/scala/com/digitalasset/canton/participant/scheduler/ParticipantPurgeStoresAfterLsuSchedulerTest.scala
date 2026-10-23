@@ -154,7 +154,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
 
       // Cleanup
       scheduler.stop()
-      f.futureValue
+      f.futureValueUS
     }
 
     def purgeObsoleteStoresScheduling(acsDigestProcessorEnabled: Boolean): Unit = {
@@ -380,7 +380,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
 
       // Clean up
       scheduler.stop()
-      f.futureValue
+      f.futureValueUS
     }
 
     behave like purgeObsoleteStoresScheduling(acsDigestProcessorEnabled = true)

@@ -44,11 +44,11 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{MediatorId, Member, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.signalling.{EventSignaller, NotificationSignal}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.*
@@ -172,11 +172,11 @@ class SequencerReader(
           CreateSubscriptionError.UnknownMember(member),
         )
         .leftWiden[CreateSubscriptionError]
-      // check they haven't been disabled
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        registeredMember.enabled,
-        CreateSubscriptionError.MemberDisabled(member): CreateSubscriptionError,
-      )
+      // check that the member is active. Active members always have a registration timestamp.
+      memberRegisteredFrom <- EitherT.fromEither[FutureUnlessShutdown](registeredMember match {
+        case RegisteredMember.Active(_, registeredAt) => Right(registeredAt)
+        case _ => Left(CreateSubscriptionError.MemberNotActive(member): CreateSubscriptionError)
+      })
 
       _ = logger.debug(
         s"Topology processor at: ${syncCryptoApi.approximateTimestamp}"
@@ -186,7 +186,6 @@ class SequencerReader(
       _ = logger.debug(
         s"Current safe watermark is $safeWatermarkTimestampO"
       )
-      memberRegisteredFrom = registeredMember.registeredFrom
       _ = logger.debug(s"Member $member was registered at $memberRegisteredFrom")
 
       // It can happen that a member switching between sequencers runs into a sequencer that is catching up.
@@ -600,7 +599,7 @@ class SequencerReader(
                       ),
                     )
                   case payload: BytesPayload =>
-                    payload.decodeBatchAndTrim(protocolVersion, member)
+                    payload.decodeBatchAndTrim(member)
                 })
               )
             }

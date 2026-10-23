@@ -135,7 +135,7 @@ class ParticipantReplicaManager(
 
           _ = logger.info("Participant replica is becoming active: Synchronizers reconnected")
           // Start the schedulers, pruning scheduler depends on the Ledger API server
-          _ <- FutureUnlessShutdown.outcomeF(participantServices.schedulers.start())
+          _ <- participantServices.schedulers.start()
           _ = logger.info("Participant replica is becoming active: Schedulers started")
         } yield ()
 

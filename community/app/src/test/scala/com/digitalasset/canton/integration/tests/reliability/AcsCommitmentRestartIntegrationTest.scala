@@ -54,7 +54,7 @@ trait AcsCommitmentRestartIntegrationTest
     with HasCycleUtils
     with CommitmentTestUtil {
 
-  // TODO(#35929) Enable again when we fix the flakiness of this test
+  // The new processor is disabled below, so it doesn't even make sense to run the consistency check
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(60)

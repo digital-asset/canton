@@ -240,6 +240,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
             metrics
               .connectedSynchronizerMetrics(config.synchronizerAlias, participantId)
               .sequencerClient,
+            new BftTopologyForInitDownloader(loggerFactory),
             participantNodeParameters.loggingConfig,
             participantNodeParameters.exitOnFatalFailures,
             synchronizerLoggerFactory,
@@ -553,6 +554,11 @@ object SynchronizerRegistryHelpers {
                   predecessorSyncState.topologyStore
                 )
 
+              predecessorDispatchingWatermarkO <-
+                predecessorSyncState.topologyStore.currentDispatchingWatermark
+              _ <- predecessorDispatchingWatermarkO.traverse_(
+                persistentState.topologyStore.updateDispatchingWatermark
+              )
               _ <- persistentState.connectivityStatusStore.setTopologyInitialized()
             } yield ()
           } else {

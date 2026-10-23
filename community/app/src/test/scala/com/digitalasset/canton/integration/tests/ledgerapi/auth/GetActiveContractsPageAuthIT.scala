@@ -25,6 +25,7 @@ final class GetActiveContractsPageAuthIT extends SuperReaderServiceCallAuthTests
           eventFormat = context.eventFormat.orElse(Some(eventFormat(getMainActorId))),
           maxPageSize = None,
           pageToken = None,
+          includeIncompleteReassignments = false,
         )
       )
 

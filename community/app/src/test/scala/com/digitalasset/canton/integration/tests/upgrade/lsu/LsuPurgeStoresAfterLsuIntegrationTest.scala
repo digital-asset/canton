@@ -132,15 +132,19 @@ final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
         .topologyStore
 
       clue("new stores are not purged") {
-        newTopologyStore
+        val newEntries = newTopologyStore
           .dumpStoreContent()
           .futureValueUS
           .result
-          .toSet shouldBe oldTopology
+          .toSet
+
+        val oldEntries = oldTopology
           // LsuSequencerConnectionSuccessor is filtered out when doing the local copy
           .filterNot(
             _.mapping.code == TopologyMapping.Code.LsuSequencerConnectionSuccessor
           )
+
+        newEntries shouldBe oldEntries
 
         participant1.underlying.value.sync.syncPersistentStateManager
           .get(fixture.newPsid)

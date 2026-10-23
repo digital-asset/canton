@@ -8,10 +8,15 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.party_management_service
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.PositiveTopologyTransaction
-import com.digitalasset.canton.topology.transaction.{TopologyChangeOp, TopologyTransaction}
+import com.digitalasset.canton.topology.transaction.{
+  TopologyChangeOp,
+  TopologyTransaction,
+  TopologyTransactionDeserializationContext,
+}
 
 final case class GenerateExternalPartyTopology(
     partyId: PartyId,
@@ -34,7 +39,9 @@ object GenerateExternalPartyTopology {
       partyId <- PartyId.fromProtoPrimitive(partyIdP, "party_id")
       fingerprint <- Fingerprint.fromProtoPrimitive(publicKeyFingerprintP)
       topologyTransactions <- topologyTransactionsP.traverse(
-        TopologyTransaction.fromTrustedByteString
+        TopologyTransaction.fromTrustedByteString(
+          TopologyTransactionDeserializationContext(SynchronizerLimits.default)
+        )
       )
       positive = topologyTransactions.mapFilter(_.selectOp[TopologyChangeOp.Replace])
       _ <- Either.cond(

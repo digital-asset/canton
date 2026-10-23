@@ -61,6 +61,8 @@ private[mediator] object MediatorEventDeduplicator {
     ): FutureUnlessShutdown[DynamicSynchronizerParametersWithValidity] =
       tracedRequestTime.withTraceContext { implicit traceContext => requestTime =>
         for {
+          // We get the synchronizer parameters from the topology snapshot at the request time,
+          // deduplication checks should be done with the parameters that were valid at the time of the request.
           snapshot <- topologyClient.awaitSnapshot(requestTime)
           synchronizerParameters <-
             snapshot
