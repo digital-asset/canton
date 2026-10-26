@@ -68,20 +68,21 @@ class RequestTimeoutDirectiveTest
 
   private def invalidMessage(rawValue: String): String =
     s"Invalid $requestTimeoutHeader header value '$rawValue': " +
-      "expected a positive integer number of milliseconds."
+      "expected a number of milliseconds (e.g. '5000') or a duration with a unit " +
+      "(e.g. '5s', '1500ms')."
 
   private def belowLowerBoundMessage(
       rawValue: String,
       configured: FiniteDuration = JsonApiConfig.defaultRequestTimeoutLowerBound,
   ): String =
-    s"$requestTimeoutHeader '$rawValue' ms is below the minimum of " +
+    s"$requestTimeoutHeader '$rawValue' is below the minimum of " +
       s"${configured.toMillis} ms."
 
   private def aboveUpperBoundMessage(
       rawValue: String,
       configured: FiniteDuration = JsonApiConfig.defaultRequestTimeoutUpperBound,
   ): String =
-    s"$requestTimeoutHeader '$rawValue' ms is above the maximum of " +
+    s"$requestTimeoutHeader '$rawValue' is above the maximum of " +
       s"${configured.toMillis} ms."
 
   "ClientRequestTimeoutConfig" should {
@@ -155,6 +156,27 @@ class RequestTimeoutDirectiveTest
 
     "trim surrounding whitespace" in {
       RequestTimeoutDirective.validate("  5000  ") shouldBe Validated.Enforce(5000.millis)
+      RequestTimeoutDirective.validate("  5s  ") shouldBe Validated.Enforce(5.seconds)
+    }
+
+    "accept a duration with a unit" in {
+      RequestTimeoutDirective.validate("44s") shouldBe Validated.Enforce(44.seconds)
+      RequestTimeoutDirective.validate("1500ms") shouldBe Validated.Enforce(1500.millis)
+      RequestTimeoutDirective.validate("1.5s") shouldBe Validated.Enforce(1500.millis)
+      RequestTimeoutDirective.validate("1 minute") shouldBe Validated.Enforce(1.minute)
+    }
+
+    "apply the bounds to a duration with a unit" in {
+      RequestTimeoutDirective.validate("500ms") shouldBe Validated.BelowLowerBound
+      RequestTimeoutDirective.validate("0s") shouldBe Validated.BelowLowerBound
+      RequestTimeoutDirective.validate("-5s") shouldBe Validated.BelowLowerBound
+      RequestTimeoutDirective.validate("2 minutes") shouldBe Validated.AboveUpperBound
+    }
+
+    "reject an infinite or unknown-unit duration as invalid" in {
+      RequestTimeoutDirective.validate("Inf") shouldBe Validated.Invalid
+      RequestTimeoutDirective.validate("Undefined") shouldBe Validated.Invalid
+      RequestTimeoutDirective.validate("5 fortnights") shouldBe Validated.Invalid
     }
 
     "honour explicitly-supplied lower and upper bounds instead of the defaults" in {
@@ -217,6 +239,14 @@ class RequestTimeoutDirectiveTest
     "process the request for an in-window header value" in {
       invocations.set(0)
       Get().withHeaders(RawHeader(requestTimeoutHeader, "5000")) ~> route ~> check {
+        status shouldBe StatusCodes.OK
+        invocations.get() shouldBe 1
+      }
+    }
+
+    "process the request for an in-window header value with a unit" in {
+      invocations.set(0)
+      Get().withHeaders(RawHeader(requestTimeoutHeader, "44s")) ~> route ~> check {
         status shouldBe StatusCodes.OK
         invocations.get() shouldBe 1
       }

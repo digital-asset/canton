@@ -10,8 +10,11 @@ import org.apache.pekko.http.scaladsl.server.Route
 import scala.concurrent.duration.*
 import scala.util.Try
 
-/** Honours an optional, client-supplied per-request timeout carried in the `Request-Timeout` header
-  * (value expressed in milliseconds).
+/** Honours an optional, client-supplied per-request timeout carried in the `Request-Timeout` header.
+  *
+  * The value is either a bare integer, interpreted as milliseconds (e.g. `5000`), or a duration with
+  * a unit as accepted by `scala.concurrent.duration.Duration(String)` (e.g. `5s`, `1500ms`, `1.5s`,
+  * `2 minutes`).
   *
   * The header value is validated against a `[lowerBound; upperBound]` window, configurable via
   * [[ClientRequestTimeoutConfig.lowerBound]] and [[ClientRequestTimeoutConfig.upperBound]]
@@ -24,12 +27,30 @@ import scala.util.Try
   *   - value within the window -> used as supplied; if the request exceeds it a `408 Request
   *     Timeout` is returned.
   *
-  * A header that cannot be parsed as a positive integer number of milliseconds is rejected with
-  * `400 Bad Request`, like a value below the lower bound.
+  * A header that cannot be parsed as either form, or that denotes an infinite duration, is rejected
+  * with `400 Bad Request`, like a value below the lower bound.
   */
 object RequestTimeoutDirective {
 
   val RequestTimeoutHeaderName: String = "Request-Timeout"
+
+  /** A bare integer, interpreted as milliseconds (e.g. `5000`). */
+  private object AsMillis {
+    def unapply(value: String): Option[FiniteDuration] = value.toLongOption.map(_.millis)
+  }
+
+  /** A finite duration with a unit (e.g. `5s`, `1500ms`); `Inf` and the like don't match. */
+  private object AsDuration {
+    def unapply(value: String): Option[FiniteDuration] =
+      Try(Duration(value)).toOption.collect { case timeout: FiniteDuration => timeout }
+  }
+
+  private def parse(rawHeaderValue: String): Option[FiniteDuration] =
+    rawHeaderValue.trim match {
+      case AsMillis(timeout) => Some(timeout)
+      case AsDuration(timeout) => Some(timeout)
+      case _ => None
+    }
 
   private val timeoutResponse: HttpRequest => HttpResponse = _ =>
     HttpResponse(StatusCodes.RequestTimeout)
@@ -51,11 +72,11 @@ object RequestTimeoutDirective {
       lowerBound: FiniteDuration = JsonApiConfig.defaultRequestTimeoutLowerBound,
       upperBound: FiniteDuration = JsonApiConfig.defaultRequestTimeoutUpperBound,
   ): Validated =
-    Try(rawHeaderValue.trim.toLong).toOption match {
+    parse(rawHeaderValue) match {
       case None => Validated.Invalid
-      case Some(millis) if millis < lowerBound.toMillis => Validated.BelowLowerBound
-      case Some(millis) if millis > upperBound.toMillis => Validated.AboveUpperBound
-      case Some(millis) => Validated.Enforce(millis.millis)
+      case Some(timeout) if timeout < lowerBound => Validated.BelowLowerBound
+      case Some(timeout) if timeout > upperBound => Validated.AboveUpperBound
+      case Some(timeout) => Validated.Enforce(timeout)
     }
 
   def apply(
@@ -72,18 +93,19 @@ object RequestTimeoutDirective {
             complete(
               StatusCodes.BadRequest,
               s"Invalid $RequestTimeoutHeaderName header value '$rawHeaderValue': " +
-                "expected a positive integer number of milliseconds.",
+                "expected a number of milliseconds (e.g. '5000') or a duration with a unit " +
+                "(e.g. '5s', '1500ms').",
             )
           case Validated.BelowLowerBound =>
             complete(
               StatusCodes.BadRequest,
-              s"$RequestTimeoutHeaderName '$rawHeaderValue' ms is below the minimum of " +
+              s"$RequestTimeoutHeaderName '$rawHeaderValue' is below the minimum of " +
                 s"${lowerBound.toMillis} ms.",
             )
           case Validated.AboveUpperBound =>
             complete(
               StatusCodes.BadRequest,
-              s"$RequestTimeoutHeaderName '$rawHeaderValue' ms is above the maximum of " +
+              s"$RequestTimeoutHeaderName '$rawHeaderValue' is above the maximum of " +
                 s"${upperBound.toMillis} ms.",
             )
           case Validated.Enforce(timeout) =>
