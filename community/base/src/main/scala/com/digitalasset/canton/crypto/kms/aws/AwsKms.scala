@@ -293,7 +293,7 @@ class AwsKms(
   ): Either[String, aws.KeySpec] =
     signingKeySpec match {
       case SigningKeySpec.EcCurve25519 =>
-        Left(s"Unsupported signing key type: ${signingKeySpec.name}")
+        Right(aws.KeySpec.ECC_NIST_EDWARDS25519)
       case SigningKeySpec.EcP256 =>
         Right(aws.KeySpec.ECC_NIST_P256)
       case SigningKeySpec.EcP384 =>
@@ -309,7 +309,7 @@ class AwsKms(
   ): Either[String, aws.SigningAlgorithmSpec] =
     signingAlgorithmSpec match {
       case SigningAlgorithmSpec.Ed25519 =>
-        Left(s"Unsupported signing algorithm type: ${signingAlgorithmSpec.name}")
+        Right(aws.SigningAlgorithmSpec.ED25519_SHA_512)
       case SigningAlgorithmSpec.EcDsaSha256 =>
         Right(aws.SigningAlgorithmSpec.ECDSA_SHA_256)
       case SigningAlgorithmSpec.EcDsaSha384 =>
@@ -340,6 +340,7 @@ class AwsKms(
 
   private def convertFromAwsSigningKeySpec(keySpec: aws.KeySpec): Either[String, SigningKeySpec] =
     keySpec match {
+      case aws.KeySpec.ECC_NIST_EDWARDS25519 => Right(SigningKeySpec.EcCurve25519)
       case aws.KeySpec.ECC_NIST_P256 => Right(SigningKeySpec.EcP256)
       case aws.KeySpec.ECC_NIST_P384 => Right(SigningKeySpec.EcP384)
       case aws.KeySpec.ECC_SECG_P256_K1 => Right(SigningKeySpec.EcSecp256k1)
@@ -601,6 +602,7 @@ object AwsKms extends Kms.SupportedSchemes {
       SigningKeySpec.EcP256,
       SigningKeySpec.EcP384,
       SigningKeySpec.EcSecp256k1,
+      SigningKeySpec.EcCurve25519,
       SigningKeySpec.MlDsa65,
     )
 
@@ -609,6 +611,7 @@ object AwsKms extends Kms.SupportedSchemes {
       Set,
       SigningAlgorithmSpec.EcDsaSha256,
       SigningAlgorithmSpec.EcDsaSha384,
+      SigningAlgorithmSpec.Ed25519,
       SigningAlgorithmSpec.MlDsa65,
     )
 

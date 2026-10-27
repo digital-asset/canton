@@ -464,6 +464,7 @@ class ParticipantPartiesAdministrationGroup(
             forceChanges = ForceFlags.none,
             waitToBecomeEffective = synchronize,
             serverVersion = nodeStatus.releaseVersion,
+            protocolVersion = None,
           )
         )
     } yield result

@@ -47,6 +47,7 @@ final case class ParticipantNodeParameters(
     validateLegacyContractsV11: Boolean,
     acsCommitments: AcsCommitmentConfig,
     deprecatedApis: DeprecatedApiConfig,
+    enableRepairService: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -73,6 +74,7 @@ object ParticipantNodeParameters {
       processingTimeouts = DefaultProcessingTimeouts.testing,
       enablePreviewFeatures = false,
       enableTestingFeatures = false,
+      enableKeyDownload = false,
       nonStandardConfig = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(
@@ -125,5 +127,6 @@ object ParticipantNodeParameters {
     validateLegacyContractsV11 = true,
     acsCommitments = AcsCommitmentConfig(),
     deprecatedApis = DeprecatedApiConfig(),
+    enableRepairService = false,
   )
 }

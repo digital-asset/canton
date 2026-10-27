@@ -5,6 +5,7 @@ package com.digitalasset.canton.nightly
 
 import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.config.KmsConfig
+import com.digitalasset.canton.crypto.kms.Kms
 import com.digitalasset.canton.crypto.kms.KmsError.{KmsDeleteKeyError, KmsKeyDisabledError}
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
 import com.digitalasset.canton.crypto.provider.kms.HasPredefinedAwsKmsKeys
@@ -26,6 +27,8 @@ import scala.jdk.FutureConverters.*
 @RequiresExternalKms
 class AwsKmsTest extends FixtureAsyncWordSpec with ExternalKmsTest with HasPredefinedAwsKmsKeys {
   override type KmsType = AwsKms
+
+  override protected def supportedSchemes: Kms.SupportedSchemes = AwsKms
 
   override protected def defaultKmsConfig: KmsConfig.Aws =
     KmsConfig.Aws.defaultTestConfig

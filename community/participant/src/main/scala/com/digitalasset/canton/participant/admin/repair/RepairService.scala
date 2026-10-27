@@ -259,33 +259,24 @@ final class RepairService(
               .zip(contractStates)
               .foldMapM { case (cid, acsStatus) =>
                 val storedContract = storedContracts.get(cid)
-                computePurgeOperations(tocFor, ignoreAlreadyPurged)(
+                computePurgeOperations(tocFor, eventMode, ignoreAlreadyPurged)(
                   cid,
                   acsStatus,
                   storedContract,
                 )
-                  .map { case PurgeOperations(missingPurge, missingAssignment, upstream) =>
-                    (upstream.toList, missingPurge.toList, missingAssignment.toList)
+                  .map { case PurgeOperations(missingPurge, upstream) =>
+                    (upstream.toList, missingPurge.toList)
                   }
               }
           )
 
-          (contractsToPublishUpstream, missingPurges, missingAssignments) = operationsE
+          (contractsToPublishUpstream, missingPurges) = operationsE
 
           // Update the stores
           _ <- repair.synchronizer.persistentState.activeContractStore
             .purgeContracts(missingPurges)
             .toEitherTWithNonaborts
-            .leftMap(e =>
-              s"Failed to purge contracts $missingAssignments in ActiveContractStore: $e"
-            )
-
-          _ <- repair.synchronizer.persistentState.activeContractStore
-            .assignContracts(missingAssignments)
-            .toEitherTWithNonaborts
-            .leftMap(e =>
-              s"Failed to assign contracts $missingAssignments in ActiveContractStore: $e"
-            )
+            .leftMap(e => s"Failed to purge contracts $missingPurges in ActiveContractStore: $e")
 
           (contractsToUnassign, contractsToArchive) = contractsToPublishUpstream.partition {
             case (_, reassignmentCounter) => eventMode.useReassignmentEvent(reassignmentCounter)
@@ -585,10 +576,12 @@ final class RepairService(
     )
   }
 
-  /** For the given contract, returns the operations (purge, assignment) to perform
+  /** For the given contract, returns the operations (purge) to perform
     * @param tocFor
     *   Time of change to use for the internal stores, given the reassignment counter of the
     *   contract used for the Ledger API event
+    * @param eventMode
+    *   Whether the purge of an active contract is published as an Unassigned or an Archive event
     * @param acsStatus
     *   Status of the contract
     * @param storedContractO
@@ -596,6 +589,7 @@ final class RepairService(
     */
   private def computePurgeOperations(
       tocFor: ReassignmentCounter => TimeOfChange,
+      eventMode: RepairLedgerApiEventMode,
       ignoreAlreadyPurged: Boolean,
   )(
       cid: LfContractId,
@@ -608,7 +602,7 @@ final class RepairService(
       Either.cond(
         ignoreAlreadyPurged,
         PurgeOperations.empty,
-        s"Contract $cid cannot be purged: $reason. Set ignoreAlreadyPurged = true to skip non-existing contracts.",
+        s"Contract $cid cannot be purged: $reason. Set ignoreAlreadyPurged = true to skip it.",
       )
 
     // Not checking that the participant hosts a stakeholder as we might be cleaning up contracts
@@ -618,40 +612,29 @@ final class RepairService(
       case Some(ActiveContractStore.Active(reassignmentCounter)) =>
         val toc = tocFor(reassignmentCounter)
         for {
-          _ <- Either
+          storedContract <- Either
             .fromOption(
               storedContractO,
               show"Active contract $cid not found in contract store",
             )
+          eventReassignmentCounter <-
+            if (eventMode.useReassignmentEvent(reassignmentCounter))
+              reassignmentCounter.increment.leftMap(err => s"Contract $cid cannot be purged: $err")
+            else Right(reassignmentCounter)
         } yield {
           PurgeOperations(
             purge = Option((cid, toc)),
-            assign = None,
-            upstream = storedContractO.map((_, reassignmentCounter)),
+            upstream = Some((storedContract, eventReassignmentCounter)),
           )
         }
       case Some(ActiveContractStore.Archived) => ignoreOrError("archived contract")
       case Some(ActiveContractStore.Purged) => ignoreOrError("purged contract")
-      case Some(ActiveContractStore.ReassignedAway(targetSynchronizer, reassignmentCounter)) =>
-        logger.info(
-          s"Purging contract $cid previously marked as reassigned to $targetSynchronizer. " +
-            s"Marking contract as assigned from $targetSynchronizer (even though contract may have since been reassigned to yet another synchronizer) and subsequently as archived."
-        )
-
-        val toc = tocFor(reassignmentCounter)
-        reassignmentCounter.increment.map { newReassignmentCounter =>
-          PurgeOperations(
-            purge = Option((cid, toc)),
-            assign = Option(
-              (
-                cid,
-                ReassignmentTag.Source(targetSynchronizer.unwrap),
-                newReassignmentCounter,
-                toc,
-              )
-            ),
-            upstream = storedContractO.map((_, reassignmentCounter)),
+      case Some(ActiveContractStore.ReassignedAway(targetSynchronizer, _)) =>
+        ignoreOrError("reassigned away contract").map { operations =>
+          logger.info(
+            s"Skipping purge of contract $cid, which is reassigned to $targetSynchronizer"
           )
+          operations
         }
     }
   }
@@ -813,25 +796,20 @@ final class RepairService(
 
 private object RepairService {
 
-  private type MissingAssignment =
-    (LfContractId, ReassignmentTag.Source[SynchronizerId], ReassignmentCounter, TimeOfChange)
   private type MissingPurge = (LfContractId, TimeOfChange)
 
   /** What needs to be done to purge a contract
     * @param purge
     *   Canton internal purge
-    * @param assign
-    *   Canton internal assign
     * @param upstream
     *   Data to generate the event that notifies the indexer
     */
   final case class PurgeOperations(
       purge: Option[MissingPurge],
-      assign: Option[MissingAssignment],
       upstream: Option[(GenContractInstance, ReassignmentCounter)],
   )
 
   private object PurgeOperations {
-    def empty: PurgeOperations = PurgeOperations(None, None, None)
+    val empty: PurgeOperations = PurgeOperations(None, None)
   }
 }

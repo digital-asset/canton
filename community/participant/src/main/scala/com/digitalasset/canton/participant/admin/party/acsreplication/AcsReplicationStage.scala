@@ -108,7 +108,14 @@ object AcsReplicationStage {
         Some(AcsReplicationStage.NeedToReconnectToDisconnectedSequencerChannel(message))
       case (params, AcsReplicationStatus.AgreementStatus.NotProposed, Some(_), None, None) =>
         Some(AcsReplicationStage.NeedsToProposeAcsReplicationSequencerChannel(params, None))
-      case (params, AcsReplicationStatus.AgreementStatus.Proposed, Some(_), None, None) =>
+      case (
+            params,
+            AcsReplicationStatus.AgreementStatus.ProposalSent |
+            AcsReplicationStatus.AgreementStatus.Proposed(_),
+            Some(_),
+            None,
+            None,
+          ) =>
         Some(AcsReplicationStage.AcsReplicationSequencerChannelAgreementProposed(params))
       case (
             _,

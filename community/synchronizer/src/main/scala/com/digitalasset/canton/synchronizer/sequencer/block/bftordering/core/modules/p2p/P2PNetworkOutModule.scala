@@ -747,8 +747,8 @@ final class P2PNetworkOutModule[
         //
         //  This also means that the persisted association is not used to pin a peer's identity across
         //  restarts. Within an incarnation, `associateP2PEndpointIdToBftNodeId` currently permits a different,
-        //  authenticated node ID to replace the association; hardening persisted associations is tracked
-        //  separately by TODO(#34191).
+        //  authenticated node ID to replace the association.
+        //
         //  The persisted node ID remains reported to the operator by `Admin.ListConfiguredEndpoints`,
         //  which is what it was introduced for.
         ensureSendingEnabledTo(P2PAddress.Endpoint(initialP2PEndpoint)).discard

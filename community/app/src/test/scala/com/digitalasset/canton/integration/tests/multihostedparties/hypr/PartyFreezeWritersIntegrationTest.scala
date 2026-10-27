@@ -25,7 +25,10 @@ import com.digitalasset.canton.participant.config.{
   DeclarativePartyConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
-import com.digitalasset.canton.topology.TopologyManagerError.UnauthorizedTransaction
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  HostingStatesNotExpressible,
+  UnauthorizedTransaction,
+}
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
@@ -33,7 +36,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.{Namespace, PartyId}
+import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Namespace, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
@@ -211,7 +214,7 @@ final class PartyFreezeWritersIntegrationTest
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
-    "L2: keep the Freezing entry when a v30 wallet relists it, and unfreeze when the wallet leaves it out" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "L2: reject a v30 wallet's write while an entry is Freezing unless forced; forced, keep the Freezing entry when relisted and unfreeze when left out" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newExternalScenario("L2")
         scenario.nominate(Seq(da -> Confirmation), PositiveInt.one)
@@ -219,14 +222,32 @@ final class PartyFreezeWritersIntegrationTest
         scenario.freeze(da)
         expectFrozenWithHostSp(scenario)
 
-        // A v30 entry is Onboarding with the onboarding flag and Active without it, so relisting
-        // the Freezing entry moves it forward, which needs DA's signature. Only the operator's log
-        // names DA's namespace as missing; the wallet gets a redacted security-sensitive error.
+        // A v30 transaction cannot express the Freezing state, so the participant that receives the
+        // wallet's write rejects it, whether the write relists the Freezing entry or leaves it out
+        Seq(
+          "Relisted" -> scenario.entries.updated(da.id, Entry(Confirmation, HostingState.Active)),
+          "Left out" -> (scenario.entries - da.id),
+        ).foreach { case (write, entries) =>
+          clue(write) {
+            loggerFactory.assertThrowsAndLogs[CommandFailure](
+              scenario.writeAsV30WalletRejected(entries, ForceFlags.none),
+              _.shouldBeCommandFailure(HostingStatesNotExpressible, s"${da.id} -> Freezing"),
+            )
+          }
+        }
+        expectFrozenWithHostSp(scenario)
+
+        // Forced, a v30 entry is Onboarding with the onboarding flag and Active without it, so
+        // relisting the Freezing entry moves it forward, which needs DA's signature. Only the
+        // operator's log names DA's namespace as missing; the wallet gets a redacted
+        // security-sensitive error.
+        val forced = ForceFlags(ForceFlag.AllowV30PartyToParticipantAfterHostingStates)
         Seq(HostingState.Onboarding, HostingState.Active).foreach { relisted =>
           clue(s"Relisted as $relisted") {
             loggerFactory.assertThrowsAndLogs[CommandFailure](
               scenario.writeAsV30WalletRejected(
-                scenario.entries.updated(da.id, Entry(Confirmation, relisted))
+                scenario.entries.updated(da.id, Entry(Confirmation, relisted)),
+                forced,
               ),
               _.shouldBeCantonError(
                 UnauthorizedTransaction,
@@ -239,7 +260,7 @@ final class PartyFreezeWritersIntegrationTest
         expectFrozenWithHostSp(scenario)
 
         // The party alone may remove an entry
-        scenario.writeAsV30Wallet(scenario.entries - da.id).discard
+        scenario.writeAsV30Wallet(scenario.entries - da.id, forced).discard
         expectHostedBySp(scenario)
         scenario.assertCommitmentsMatchAmongHosts()
     }

@@ -2086,19 +2086,23 @@ final case class PartyToParticipant private (
   override def companion: PartyToParticipant.type = PartyToParticipant
   override def prettyCompanion: PrettyPrintingCompanion[PartyToParticipant] = PartyToParticipant
 
-  override def canBeSerializedTo(protoVersion: ProtoVersion): Either[String, Unit] =
-    if (protoVersion.v >= 31) ().asRight
-    else {
-      val notRepresentableInV30 = participants.filter(p =>
+  /** The hosting participants whose hosting state `protoVersion` cannot express. */
+  def participantsNotSerializableTo(protoVersion: ProtoVersion): Seq[HostingParticipant] =
+    if (protoVersion.v >= 31) Seq.empty
+    else
+      participants.filter(p =>
         p.state == HostingState.Nominated || p.state == HostingState.Freezing
       )
-      Either.cond(
-        notRepresentableInV30.isEmpty,
-        (),
-        "Unable to serialize PartyToParticipant mapping to v30 because of unsupported hosting states: " +
-          notRepresentableInV30.map(p => s"${p.participantId} -> ${p.state}").mkString(", "),
-      )
-    }
+
+  override def canBeSerializedTo(protoVersion: ProtoVersion): Either[String, Unit] = {
+    val notRepresentable = participantsNotSerializableTo(protoVersion)
+    Either.cond(
+      notRepresentable.isEmpty,
+      (),
+      s"Unable to serialize PartyToParticipant mapping to v${protoVersion.v} because of unsupported hosting states: " +
+        notRepresentable.map(p => s"${p.participantId} -> ${p.state}").mkString(", "),
+    )
+  }
 
   def toProtoPartyToParticipantV30: Either[String, v30.PartyToParticipant] =
     for {

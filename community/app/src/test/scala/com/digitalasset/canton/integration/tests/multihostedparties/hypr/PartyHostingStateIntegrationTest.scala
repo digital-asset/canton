@@ -17,9 +17,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.topology.TopologyManagerError.InvalidTopologyMapping
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TopologyTransaction}
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -77,6 +78,11 @@ import com.digitalasset.canton.version.ProtocolVersion
   * Test: Reject Nominated on older protocol versions
   *   - Participant 1 proposes moving itself to Nominated, which fails because older protocol
   *     versions cannot serialize the Nominated and Freezing states.
+  *
+  * Test: Create a mapping for protocol version 36 on protocol version 37
+  *   - Participant 1 hosts Erin with a topology transaction for protocol version 36.
+  *   - Participant 1 proposes nominating participant2 for protocol version 36, which fails because
+  *     protocol version 36 cannot express the Nominated state.
   *
   * Test: Nominate an external party to be hosted on participant2
   *   - External party Bob nominates participant2 to host it
@@ -466,21 +472,49 @@ final class PartyHostingStateIntegrationTest
           Map(participant1.id -> HostingState.Active),
         )
 
-        // The console command will refuse to submit the transaction because canBeSerializedTo(30) returns a Left
-        loggerFactory.assertThrowsAndLogsUnordered[CommandFailure](
+        // The topology manager rejects the mapping because canBeSerializedTo(30) returns a Left
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
           participant1.topology.party_to_participant_mappings.propose_delta(
             party = alice,
             store = daId,
             participantStates = Map(participant1.id -> HostingState.Nominated),
           ),
-          // 1. The server-side Topology Manager logs the exact serialization failure
-          _.errorMessage should include(
-            "Unable to serialize PartyToParticipant mapping to v30 because of unsupported hosting states"
+          _.shouldBeCommandFailure(
+            InvalidTopologyMapping,
+            "Unable to serialize PartyToParticipant mapping to v30 because of unsupported hosting states",
           ),
-          // 2. The server-side gRPC interceptor logs the internal failure
-          _.errorMessage should include("failed with INTERNAL/An error occurred"),
-          // 3. The client-side console log receives the masked security error
-          _.errorMessage should include("Request failed for participant1"),
+        )
+    }
+
+    "create a mapping for protocol version 36 on protocol version 37" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
+
+        val erin = PartyId.tryCreate("Erin", participant1.namespace)
+        val created = participant1.topology.party_to_participant_mappings.propose(
+          party = erin,
+          newParticipants = Seq(participant1.id -> Submission),
+          store = daId,
+          protocolVersion = Some(ProtocolVersion.v36),
+        )
+        created.transaction.representativeProtocolVersion shouldBe TopologyTransaction
+          .protocolVersionRepresentativeFor(ProtocolVersion.v36)
+        awaitHostingStates(
+          erin,
+          daId,
+          Seq(participant1),
+          Map(participant1.id -> HostingState.Active),
+        )
+
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.topology.party_to_participant_mappings.propose_delta(
+            party = erin,
+            adds = Seq(participant2.id -> ParticipantPermission.Observation),
+            store = daId,
+            participantStates = Map(participant2.id -> HostingState.Nominated),
+            protocolVersion = Some(ProtocolVersion.v36),
+          ),
+          _.shouldBeCommandFailure(InvalidTopologyMapping, s"${participant2.id} -> Nominated"),
         )
     }
 

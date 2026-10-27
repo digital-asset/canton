@@ -11,6 +11,7 @@ _Write summary of release_
 ### CantonBFT
 - Fixed: the P2P connection direction was incorrectly reported in metrics and console/admin endpoints in some circumstances.
 - Logs of the dissemination stage of the ordering protocol have been improved for easier troubleshooting.
+- Improved configuration defaults for better ordering latency.
 
 ### Addition of protocol version 37, removal of protocol version 34 and 35.
 Protocol versions 34 and 35 are not supported anymore. This release supports protocol versions 36 and 37.
@@ -46,11 +47,21 @@ From protocol version 37, topology transactions can use the new `v31` `TopologyT
 hosting state instead of the onboarding flag; all other mappings are unchanged. Synchronizers on protocol
 version 37 also accept `v30` topology transactions: a `v30` entry is Onboarding if its onboarding flag is
 set, and Active otherwise.
-- Clients that decode topology transactions must support `v31` on protocol version 37:
+- Clients that decode topology transactions must support `v31` on protocol version 37. Clients can request
+  `v30` for the transactions that they create by setting the new `protocol_version` field to 36, but the
+  transactions that a participant creates itself, e.g. to clear the onboarding flag, are `v31`:
   - The Ledger API `GenerateExternalPartyTopology` returns `v31` transactions for a synchronizer on protocol
-    version 37.
+    version 37, or `v30` transactions if `protocol_version` is 36. `AllocateExternalParty` accepts both, and
+    keeps the version of the transactions that it receives.
+  - The topology admin API `Authorize` creates `v31` transactions on protocol version 37, or `v30` transactions
+    if `protocol_version` is 36. The console's `party_to_participant_mappings.propose` and `propose_delta`
+    have a matching `protocolVersion` parameter.
+  - To co-sign a transaction, sign the transaction that you received, e.g. with `Authorize` and its hash, and do
+    not propose its mapping again: a `v30` and a `v31` proposal of the same change never combine, and neither
+    becomes effective.
   - The topology admin API `ListPartyToParticipant` sets the `v31` item for `v31` transactions and the `v30`
-    item for `v30` transactions.
+    item for `v30` transactions. Clients that do not send a `client_version` of 3.7 or later get the `v30` item
+    whenever `v30` can express the mapping, i.e. unless an entry is Nominated or Freezing.
 - Hosting states, in their forward order:
   - Nominated: added by the party; the participant does not host the party yet.
   - Freezing: the participant does not host the party yet, and the party is frozen on the synchronizer.
@@ -59,7 +70,22 @@ set, and Active otherwise.
 - The party alone can add a participant as Nominated; any other addition needs the party and the participant,
   as before. Moving an entry forward needs only that participant's authorization, and states can be skipped.
   Moving an entry backward is rejected. On protocol version 37 these rules also apply to `v30` transactions,
-  so setting the onboarding flag of an Active entry is rejected.
+  with one exception for backward compatibility: a `v30` transaction may still set the onboarding flag of an
+  Active entry if the current mapping is `v30` too.
+- The submitting node rejects setting the onboarding flag of an Active entry on every protocol version, so
+  `propose_delta` with `requiresPartyToBeOnboarded` no longer moves an Active participant back to Onboarding.
+  Set `topology.disable-optional-topology-checks` to submit it anyway.
+- `v30` cannot express the Nominated and Freezing states. The node that receives a `v30` transaction therefore
+  rejects it with `TOPOLOGY_HOSTING_STATES_NOT_EXPRESSIBLE` while the party has a Nominated or Freezing entry,
+  unless the new force flag `FORCE_FLAG_ALLOW_V30_PARTY_TO_PARTICIPANT_AFTER_HOSTING_STATES` is set. A mapping
+  with such an entry cannot be created as a `v30` transaction: this fails with `TOPOLOGY_INVALID_MAPPING`,
+  also on protocol version 36.
+- For the same reason, the topology admin API `Authorize` and `GenerateTransactions` reject a `v30`
+  `PartyToParticipant` mapping with `TOPOLOGY_HOSTING_STATES_NOT_EXPRESSIBLE` while the party has a Nominated or
+  Freezing entry. `Authorize` accepts the force flag above. The console sends `v31` mappings to nodes of version
+  3.7 and later. The admin client does so only if the caller passes the node's version; otherwise it sends `v30`
+  whenever the mapping allows it. Both checks use the hosting states in the target store, so propose such
+  changes to the synchronizer's store rather than the authorized store.
 - While any entry of a party is Freezing, the party has no hosting participants on that synchronizer:
   - Transactions and reassignments that involve the party are rejected there. A submission fails with the new
     error code `FROZEN_PARTIES` if the freeze is the only reason it cannot be routed. The code has the same
@@ -79,6 +105,8 @@ set, and Active otherwise.
   - The Ledger API `AllocateParty` fails with `HOSTING_STATE_PREVENTS_PARTY_ALLOCATION`, and `parties.enable`
     fails, if this participant's entry is Nominated or Freezing. The declarative API leaves such parties
     untouched.
+  - The Ledger API `AllocateExternalParty` rejects a `PartyToParticipant` transaction with a Nominated or
+    Freezing entry, as these states are only for adding a participant to an existing party.
 
 ### New collection size limits from protocol version 37
 
@@ -208,6 +236,10 @@ and the following limit metrics for transaction views:
 - `daml.participant.sync.protocol-messages.transaction-view.sub-views`
 - `daml.participant.sync.protocol-messages.transaction-view.tree-depth`
 
+### LF Elliptic Curve Crypto Primitive
+
+Harden DER sanitization in LF crypto primitive, SECP256K1_BOOL,  SECP256K1_WITH_ECDSA_BOOL, SECP256K1_VALIDATE_KEY
+
 ### Breaking: Repair commands represent contracts depending on their reassignment counter
 
 #### Background
@@ -282,6 +314,7 @@ This change in behavior affects all early adopters of the Multi-Synchonizer Alph
   Pass the protocol version with `--protocol-version` to `prepare-cert.sh`, `interactive_submission.py`,
   `interactive_topology_example.py`, and `interactive_topology_example.sh` if the topology transactions should be generated with a lower proto version (e.g., when connected to a synchronizer running protocol version 36).
 - `prepare-cert.sh` rejects `--intermediate-delegation` combined with `--root-delegation` or `--delegation-restrictions`.
+- `repair.purge` rejects contracts that are reassigned away from the synchronizer, or skips them when `ignoreAlreadyPurged` is set.
 - Iterative manual pruning over the Ledger API. Scheduled pruning was already iterative based on the `batching-config.max-pruning-batch-size`, which controls the size of the maximum offset range in one iteration. This improvement turned manual pruning to iterative as well, based on the same participant configuration.
   Contract pruning made also iterative as well, controlled by the participant configuration `index-service.contract-pruning-batch-size`, which defines the maximum amount of contracts pruned in one iteration. (Default: 10000)
 - Party queries are now served from the `lapi_events_party_to_participant` table, which also acquired a new index on `party + participant_id + synchronizer_id + event_sequential_id`. This change allows faithful representation of changes to the multi-hosted parties. At the same time, the `lapi_party_entries` has now been dropped.
@@ -340,6 +373,13 @@ This change in behavior affects all early adopters of the Multi-Synchonizer Alph
 - Deprecated the traffic enforcement admin endpoint `PruneEvents`, the JSON endpoint `POST /v2/traffic/events/prune` and the console command `ledger_api.traffic.prune_events`. Use `Prune` instead. They will be disabled by default in 3.8 and removed in 3.9.
   Setting `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = false` (default `true`) disables them earlier, and calls then fail with `DEPRECATED_API_DISABLED`.
 - Use the same `currentSnapshotApproximation` and signing timestamp for both the inner message (`ConfirmationResponses` or `ConfirmationResultMessage`) and its enclosing `SubmissionRequest`.
+- Improved the performance of Ledger API pruning queries. Merge and hash joins are now disabled for the selected pruning queries. These joins could scan all older still-active contracts degrading pruning performance. Disabling the joins is controlled by the new configuration setting
+  `canton.participants.<participant>.ledger-api.index-service.disable-merge-and-hash-joins` which defaults to `true`.
+- Improved the performance of finding the latest request up to a given timestamp, used when a participant reconnects
+  to a synchronizer.
+- When a topology transaction submission loses the race against a concurrent topology transaction submission for the same serial, a `TOPOLOGY_SERIAL_MISMATCH` is reported instead of a semantic error related to the content of the transaction.
+- Aded AWS KMS support for `Ed25519` signing keys like GCP KMS.
+- Fixed creation of Ed25519 keys in GCP KMS to use only the software protection level, because they are not available with HSM protection level.
 
 #### New file-based console commands for sequencer initialization and topology snapshots
 
@@ -376,6 +416,7 @@ Added new console commands that stream the state to or from a file, for states l
 ## Bugfixes
 - bump da-base-image to 1.0.14
 - Update Bouncy Castle to 1.86 to address security vulnerabilities.
+- Update GRPC to 1.85 to address security vulnerabilities.
 - Minor performance fix: time proofs have now a max sequencing timeout of 2 minutes and they no longer create a
   performance regression during synchronizer catch-up. Furthermore, synchronous rejects were not properly
   cleaned up by the sequencer client immediately after the reject was processed, but relied on the timeout logic to pick
@@ -388,6 +429,9 @@ Added new console commands that stream the state to or from a file, for states l
 - Minor fix: sequencer acknowledgements are now rejected synchronously whenever the sequencer cannot accept them.
 - gRPC server handler logs now carry the request's trace id when a client calls with an empty `TraceContext`, for example the sequencer connection pool's `Authenticate`, `Subscribe` and `DownloadTopologyStateForInit`. The client interceptor uses a default trace id when the caller supplied none, instead of sending no `traceparent`.
 - Fix internal error when calling `JoseService.GetJwks` for Ed25519 keys
+- Update versions of jackson to address security vulnerabilities
+
+### CantonBFT
 
 ### (YY-nnn, Risk): Title
 

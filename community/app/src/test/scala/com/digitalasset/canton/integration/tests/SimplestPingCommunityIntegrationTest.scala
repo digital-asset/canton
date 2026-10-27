@@ -25,6 +25,10 @@ sealed trait SimplestPingCommunityIntegrationTest
       .addConfigTransforms(ConfigTransforms.setProtocolVersion(testedProtocolVersion)*)
       .withManualStart
 
+  // Examples run with default canton.features.enable-repair-commands = false,
+  // which disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "we can run a trivial ping" in { implicit env =>
     import env.*
 

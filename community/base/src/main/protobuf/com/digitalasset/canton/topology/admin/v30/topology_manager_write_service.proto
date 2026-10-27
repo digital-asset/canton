@@ -98,6 +98,15 @@ message AuthorizeRequest {
       com.digitalasset.canton.protocol.v30.TopologyMapping v30 = 3;
       com.digitalasset.canton.protocol.v31.TopologyMapping v31 = 4;
     }
+
+    /**
+     * Optional: the protocol version to create the topology transaction for, so that clients that only read
+     * topology transactions of an older protocol version can read it, e.g. 36 on a synchronizer with protocol version 37.
+     * Must be the target store's protocol version or a lower one whose topology transactions the store admits:
+     * from protocol version 37 on, a store admits those of protocol version 36.
+     * Defaults to the target store's protocol version.
+     */
+    optional uint32 protocol_version = 5;
   }
 
   oneof type {
@@ -280,4 +289,9 @@ enum ForceFlag {
   FORCE_FLAG_ALLOW_OUT_OF_BOUNDS_VALUE = 13;
   /** Required when changing the confirming threshold to a value higher than the number of confirming participants */
   FORCE_FLAG_ALLOW_CONFIRMING_THRESHOLD_CANNOT_BE_MET = 14;
+  /**
+   * Required when replacing a party-to-participant mapping that has a participant in the Nominated or Freezing
+   * hosting state with a topology transaction of protocol version 36, which cannot express these states.
+   */
+  FORCE_FLAG_ALLOW_V30_PARTY_TO_PARTICIPANT_AFTER_HOSTING_STATES = 15;
 }

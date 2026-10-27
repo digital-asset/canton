@@ -339,6 +339,15 @@ nightly_integration_test_sequencer_only:
         num_test_buckets: "2"
         num_parallel_tasks: "1"
 
+nightly_integration_test_kms_only:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.kms"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+
 nightly_integration_test_bftordering_only:
   executor: canton-xlarge-docker
   parameters:

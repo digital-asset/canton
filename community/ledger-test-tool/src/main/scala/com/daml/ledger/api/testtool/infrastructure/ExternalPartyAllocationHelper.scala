@@ -38,6 +38,7 @@ final case class ExternalPartyAllocationHelper(ledger: ParticipantTestContext) {
         otherConfirmingParticipantUids = Seq(),
         confirmationThreshold = 1,
         observingParticipantUids = Seq(),
+        protocolVersion = None,
       )
     )
 

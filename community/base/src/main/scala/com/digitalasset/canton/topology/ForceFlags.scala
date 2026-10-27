@@ -67,6 +67,11 @@ object ForceFlag {
   case object AllowOutOfBoundsValue
       extends ForceFlag(v30.ForceFlag.FORCE_FLAG_ALLOW_OUT_OF_BOUNDS_VALUE)
 
+  case object AllowV30PartyToParticipantAfterHostingStates
+      extends ForceFlag(
+        v30.ForceFlag.FORCE_FLAG_ALLOW_V30_PARTY_TO_PARTICIPANT_AFTER_HOSTING_STATES
+      )
+
   /** This should only be used internally in situations where
     *   - the caller knows what they are doing
     *   - it's not necessarily clear which specific flags to use, but there also isn't really any
@@ -89,6 +94,7 @@ object ForceFlag {
       AllowVetIncompatibleUpgrades,
       AllowOutOfBoundsValue,
       AllowConfirmingThresholdCanBeMet,
+      AllowV30PartyToParticipantAfterHostingStates,
     )
       .map(ff => ff.toProtoV30 -> ff)
       .toMap

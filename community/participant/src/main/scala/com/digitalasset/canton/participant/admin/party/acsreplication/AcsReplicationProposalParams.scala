@@ -8,6 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.nonempty.NonEmpty
@@ -15,6 +16,7 @@ import com.digitalasset.nonempty.NonEmpty
 import scala.jdk.CollectionConverters.*
 
 final case class AcsReplicationProposalParams private (
+    proposalContractId: LfContractId,
     requestId: Hash,
     partyId: PartyId,
     synchronizerId: SynchronizerId,
@@ -26,11 +28,15 @@ final case class AcsReplicationProposalParams private (
 
 object AcsReplicationProposalParams {
   def fromDaml(
+      rawProposalContractId: String,
       c: M.acsreplication.AcsReplicationProposal,
       synchronizer: String,
   ): Either[String, AcsReplicationProposalParams] =
     for {
       _ <- Either.cond(c.acsReplicationId.nonEmpty, (), "Empty ACS replication id")
+      contractId <- LfContractId.fromString(rawProposalContractId).leftMap { err =>
+        s"Malformed ACS replication proposal contract id: $err"
+      }
       requestId <- Hash
         .fromHexString(c.acsReplicationId)
         .leftMap(err => s"Invalid ACS replication id: $err")
@@ -64,6 +70,7 @@ object AcsReplicationProposalParams {
       // TODO(#35267) ACS replicator shouldn't know about party party participant permission
       participantPermission = PartyParticipantPermission.fromDaml(c.participantPermission)
     } yield AcsReplicationProposalParams(
+      contractId,
       requestId,
       partyId,
       synchronizerId,

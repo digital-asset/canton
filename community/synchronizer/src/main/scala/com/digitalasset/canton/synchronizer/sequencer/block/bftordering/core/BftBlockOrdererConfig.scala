@@ -337,11 +337,11 @@ object BftBlockOrdererConfig {
 
   val DefaultMaxMempoolQueueSize: Int = 10 * 1_024
   val DefaultMinRequestsInBatch: Short = 3
-  val DefaultMaxBatchCreationInterval: FiniteDuration = 100.milliseconds
+  val DefaultMaxBatchCreationInterval: FiniteDuration = 300.milliseconds
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
   val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1_000
   val DefaultAvailabilityDisseminationPatience: Option[FiniteDuration] = None
-  val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 250.millis
+  val DefaultAvailabilityMinProposalCreationDelay: FiniteDuration = 300.millis
   val DefaultConsensusQueueMaxSize: Int = 10 * 1_024
   val DefaultConsensusQueuePerNodeQuota: Int = 1_024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds

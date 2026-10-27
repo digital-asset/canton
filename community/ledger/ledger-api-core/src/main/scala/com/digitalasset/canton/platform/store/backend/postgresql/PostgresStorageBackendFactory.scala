@@ -10,17 +10,21 @@ import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.daml.lf.data.Ref
 
-final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory)
-    extends StorageBackendFactory
+final case class PostgresStorageBackendFactory(
+    disableMergeAndHashJoins: Boolean,
+    loggerFactory: NamedLoggerFactory,
+) extends StorageBackendFactory
     with CommonStorageBackendFactory {
 
   override val createIngestionStorageBackend: IngestionStorageBackend[?] =
     new IngestionStorageBackendTemplate(PGSchema.schema)
 
+  private val queryStrategy = PostgresQueryStrategy(disableMergeAndHashJoins)
+
   override def createParameterStorageBackend(
       stringInterning: StringInterning
   ): ParameterStorageBackend =
-    new ParameterStorageBackendImpl(PostgresQueryStrategy, stringInterning)
+    new ParameterStorageBackendImpl(queryStrategy, stringInterning)
 
   override def createPartyStorageBackend(
       participantId: Ref.ParticipantId,
@@ -39,7 +43,7 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
       stringInterning: StringInterning,
       ledgerEndCache: LedgerEndCache,
   ): ContractStorageBackend =
-    new PostgresContractStorageBackend(stringInterning)
+    new PostgresContractStorageBackend(queryStrategy, stringInterning)
 
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
@@ -49,6 +53,7 @@ final case class PostgresStorageBackendFactory(loggerFactory: NamedLoggerFactory
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
       loggerFactory = loggerFactory,
+      queryStrategy = queryStrategy,
     )
 
   override val createDataSourceStorageBackend: DataSourceStorageBackend =

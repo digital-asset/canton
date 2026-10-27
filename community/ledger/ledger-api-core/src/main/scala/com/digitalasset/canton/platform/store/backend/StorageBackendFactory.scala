@@ -5,13 +5,19 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.DbType
-import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
+import com.digitalasset.canton.platform.store.backend.h2.{
+  H2DataSourceStorageBackend,
+  H2StorageBackendFactory,
+}
 import com.digitalasset.canton.platform.store.backend.localstore.{
   IdentityProviderStorageBackend,
   PartyRecordStorageBackend,
   UserManagementStorageBackend,
 }
-import com.digitalasset.canton.platform.store.backend.postgresql.PostgresStorageBackendFactory
+import com.digitalasset.canton.platform.store.backend.postgresql.{
+  PostgresDataSourceStorageBackend,
+  PostgresStorageBackendFactory,
+}
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.daml.lf.data.Ref
@@ -60,10 +66,27 @@ trait StorageBackendFactory {
 }
 
 object StorageBackendFactory {
-  def of(dbType: DbType, loggerFactory: NamedLoggerFactory): StorageBackendFactory =
+  def of(
+      dbType: DbType,
+      disableMergeAndHashJoins: Boolean,
+      loggerFactory: NamedLoggerFactory,
+  ): StorageBackendFactory =
     dbType match {
       case DbType.H2Database => H2StorageBackendFactory(loggerFactory)
-      case DbType.Postgres => PostgresStorageBackendFactory(loggerFactory)
+      case DbType.Postgres =>
+        PostgresStorageBackendFactory(
+          disableMergeAndHashJoins = disableMergeAndHashJoins,
+          loggerFactory = loggerFactory,
+        )
+    }
+
+  def dataSourceStorageBackend(
+      dbType: DbType,
+      loggerFactory: NamedLoggerFactory,
+  ): DataSourceStorageBackend =
+    dbType match {
+      case DbType.H2Database => H2DataSourceStorageBackend
+      case DbType.Postgres => PostgresDataSourceStorageBackend(loggerFactory)
     }
 }
 

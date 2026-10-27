@@ -1044,6 +1044,65 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           verify(mempoolSpy, times(1)).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
           verify(mempoolSpy, times(1)).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
         }
+
+        "it is authenticated, also clearing its in-memory association with the node ID" in {
+          val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+          val (context, state, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(p2pConnectionState = p2pConnectionState)
+          // Mirror `PekkoP2PGrpcNetworkManager.shutdownOutgoingConnection`
+          p2pNetworkManager.onShutdownOutgoingConnection = p2pEndpointId =>
+            p2pConnectionState
+              .shutdownConnectionAndReturnPeerSender(
+                Left(p2pEndpointId),
+                clearNetworkRefAssociations = true,
+                closeNetworkRef = true,
+              )
+              .discard
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          val removedEndpoint = otherInitialEndpointsTupled._1
+          val removedBftNodeId = endpointToTestBftNodeId(removedEndpoint)
+          val keptEndpoint = otherInitialEndpointsTupled._2
+          val keptBftNodeId = endpointToTestBftNodeId(keptEndpoint)
+
+          // Match the manager's authentication sequence for both endpoints
+          Seq(removedEndpoint -> removedBftNodeId, keptEndpoint -> keptBftNodeId).foreach {
+            case (endpoint, bftNodeId) =>
+              p2pConnectionState
+                .associateP2PEndpointIdToBftNodeId(endpoint.id, bftNodeId) shouldBe Right(())
+              p2pConnectionState.addSenderIfMissing(bftNodeId, mock[PeerSender]) shouldBe true
+              authenticate(p2pNetworkManager, endpoint)
+          }
+          context.extractSelfMessages().foreach(module.receive)
+          p2pConnectionState.getBftNodeId(removedEndpoint.id) shouldBe Some(removedBftNodeId)
+
+          var endpointRemoved = false
+          module.receive(
+            P2PNetworkOut.Admin.RemoveEndpoint(
+              removedEndpoint.id,
+              removed => endpointRemoved = removed,
+            )
+          )
+          context.runPipedMessagesAndReceiveOnModule(module)
+          context.extractSelfMessages().foreach(module.receive)
+
+          endpointRemoved shouldBe true
+          p2pNetworkManager.shutdownOutgoingConnectionRequests should contain only
+            removedEndpoint.id
+          state.configuredP2PEndpoints.keys should not contain removedEndpoint.id
+
+          // The in-memory endpoint-to-node association is gone, as is any runtime state for the node
+          p2pConnectionState.getBftNodeId(removedEndpoint.id) shouldBe None
+          p2pConnectionState.isDefined(removedEndpoint.id) shouldBe false
+          p2pConnectionState.getNetworkRef(removedBftNodeId) shouldBe None
+          p2pConnectionState.isConnected(Right(removedBftNodeId)) shouldBe false
+          p2pConnectionState.connections.flatMap(_._2) should not contain removedBftNodeId
+
+          // Other peers are unaffected
+          p2pConnectionState.getBftNodeId(keptEndpoint.id) shouldBe Some(keptBftNodeId)
+          p2pConnectionState.isConnected(Right(keptBftNodeId)) shouldBe true
+        }
       }
 
       "just disconnect the endpoint" when {
@@ -1735,9 +1794,18 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
+    val shutdownOutgoingConnectionRequests: mutable.ArrayBuffer[P2PEndpoint.Id] =
+      mutable.ArrayBuffer.empty
+
+    // Opt-in, so that tests can mirror the production manager's runtime state cleanup
+    var onShutdownOutgoingConnection: P2PEndpoint.Id => Unit = _ => ()
+
     override def shutdownOutgoingConnection(
         p2pEndpointId: P2PEndpoint.Id
-    )(implicit traceContext: TraceContext): Unit = ()
+    )(implicit traceContext: TraceContext): Unit = {
+      shutdownOutgoingConnectionRequests.append(p2pEndpointId)
+      onShutdownOutgoingConnection(p2pEndpointId)
+    }
   }
 }
 

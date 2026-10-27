@@ -11,8 +11,8 @@ import io.grpc.netty.shaded.io.grpc.netty.InternalNettySocketSupport.{
   InternalHelper,
   InternalNativeSocketOptions,
 }
-import io.grpc.netty.shaded.io.netty.channel.epoll.{Epoll, EpollEventLoopGroup, EpollSocketChannel}
-import io.grpc.netty.shaded.io.netty.channel.{Channel, EventLoopGroup}
+import io.grpc.netty.shaded.io.netty.channel.epoll.{Epoll, EpollIoHandler, EpollSocketChannel}
+import io.grpc.netty.shaded.io.netty.channel.{Channel, EventLoopGroup, MultiThreadIoEventLoopGroup}
 import io.grpc.netty.shaded.io.netty.util.concurrent.DefaultThreadFactory
 
 import java.util.concurrent.TimeUnit
@@ -45,7 +45,11 @@ private[bftordering] abstract class P2PNettyEpollInstrumentation(
   protected val eventLoopGroupO: Option[EventLoopGroup] =
     if (preferEpoll && epollAvailable) {
       try {
-        val group = new EpollEventLoopGroup(0, new DefaultThreadFactory(threadNamePrefix))
+        val group = new MultiThreadIoEventLoopGroup(
+          0,
+          new DefaultThreadFactory(threadNamePrefix),
+          EpollIoHandler.newFactory(),
+        )
         // gRPC's default socket-options helper returns no native options, so Channelz never carries
         //  a `TcpInfo` and TCP-level metrics stay empty even under epoll. gRPC ships no epoll mapper
         //  and installs none by default, so we install one (process-wide, once) that reads the epoll

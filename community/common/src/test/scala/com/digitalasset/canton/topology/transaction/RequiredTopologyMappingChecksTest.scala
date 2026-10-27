@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeysWithThreshold, SigningPublicKey}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   OnboardingRestriction,
@@ -31,6 +32,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
@@ -54,6 +56,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.event.Level
 
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
@@ -176,6 +179,54 @@ private[transaction] abstract class BaseTopologyMappingChecksTest[T <: TopologyM
       )
       .value
       .futureValueUS
+
+  protected val supportedStates: Seq[HostingState] =
+    if (testedProtocolVersion >= ProtocolVersion.v37)
+      Seq(
+        HostingState.Nominated,
+        HostingState.Freezing,
+        HostingState.Onboarding,
+        HostingState.Active,
+      )
+    else Seq(HostingState.Onboarding, HostingState.Active)
+
+  protected def mkPtp(
+      serial: PositiveInt,
+      participants: (ParticipantId, HostingState)*
+  ): SignedTopologyTransaction[Replace, PartyToParticipant] =
+    mkPtp(serial, testedProtocolVersion, participants*)
+
+  /** `protocolVersion` selects the version of the transaction: 36 creates `v30`, 37 `v31`. */
+  protected def mkPtp(
+      serial: PositiveInt,
+      protocolVersion: ProtocolVersion,
+      participants: (ParticipantId, HostingState)*
+  ): SignedTopologyTransaction[Replace, PartyToParticipant] =
+    factory.mkTrans(
+      TopologyTransaction.tryCreate(
+        TopologyChangeOp.Replace,
+        serial,
+        PartyToParticipant.tryCreate(
+          DefaultTestIdentities.party1,
+          PositiveInt.one,
+          participants.map { case (pid, state) => HostingParticipant(pid, Submission, state) },
+        ),
+        protocolVersion,
+      )
+    )
+
+  // transitions are expected in the order of the participants in the mapping to validate
+  protected def invalidTransitions(
+      transitions: (ParticipantId, HostingState, HostingState)*
+  ): Left[TopologyTransactionRejection, Unit] =
+    Left(
+      TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
+        s"Invalid hosting state transitions for party ${DefaultTestIdentities.party1}: " +
+          transitions
+            .map { case (pid, from, to) => s"$pid: $from -> $to" }
+            .mkString(", ")
+      )
+    )
 
   implicit def toHostingParticipant(
       participantToPermission: (ParticipantId, ParticipantPermission)
@@ -842,45 +893,7 @@ class RequiredTopologyMappingChecksTest
     }
 
     "validating PartyToParticipant HostingState transitions" should {
-      import HostingParticipant.HostingState
       import scala.math.Ordering.Implicits.*
-
-      val supportedStates: Seq[HostingState] =
-        if (testedProtocolVersion >= ProtocolVersion.v37)
-          Seq(
-            HostingState.Nominated,
-            HostingState.Freezing,
-            HostingState.Onboarding,
-            HostingState.Active,
-          )
-        else Seq(HostingState.Onboarding, HostingState.Active)
-
-      def mkPtp(
-          serial: PositiveInt,
-          participants: (ParticipantId, HostingState)*
-      ) = factory.mkAdd(
-        PartyToParticipant.tryCreate(
-          party1,
-          PositiveInt.one,
-          participants.map { case (pid, state) =>
-            HostingParticipant(pid, Submission, state)
-          },
-        ),
-        serial = serial,
-      )
-
-      // transitions are expected in the order of the participants in the mapping to validate
-      def invalidTransitions(
-          transitions: (ParticipantId, HostingState, HostingState)*
-      ): Left[TopologyTransactionRejection, Unit] =
-        Left(
-          TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
-            s"Invalid hosting state transitions for party $party1: " +
-              transitions
-                .map { case (pid, from, to) => s"$pid: $from -> $to" }
-                .mkString(", ")
-          )
-        )
 
       "allow unchanged and forward hosting state transitions, including skipping states" in {
         val (checks, store) = mk()
@@ -892,6 +905,26 @@ class RequiredTopologyMappingChecksTest
         } withClue(s"$from -> $to") {
           val inStore = mkPtp(PositiveInt.one, participant1 -> from)
           val toValidate = mkPtp(PositiveInt.two, participant1 -> to)
+          checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+        }
+      }
+
+      "allow unchanged and forward hosting state transitions across v30 and v31 transactions" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+        val v30States = Seq(HostingState.Onboarding, HostingState.Active)
+
+        for {
+          (inStoreVersion, inStoreStates, toValidateVersion, toValidateStates) <- Seq(
+            (ProtocolVersion.v36, v30States, ProtocolVersion.v36, v30States),
+            (ProtocolVersion.v36, v30States, ProtocolVersion.v37, supportedStates),
+            (ProtocolVersion.v37, supportedStates, ProtocolVersion.v36, v30States),
+          )
+          from <- inStoreStates
+          to <- toValidateStates if to >= from
+        } withClue(s"in store: $inStoreVersion $from, proposal: $toValidateVersion $to") {
+          val inStore = mkPtp(PositiveInt.one, inStoreVersion, participant1 -> from)
+          val toValidate = mkPtp(PositiveInt.two, toValidateVersion, participant1 -> to)
           checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
         }
       }
@@ -918,6 +951,42 @@ class RequiredTopologyMappingChecksTest
         val inStore = mkPtp(PositiveInt.one, participant1 -> HostingState.Active)
         val toValidate = mkPtp(PositiveInt.two, participant1 -> HostingState.Onboarding)
         checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit
+      }
+
+      "allow change from Active to Onboarding state if the mapping in the store and the proposal are v30" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        val inStore =
+          mkPtp(PositiveInt.one, ProtocolVersion.v36, participant1 -> HostingState.Active)
+        val toValidate =
+          mkPtp(PositiveInt.two, ProtocolVersion.v36, participant1 -> HostingState.Onboarding)
+        loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.INFO))(
+          checkTransaction(checks, toValidate, Some(inStore)) shouldBe Either.unit,
+          _.map(_.message) should contain(
+            s"Accepting v30 transaction ${toValidate.hash} for backward compatibility, although it " +
+              s"moves hosting states backward for party $party1: $participant1: Active -> Onboarding"
+          ),
+        )
+      }
+
+      "reject change from Active to Onboarding state if the mapping in the store or the proposal is v31" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        val (checks, store) = mk()
+        addToStore(store, p1_otk, p1_dtc)
+
+        for {
+          (inStoreVersion, toValidateVersion) <- Seq(
+            ProtocolVersion.v36 -> ProtocolVersion.v37,
+            ProtocolVersion.v37 -> ProtocolVersion.v36,
+            ProtocolVersion.v37 -> ProtocolVersion.v37,
+          )
+        } withClue(s"in store: $inStoreVersion, proposal: $toValidateVersion") {
+          val inStore = mkPtp(PositiveInt.one, inStoreVersion, participant1 -> HostingState.Active)
+          val toValidate =
+            mkPtp(PositiveInt.two, toValidateVersion, participant1 -> HostingState.Onboarding)
+          checkTransaction(checks, toValidate, Some(inStore)) shouldBe
+            invalidTransitions((participant1, HostingState.Active, HostingState.Onboarding))
+        }
       }
 
       "report all participants with backward hosting state transitions" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {

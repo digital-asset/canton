@@ -64,7 +64,7 @@ object BaseVaultRequest {
 
 class GrpcVaultService(
     crypto: Crypto,
-    enablePreviewFeatures: Boolean,
+    enableKeyDownload: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext, err: ErrorLoggingContext)
     extends v30.VaultServiceGrpc.VaultService
@@ -264,16 +264,7 @@ class GrpcVaultService(
       keys <- crypto.cryptoPublicStore.publicKeysWithName
       publicKeys = listPublicKeys(listKeysFilters, keys)
       clientVersionO = baseRequestO.map(_.clientVersion)
-      serializedPublicKeysE =
-        if (
-          ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(
-            baseRequestO.map(_.clientVersion)
-          )
-        )
-          // TODO(#32231) Set public keys
-          Right(Seq())
-        else
-          publicKeys.traverse(_.toProtoV30)
+      serializedPublicKeysE = publicKeys.traverse(_.toProtoV30)
       serializedPublicKeys <- ProtoSerDesUtils.serializationErrorToFutureUnlessShutdown(
         serializedPublicKeysE.leftMap(err =>
           s"Failed to serialize keys meta data for client version $clientVersionO: $err"
@@ -324,12 +315,7 @@ class GrpcVaultService(
           .leftMap(err => SigningKeyGenerationError.ErrorCode.Wrap(err).toCantonRpcError)
       )
       clientVersionO = baseRequestO.map(_.clientVersion)
-      serializedKeyE =
-        if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(clientVersionO))
-          // TODO(#32231) Switch to v30.GenerateSigningKeyResponse.PublicKey.Key
-          key.toProtoV30
-        else
-          key.toProtoV30
+      serializedKeyE = key.toProtoV30
       serializedKey <- ProtoSerDesUtils.serializationErrorToFuture(
         serializedKeyE.leftMap(err =>
           s"Failed to serialize keys meta data for client version $clientVersionO: $err"
@@ -424,7 +410,7 @@ class GrpcVaultService(
       .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
 
     val res = for {
-      baseRequestO <-
+      _ <-
         EitherT
           .fromEither[FutureUnlessShutdown](
             request.baseRequest.traverse(BaseVaultRequest.fromProtoV30)
@@ -458,14 +444,7 @@ class GrpcVaultService(
         },
       ).leftMap(_.toCantonRpcError)
 
-      serializedPubKeyE = // TODO(#32231) Switch to v31
-        if (
-          ReleaseVersion.Feature.signingKeyUsageProtoV31
-            .supported(baseRequestO.map(_.clientVersion))
-        )
-          pubKey.toProtoV30
-        else
-          pubKey.toProtoV30
+      serializedPubKeyE = pubKey.toProtoV30
 
       serializedPubKey <- EitherT
         .fromEither[FutureUnlessShutdown](serializedPubKeyE)
@@ -588,11 +567,11 @@ class GrpcVaultService(
     for {
       // TODO(i13613): Remove feature flag check in favor of exportable keys check
       _ <-
-        if (enablePreviewFeatures) FutureUnlessShutdown.unit
+        if (enableKeyDownload) FutureUnlessShutdown.unit
         else
           FutureUnlessShutdown.failed(
             Status.FAILED_PRECONDITION
-              .withDescription("Remote export of private keys only allowed when preview is enabled")
+              .withDescription("Remote export of private keys only allowed when explicitly enabled")
               .asRuntimeException()
           )
       cryptoPrivateStore <-

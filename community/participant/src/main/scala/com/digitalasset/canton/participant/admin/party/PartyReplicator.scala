@@ -643,19 +643,19 @@ final class PartyReplicator(
             } yield ()
 
           case None =>
+            // Sign the transaction as is: rebuilding it for the synchronizer's protocol version
+            // would change the hash of a transaction of an earlier protocol version, so that other
+            // signatures on it would not combine with this participant's.
             topologyManager
-              .proposeAndAuthorize(
-                op = transaction.operation,
-                mapping = transaction.mapping,
-                serial = Some(transaction.serial),
+              .authorizeTransaction(
+                transaction,
                 signingKeys = Seq.empty,
                 namespacesToSignFor = Seq.empty,
                 protocolVersion = psid.protocolVersion,
                 expectFullAuthorization = false,
                 forceChanges = ForceFlags.none,
-                waitToBecomeEffective = None,
               )
-              .leftMap(err => s"Failed to propose and authorize topology transaction: $err")
+              .leftMap(err => s"Failed to authorize topology transaction: $err")
               .map(_ => ())
         }
 

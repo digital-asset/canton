@@ -263,6 +263,33 @@ object TopologyTransaction
   override def admissibleRpvs(rpv: ProtocolVersion): Seq[ProtocolVersion] =
     if (rpv >= ProtocolVersion.v37) Seq(ProtocolVersion.v36, rpv) else Seq(rpv)
 
+  /** The protocol version to create a topology transaction for, on a store of
+    * `storeProtocolVersion`.
+    *
+    * @param requested
+    *   The protocol version a client asks for, so that it can read the transaction, e.g. 36 on a
+    *   synchronizer with protocol version 37. If defined, it must be `storeProtocolVersion` or a
+    *   lower protocol version whose topology transactions the store admits.
+    * @return
+    *   `requested` if it is defined and admissible, `storeProtocolVersion` if it is empty, and an
+    *   error otherwise.
+    */
+  def protocolVersionToCreate(
+      storeProtocolVersion: ProtocolVersion,
+      requested: Option[ProtocolVersion],
+  ): Either[String, ProtocolVersion] =
+    requested.fold[Either[String, ProtocolVersion]](Right(storeProtocolVersion)) { pv =>
+      val admissible =
+        (admissibleRpvs(protocolVersionRepresentativeFor(storeProtocolVersion).representative) :+
+          storeProtocolVersion).filter(_ <= storeProtocolVersion).distinct
+      Either.cond(
+        admissible.contains(pv),
+        pv,
+        s"Cannot create a topology transaction for protocol version $pv on a store of protocol version $storeProtocolVersion. Admissible protocol versions: ${admissible
+            .mkString(", ")}",
+      )
+    }
+
   def create[Op <: TopologyChangeOp, M <: TopologyMapping](
       op: Op,
       serial: PositiveInt,

@@ -19,6 +19,10 @@ class BftSequencerTwoPeerConfigIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.fromFiles(bftSequencerConfigurationFolder / "two-peers.conf")
 
+  // Examples run with default canton.features.enable-repair-commands = false,
+  // which disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "participant" should {
     "successfully connect to both sequencers and ping" in { implicit env =>
       import env.*
