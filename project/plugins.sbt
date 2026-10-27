@@ -32,7 +32,7 @@ addSbtPlugin("com.eed3si9n" %% "sbt-buildinfo" % "0.13.1")
 libraryDependencies += "com.esotericsoftware.yamlbeans" % "yamlbeans" % "1.13"
 
 // Assembly plugin to build fat-jars
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.3.1")
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.5.0")
 
 // Need better files for building the config file when doing the 'did we break Protobuf compatibility?' check
 libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2"

@@ -45,7 +45,7 @@ class JobSchedulerTest
     )
 
     timeouts.unbounded
-      .await[List[(JobScheduler.ScheduledRunResult, T)]]("letting scheduler run")((for {
+      .awaitUS[List[(JobScheduler.ScheduledRunResult, T)]]("letting scheduler run")((for {
         _configured <- scheduler.setSchedule(schedule)
         _started <- scheduler.start()
         _sleptLettingSchedulerRun = Threading.sleep(duration.duration.toMillis)
@@ -53,6 +53,7 @@ class JobSchedulerTest
         scheduler.stop()
         t
       })
+      .onShutdown(fail("runScheduler aborted"))
   }
 
   private def runTask(result: JobScheduler.ScheduledRunResult, waitInMillis: Int) = {

@@ -8,24 +8,8 @@ _Write summary of release_
 
 ## What’s New
 
-### Removal of protocol version 34
-Protocol version 34 is not supported anymore. This release supports protocol versions 35, 36 and 37.
-
-### Protocol version downgrades via LSU are forbidden from protocol version 37 on
-TODO Sören/Raf: remove if new topology transaction is not released with 3.7
-Logical synchronizer upgrades from a synchronizer running protocol version 37 or higher to a
-successor with a lower protocol version are now rejected. Both the topology manager and the topology
-processor reject such `LsuAnnouncement` topology mappings with the error
-`TOPOLOGY_INVALID_SUCCESSOR_PHYSICAL_SYNCHRONIZER_ID`.
-
-### Protocol support for assignments with source and target validation packages
-Prior to this protocol version 37 the creating package of the contract was used for contract authentication during contract assignment.
-From protocol version 37 separate source and target validation packages can be specified at the protocol level.
-To be valid these validation package must be be an upgradable package for the contract and be vetted on the respective synchronizer.
-
-### CantonBFT
-- P2P: TCP- and HTTP2-level metrics.
-- Added metrics for the time ordered blocks wait before delivery while lower-numbered blocks are still pending.
+### Removal of support for sequencer drivers
+- Sequencer drivers (such as CometBFT) are no longer supported. The reference sequencer driver is still being used in tests but will also be discontinued soon.
 
 ### Topic A
 Template for a bigger topic
@@ -33,123 +17,101 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
-### Initialization changes for sequencers and mediators
+### Breaking: Addition of a flag controlling presence of reassignment events in the `StateService`.
 
-Rather than genenerating the onboarding topology transactions during node initialization and storing these in the authorized store,
-sequencers and mediators now skip this step and generate them when needed.
+#### Background
 
-This ensures these topology transactions are generated in the right protocol version (which is not known during initialization).
+Incomplete reassignments (`IncompleteAssigned` and `IncompleteUnassigned` events) are only relevant
+to clients that work with contracts reassigned between multiple synchronizers. Most clients only
+need the active contracts. Until now, the snapshot always included these events. The new flag lets
+clients opt in to incomplete reassignments only when they need them.
 
-Practically, this means that instead of the `node.topology.transactions.identity_transactions()` console command,
-the `node.topology.transactions.generate_onboarding_transactions(protocolVersion)` command should be used instead.
+#### Specific Changes
 
-If you are using an offline root key, you cannot call this
-(but you would have already been signing and providing the transactions manually using the offline key).
+A flag controlling presence of reassignment events has been added to the `GetActiveContractsRequest`
+and `GetActiveContractsPageRequest` of the `StateService`. If the `includeIncompleteReassignments`
+flag is not set, the reassignments are excluded from the response stream. JSON version of the api
+has been also extended accordingly. For details see the OpenApi specification. As an illustration,
+the following request for the `active-contracts-page` endpoint will return only the active contracts
+and exclude any reassignments:
 
-### Key management operations are now bound to a synchronizer
+  ```
+    POST http://localhost:6865/v2/state/active-contracts-page
+    Content-Type: application/json
+    {
+      "activeAtOffset": 1000000,
+      "eventFormat": {...},
+      "maxPageSize": 100,
+      "pageToken": "",
+      "includeIncompleteReassignments": false
+    }
+  ```
 
-The following console commands now take an optional `synchronizerId` argument:
+The `GetActiveContracts` stream continuation token and the `GetActiveContractsPage` page token formats
+have changed to take the new flag into account, so tokens issued by previous Canton versions are rejected
+with `INVALID_CONTINUATION_TOKEN` and `INVALID_ACS_PAGE_TOKEN` respectively.
 
-- `node.topology.owner_to_key_mappings.add_key`
-- `node.topology.owner_to_key_mappings.add_keys`
-- `node.topology.owner_to_key_mappings.remove_key`
-- `node.topology.owner_to_key_mappings.rotate_keys`
-- `node.keys.secret.rotate_kms_node_key`
-- `node.keys.secret.rotate_node_key`
-- `node.keys.secret.rotate_node_keys`
+#### Impact and Migration
 
-If omitted, we will try to auto-detect the synchronizer instead.
-This will only succeed when there is exactly a single registered and connected synchronizer.
+This change is backwards incompatible, as the default value of the new flag is `false`,
+which means that reassignments are excluded from the response stream. The previous behavior
+of including reassignments in the response stream can be restored by setting
+the `includeIncompleteReassignments` flag to `true` in the request.
+This change in behavior affects all early adopters of the Multi-Synchonizer Alpha feature.
 
-It is considered a security best practice to have a distinct key per synchronizer.
+### New limits
+NOTE: These limits are provisional on protocol version 38 and may still change before it is released.
 
-### Synchronizer record time to offset conversion ledger API endpoint
-
-To make cross-participant requests easier an API endpoint that converts a pair of synchronizer id and record time into a participant offset. The new endpoint was added to state service.
-
-Please keep in mind that synthetic synchronizer events, like repair related events, will be put on the same record time
-as the last observed synchronized event at the time of creation of this synthetic event. That means that multiple
-participant offsets can exist for a single record time. The newly added endpoint returns the first record time that
-happened on a requested record time or the last offset before that record time if there are no offset on there requested
-record time.
+The following topology limits are static synchronizer parameters (`synchronizerLimits.topologyLimits`) and are enforced from protocol version 38.
+- `TopologyLimits.maxVettedPackagesPerParticipant` (default 10000) bounds the number of packages a participant can vet in a `VettedPackages` topology mapping.
+  It applies to the `packages` field and to the deprecated `package_ids` field individually.
+- `TopologyLimits.maxSequencersPerSynchronizer` (default 100) bounds the number of active and observer sequencers combined in a `SequencerSynchronizerState` topology mapping.
+- `TopologyLimits.maxMediatorsPerGroup` (default 100) bounds the number of active and observer mediators combined in a `MediatorSynchronizerState` topology mapping, i.e. per mediator group.
+- `TopologyLimits.maxSignaturesPerTransaction` (default 1000) bounds the number of signatures on a signed topology transaction, single and multi transaction signatures combined.
+- `TopologyLimits.maxTransactionHashesPerMultiSignature` (default 1000) bounds the number of transaction hashes a multi transaction signature covers.
 
 ### Minor Improvements
-- Iterative manual pruning over the Ledger API. Scheduled pruning was already iterative based on the `batching-config.max-pruning-batch-size`, which controls the size of the maximum offset range in one iteration. This improvement turned manual pruning to iterative as well, based on the same participant configuration.
-  Contract pruning made also iterative as well, controlled by the participant configuration `index-service.contract-pruning-batch-size`, which defines the maximum amount of contracts pruned in one iteration. (Default: 10000)
-- Party queries are now served from the `lapi_events_party_to_participant` table, which also acquired a new index on `party + participant_id + synchronizer_id + event_sequential_id`. This change allows faithful representation of changes to the multi-hosted parties. At the same time, the `lapi_party_entries` has now been dropped.
-- participant_id label is added onto participant metrics
-- To maintain ledger consistency when importing repair events, repair events are now rejected if the last persisted event was a topology event. If this happens, reconnect to the synchronizer to move the record time. If cannot reconnect, use the `forceRepairWhenTopologyTransactionAtLedgerEnd` flag. Using the force flag can corrupt the data in the system.
-- Deprecated configuration settings: `canton.participants.<participant>.parameters.ledger-api-server.indexer.use-weighted-batching` and `canton.participants.<participant>.parameters.ledger-api-server.indexer.submission-batch-insertion-size`. These are no longer supported.
-- Support for OTLP remote metrics reporting, including optional OAuth2 Client Credentials authentication
-  ```
-  canton.monitoring.metrics.reporters = [{
-    type = otlp
-      endpoint = "http://localhost:4317"
-      protocol = grpc
-      auth {
-        type = oauth-client-credentials
-        token-url = "http://localhost:8080/token"
-        client-id = "test-client"
-        client-secret = "test-secret"
-      }
-   }]
-  ```
-- Added the request type to the sequencer cap rejection message.
-- The participant status report now tracks the health components of all connected synchronizers instead of only the
-  last connected one. Each per-synchronizer component status carries the physical synchronizer id in a new `labels`
-  field (`synchronizer` key) of `ComponentStatus` in the health admin API, and the `Components:` section of
-  `participant.health.status` renders node-level components as before, followed by a `Synchronizers:` section with the
-  component states per connected synchronizer. The status can also be restricted to a single synchronizer via
-  `participant.health.status(synchronizerId)` (accepting a logical or physical synchronizer id), backed by a new
-  optional `synchronizer_id` field on `ParticipantStatusRequest`.
-- Removed the default `non-standard-config = true` from the docker images configuration as they are not required for the default configuration.
-- Increased the log level of Ledger API Indexer initialization and termination errors to WARN, except known transient failures that stay on INFO
-- Improved the performance of the Ledger API database queries that fetch event sequential ids for updates and ACS streams. The
-  `(event_sequential_id, first_per_sequential_id)` index on the Ledger API filter tables is also replaced by a plain index on `event_sequential_id`
-  and a partial index on `event_sequential_id` restricted to `first_per_sequential_id`.
-- Starting with protocol version 37, the `EnableMultiSynchronizer` feature flag is not needed to enable
-  multi-synchronizer.
-- Added documentation generation for some missing metrics on
-  `https://docs.canton.network/global-synchronizer/reference/canton-metrics`:
-    - daml.sequencer-client.sequencer-connection-pool.connection-health
-    - daml.sequencer-client.sequencer-connection-pool.subscription-health
-    - daml.sequencer-client.handler.delay-per-connection
-    - daml.sequencer-client.handler.last-sequencing-time-micros-per-connection
-    - daml.sequencer-client.traffic-control.last-traffic-update
-    - daml.sequencer-client.traffic-control.extra-traffic-purchased
-    - daml.sequencer-client.traffic-control.extra-traffic-consumed
-    - daml.sequencer-client.traffic-control.base-traffic-remainder
-    - daml.participant.sync.commitments.counter-participant-latency
-    - daml.participant.sync.commitments.latest-matching-status
-    - daml.participant.sync.commitments.latest-matching-status-period-end
-    - daml.participant.sync.conflict-detection.task-queue
-    - daml.participant.sync.request-tracker.task-queue
-
-#### New file-based console commands for sequencer initialization and topology snapshots
-
-Added new console commands that stream the state to or from a file, for states larger than 2 GB:
-- `node.topology.transactions.export_genesis_state`
-- `node.topology.transactions.export_topology_snapshot_to_file`
-- `sequencer.setup.export_onboarding_state_for_sequencer`
-- `sequencer.setup.export_onboarding_state_at_timestamp`
-- `sequencer.setup.import_genesis_state`
-- `sequencer.setup.import_onboarding_state`
-
-`node.topology.transactions.import_topology_snapshot_fromV2` supports now files larger than 2 GB.
+- Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
+- Deprecated the `canton.participants.<participant>.parameters.ledger-api-server.indexer.batching-parallelism` configuration setting, which is no longer supported.
+- ConvertRecordTimeToOffset API call was not detecting situation where the requested record time at which there were multiple updates and some of them were already pruned was returning earliest not pruned offset, now the request is rejected with `RECORD_TIME_NOT_FOUND` error code.
+- The topology and offline root key scripts support topology transaction proto version 31 (used from protocol version 37) which is now the default.
+  Pass the protocol version with `--protocol-version` to `prepare-cert.sh`, `interactive_submission.py`,
+  `interactive_topology_example.py`, and `interactive_topology_example.sh` if the topology transactions should be generated with a lower proto version (e.g., when connected to a synchronizer running protocol version 36).
+- `prepare-cert.sh` rejects `--intermediate-delegation` combined with `--root-delegation` or `--delegation-restrictions`.
+- `repair.purge` rejects contracts that are reassigned away from the synchronizer, or skips them when `ignoreAlreadyPurged` is set.
+- A participant that registers a synchronizer with explicit onboarding transactions does not push its authorized store to that synchronizer automatically.
+  Changes to its identity for that synchronizer must be proposed in the synchronizer store.
+  The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionConfig` in the admin API shows it.
+- gRPC server handler logs now carry the request's trace id when a client calls with an empty `TraceContext`, for example the sequencer connection pool's `Authenticate`, `Subscribe` and `DownloadTopologyStateForInit`. The client interceptor uses a default trace id when the caller supplied none, instead of sending no `traceparent`.
+- Fixed documentation comments in Ledger API proto definiton that mentioned usage of package id. This feature was removed in 3.5
+- Ledger API `UpdateService`: participant authorization topology events (`TopologyFormat.include_participant_authorization_events`) are now publicly available.
+  Previously `ReadAs` rights for every listed party (or `ReadAsAnyParty` for an empty party list) were required.
+  The authorization required by the transaction and reassignment formats of the same request is unchanged.
+- The error code `SYNC_SERVICE_BECAME_PASSIVE` is no longer reported, because it was not used consistently. It is replaced by `SUBMISSION_DURING_SHUTDOWN` or `ABORTED_DUE_TO_SHUTDOWN`.
+- The error code `SUBMISSION_DURING_SHUTDOWN` now uses the status code `UNAVAILABLE` instead of `ABORTED` to correctly reflect that the service is unavailable and the call can be retried.
+- Update versions of jackson to address security vulnerabilities.
+- Update versions of opentelemetry and opentelemetry-instrumentation to address security vulnerabilities.
+- Support for the Zipkin trace exporter (`canton.monitoring.tracing.tracer.exporter.type=zipkin`) has been removed following its deprecation. Users should migrate to the OTLP exporter.
+  See https://opentelemetry.io/blog/2025/deprecating-zipkin-exporters/ for details.
+- Set autovacuum and autoanalyze settings on the tables pruned by Ledger API pruning. Vacuum and analyze now trigger on
+  fixed row-count thresholds instead of a fraction of the table size, so large tables are vacuumed and analyzed more often.
+- The JSON Ledger API HTTPS server now uses the `PKIX` trust manager and key manager instead of the legacy `SunX509` ones.
+  `PKIX` performs full RFC 5280 certification path validation, so certificate chains that were previously accepted
+  but violate constraints such as the name constraints of an intermediate CA are now rejected.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
-- bump da-base-image to 1.0.14
-- Update Bouncy Castle to 1.86 to address security vulnerabilities.
-- Minor performance fix: time proofs have now a max sequencing timeout of 2 minutes and they no longer create a
-  performance regression during synchronizer catch-up. Furthermore, synchronous rejects were not properly
-  cleaned up by the sequencer client immediately after the reject was processed, but relied on the timeout logic to pick
-  up the requests.
-- Fixed the transaction trace shown for unhandled exceptions: when the exception passed through
-  a try-catch that did not handle it, the trace started at the choice enclosing the try-catch
-  instead of the choice where the exception was thrown.
+
+- Minor bugfix to synchronization of `participants.parties.enable` which always timed out on a network
+  with more than 100 parties.
+
+### CantonBFT
+- Fixed two security issues whereby malicious sequencers could respectively trigger overflows
+  and corrupt in-memory state in other sequencers (Canton security advisory `GHSA-wg5x-47q6-4rhm`).
+- Fixed a security issue that could have allowed a byzantine sequencer elected as new view leader
+  to break consensus (Canton security advisory `GHSA-jp98-9j6j-8g8j`).
 
 ### (YY-nnn, Risk): Title
 

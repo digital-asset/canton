@@ -22,7 +22,13 @@ import com.digitalasset.canton.data.{
   ViewPosition,
   ViewType,
 }
-import com.digitalasset.canton.protocol.{GeneratorsProtocol, RequestId, RootHash, ViewHash}
+import com.digitalasset.canton.protocol.{
+  AcsCommitmentLimits,
+  GeneratorsProtocol,
+  RequestId,
+  RootHash,
+  ViewHash,
+}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.{
   GeneratorsTransaction,
@@ -36,11 +42,12 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   PhysicalSynchronizerId,
 }
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{Generators, GeneratorsLf, LfPartyId}
 import com.digitalasset.nonempty.NonEmptyUtil
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
+import org.scalatest.EitherValues.*
 
 final class GeneratorsMessages(
     protocolVersion: ProtocolVersion,
@@ -99,24 +106,29 @@ final class GeneratorsMessages(
       period = CommitmentPeriod.tryCreate(periodFrom, periodTo)
 
       rawDigest <- byteStringArb.arbitrary
-    } yield AcsCommitment.create(
-      synchronizerId,
-      sender.toLf,
-      counterparticipant.toLf,
-      period,
-      Digest.hashDigest(rawDigest).getCryptographicEvidence,
-      protocolVersion,
-    )
+    } yield AcsCommitment
+      .create(
+        synchronizerId,
+        sender.toLf,
+        counterparticipant.toLf,
+        period,
+        Digest.hashDigest(rawDigest).getCryptographicEvidence,
+        protocolVersion,
+      )
+      .value
   )
 
   implicit val digestForCounterparticipantArb: Arbitrary[DigestForCounterparticipant] = Arbitrary(
     for {
       digest <- byteStringArb.arbitrary
       counterparticipant <- Arbitrary.arbitrary[ParticipantId]
-    } yield DigestForCounterparticipant(
-      Digest.hashDigest(digest).getCryptographicEvidence,
-      counterparticipant.toLf,
-    )
+    } yield DigestForCounterparticipant
+      .create(
+        ProtocolVersionValidation(protocolVersion),
+        Digest.hashDigest(digest).getCryptographicEvidence,
+        counterparticipant.toLf,
+      )
+      .value
   )
 
   implicit val acsCommitmentSummaryArb: Arbitrary[AcsCommitmentSummary] =
@@ -128,15 +140,18 @@ final class GeneratorsMessages(
         unsentDigests <- Gen.nonEmptyListOf(Arbitrary.arbitrary[DigestForCounterparticipant])
         batchIndex <- Arbitrary.arbitrary[NonNegativeInt]
         lastBatch <- Arbitrary.arbitrary[Boolean]
-      } yield AcsCommitmentSummary.create(
-        synchronizerId,
-        commitmentTick,
-        counterparticipants.map(_.toLf),
-        unsentDigests,
-        batchIndex,
-        lastBatch,
-        protocolVersion,
-      )
+      } yield AcsCommitmentSummary
+        .create(
+          synchronizerId,
+          commitmentTick,
+          counterparticipants.map(_.toLf),
+          unsentDigests,
+          batchIndex,
+          lastBatch,
+          protocolVersion,
+          AcsCommitmentLimits.default,
+        )
+        .value
     )
 
   implicit val acsCommitmentSummaryProtocolMessageArb
@@ -145,7 +160,13 @@ final class GeneratorsMessages(
       for {
         acsCommitmentSummary <- Arbitrary.arbitrary[AcsCommitmentSummary]
         signature <- Arbitrary.arbitrary[Signature]
-      } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
+      } yield AcsCommitmentSummaryProtocolMessage
+        .create(
+          acsCommitmentSummary,
+          signature,
+          AcsCommitmentLimits.default.maxCommitmentSummarySizeBytes,
+        )
+        .value
     )
 
   implicit val legacyAcsCommitmentProtocolMessageArb
@@ -160,7 +181,13 @@ final class GeneratorsMessages(
     for {
       acsCommitment <- Arbitrary.arbitrary[AcsCommitment]
       signature <- Arbitrary.arbitrary[Signature]
-    } yield AcsCommitmentProtocolMessage(acsCommitment, signature)
+    } yield AcsCommitmentProtocolMessage
+      .create(
+        acsCommitment,
+        signature,
+        AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+      )
+      .value
   )
 
   implicit val confirmationResultMessageArb: Arbitrary[ConfirmationResultMessage] = Arbitrary(

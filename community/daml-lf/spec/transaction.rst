@@ -216,20 +216,6 @@ any ``version`` not in this list should be considered newer than any
 version in that list, and consumers must reject values with such
 unknown versions.
 
-message ThinContractInstance
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-An instance of a Daml-LF template, represented by the Daml-LF value used
-to construct that instance.
-
-(*since version 2.1*)
-
-As of version 2.1, these fields are included:
-
-* `message Identifier`_ template_id (*required*)
-* `message VersionedValue`_ arg_versioned
-* ``string`` agreement
-
 message Node
 ^^^^^^^^^^^^
 

@@ -15,8 +15,9 @@ import com.digitalasset.canton.topology.SynchronizerId
 import java.sql.Connection
 
 class PostgresContractStorageBackend(
-    stringInterning: StringInterning
-) extends ContractStorageBackendTemplate(PostgresQueryStrategy, stringInterning) {
+    queryStrategy: PostgresQueryStrategy,
+    stringInterning: StringInterning,
+) extends ContractStorageBackendTemplate(queryStrategy, stringInterning) {
 
   private def toIntArrayLiteral(values: Iterable[Int]): String =
     values.mkString("ARRAY[", ", ", "]::integer[]")

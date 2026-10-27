@@ -27,8 +27,7 @@ object VerifiedDataSource {
   ): Future[DataSource] = {
     val dataSourceStorageBackend =
       StorageBackendFactory
-        .of(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
-        .createDataSourceStorageBackend
+        .dataSourceStorageBackend(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
     apply(
       dataSourceStorageBackend,
       DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
@@ -58,7 +57,7 @@ object VerifiedDataSource {
         .applyFut(
           Future {
             val createdDatasource =
-              dataSourceStorageBackend.createDataSource(dataSourceConfig, loggerFactory)
+              dataSourceStorageBackend.createDataSource(dataSourceConfig)
             logger.info("Attempting to connect to the database")
             Using.resource(createdDatasource.getConnection)(
               dataSourceStorageBackend.checkDatabaseAvailable

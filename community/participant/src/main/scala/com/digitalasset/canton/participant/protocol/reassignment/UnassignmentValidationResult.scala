@@ -30,6 +30,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.util.ReassignmentTag.Target
 
+/** @param assignmentExclusivity
+  *   before this time (measured on the target synchronizer), only the submitter of the unassignment
+  *   can initiate the assignment; set on reassigning participants when the target synchronizer runs
+  *   protocol version 36 or lower, None otherwise
+  */
 final case class UnassignmentValidationResult(
     unassignmentData: UnassignmentData,
     override val rootHash: RootHash,
@@ -50,6 +55,8 @@ final case class UnassignmentValidationResult(
 
   override def activenessResultIsSuccessful: Boolean =
     commonValidationResult.activenessResult.isSuccessful
+
+  override protected def requestDescription: String = "Unassignment request"
 
   def contracts: ContractsReassignmentBatch = unassignmentData.contractsBatch
 

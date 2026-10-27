@@ -20,12 +20,12 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.util.{
   EitherTUtil,
+  FailureMode,
   FutureUnlessShutdownUtil,
   SimpleExecutionQueue,
   retry,
@@ -40,6 +40,7 @@ import java.sql.{Connection, SQLTransientException}
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /** A pool of [[DbLockedConnection]] for writes guarded by a main lock. It implements the
   * [[slick.jdbc.JdbcDataSource]] trait to be used by slick.
@@ -77,14 +78,17 @@ class DbLockedConnectionPool private (
       futureSupervisor,
       timeouts,
       loggerFactory,
-      crashOnFailure = exitOnFatalFailures,
+      logTaskTiming = false,
+      failureMode =
+        if (exitOnFatalFailures) FailureMode.CrashAfterFailureContinueAfterAbort
+        else FailureMode.StopAfterFailureContinueAfterAbort,
     )
 
   // Start out as passive and try to become active
   override protected val stateRef: AtomicReference[DbLockedConnectionPool.State] =
     new AtomicReference(State.Passive)
 
-  private def becomeActive()(implicit traceContext: TraceContext): Future[Unit] = {
+  private def becomeActive()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug("Becoming active")
 
     // Create an exclusive connection and lock for the pool and wait until active to ensure that the other connection
@@ -98,19 +102,17 @@ class DbLockedConnectionPool private (
         500.millis,
         "wait for exclusive access to connection pool",
         retryLogLevel = Some(Level.DEBUG),
-      )(
+      )
+      .unlessShutdown(
         poolExclusive.get match {
           // While we're waiting to acquire the pool in exclusive mode, it's possible that we lose the main connection lock
           // to another instance (for whatever reason). If that happens we can stop retrying here.
           case Left(_) if !mainConnection.isActive =>
+            logger.info("Main connection lock was lost while trying to acquire write pool locks")
             // Close the exclusive pool connection before failing the retry
             poolExclusive.close()
-            Future.failed(
-              PassiveInstanceException(
-                s"Main connection lock was lost while trying to acquire write pool locks"
-              )
-            )
-          case other => Future.successful(other)
+            FutureUnlessShutdown.abortedDueToShutdown
+          case other => FutureUnlessShutdown.pure(other)
         },
         NoExceptionRetryPolicy,
       )
@@ -128,7 +130,7 @@ class DbLockedConnectionPool private (
 
           logger.debug(s"Ramping up connection pool with ${poolSize.value} connections")
 
-          val pool = Range(0, poolSize.value).map { idx =>
+          val pool = (0 until poolSize.value).map { idx =>
             createPoolConnection(s"pool-$idx", DbLockMode.Shared)
           }
 
@@ -213,21 +215,20 @@ class DbLockedConnectionPool private (
   }
 
   private def checkHealth()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    def checkHealthInternal(): Future[Unit] = {
+    def checkHealthInternal(): FutureUnlessShutdown[Unit] = {
       val result = stateRef.get() match {
         case State.Active(pool) =>
           if (mainConnection.isActive) {
             logger.trace(s"Connection pool remains active")
             checkPoolHealth(pool)
-            Future.unit
           } else {
             becomePassive()
-            Future.unit
           }
+          FutureUnlessShutdown.unit
         case State.Passive =>
           if (!mainConnection.isActive) {
             logger.trace(s"Connection pool remains passive")
-            Future.unit
+            FutureUnlessShutdown.unit
           } else {
             becomeActive()
           }
@@ -238,7 +239,7 @@ class DbLockedConnectionPool private (
     }
 
     // Run the health check and becoming active/passive through the queue to ensure there's only one attempt at a time.
-    execQueue.execute(checkHealthInternal(), "check-health")
+    execQueue.executeUS(checkHealthInternal(), "check-health")
   }
 
   private def runScheduledHealthCheck(ts: CantonTimestamp): Unit =
@@ -335,6 +336,22 @@ object DbLockedConnectionPool {
 
   final case class NoActiveConnectionAvailable()
       extends SQLTransientException("No active and free KeepAliveConnection available")
+
+  private final case class PassiveInstanceException(reason: String)
+      extends RuntimeException(s"DbStorage instance is not active: $reason")
+
+  private[resource] def recoverPassiveInstanceException[A](fut: Future[A])(implicit
+      executionContext: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[A] =
+    FutureUnlessShutdown(fut.transform {
+      case Success(x) =>
+        Success(UnlessShutdown.Outcome(x))
+      case Failure(PassiveInstanceException(reason)) =>
+        errorLoggingContext.info(s"Node is passive: $reason")
+        Success(AbortedDueToShutdown)
+      case Failure(ex) => Failure(ex)
+    })
 
   sealed trait State extends Product with Serializable
   object State {

@@ -66,6 +66,7 @@ import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, Rep
 import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionFailure,
@@ -101,12 +102,14 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  SubmissionAccounting,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.replica.ReplicaState
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
@@ -126,7 +129,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -340,7 +343,7 @@ class CantonSyncService(
       // vet any packages that have not yet been vetted
       EitherTUtil.toFutureUnlessShutdown(
         AdminWorkflowServices.handleDamlErrorDuringPackageLoading(
-          s"${AdminWorkflowServices.PingDarResourceName}__${AdminWorkflowServices.AcsReplicationDarResourceName}"
+          AdminWorkflowServices.AdminWorkflowNames.mkString("__")
         )(
           packageService
             .vetPackages(
@@ -362,8 +365,11 @@ class CantonSyncService(
           ) {
             AdminWorkflowServices.AcsReplicationPackages.keySet
           } else Set.empty
+        val trafficCreditPackagesIfShouldVet =
+          if (parameters.damlTopUpEnabled) AdminWorkflowServices.TrafficCreditPackages.keySet
+          else Set.empty
         val packagesToVet = AdminWorkflowServices.PingPackages.keySet ++
-          acsReplicationPackagesIfShouldVet
+          acsReplicationPackagesIfShouldVet ++ trafficCreditPackagesIfShouldVet
         logger.debug("Checking whether admin workflows need to be vetted still.")
 
         topologyClient.headSnapshot
@@ -684,6 +690,12 @@ class CantonSyncService(
         )
         submitted <- transactionRoutingProcessor.submitTransaction(
           submitterInfo = submitterInfo,
+          // TODO(#33681): Use the account id from the command once the Ledger API has one.
+          accounting = SubmissionAccounting.forSubmitter(
+            accountId = None,
+            actAs = submitterInfo.actAs.toSet,
+            adminParty = participantId.adminParty.toLf,
+          ),
           synchronizerRankTarget = synchronizerRank,
           synchronizerState = routingSynchronizerState,
           wfTransaction = wfTransaction,
@@ -727,8 +739,7 @@ class CantonSyncService(
             Right(loggedF)
           case Success(UnlessShutdown.Outcome(Left(submissionError))) =>
             processSubmissionError(submissionError)
-          case Failure(PassiveInstanceException(_)) |
-              Success(UnlessShutdown.AbortedDueToShutdown) =>
+          case Success(UnlessShutdown.AbortedDueToShutdown) =>
             val err = SyncServiceInjectionError.PassiveReplica.Error(
               submitterInfo.userId,
               submitterInfo.commandId,
@@ -1010,6 +1021,9 @@ class CantonSyncService(
           )
       )
       _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
+      configToStore = config.copy(disableAuthorizedStoreDispatching =
+        config.disableAuthorizedStoreDispatching || onboardingTransactions.isDefined
+      )
       _ <- EitherT
         .rightT[FutureUnlessShutdown, SyncServiceError](
           synchronizerConnectionConfigStore
@@ -1017,12 +1031,18 @@ class CantonSyncService(
             .fold(_ => Seq.empty[StoredSynchronizerConnectionConfig], _.forgetNE)
         )
         .flatMap { configs =>
-          val activeForAlias = configs.filter(_.status == SynchronizerConnectionConfigStore.Active)
-          activeForAlias match {
+          // A HardMigratingTarget config is the target of a migration that did not complete:
+          // registering the target again updates it, so that the next migration attempt finds a
+          // single config.
+          val activeOrHardMigratingTargetForAlias = configs.filter(stored =>
+            stored.status == SynchronizerConnectionConfigStore.Active ||
+              stored.status == SynchronizerConnectionConfigStore.HardMigratingTarget
+          )
+          activeOrHardMigratingTargetForAlias match {
             case Seq() =>
               synchronizerConnectionConfigStore
                 .put(
-                  config,
+                  configToStore,
                   SynchronizerConnectionConfigStore.Active,
                   configuredPsid = UnknownPhysicalSynchronizerId,
                   synchronizerPredecessor = None,
@@ -1035,7 +1055,7 @@ class CantonSyncService(
             case Seq(storedConfig) =>
               EitherT
                 .fromEither[FutureUnlessShutdown](
-                  config
+                  configToStore
                     .subsumeMerge(storedConfig.config)
                     .leftMap(err =>
                       SyncServiceError.SynchronizerRegistration
@@ -1098,7 +1118,7 @@ class CantonSyncService(
       }
       operation = PendingOnboardingTransactions(
         transactions.sortBy(TopologyStore.initialParticipantDispatchingOrder),
-        ProtocolVersion.latest,
+        ReleaseProtocolVersion(ProtocolVersion.latest),
       )
         .toPendingOperation(synchronizerId, config.synchronizerAlias)
       _ <- pendingOnboardingTransactionsStore
@@ -1197,8 +1217,16 @@ class CantonSyncService(
       }
       connectionIdToUpdate <- EitherT.fromEither[FutureUnlessShutdown](connectionIdToUpdateE)
 
+      storedDisableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+        .get(config.synchronizerAlias, connectionIdToUpdate)
+        .exists(_.config.disableAuthorizedStoreDispatching)
       _ <- synchronizerConnectionConfigStore
-        .replace(connectionIdToUpdate, config)
+        .replace(
+          connectionIdToUpdate,
+          config.copy(disableAuthorizedStoreDispatching =
+            config.disableAuthorizedStoreDispatching || storedDisableAuthorizedStoreDispatching
+          ),
+        )
         .leftMap(_ =>
           SyncServiceError.SyncServiceUnknownSynchronizer
             .Error(config.synchronizerAlias): SyncServiceError
@@ -1815,6 +1843,7 @@ class CantonSyncService(
           )
           _ <- reassign(connectedSynchronizer, topologySnapshot)
             .leftMap {
+              case ProtocolProcessor.TrafficEnforcementRejection(reason) => reason
               case rpcError: RpcError =>
                 // Pass Canton errors (like PartyCurrentlyOnboarding) straight through
                 rpcError
@@ -1831,6 +1860,13 @@ class CantonSyncService(
         .leftMap(error => SubmissionResult.SynchronousError(error.asGrpcStatus))
         .merge
 
+      // TODO(#33681): Use the account id from the reassignment command once the Ledger API has one.
+      val accounting = SubmissionAccounting.forSubmitter(
+        accountId = None,
+        actAs = Set(submitter),
+        adminParty = participantId.adminParty.toLf,
+      )
+
       def lookupPsid(
           synchronizerId: SynchronizerId
       ): Either[RequestValidationErrors.InvalidArgument.Reject, PhysicalSynchronizerId] =
@@ -1841,17 +1877,33 @@ class CantonSyncService(
               .Reject(s"Unable to resolve $synchronizerId to a connected physical synchronizer id")
           )
 
-      def lookupPsids(source: Source[SynchronizerId], target: Target[SynchronizerId]): Either[
+      def lookupAndCheckPsids(
+          source: Source[SynchronizerId],
+          target: Target[SynchronizerId],
+          hasPkgValidationOverrides: Boolean,
+      ): Either[
         RequestValidationErrors.InvalidArgument.Reject,
         (Source[PhysicalSynchronizerId], Target[PhysicalSynchronizerId]),
       ] = for {
         sourcePsid <- lookupPsid(source.unwrap).map(Source(_))
         targetPsid <- lookupPsid(target.unwrap).map(Target(_))
+        _ <- Either.cond(
+          !hasPkgValidationOverrides || (sourcePsid.unwrap.protocolVersion > ProtocolVersion.v36 && targetPsid.unwrap.protocolVersion > ProtocolVersion.v36),
+          (),
+          RequestValidationErrors.InvalidArgument
+            .Reject(
+              s"Can only use validation package overrides when both source and target synchronizers are running protocol version ${ProtocolVersion.v37} or later. Source: ${sourcePsid.unwrap.protocolVersion}, Target: ${targetPsid.unwrap.protocolVersion}"
+            ),
+        )
       } yield (sourcePsid, targetPsid)
 
       ReassignmentCommandsBatch.create(reassignmentCommands) match {
         case Right(unassigns: ReassignmentCommandsBatch.Unassignments) =>
-          lookupPsids(unassigns.source, unassigns.target) match {
+          lookupAndCheckPsids(
+            unassigns.source,
+            unassigns.target,
+            unassigns.hasPkgValidationOverrides,
+          ) match {
             case Right((sourcePsid, targetPsid)) =>
               doReassignment(
                 psid = sourcePsid.unwrap
@@ -1868,6 +1920,9 @@ class CantonSyncService(
                   contractIds = unassigns.contractIds,
                   targetSynchronizer = targetPsid,
                   sourceTopology = Source(sourceTopology),
+                  overrideSourceValidationPkgIds = unassigns.overrideSourceValidationPkgIds,
+                  overrideTargetValidationPkgIds = unassigns.overrideTargetValidationPkgIds,
+                  accounting = accounting,
                 )
               }
 
@@ -1891,6 +1946,7 @@ class CantonSyncService(
                   ),
                   reassignmentId = assigns.reassignmentId,
                   targetTopology = Target(targetTopology),
+                  accounting = accounting,
                 )
               }
             case Left(err) => Future.failed(err.asGrpcError)

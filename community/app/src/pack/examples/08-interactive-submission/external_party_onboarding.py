@@ -117,8 +117,7 @@ def onboard_external_party(
     # on behalf of the party by confirming or rejecting them according to the ledger model. They also records transaction for that party on the ledger.
     # It also contains the protocol signing keys and signing threshold for the party
     # Both v30 and v31 use the v30 ParticipantPermission; v31 additionally sets the hosting state of each participant
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
+    if protocol_version == "dev" or int(protocol_version) >= 37:
         confirming_participants_hosting = [
             topology_v31_pb2.PartyToParticipant.HostingParticipant(
                 participant_uid=confirming_participant_id,

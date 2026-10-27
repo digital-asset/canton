@@ -18,17 +18,16 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
-import com.digitalasset.canton.resource.{PassiveInstanceExceptionRetryPolicy, Storage}
+import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.retry.Success
+import com.digitalasset.canton.util.retry.{NoExceptionRetryPolicy, Success}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SimpleExecutionQueue, retry}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 sealed trait BootstrapStageOrLeaf[T <: CantonNode]
@@ -99,20 +98,18 @@ abstract class BootstrapStage[T <: CantonNode, StageResult <: BootstrapStageOrLe
       stageResult.get() match {
         case Some(previous) => EitherT.rightT(Some(previous))
         case None =>
-          EitherT(
-            synchronizeWithClosing(description)(
-              (for {
-                result <- attempt()
-                  .leftMap { err =>
-                    logger.error(s"Attempting to run $description failed with $err")
-                    bootstrap.abortThisNodeOnStartupFailure()
-                    err
-                  }
-              } yield {
-                stageResult.set(result)
-                result
-              }).value
-            )
+          synchronizeWithClosing(description)(
+            for {
+              result <- attempt()
+                .leftMap { err =>
+                  logger.error(s"Attempting to run $description failed with $err")
+                  bootstrap.abortThisNodeOnStartupFailure()
+                  err
+                }
+            } yield {
+              stageResult.set(result)
+              result
+            }
           )
       },
       description,
@@ -202,12 +199,14 @@ abstract class BootstrapStageWithStorage[
   /** if a passive node hits a manual init step, it will return "start" is succeeded and wait in the
     * background for the active node to finish the startup sequence
     */
-  protected def toBackgroundForPassiveNode()(implicit traceContext: TraceContext): Unit =
+  private def toBackgroundForPassiveNode()(implicit traceContext: TraceContext): Unit =
     if (!backgroundStarted.getAndSet(true)) {
       logger.debug(s"As passive instance, I await $description or becoming active")
       // retry here as long as we don't get a result or we get a serious failure
-      // so we retry here if the result is Right(None)
-      val success = Success[Either[String, Option[StageResult]]](_ != Right(None))
+      // so we retry here if the result is Outcome(Right(None)) or AbortedDueToShutdown
+      val success = Success[UnlessShutdown[Either[String, Option[StageResult]]]](
+        !_.forall(_ == Right(None))
+      )
       EitherTUtil.doNotAwaitUS(
         EitherT(
           retry
@@ -219,13 +218,18 @@ abstract class BootstrapStageWithStorage[
               maxDelay = 5.seconds,
               s"waitForInit-$description",
             )
-            // on shutdown, the retry loop will return the last value so if
-            // we get None back, we know that the retry loop was aborted due to a shutdown
-            .unlessShutdown(attemptAndStore().value, PassiveInstanceExceptionRetryPolicy)(
+            .unlessShutdown(
+              // To retry if `attemptAndStore` aborts due to shutdown, we unwrap the unless shutdown into a proper value
+              // to examine. If the retry aborts because `this` is closing, we get a proper AbortedDueToShutdown in the outer future.
+              FutureUnlessShutdown.outcomeF(attemptAndStore().value.unwrap),
+              NoExceptionRetryPolicy,
+            )(
               success,
               executionContext,
               traceContext,
             )
+            // Forget about the inner aborted-due-to-shutdown because it's always being retries.
+            .flatMap(FutureUnlessShutdown.lift)
         ).tapOnShutdown {
           logger.debug(s"Initialization of $description aborted due to shutdown")
         }.flatMap {
@@ -254,16 +258,11 @@ abstract class BootstrapStageWithStorage[
   /** if the stage didn't complete yet, the node is active and auto-init is set to true, perform the
     * steps necessary. note, this invocation will be thread safe and only run once however, any
     * implementation needs to be crash resilient, if it didn't complete fully, it might be called
-    * again. if this stage does not support auto-init, you must return None. The method may throw
-    * "PassiveInstanceException" if it becomes passive
+    * again. if this stage does not support auto-init, you must return None. If the node becomes
+    * passive, this method should return
+    * [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]].
     */
   protected def autoCompleteStage(): EitherT[FutureUnlessShutdown, String, Option[M]]
-
-  /** if external input is necessary */
-  protected def completeWithExternal(
-      storeAndPassResult: => EitherT[Future, String, M]
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    completeWithExternalUS(storeAndPassResult.mapK(FutureUnlessShutdown.outcomeK))
 
   protected def resumeIfCompleteStage()(implicit
       traceContext: TraceContext
@@ -363,11 +362,8 @@ abstract class BootstrapStageWithStorage[
                     res
                   }
                   .value
-                  .recover { case _: PassiveInstanceException =>
-                    logger.info(s"Stage $description failed as node became passive")
-                    // if we became passive during auto-complete stage, we complete the
-                    // start procedure and move the waiting to the back
-                    UnlessShutdown.Outcome(Right(None))
+                  .tapOnShutdown {
+                    logger.info(s"Stage $description aborted due to shutdown")
                   }
               ).flatMap(_.traverse(buildNextStage))
             } else {
@@ -381,12 +377,11 @@ abstract class BootstrapStageWithStorage[
   override def start()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
-    super.start().map { res =>
-      // if start did not complete, move start
-      if (!storage.isActive && next.isEmpty) {
+    super.start().thereafter {
+      case scala.util.Success(res) if res.forall(_.isRight) && !storage.isActive && next.isEmpty =>
+        // if start did not complete, move start
         toBackgroundForPassiveNode()
-      }
-      res
+      case _ =>
     }
 }
 
@@ -398,5 +393,4 @@ object BootstrapStage {
     def queue: SimpleExecutionQueue
     def ec: ExecutionContext
   }
-
 }

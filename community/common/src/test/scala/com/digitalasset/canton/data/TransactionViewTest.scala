@@ -144,7 +144,12 @@ final class TransactionViewTest
           val decoded = TransactionView
             .fromByteString(
               testedProtocolVersion,
-              (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+              TransactionViewDeserializationContext(
+                hashOps,
+                DepthCounter.NoLimit,
+                testedProtocolVersion,
+                testedTransactionLimits,
+              ),
             )(encoded)
             .value
           decoded shouldBe expected
@@ -555,7 +560,7 @@ final class TransactionViewTest
     }
 
     "external call results have duplicate occurrence identities" must {
-      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reject creation" in {
         create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -573,7 +578,7 @@ final class TransactionViewTest
     }
 
     "external call results on a non-exercise root action" must {
-      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reject creation" in {
         create(
           externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7))
         ).left.value shouldBe "External call results require an exercise root action"
@@ -583,7 +588,7 @@ final class TransactionViewTest
     "the same external call is recorded with conflicting outputs in one view" must {
       // Distinct occurrences share a semantic key but record different outputs: the participant
       // data is well-formed on its own; the disagreement is caught when the view is validated.
-      "reject the view as malformed without leaking the payloads" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reject the view as malformed without leaking the payloads" in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -619,7 +624,7 @@ final class TransactionViewTest
       // The aggregation spans the whole subtree: a key recorded in the parent core and again,
       // differently, in a subview core is a disagreement even though neither view's participant
       // data conflicts on its own.
-      "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reject the parent view as malformed" in {
         val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
         def withCall(output: String): TransactionView =
           TransactionView.Optics.viewParticipantDataUnsafe.modify(vpd =>
@@ -747,7 +752,7 @@ final class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct the original keyed view participant data" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reconstruct the original keyed view participant data" in {
 
         val key = ExampleTransactionFactory.globalKeyWithMaintainers()
 
@@ -779,7 +784,7 @@ final class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct external call results" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reconstruct external call results" in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -799,7 +804,7 @@ final class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct keyed external call results" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "reconstruct keyed external call results" in {
         val key = ExampleTransactionFactory.globalKeyWithMaintainers()
 
         val usedContract = ExampleContractFactory.build(
@@ -838,7 +843,7 @@ final class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "serialize external call checking parties canonically" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "serialize external call checking parties canonically" in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -892,7 +897,7 @@ final class TransactionViewTest
       }
 
       // Need to work with v30 structures to avoid stack overflow during serialization
-      "return parsing failure when nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "return parsing failure when nesting is over limit" in {
 
         val actualDepth = 10
 
@@ -904,10 +909,11 @@ final class TransactionViewTest
         val deserialized = TransactionView
           .fromByteString(
             testedProtocolVersion,
-            (
+            TransactionViewDeserializationContext(
               hashOps,
               DepthCounter.withLimit(testedProtocolVersion, actualDepth),
               testedProtocolVersion,
+              testedTransactionLimits,
             ),
           )(bytes)
           .value
@@ -917,12 +923,17 @@ final class TransactionViewTest
 
         TransactionView.fromByteString(
           testedProtocolVersion,
-          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+          TransactionViewDeserializationContext(
+            hashOps,
+            DepthCounter.withLimit(testedProtocolVersion, expected),
+            testedProtocolVersion,
+            testedTransactionLimits,
+          ),
         )(bytes) shouldBe Left(NestingTooDeep(expected))
 
       }
 
-      "return parsing failure when mixed view/merkle-seq nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      "return parsing failure when mixed view/merkle-seq nesting is over limit" in {
 
         import TestProtoBuilder.*
 
@@ -934,7 +945,12 @@ final class TransactionViewTest
         val deserialized = TransactionView
           .fromByteString(
             testedProtocolVersion,
-            (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+            TransactionViewDeserializationContext(
+              hashOps,
+              DepthCounter.NoLimit,
+              testedProtocolVersion,
+              testedTransactionLimits,
+            ),
           )(bytes)
           .value
 
@@ -944,7 +960,12 @@ final class TransactionViewTest
 
         TransactionView.fromByteString(
           testedProtocolVersion,
-          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+          TransactionViewDeserializationContext(
+            hashOps,
+            DepthCounter.withLimit(testedProtocolVersion, expected),
+            testedProtocolVersion,
+            testedTransactionLimits,
+          ),
         )(bytes) shouldBe Left(NestingTooDeep(expected))
       }
     }

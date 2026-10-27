@@ -111,8 +111,11 @@ echo ""
 
 echo "== Assembling Certificate =="
 # Extract the fingerprint from the transaction
-WRAPPED_TRANSACTION=$(convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.version.v1.UntypedVersionedMessage" < "$PREPARED_TRANSACTION")
-TOPOLOGY_TRANSACTION=$(echo "$WRAPPED_TRANSACTION" | jq -r .data | decode_from_base64 | convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.TopologyTransaction")
+if ! TOPOLOGY_TRANSACTION=$(versioned_topology_transaction_to_json < "$PREPARED_TRANSACTION"); then
+  echo "Error: Failed to import the prepared transaction: $PREPARED_TRANSACTION"
+  echo "Please ensure this is a transaction prepared with prepare-cert.sh."
+  exit 1
+fi
 FINGERPRINT=$(echo "$TOPOLOGY_TRANSACTION" | jq -r .mapping.namespaceDelegation.namespace)
 # Wrap the signature into Canton's protobuf Signature message
 TRANSACTION_SIGNATURE_BASE64=$(encode_to_base64 < "$TRANSACTION_SIGNATURE")
@@ -123,5 +126,5 @@ CANTON_SIGNATURES=("$CANTON_SIGNATURE")
 PROPOSAL="false" # Proposal = false means the transaction must be fully authorized with the provided signatures
 SIGNED_TRANSACTION=$(build_signed_transaction "$PROPOSAL" "$PREPARED_TRANSACTION_BASE64" "${CANTON_SIGNATURES[@]}")
 echo "Certificate: $SIGNED_TRANSACTION"
-json_to_serialized_versioned_message "$SIGNED_TRANSACTION" "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.SignedTopologyTransaction" > "$OUTPUT.cert"
+serialize_signed_topology_transaction "$SIGNED_TRANSACTION" > "$OUTPUT.cert"
 echo "Certificate written to $OUTPUT.cert"

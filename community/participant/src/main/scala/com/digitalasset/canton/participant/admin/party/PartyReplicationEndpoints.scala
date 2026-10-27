@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.transaction.{
   SingleTransactionSignature,
   TopologyChangeOp,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
   ParticipantPermission as TopologyParticipantPermission,
 }
 import com.digitalasset.canton.topology.{
@@ -45,6 +46,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.RichEither
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.duration.Duration
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.actor.ActorSystem
@@ -319,7 +321,10 @@ class PartyReplicationEndpointsImpl(
       genericTx <- EitherT.fromEither[FutureUnlessShutdown](
         TopologyTransaction
           .fromByteString(
-            expectedProtocolVersion = protocolVersion,
+            ProtocolVersionValidation(protocolVersion),
+            TopologyTransactionDeserializationContext(
+              connectedSynchronizer.staticSynchronizerParameters.synchronizerLimits.topologyLimits
+            ),
             txBytes,
           )
           .leftMap(err =>

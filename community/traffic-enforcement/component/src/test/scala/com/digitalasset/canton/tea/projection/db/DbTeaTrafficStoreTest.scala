@@ -4,10 +4,10 @@
 package com.digitalasset.canton.tea.projection.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, DbParametersConfig, PositiveFiniteDuration}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
@@ -18,9 +18,18 @@ import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TrafficEnforcementError
-import com.digitalasset.canton.tea.projection.{AccountId, TeaTrafficStoreTest, TrafficDelta}
+import com.digitalasset.canton.tea.projection.{
+  AccountId,
+  CorrelationAccount,
+  CorrelationKey,
+  EventSource,
+  SubmissionCorrelation,
+  TeaTrafficStoreTest,
+  TrafficDelta,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.{Future, Promise}
@@ -36,7 +45,10 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
     storage.update(
       DBIO.seq(
         sqlu"truncate table par_traffic_enforcement_event",
+        sqlu"truncate table par_traffic_enforcement_correlations",
+        sqlu"truncate table par_traffic_enforcement_uncharged_completions",
         sqlu"truncate table par_traffic_enforcement_balance",
+        sqlu"truncate table par_traffic_enforcement_state",
         // Double quotes to force H2 to use lower case table names
         sqlu"""truncate table "pekko_projection_offset_store"""",
         sqlu"""truncate table "pekko_projection_management"""",
@@ -46,14 +58,56 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
   }
 
   "TeaTrafficStore" should {
-    behave like teaTrafficStore(() =>
-      new TeaDbTrafficStore(
+    behave like teaTrafficStore(
+      () =>
+        new TeaDbTrafficStore(
+          storage,
+          loggerFactory,
+          timeouts,
+          TrafficEnforcementServerConfig.Internal().databaseQueryTimeout,
+        ),
+      (store: TeaDbTrafficStore, event) => {
+        import storage.api.*
+        storage
+          .queryAndUpdate(
+            store
+              .applyCompletionDBIO(
+                event,
+                "test",
+                EventSource.LedgerAPICompletions,
+                completionPolicy,
+              )
+              .transactionally,
+            "apply_completion",
+          )
+      },
+    )
+
+    "keep a correlation that replaced a pruned one with the same key" in {
+      val store = new TeaDbTrafficStore(
         storage,
         loggerFactory,
         timeouts,
         TrafficEnforcementServerConfig.Internal().databaseQueryTimeout,
       )
-    )
+      val pruned = SubmissionCorrelation(
+        CorrelationKey(DefaultDamlValues.lfhash(), "submission"),
+        CorrelationAccount.Account(AccountId.tryCreate("alice")),
+        CantonTimestamp.Epoch,
+      )
+      val replacement = pruned.copy(insertedAt = pruned.insertedAt.plusSeconds(1))
+
+      for {
+        _ <- store.insertCorrelation(pruned).valueOrFail("insert pruned")
+        _ <- store.prune(pruned.insertedAt).valueOrFail("prune")
+        _ <- store.insertCorrelation(replacement).valueOrFail("insert replacement")
+        deleted <- storage.update(store.deleteCorrelationDBIO(pruned), "delete_pruned")
+        remaining <- store.lookupCorrelation(pruned.key).valueOrFail("lookup")
+      } yield {
+        deleted shouldBe 0
+        remaining shouldBe Some(replacement)
+      }
+    }
 
     "classify a malformed query as fatal" in {
       import storage.api.*

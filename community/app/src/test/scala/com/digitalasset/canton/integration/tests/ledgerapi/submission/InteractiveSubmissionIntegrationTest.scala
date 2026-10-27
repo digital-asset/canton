@@ -28,7 +28,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.console.commands.PartiesAdministration
-import com.digitalasset.canton.crypto.SigningKeyUsage
+import com.digitalasset.canton.crypto.{Signature, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.test.DummyFactory
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.UnknownInformees
@@ -39,7 +39,8 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
@@ -50,7 +51,6 @@ import com.google.protobuf.ByteString
 import io.grpc.Status
 import monocle.Optional
 import monocle.macros.GenLens
-import org.slf4j.event.Level
 
 import java.util.UUID
 import scala.jdk.OptionConverters.RichOption
@@ -162,6 +162,28 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         keysCount = PositiveInt.three,
         keysThreshold = PositiveInt.two,
       )
+    }
+
+    "fail to execute a command on a local party without signature" in { implicit env =>
+      val localParty = cpn.parties.enable("localAlice")
+      val command = createCycleCommand(localParty, "a")
+      val prepared = cpn.ledger_api.interactive_submission.prepare(Seq(localParty), Seq(command))
+
+      List[Map[PartyId, Seq[Signature]]](
+        Map(localParty -> Seq.empty),
+        Map.empty,
+      ).foreach { signatureMap =>
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          cpn.ledger_api.interactive_submission.execute(
+            prepared.getPreparedTransaction,
+            signatureMap,
+            UUID.randomUUID().toString,
+            testedHashingSchemeVersion.toLedgerApiProto,
+          ),
+          _.shouldBeCantonErrorCode(CommandExecutionErrors.InteractiveSubmissionExecuteError),
+        )
+
+      }
     }
 
     "fail if providing more signatures than registered keys" in { implicit env =>
@@ -1315,19 +1337,12 @@ class InteractiveSubmissionIntegrationTestTimeouts
       aliceE,
       epn,
     )
+    // Just checking the completion and avoiding reconnecting in order
+    //  not to have the confirming participant log a "Response message for request ... timed out"
+    //  warning while replaying the sequenced events, as the environment is going to be
+    //  tear down anyway.
     completion.status.value.code shouldBe Status.Code.ABORTED.value()
     completion.status.value.message should include("MEDIATOR_SAYS_TX_TIMED_OUT")
-    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
-      cpn.synchronizers.reconnect_all(),
-      LogEntry.assertLogSeq(
-        Seq.empty,
-        Seq(
-          _.warningMessage should (include("Response message for request") and include(
-            "timed out"
-          ))
-        ),
-      ),
-    )
   }
 }
 

@@ -10,6 +10,7 @@ import "com/daml/ledger/api/v2/crypto.proto";
 import "com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto";
 import "com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto";
 import "com/daml/ledger/api/v2/package_reference.proto";
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "com/daml/ledger/api/v2/transaction.proto";
 import "com/daml/ledger/api/v2/transaction_filter.proto";
 import "com/daml/ledger/api/v2/value.proto";
@@ -563,7 +564,7 @@ message PreparedTransaction {
   // Daml Transaction representing the ledger effect if executed. See below
   //
   // Required
-  DamlTransaction transaction = 1;
+  DamlTransaction transaction = 1 [(size_limit) = true];
   // Metadata context necessary to execute the transaction
   //
   // Required

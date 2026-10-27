@@ -8,13 +8,14 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ContractsReassignmentBatch
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
+import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.participant.protocol.conflictdetection.{ActivenessResult, CommitSet}
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationResult.{
   CommonValidationResult,
   ReassigningParticipantValidationResult,
 }
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationError
-import com.digitalasset.canton.protocol.{ReassignmentId, RootHash}
+import com.digitalasset.canton.protocol.{ReassignmentId, RequestId, RootHash}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
@@ -33,6 +34,21 @@ private[reassignment] trait ReassignmentValidationResult {
   def commonValidationResult: CommonValidationResult
   def reassigningParticipantValidationResult: ReassigningParticipantValidationResult
   def activenessResultIsSuccessful: Boolean
+  protected def requestDescription: String
+
+  /** Reports a `SyncServiceAlarm` if the activeness check of this approved request failed, and
+    * crashes if `crashAfterFailedValidation` is set.
+    */
+  def alarmIfActivenessCheckFailed(requestId: RequestId, crashAfterFailedValidation: Boolean)(
+      implicit loggingContext: ErrorLoggingContext
+  ): Unit =
+    CommitSet.alarmIfActivenessCheckFailed(
+      activenessResultIsSuccessful,
+      commonValidationResult.activenessResult,
+      requestId,
+      requestDescription,
+      crashAfterFailedValidation,
+    )
 
   @VisibleForTesting
   def isSuccessful(implicit ec: ExecutionContext): FutureUnlessShutdown[Boolean] =

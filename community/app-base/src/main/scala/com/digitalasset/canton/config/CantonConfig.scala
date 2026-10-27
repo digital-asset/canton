@@ -90,7 +90,6 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerExponentialBackoffJitterConfig,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDriverFactory}
 import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
 import com.digitalasset.canton.synchronizer.mediator.{
   DeduplicationStoreConfig,
@@ -107,7 +106,6 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
   DatabaseSequencerExclusiveStorageConfig,
   SequencerHighAvailabilityConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.SequencerCoreSubscriptionConfig
@@ -134,6 +132,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.time.DisasterRecoverySequencingTimeUpperBound
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.ReferenceSequencerDriver
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
@@ -361,6 +360,9 @@ object ThreadingConfig {
   * @param failOnUnknownConfigKeys
   *   If set to true, config parsing fails when unknown keys are read provided that
   *   non-standard-config is enabled. Default: true. Should not be used in production.
+  * @param enableKeyDownload
+  *   If true, the node will allow downloading of keys from the vault. This should not be enabled in
+  *   production.
   */
 final case class CantonParameters(
     clock: ClockConfig = ClockConfig.WallClock(),
@@ -383,6 +385,7 @@ final case class CantonParameters(
     stateRefreshInterval: Option[config.NonNegativeFiniteDuration] = None,
     threading: ThreadingConfig = ThreadingConfig(),
     failOnUnknownConfigKeys: Boolean = true,
+    enableKeyDownload: Boolean = false,
 ) {
   def devOrAlphaVersionSupport: Boolean = devVersionSupport || alphaVersionSupport
 
@@ -527,6 +530,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         crashAfterFailedValidation = participantParameters.crashAfterFailedValidation,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
         acsCommitments = participantParameters.acsCommitments,
+        damlTopUpEnabled = participantConfig.trafficAccounting.damlTopUpEnabled,
       )
     }
 
@@ -762,6 +766,7 @@ private[canton] object CantonNodeParameterConverter {
       enableAdditionalConsistencyChecks = parent.parameters.enableAdditionalConsistencyChecks,
       enablePreviewFeatures = parent.features.enablePreviewCommands,
       enableTestingFeatures = parent.features.enableTestingCommands,
+      enableKeyDownload = parent.parameters.enableKeyDownload,
       processingTimeouts = parent.parameters.timeouts.processing,
       sequencerClient = node.sequencerClient,
       cachingConfigs = node.parameters.caching,
@@ -1211,6 +1216,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownComputeDelayConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig]
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
@@ -1263,6 +1271,10 @@ object CantonConfig {
     lazy implicit val sequencerReaderConfigReader: ConfigReader[SequencerReaderConfig] =
       deriveReader[SequencerReaderConfig]
 
+    lazy implicit val referenceSequencerConfigReader
+        : ConfigReader[ReferenceSequencerDriver.Config[StorageConfig]] =
+      deriveReader[ReferenceSequencerDriver.Config[StorageConfig]]
+
     lazy implicit final val sequencerConfigReader: ConfigReader[SequencerConfig] =
       ConfigReader.fromCursor[SequencerConfig] { cur =>
         for {
@@ -1273,9 +1285,9 @@ object CantonConfig {
               sequencerConfigDatabaseReader.from(objCur.withoutKey("type"))
             case BftSequencerFactory.ShortName =>
               sequencerConfigBftSequencerReader.from(objCur.withoutKey("type"))
-            case other =>
+            case "reference" =>
               for {
-                config <- objCur.atKey("config")
+                rawConfig <- objCur.atKey("config")
                 // since the `database` subsection is optional, we try to get the
                 // config value, and if it doesn't exist parse the default
                 // Database sequencer config with an empty object
@@ -1284,7 +1296,21 @@ object CantonConfig {
                   .valueOpt
                   .getOrElse(ConfigValueFactory.fromMap(new java.util.HashMap()))
                 blockSequencerConfig <- blockSequencerConfigReader.from(database)
-              } yield SequencerConfig.External(other, blockSequencerConfig, config)
+                config <- referenceSequencerConfigReader.from(rawConfig)
+              } yield SequencerConfig.External(blockSequencerConfig, config)
+            case _ =>
+              Left(
+                ConfigReaderFailures(
+                  ConvertFailure(
+                    CannotConvert(
+                      sequencerType,
+                      SequencerConfig.getClass.getName,
+                      s"Unknown sequencer type: $sequencerType",
+                    ),
+                    cur,
+                  )
+                )
+              )
           }): ConfigReader.Result[SequencerConfig]
         } yield config
       }
@@ -1340,10 +1366,6 @@ object CantonConfig {
     implicit val tracingConfigDisabledSpanExporterReader
         : ConfigReader[TracingConfig.Exporter.Disabled.type] =
       deriveReader[TracingConfig.Exporter.Disabled.type]
-    @nowarn("cat=deprecation")
-    implicit val tracingConfigZipkinSpanExporterReader
-        : ConfigReader[TracingConfig.Exporter.Zipkin] =
-      deriveReader[TracingConfig.Exporter.Zipkin]
     implicit val tracingConfigOtlpSpanExporterReader: ConfigReader[TracingConfig.Exporter.Otlp] =
       deriveReader[TracingConfig.Exporter.Otlp]
     implicit val tracingConfigSpanExporterReader: ConfigReader[TracingConfig.Exporter] =
@@ -1474,6 +1496,7 @@ object CantonConfig {
           override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
             DeprecatedConfigPath[String]("contract-id-seeding", since = "3.6.0"),
             DeprecatedConfigPath[String]("use-weighted-batching", since = "3.7.0"),
+            DeprecatedConfigPath[String]("batching-parallelism", since = "3.8.0"),
           )
         }
 
@@ -1616,6 +1639,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigReader: ConfigReader[ReplicationConfig] =
       deriveReader[ReplicationConfig]
+    lazy implicit final val deprecatedApiConfigReader: ConfigReader[DeprecatedApiConfig] =
+      deriveReader[DeprecatedApiConfig]
     implicit val participantFeaturesConfigReader: ConfigReader[ParticipantFeaturesConfig] =
       deriveReader[ParticipantFeaturesConfig]
 
@@ -2068,6 +2093,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownComputeDelayConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig] =
+      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneComputeDelayConfig]
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
@@ -2120,6 +2148,10 @@ object CantonConfig {
         : ConfigWriter[DatabaseSequencerConfig.SequencerPruningConfig] =
       deriveWriter[DatabaseSequencerConfig.SequencerPruningConfig]
 
+    lazy implicit val referenceSequencerConfigWriter
+        : ConfigWriter[ReferenceSequencerDriver.Config[StorageConfig]] =
+      deriveWriter[ReferenceSequencerDriver.Config[StorageConfig]]
+
     implicit def sequencerConfigWriter[C]: ConfigWriter[SequencerConfig] = {
       case dbSequencerConfig: SequencerConfig.Database =>
         import pureconfig.syntax.*
@@ -2133,28 +2165,16 @@ object CantonConfig {
 
       case otherSequencerConfig: SequencerConfig.External =>
         import scala.jdk.CollectionConverters.*
-        val sequencerType = otherSequencerConfig.sequencerType
-
-        val factory: SequencerDriverFactory {
-          type ConfigType = C
-        } = DriverBlockSequencerFactory
-          .getSequencerDriverFactory(sequencerType, SequencerDriver.DriverApiVersion)
 
         val blockConfigValue = blockSequencerConfigWriter.to(otherSequencerConfig.block)
+        val referenceSequencerConfigValue =
+          referenceSequencerConfigWriter.to(otherSequencerConfig.config)
 
-        val configValue = factory.configParser
-          .from(otherSequencerConfig.config)
-          // in order to make use of the confidential flag, we must first parse the raw sequencer driver config
-          // and then write it again now making sure to use hide fields if confidentiality is turned on
-          .map(parsedConfig => factory.configWriter(confidential).to(parsedConfig))
-          .valueOr(error =>
-            sys.error(s"Failed to read $sequencerType sequencer's config. Error: $error")
-          )
         ConfigValueFactory.fromMap(
           Map[String, Object](
-            "type" -> sequencerType,
+            "type" -> "reference",
             "block" -> blockConfigValue,
-            "config" -> configValue,
+            "config" -> referenceSequencerConfigValue,
           ).asJava
         )
     }
@@ -2201,10 +2221,6 @@ object CantonConfig {
     implicit val tracingConfigDisabledSpanExporterWriter
         : ConfigWriter[TracingConfig.Exporter.Disabled.type] =
       deriveWriter[TracingConfig.Exporter.Disabled.type]
-    @nowarn("cat=deprecation")
-    implicit val tracingConfigZipkinSpanExporterWriter
-        : ConfigWriter[TracingConfig.Exporter.Zipkin] =
-      deriveWriter[TracingConfig.Exporter.Zipkin]
     implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] =
       deriveWriter[TracingConfig.Exporter.Otlp]
     implicit val tracingConfigSpanExporterWriter: ConfigWriter[TracingConfig.Exporter] =
@@ -2437,6 +2453,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigWriter: ConfigWriter[ReplicationConfig] =
       deriveWriter[ReplicationConfig]
+    lazy implicit final val deprecatedApiConfigWriter: ConfigWriter[DeprecatedApiConfig] =
+      deriveWriter[DeprecatedApiConfig]
     implicit val participantFeaturesConfigWriter: ConfigWriter[ParticipantFeaturesConfig] =
       deriveWriter[ParticipantFeaturesConfig]
 

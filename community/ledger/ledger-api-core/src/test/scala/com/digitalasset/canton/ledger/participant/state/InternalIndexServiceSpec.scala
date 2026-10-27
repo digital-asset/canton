@@ -78,6 +78,7 @@ class InternalIndexServiceSpec
         activeAt = eqTo(Some(Offset.tryFromLong(10))),
         rangeInfo = eqTo(AcsRangeInfo.empty),
         configOverrides = any[Option[ActiveContractsServiceStreamsConfigOverrides]],
+        includeIncompleteReassignments = any[Boolean],
       )(any[LoggingContextWithTrace])
     ).thenReturn(
       activeContractsResponses(1, 2, 3, 4, 5)
@@ -102,6 +103,7 @@ class InternalIndexServiceSpec
         activeAt = eqTo(Some(Offset.tryFromLong(10))),
         rangeInfo = eqTo(AcsRangeInfo.empty),
         configOverrides = any[Option[ActiveContractsServiceStreamsConfigOverrides]],
+        includeIncompleteReassignments = any[Boolean],
       )(any[LoggingContextWithTrace])
     ).thenReturn(
       activeContractsResponses(1, 2, 3, 4, 5)
@@ -121,6 +123,7 @@ class InternalIndexServiceSpec
           )
         ),
         configOverrides = any[Option[ActiveContractsServiceStreamsConfigOverrides]],
+        includeIncompleteReassignments = any[Boolean],
       )(any[LoggingContextWithTrace])
     ).thenReturn(
       activeContractsResponses(3, 4, 5)
@@ -147,6 +150,7 @@ class InternalIndexServiceSpec
         activeAt = eqTo(Some(Offset.tryFromLong(10))),
         rangeInfo = eqTo(AcsRangeInfo.empty),
         configOverrides = any[Option[ActiveContractsServiceStreamsConfigOverrides]],
+        includeIncompleteReassignments = any[Boolean],
       )(any[LoggingContextWithTrace])
     ).thenReturn(
       activeContractsResponses(1, 2, 3, 4, 5)

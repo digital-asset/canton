@@ -117,7 +117,7 @@ def gather_results(paths):
     for path in paths:
         try:
             root = ET.parse(path).getroot()
-        except ET.ParseError:
+        except ET.ParseError:  # failure-surfaced: counted in parse_errors and reported
             parse_errors += 1
             continue
 

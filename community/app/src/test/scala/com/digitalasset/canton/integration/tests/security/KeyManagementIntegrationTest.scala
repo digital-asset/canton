@@ -19,6 +19,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
+import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
 trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
@@ -287,6 +288,7 @@ sealed trait KeyManagementIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
+        _.focus(_.parameters.enableKeyDownload).replace(true),
         ConfigTransforms.enableRemoteMediators("mediator1", "remoteMediator1"),
         // Disable ACS commitment processing, so that the sequencer is idle when keys get deleted
         ConfigTransforms.useStaticTime,

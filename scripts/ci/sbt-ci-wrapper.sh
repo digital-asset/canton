@@ -136,7 +136,9 @@ if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
   FAIL_ON_ERROR_IN_OUTPUT="false"
 fi
 
-CODE=0
+# Stays non-zero until sbt has run and its exit code has been stored, so that an abort before that point
+# (for example a missing credential) is not reported as success by the EXIT trap.
+CODE=1
 WATCHDOG_TIMEOUT_TRIGGERED=false
 WATCHDOG_XML_GENERATED=false
 

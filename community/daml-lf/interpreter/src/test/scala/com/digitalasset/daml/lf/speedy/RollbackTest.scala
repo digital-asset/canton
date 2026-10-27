@@ -268,7 +268,7 @@ abstract class RollbackTestBase
           } yield tx,
         parties = Set(alice),
         packageResolution = Map.empty,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
       )
       if (effectfulRollbackChoices(choiceName)) {
         result match {

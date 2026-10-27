@@ -43,7 +43,7 @@ object TopologySigningHelper {
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, String, GenericSignedTopologyTransaction] =
-    if (tx.transaction.isEquivalentTo(protocolVersion)) {
+    if (tx.transaction.isAdmissibleFor(protocolVersion)) {
       EitherT.rightT(tx)
     } else {
       val authorizingKeys = tx.signatures.map(_.authorizingLongTermKey)

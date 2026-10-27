@@ -11,8 +11,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -27,8 +27,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * [[com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient]].
   */
 class ApiTrafficService(
-    // TODO(i35199): Streamline participant bootstrapping without dynamic loading: with streamlined instantiation we would be able to get rid of this CBN
-    client: => RichTrafficServiceClient,
+    client: RichTrafficServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends TrafficService
@@ -63,12 +62,12 @@ class ApiTrafficService(
       .asGrpcFuture
   }
 
-  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+  override def prune(request: PruneRequest): Future[PruneResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     client
-      .pruneEvents(request)
+      .prune(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(
           RichTrafficServiceClient.normalizeTeaError(grpcError)

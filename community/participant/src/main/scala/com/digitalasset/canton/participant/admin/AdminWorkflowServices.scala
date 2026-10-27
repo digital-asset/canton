@@ -35,6 +35,8 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCreditIssuer
+import com.digitalasset.canton.tea.ingestion.TeaCreditIngestionService
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.TopologyManagerError.{
@@ -46,7 +48,12 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
-import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil, FutureUtil, MonadUtil}
+import com.digitalasset.canton.util.{
+  DamlPackageLoader,
+  EitherTUtil,
+  FutureUnlessShutdownUtil,
+  MonadUtil,
+}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.Ast
 import com.google.protobuf.ByteString
@@ -275,21 +282,8 @@ class AdminWorkflowServices(
     */
   private def loadDamlArchiveResource(darName: String)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
-    val bytes =
-      withResource(AdminWorkflowServices.getDarInputStream(darName))(ByteString.readFrom)
-    AdminWorkflowServices.handleDamlErrorDuringPackageLoading(darName)(
-      packageService
-        .upload(
-          darBytes = bytes,
-          description = Some("System package"),
-          submissionIdO = None,
-          vettingInfo = None,
-          expectedMainPackageId = None,
-        )
-        .void
-    )
-  }
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    AdminWorkflowServices.uploadBuiltInDar(packageService, darName)
 
   private def createLedgerClient(
       userId: String
@@ -343,6 +337,7 @@ class AdminWorkflowServices(
                     client.updateService.getUpdatesSource(
                       begin = subscribeOffset,
                       eventFormat = service.eventFormat,
+                      transactionShape = service.transactionShape,
                     ),
                   consumingFlow = Flow[GetUpdatesResponse]
                     .map(_.update)
@@ -368,7 +363,10 @@ class AdminWorkflowServices(
         }
       }
 
-    (FutureUtil.logOnFailureUS(startupUS, s"Failed to start $service"), service)
+    (
+      FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(startupUS, s"Failed to start $service"),
+      service,
+    )
   }
 
 }
@@ -381,7 +379,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
     "canton-builtin-admin-workflow-acs-replication-alpha"
   private val AcsReplicationDarResourceFileName: String =
     s"dar/$AcsReplicationDarResourceName.dar"
-  val AdminWorkflowNames: Set[String] = Set(PingDarResourceName, AcsReplicationDarResourceName)
+  val AdminWorkflowNames: Set[String] =
+    Set(PingDarResourceName, AcsReplicationDarResourceName, TrafficCreditIssuer.PACKAGE_NAME)
 
   private def getDarInputStream(resourceName: String): InputStream =
     Option(
@@ -400,6 +399,46 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       .valueOr(err =>
         throw new IllegalStateException(s"Unable to load admin workflow packages: $err")
       )
+
+  /** Uploads a DAR from the classpath as a system package. Does NOT vet the DAR. */
+  private def uploadBuiltInDar(packageService: PackageService, darName: String)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] = {
+    val bytes = withResource(getDarInputStream(darName))(ByteString.readFrom)
+    handleDamlErrorDuringPackageLoading(darName)(
+      packageService
+        .upload(
+          darBytes = bytes,
+          description = Some("System package"),
+          submissionIdO = None,
+          vettingInfo = None,
+          expectedMainPackageId = None,
+        )
+        .void
+    )
+  }
+
+  /** Whether all packages of the canton-traffic-credit DAR are registered with the participant. */
+  private[participant] def isTrafficCreditDarRegistered(packageService: PackageService)(implicit
+      loggingContext: ErrorLoggingContext
+  ): Boolean =
+    TrafficCreditPackages.keySet.subsetOf(
+      packageService.getPackageMetadataView.getSnapshot.packages.keySet
+    )
+
+  /** Uploads the canton-traffic-credit DAR read by the traffic enforcement top-up ingestion, unless
+    * all its packages are already registered with the participant. Does NOT vet the DAR.
+    */
+  private[participant] def uploadTrafficCreditDarUnlessRegistered(packageService: PackageService)(
+      implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, IllegalStateException, Unit] =
+    if (isTrafficCreditDarRegistered(packageService)) EitherTUtil.unitUS
+    else uploadBuiltInDar(packageService, TeaCreditIngestionService.DarResourceFileName)
 
   private[participant] def handleDamlErrorDuringPackageLoading(adminWorkflow: String)(
       res: EitherT[FutureUnlessShutdown, RpcError, Unit]
@@ -436,8 +475,11 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
   lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(
     AcsReplicationDarResourceFileName
   )
+  lazy val TrafficCreditPackages: Map[PackageId, Ast.Package] = getDarPackages(
+    TeaCreditIngestionService.DarResourceFileName
+  )
   lazy val AllBuiltInPackages: Map[PackageId, Ast.Package] =
-    PingPackages ++ AcsReplicationPackages
+    PingPackages ++ AcsReplicationPackages ++ TrafficCreditPackages
 
   @Explanation(
     """This error indicates that the admin workflow package could not be vetted. The admin workflows is

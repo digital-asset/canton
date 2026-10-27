@@ -1,0 +1,26 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.integration.tests.ledgerapi.auth
+
+import com.daml.ledger.api.v2.state_service.GetConnectedSynchronizersRequest
+import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.util.GrpcServices.StateService
+
+import scala.concurrent.Future
+
+final class GetConnectedSynchronizersWithoutPartyAuthIT extends PublicServiceCallAuthTests {
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+
+  override def serviceCallName: String = "StateService#GetConnectedSynchronizers(<without party>)"
+
+  private lazy val request =
+    GetConnectedSynchronizersRequest(party = "", participantId = "", identityProviderId = "")
+
+  override def serviceCall(context: ServiceCallContext)(implicit
+      env: TestConsoleEnvironment
+  ): Future[Any] =
+    stub(StateService.stub(channel), context.token).getConnectedSynchronizers(request)
+}

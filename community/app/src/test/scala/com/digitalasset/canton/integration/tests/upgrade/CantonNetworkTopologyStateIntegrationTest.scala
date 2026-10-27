@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade
 
 import better.files.File
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.UsePostgres
@@ -23,6 +24,7 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage}
 import com.digitalasset.canton.store.IndexedTopologyStoreId
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.{InitialTopologySnapshotValidator, SequencedTime}
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
@@ -37,7 +39,9 @@ import com.digitalasset.canton.topology.transaction.SynchronizerParametersState
 import com.digitalasset.canton.util.JarResourceUtils
 import com.google.protobuf.ByteString
 import eu.rekawek.toxiproxy.model.ToxicDirection
-import org.apache.pekko.stream.scaladsl.Sink
+import monocle.macros.syntax.lens.*
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
 import scala.annotation.nowarn
@@ -48,16 +52,14 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
   protected def runValidation(
       topoStoreIdx: Int,
       txs: GenericStoredTopologyTransactions,
-      cleanupTopologyState: Boolean,
       timeout: FiniteDuration,
-      physicalSynchronizerIdOverride: Option[PhysicalSynchronizerId] = None,
+      psidOverride: Option[PhysicalSynchronizerId] = None,
       validateInitialTopologySnapshot: Boolean = true,
   )(implicit
       env: TestConsoleEnvironment
   ): (TopologyStore[TopologyStoreId], InitialTopologySnapshotValidator) = {
-    import env.*
 
-    val physicalSynchronizerId = physicalSynchronizerIdOverride.getOrElse {
+    val psid = psidOverride.getOrElse {
       txs
         .collectOfMapping[SynchronizerParametersState]
         .result
@@ -67,19 +69,40 @@ trait CantonNetworkTopologyIntegrationTestBase extends CommunityIntegrationTest 
         .synchronizerId
         .toPhysical
     }
+    runValidation(
+      topoStoreIdx,
+      Source(txs.result),
+      timeout,
+      psid,
+      validateInitialTopologySnapshot,
+    )
+  }
+
+  protected def runValidation(
+      topoStoreIdx: Int,
+      txs: Source[GenericStoredTopologyTransaction, NotUsed],
+      timeout: FiniteDuration,
+      psid: PhysicalSynchronizerId,
+      validateInitialTopologySnapshot: Boolean,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): (TopologyStore[TopologyStoreId], InitialTopologySnapshotValidator) = {
+    import env.*
+
     val static = StaticSynchronizerParameters.defaults(testedProtocolVersion).toInternal.value
-    val store = getTopologyStore(topoStoreIdx, physicalSynchronizerId)
+    val store = getTopologyStore(topoStoreIdx, psid)
     val validator = new InitialTopologySnapshotValidator(
       participant1.underlying.value.cryptoPureApi,
       store,
-      BatchAggregatorConfig.defaultsForTesting,
+      BatchingConfig().copy(
+        topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting
+      ),
       TopologyConfig.forTesting
         .copy(validateInitialTopologySnapshot = validateInitialTopologySnapshot),
       Some(static),
       timeouts,
       futureSupervisor = env.environment.futureSupervisor,
       loggerFactory,
-      cleanupTopologySnapshot = cleanupTopologyState,
     )
     validator
       .validateAndApplyInitialTopologySnapshot(txs)
@@ -160,6 +183,11 @@ final class CantonNetworkTopologyStateIntegrationTest
           )
         }
       }
+      .addConfigTransforms(
+        // We need to run this suite with a lot of extra memory to allow the snapshot to load
+        _.focus(_.parameters.startupMemoryCheckConfig.reportingLevel)
+          .replace(ReportingLevel.Ignore)
+      )
 
   private lazy val genesisFileName: String = "CN-genesis-state-20250410.gz"
 
@@ -216,7 +244,7 @@ final class CantonNetworkTopologyStateIntegrationTest
         client.toxics().latency("participant-db", ToxicDirection.UPSTREAM, toxiProxyLatency.toLong)
       }
 
-      val (store1, _) = runValidation(11, genesisSnapshot, cleanupTopologyState = true, timeout)
+      val (store1, _) = runValidation(11, genesisSnapshot, timeout)
       topologyStoreAfterImport = Some(store1)
 
     }
@@ -235,7 +263,7 @@ final class CantonNetworkTopologyStateIntegrationTest
             .futureValue
         )
 
-        runValidation(12, stateAfterImport, cleanupTopologyState = false, timeout)
+        runValidation(12, stateAfterImport, timeout)
       }
     }
 

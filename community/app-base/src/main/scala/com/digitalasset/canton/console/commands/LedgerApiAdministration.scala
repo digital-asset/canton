@@ -116,11 +116,7 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.tea.v1.{
-  GetAccountResponse,
-  PruneEventsResponse,
-  UpdateAccountResponse,
-}
+import com.digitalasset.canton.tea.v1.{GetAccountResponse, PruneResponse, UpdateAccountResponse}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
@@ -1315,6 +1311,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           submissionId: String = UUID.randomUUID().toString,
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
       ): UnassignedWrapper =
         submit_unassign_with_format(
           submitter = submitter,
@@ -1326,6 +1324,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId = submissionId,
           eventFormat = eventFormatAllParties(),
           timeout = timeout,
+          overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+          overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
         ).unassignedWrapper
 
       @Help.Summary(
@@ -1356,12 +1356,16 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId: String = UUID.randomUUID().toString,
           eventFormat: Option[EventFormat],
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
       ): EmptyOrUnassignedWrapper = {
         val result = consoleEnvironment.run(
           ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitUnassign(
               submitter = submitter.toLf,
               contractIds = contractIds,
+              overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
               source = source,
               target = target,
               workflowId = workflowId,
@@ -1388,6 +1392,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           submissionId: String = UUID.randomUUID().toString,
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
       ): (UnassignedWrapper, AssignedWrapper) = {
         val unassigned = submit_unassign(
           submitter,
@@ -1398,6 +1404,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId,
           submissionId,
           timeout,
+          overrideSourceValidationPackageIds,
+          overrideTargetValidationPackageIds,
         )
         val assigned = submit_assign(
           submitter,
@@ -1454,6 +1462,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           commandId: String = UUID.randomUUID().toString,
           submissionId: String = UUID.randomUUID().toString,
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
       ): Unit =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -1464,6 +1474,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               submitter = submitter.toLf,
               submissionId = submissionId,
               contractIds = contractIds,
+              overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
               source = source,
               target = target,
             )
@@ -1725,6 +1737,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- includeCreatedEventBlob: Whether the result should contain the createdEventBlobs, it
             |  works only if the filterTemplate is non-empty.
             |- resultFilter: Custom filter of the results, applies before limit.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the result.
             """
         )
         def of_party(
@@ -1737,6 +1751,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
             resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
+            includeIncompleteReassignments: Boolean = true,
         ): Seq[WrappedContractEntry] = {
           val observer =
             new RecordingStreamObserver[GetActiveContractsResponse](limit, resultFilter)
@@ -1763,6 +1778,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   verbose,
                   timeout.asFiniteApproximation,
                   includeCreatedEventBlob,
+                  includeIncompleteReassignments = includeIncompleteReassignments,
                 )
               )
             },
@@ -1812,6 +1828,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isActiveContract,
+            includeIncompleteReassignments = false,
           )
             .flatMap(_.entry.activeContract)
 
@@ -1856,6 +1873,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isIncompleteUnassigned,
+            includeIncompleteReassignments = true,
           )
             .flatMap(_.entry.incompleteUnassigned)
             .map(WrappedIncompleteUnassigned(_))
@@ -1901,6 +1919,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isIncompleteAssigned,
+            includeIncompleteReassignments = true,
           )
             .flatMap(_.entry.incompleteAssigned)
             .map(WrappedIncompleteAssigned(_))
@@ -1929,6 +1948,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- includeCreatedEventBlob: Whether the result should contain the createdEventBlobs, it
             |  works only if the filterTemplate is non-empty.
             |- resultFilter: Custom filter of the results, applies before limit.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the result.
             """
         )
         def of_all(
@@ -1941,6 +1962,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             identityProviderId: String = "",
             includeCreatedEventBlob: Boolean = false,
             resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
+            includeIncompleteReassignments: Boolean = true,
         ): Seq[WrappedContractEntry] =
           consoleEnvironment.runE {
             ledgerCommandResultWithLocalParties(ifPartiesEmpty =
@@ -1965,6 +1987,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                         verbose,
                         timeout.asFiniteApproximation,
                         includeCreatedEventBlob,
+                        includeIncompleteReassignments = includeIncompleteReassignments,
                       )
                     )
                   },
@@ -1995,6 +2018,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- identityProviderId: Limit the response to parties governed by the given identity
             |  provider.
             |- timeout: The maximum wait time for the complete acs to arrive.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the count.
             """
         )
         def count(
@@ -2003,6 +2028,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             identityProviderId: String = "",
+            includeIncompleteReassignments: Boolean = true,
         ): Int =
           check(FeatureFlag.Testing)(consoleEnvironment.runE {
             ledgerCommandResultWithLocalParties(ifPartiesEmpty = Right(0))(
@@ -2020,6 +2046,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                         interfaceFilter = filterInterfaces,
                         activeAtOffset = activeAtOffsetO.getOrElse(end()),
                         timeout = timeout.asFiniteApproximation,
+                        includeIncompleteReassignments = includeIncompleteReassignments,
                       )
                     )
                   },
@@ -2045,7 +2072,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
         ): Unit =
           ConsoleMacros.utils.retry_until_true(timeout) {
-            of_party(party, verbose = false)
+            of_party(party, verbose = false, includeIncompleteReassignments = false)
               .exists(_.contractId == contractId.coid)
           }
 
@@ -2053,14 +2080,19 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         @Help.Description(
           """This search function returns an untyped ledger-api event.
             |The find will wait until the contract appears or throw an exception once it times out.
+            |The includeIncompleteReassignments parameter controls whether incomplete reassignments
+            |are also searched.
             """
         )
         def find_generic(
             partyId: Party,
             filter: WrappedContractEntry => Boolean,
             timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
+            includeIncompleteReassignments: Boolean = true,
         ): WrappedContractEntry = {
-          def scan: Option[WrappedContractEntry] = of_party(partyId).find(filter(_))
+          def scan: Option[WrappedContractEntry] =
+            of_party(partyId, includeIncompleteReassignments = includeIncompleteReassignments)
+              .find(filter(_))
 
           ConsoleMacros.utils.retry_until_true(timeout)(scan.isDefined)
           consoleEnvironment.runE {
@@ -3383,6 +3415,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId: String = userId,
             submissionId: String = UUID.randomUUID().toString,
             timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+            overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+            overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
         ): Reassignment =
           ledger_api.commands
             .submit_unassign(
@@ -3394,6 +3428,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId,
               submissionId,
               timeout,
+              overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds,
             )
             .unassignedWrapper
             .reassignment
@@ -3710,6 +3746,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               |The command will wait until the contract appears or throw an exception once it times out.
               |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
               |trailing fields in the contract payload are handled during decoding.
+              |The includeIncompleteReassignments parameter controls whether contracts of incomplete
+              |reassignments are also considered.
               """
           )
           def await[
@@ -3725,6 +3763,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
               timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
+              includeIncompleteReassignments: Boolean = true,
           ): TC = {
             val result = new AtomicReference[Option[TC]](None)
             ConsoleMacros.utils.retry_until_true(timeout) {
@@ -3733,6 +3772,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   partyId,
                   predicate,
                   synchronizerFilter,
+                  includeIncompleteReassignments,
                 )
               result.set(tmp.headOption)
               tmp.nonEmpty
@@ -3755,6 +3795,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               |You can restrict search to a synchronizer by specifying the optional synchronizer ID.
               |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
               |trailing fields in the contract payload are handled during decoding.
+              |The includeIncompleteReassignments parameter controls whether contracts of incomplete
+              |reassignments are also considered.
               """
           )
           def filter[
@@ -3769,6 +3811,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               partyId: Party,
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
+              includeIncompleteReassignments: Boolean = true,
           ): Seq[TC] = {
             val templateId = TemplateId.fromJavaIdentifier(templateCompanion.TEMPLATE_ID)
 
@@ -3779,7 +3822,11 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               }
 
             ledger_api.state.acs
-              .of_party(partyId, filterTemplates = Seq(templateId))
+              .of_party(
+                partyId,
+                filterTemplates = Seq(templateId),
+                includeIncompleteReassignments = includeIncompleteReassignments,
+              )
               .collect { case entry if synchronizerPredicate(entry) => entry.event }
               .flatMap { ev =>
                 JavaDecodeUtil
@@ -3843,23 +3890,33 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         )
       }
 
-      @Help.Summary("Prune events before or at the given timestamp", FeatureFlag.Stable)
+      @Help.Summary(
+        "Prune events, submission correlations and uncharged completions before or at the given timestamp",
+        FeatureFlag.Stable,
+      )
       @Help.Description(
-        """Prune events before or at the given timestamp.
-          |This command will delete all events that have a record time before or at the given
-          |timestamp. This is useful for cleaning up old events and reducing the size of the
-          |event store.
+        """Prune events, submission correlations and uncharged completions before or at the given
+          |timestamp.
+          |This command will delete all events, submission correlations and uncharged completions
+          |that have a timestamp before or at the given timestamp. This is useful for cleaning up
+          |old events and reducing the size of the event store. Submission correlations record
+          |which account each submission is charged to until its completion arrives. Uncharged
+          |completions record completions with a positive cost that weren't charged to any account.
+          |The timestamp must be at least the participant's max deduplication duration (7 days by
+          |default) in the past.
           |
           |WARNING:
           |- This operation is irreversible and should be used with caution.
           |- Affects de-duplication. If an event is pruned, de-duplication UpdateAccount
-          |  requests on it will NOT be possible."""
+          |  requests on it will NOT be possible.
+          |- If a submission's correlation is pruned before its completion arrives, the submission
+          |  is NOT debited."""
       )
-      def prune_events(
+      def prune(
           beforeOrAt: CantonTimestamp
-      ): PruneEventsResponse = consoleEnvironment.run {
+      ): PruneResponse = consoleEnvironment.run {
         ledgerApiCommand(
-          LedgerApiCommands.Traffic.PruneEvents(beforeOrAt)
+          LedgerApiCommands.Traffic.Prune(beforeOrAt)
         )
       }
     }

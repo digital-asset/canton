@@ -109,6 +109,7 @@ final class ApiStateService(
                 limit = None,
               ),
               configOverrides = None,
+              includeIncompleteReassignments = request.includeIncompleteReassignments,
             )
         }
       }
@@ -174,6 +175,7 @@ final class ApiStateService(
                 limit = Some(maxPageSize + 1L),
               ),
               configOverrides = None,
+              includeIncompleteReassignments = request.includeIncompleteReassignments,
             )
             .runWith(
               Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]]

@@ -87,7 +87,7 @@ private[update] final class SubmissionRequestValidator(
           envelopesHaveValidSignature <- batchSignatureFE
         } yield {
           // if all have valid signatures, then we'll mark this event as prevalidated, which means that the signature
-          // validation will be skipped and we only need to check that the key used was really the one valid
+          // validation will be skipped, and we only need to check that the key used was really the one valid
           // at the given time (using verifyKeyOwner)
           TracedPossiblyPrevalidated(
             send,
@@ -119,7 +119,7 @@ private[update] final class SubmissionRequestValidator(
   def performIndependentValidations(
       sequencingTimestamp: CantonTimestamp,
       signedSubmissionRequest: TracedPossiblyPrevalidated[SignedContent[SubmissionRequest]],
-      snapshotToValidateSubmissionRequest: SyncCryptoApi,
+      sequencingSnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -150,7 +150,7 @@ private[update] final class SubmissionRequestValidator(
       // Warn if we use an approximate snapshot but only after we've read at least one
       _ <- checkSignatureOnSubmissionRequest(
         signedSubmissionRequest,
-        snapshotToValidateSubmissionRequest,
+        sequencingSnapshot,
       ).mapK(validationFUSK)
       // At this point we know the sender has indeed properly signed the submission request
       // so we'll want to run the traffic control logic
@@ -196,7 +196,7 @@ private[update] final class SubmissionRequestValidator(
       ).mapK(validationFUSK)
 
       _ <- checkClosedEnvelopesSignatures(
-        snapshotToValidateSubmissionRequest,
+        sequencingSnapshot,
         signedSubmissionRequest.map(_.content),
         sequencingTimestamp,
       ).mapK(validationFUSK)
@@ -204,7 +204,7 @@ private[update] final class SubmissionRequestValidator(
         resolveSubmissionRequestRecipients(
           submissionRequest,
           sequencingTimestamp,
-          snapshotToValidateSubmissionRequest,
+          sequencingSnapshot,
         ).mapK(validationFUSK)
       // compute the aggregation id last (we keep this here as the old code computed
       // the aggregation id as first step in the sequential stage. we now do this in the
@@ -212,7 +212,7 @@ private[update] final class SubmissionRequestValidator(
       aggregationInfo <- inFlightAggregationHandler
         .computeAggregationIdAndValidateAggregationRule(
           sequencingTimestamp,
-          snapshotToValidateSubmissionRequest,
+          sequencingSnapshot,
           submissionRequest,
         )
         .mapK(validationFUSK)
@@ -331,7 +331,7 @@ private[update] final class SubmissionRequestValidator(
               .areMembersRegisteredAt(group.active ++ group.passive, sequencingTimestamp)
               .map(_.flatMap {
                 case (member, false) => Some(member)
-                case (member, true) => None
+                case (_, true) => None
               })
 
           EitherT(
@@ -374,12 +374,12 @@ private[update] final class SubmissionRequestValidator(
                 }
             )
             .flatMap { closedUncompressedEnvelope =>
-              if (submissionRequest.prevalidated) {
+              if (submissionRequest.prevalidated)
                 closedUncompressedEnvelope.verifyKeyUsage(
                   topologyOrSequencingSnapshot,
                   submissionRequest.value.sender,
                 )
-              } else
+              else
                 closedUncompressedEnvelope.verifySignatures(
                   topologyOrSequencingSnapshot,
                   submissionRequest.value.sender,

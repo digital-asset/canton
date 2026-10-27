@@ -14,13 +14,9 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FailureMode.{
-  ContinueAfterFailure,
-  CrashAfterFailure,
-  StopAfterFailure,
-}
+import com.digitalasset.canton.util.FailureMode.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
+import com.digitalasset.canton.util.SimpleExecutionQueue.{QueueConfig, TaskCell}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import java.util.concurrent.atomic.AtomicReference
@@ -31,22 +27,32 @@ import scala.util.{Failure, Success, Try}
 
 /** Determines how the queue reacts to failures of previous tasks.
   */
-sealed trait FailureMode
+sealed trait FailureMode extends Product with Serializable
 
 object FailureMode {
 
   /** Causes the queue to crash the entire process if a task is scheduled after a previously failed
     * task.
     */
-  object CrashAfterFailure extends FailureMode
+  case object CrashAfterFailure extends FailureMode
+
+  /** Causes the queue to crash the entire process if a task is scheduled after a previously failed
+    * task, but will continue to process tasks after a task has been aborted due to shutdown.
+    */
+  case object CrashAfterFailureContinueAfterAbort extends FailureMode
 
   /** Causes the queue to not process any further tasks after a previously failed task.
     */
-  object StopAfterFailure extends FailureMode
+  case object StopAfterFailure extends FailureMode
+
+  /** Causes the queue to not process any further tasks after a previously failed task, but will
+    * continue to process tasks after a task has been aborted due to shutdown.
+    */
+  case object StopAfterFailureContinueAfterAbort extends FailureMode
 
   /** The queue will continue the execution of tasks even if previous tasks had failed.
     */
-  object ContinueAfterFailure extends FailureMode
+  case object ContinueAfterFailure extends FailureMode
 }
 
 /** Functions executed with this class will only run when all previous calls have completed
@@ -101,6 +107,14 @@ class SimpleExecutionQueue(
   protected val directExecutionContext: DirectExecutionContext =
     DirectExecutionContext(noTracingLogger)
 
+  private val queueConfig = QueueConfig(
+    name,
+    logTaskTiming,
+    failureMode,
+    futureSupervisor,
+    directExecutionContext,
+  )
+
   /** Will execute the given function after all previous executions have completed successfully and
     * return the future with the result of this execution.
     */
@@ -135,15 +149,7 @@ class SimpleExecutionQueue(
       execution: => FutureUnlessShutdown[A],
       description: String,
   )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[A] = {
-    val next =
-      new TaskCell(
-        queueName = name,
-        description = description,
-        logTaskTiming,
-        failureMode,
-        futureSupervisor,
-        directExecutionContext,
-      )
+    val next = new TaskCell(queueConfig, description)
     val oldHead = queueHead.getAndSet(next) // linearization point
     next.chain(
       oldHead,
@@ -177,7 +183,7 @@ class SimpleExecutionQueue(
       }(directExecutionContext)
 
   private val queueHead: AtomicReference[TaskCell] =
-    new AtomicReference[TaskCell](TaskCell.sentinel(queueName = name, directExecutionContext))
+    new AtomicReference[TaskCell](TaskCell.sentinel(queueConfig))
 
   /** Check if any task is queued skipping the sentinel */
   def isEmpty: Boolean = queueHead.get().predecessor.isEmpty
@@ -257,15 +263,21 @@ class SimpleExecutionQueue(
 
 object SimpleExecutionQueue {
 
-  /** Implements the chaining of tasks and their descriptions. */
-  private class TaskCell(
-      val queueName: String,
-      val description: String,
+  private final case class QueueConfig(
+      queueName: String,
       logTaskTiming: Boolean,
       failureMode: FailureMode,
       futureSupervisor: FutureSupervisor,
       directExecutionContext: DirectExecutionContext,
+  )
+
+  /** Implements the chaining of tasks and their descriptions. */
+  private class TaskCell(
+      private val queueConfig: QueueConfig,
+      val description: String,
   )(implicit errorLoggingContext: ErrorLoggingContext) {
+
+    import queueConfig.*
 
     /** Completes after all earlier tasks and this task have completed. The result of the executed
       * action will be captured by `Try[UnlessShutdown[Unit]]`. The promise failure/shutdown of the
@@ -338,49 +350,6 @@ object SimpleExecutionQueue {
           execution
         }
 
-      // CrashAfterFailure only runs the subsequent task if the previous task was successful.
-      // In case of the previous task's failure, it will crash the process.
-      def proceedWithCrashAfterFailure(
-          previousResult: Try[UnlessShutdown[Unit]]
-      ): FutureUnlessShutdown[Try[UnlessShutdown[A]]] =
-        previousResult match {
-          case Failure(ex) =>
-            logNotRunningTask(isShutdown = false)
-            FatalError.exitOnFatalError(
-              message =
-                s"Execution queue $queueName is stuck, task ${description.singleQuoted} will not run because of failure of previous task",
-              exception = ex,
-              logger = loggingContext.logger,
-            )(loggingContext.traceContext)
-
-          case Success(AbortedDueToShutdown) =>
-            logNotRunningTask(isShutdown = true)
-            // Do not crash if a previous task was aborted due to shutdown,
-            // because we might be in the middle of a coordinated shutdown and therefore
-            // we don't want to just sys.exit.
-            FutureUnlessShutdown.pure(Success(UnlessShutdown.AbortedDueToShutdown))
-
-          case Success(UnlessShutdown.Outcome(_)) =>
-            runTask()
-        }
-
-      // StopAfterFailure only runs the subsequent task if the previous task was successful
-      def proceedWithStopAfterFailure(
-          previousResult: Try[UnlessShutdown[Unit]]
-      ): FutureUnlessShutdown[Try[UnlessShutdown[A]]] =
-        previousResult match {
-          case Failure(exception) =>
-            logNotRunningTask(isShutdown = false)
-            FutureUnlessShutdown.pure(Failure(exception))
-
-          case Success(UnlessShutdown.AbortedDueToShutdown) =>
-            logNotRunningTask(isShutdown = true)
-            FutureUnlessShutdown.pure(Success(UnlessShutdown.AbortedDueToShutdown))
-
-          case Success(UnlessShutdown.Outcome(_)) =>
-            runTask()
-        }
-
       def logNotRunningTask(isShutdown: Boolean): Unit = {
         def log(msg: String): Unit =
           if (isShutdown) loggingContext.debug(msg)
@@ -404,18 +373,39 @@ object SimpleExecutionQueue {
           FutureUnlessShutdown.failed(exception)
 
         case Success(UnlessShutdown.Outcome(executionResult)) =>
-          failureMode match {
-            case CrashAfterFailure =>
-              proceedWithCrashAfterFailure(executionResult)
-
-            case StopAfterFailure =>
-              proceedWithStopAfterFailure(executionResult)
-
-            case ContinueAfterFailure =>
-              // this failureMode always runs the next task, independent of the previous task's result
+          executionResult match {
+            case Success(UnlessShutdown.Outcome(_)) =>
               runTask()
+            case Success(AbortedDueToShutdown) =>
+              failureMode match {
+                case CrashAfterFailure | StopAfterFailure =>
+                  logNotRunningTask(isShutdown = true)
+                  // Do not crash if a previous task was aborted due to shutdown even if the failure mode is CrashAfterFailure,
+                  // because we might be in the middle of a coordinated shutdown and therefore
+                  // we don't want to just sys.exit.
+                  FutureUnlessShutdown.abortedDueToShutdown
+                case CrashAfterFailureContinueAfterAbort | StopAfterFailureContinueAfterAbort |
+                    ContinueAfterFailure =>
+                  runTask()
+              }
+            case Failure(exception) =>
+              failureMode match {
+                case CrashAfterFailure | CrashAfterFailureContinueAfterAbort =>
+                  logNotRunningTask(isShutdown = false)
+                  val message =
+                    s"Execution queue $queueName is stuck, task ${description.singleQuoted} will not run because of failure of previous task"
+                  implicit val traceContext: TraceContext = loggingContext.traceContext
+                  FatalError.exitOnFatalError(message, exception, loggingContext.logger)
+                case StopAfterFailure | StopAfterFailureContinueAfterAbort =>
+                  logNotRunningTask(isShutdown = false)
+                  FutureUnlessShutdown.pure(Failure(exception))
+                case ContinueAfterFailure =>
+                  // this failureMode always runs the next task, independent of the previous task's failure
+                  runTask()
+              }
           }
         case Success(AbortedDueToShutdown) =>
+          // If the queue is closed, do not run any further tasks even if `continueAfterFailure` is true
           logNotRunningTask(isShutdown = true)
           FutureUnlessShutdown.abortedDueToShutdown
       }(directExecutionContext)
@@ -471,20 +461,11 @@ object SimpleExecutionQueue {
   private object TaskCell {
 
     /** Sentinel task cell that is already completed. */
-    def sentinel(queueName: String, directExecutionContext: DirectExecutionContext): TaskCell = {
+    def sentinel(queueConfig: QueueConfig): TaskCell = {
       // We don't care about the logging context here because the promise is already completed
       import TraceContext.Implicits.Empty.*
       val errorLoggingContext = ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)
-      val cell = new TaskCell(
-        queueName = queueName,
-        description = "sentinel",
-        logTaskTiming = false,
-        failureMode = StopAfterFailure,
-        FutureSupervisor.Noop,
-        directExecutionContext,
-      )(
-        errorLoggingContext
-      )
+      val cell = new TaskCell(queueConfig, "sentinel")(errorLoggingContext)
       cell.predecessorCell.set(None)
       cell.completionPromise.outcome_(Success(UnlessShutdown.Outcome(())))
       cell

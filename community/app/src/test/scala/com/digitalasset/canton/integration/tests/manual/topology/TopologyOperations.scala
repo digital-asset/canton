@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperations.TransactionProgress
 import com.digitalasset.canton.integration.{ConfigTransform, TestConsoleEnvironment}
@@ -32,6 +33,11 @@ final case class Reservations(
       (exclusiveMediators ++ other.exclusiveMediators).distinct,
       (exclusiveParties ++ other.exclusiveParties).distinct,
     )
+
+  def isReserved(name: String): Boolean =
+    exclusiveParticipants.contains(name) ||
+      exclusiveSequencers.contains(name) ||
+      exclusiveMediators.contains(name)
 }
 
 /** Allow to model one operation that is performed as part of the chaos testing. Most of the methods
@@ -83,6 +89,15 @@ trait TopologyOperations extends TopologyChaosLogging with TopologyOperationsHel
   def canUseParty(party: PartyId)(implicit globalReservations: Reservations): Boolean =
     reservations.exclusiveParties.exists(party.identifier.unwrap.startsWith(_)) ||
       !globalReservations.exclusiveParties.exists(party.identifier.unwrap.startsWith(_))
+
+  /** Whether this operation can use the node, i.e., the node is not reserved by another operation.
+    */
+  def canUseNode(
+      node: LocalInstanceReference
+  )(implicit globalReservations: Reservations): Boolean =
+    node.is_initialized &&
+      (reservations.isReserved(node.name) || !globalReservations.isReserved(node.name))
+
 }
 
 trait TopologyOperationsCompanion {

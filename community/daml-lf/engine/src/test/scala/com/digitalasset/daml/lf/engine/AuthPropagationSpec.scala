@@ -112,7 +112,7 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
   private val submissionSeed: crypto.Hash = crypto.Hash.hashPrivateKey("submissionSeed")
   private val contractIdVersion = ContractIdVersion.V1
   private val testEngine: Engine = Engine.DevEngine(loggerFactory)
-  private val interpretConfig: InterpretationConfig = InterpretationConfig.Default
+  private val interpretConfig: InterpretationConfig = InterpretationConfig.DefaultForTesting
 
   private def go(
       submitters: Set[Party],

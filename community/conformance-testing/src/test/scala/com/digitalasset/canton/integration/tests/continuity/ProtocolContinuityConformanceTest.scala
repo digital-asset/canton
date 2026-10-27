@@ -5,8 +5,9 @@ package com.digitalasset.canton.integration.tests.continuity
 
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.console.MediatorReference
+import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -49,12 +50,15 @@ trait ProtocolContinuityConformanceTest
     with IsolatedEnvironments
     with HasExecutionContext {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def connectedSynchronizersCount = 1
 
-  override def environmentDefinition: EnvironmentDefinition = {
-    val env = EnvironmentDefinition.P3S1M1_Manual
+  protected def baseEnvironmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P3S1M1_Manual
+
+  override def environmentDefinition: EnvironmentDefinition =
+    baseEnvironmentDefinition
       .addConfigTransforms(ConfigTransforms.clearMinimumProtocolVersion*)
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
       .updateTestingConfig(
@@ -62,37 +66,38 @@ trait ProtocolContinuityConformanceTest
           Set("participant1", "participant2", "participant3")
         )
       )
-    if (disableBinaryVersionEnforcement)
-      env.addConfigTransform(
-        // Once we remove PV34, we can remove this config transform!
-        ConfigTransforms.updateAllSequencerConfigs_(
-          _.focus(_.parameters.disableReleaseVersionHandshakeCheck).replace(true)
-        )
-      )
-    else env
-  }
 
   protected def numShards: Int
   protected def shard: Int
-  protected def disableBinaryVersionEnforcement: Boolean = false
 
 }
 
 /** For a given release R, the Ledger API conformance test suites at release R are run against:
-  *   - 1x synchronizer of release R with the latest protocol version of release R
-  *   - 2x participants based on current main
+  *   - 1x synchronizer with the latest protocol version of release R, consisting of
+  *     - 1x sequencer and 1x mediator of release R (sequencer1, mediator1)
+  *     - 1x sequencer and 1x mediator based on current main (sequencer2, mediator2)
+  *   - 1x participant based on current main (participant1)
+  *   - 2x participants of release R (participant2, participant3)
+  *
+  * All participants and mediators read from both sequencers with a trust threshold of 2, and the
+  * mediator threshold is 2. Hence, sequenced events and confirmation results are only accepted if
+  * the release-R and the current-main nodes agree.
   */
-trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityConformanceTest {
-  private lazy val externalSynchronizer =
+trait ProtocolContinuityConformanceTestMixedVersions extends ProtocolContinuityConformanceTest {
+  override protected def baseEnvironmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P3S2M2_Manual
+
+  private lazy val external =
     new UseExternalProcess(
       loggerFactory,
+      externalParticipants = Set("participant2", "participant3"),
       externalSequencers = Set("sequencer1"),
       externalMediators = Set("mediator1"),
       fileNameHint = this.getClass.getSimpleName,
       removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
     )
 
-  registerPlugin(externalSynchronizer)
+  registerPlugin(external)
 
   testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
     lazy val binDir = ReleaseUtils
@@ -106,17 +111,29 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
 
         val cantonReleaseVersion = ReleasePath(binDir)
 
-        externalSynchronizer.start(
+        external.start(
           remoteMediator1.name,
           cantonReleaseVersion,
           failOnUnknownConfigKeys = false,
         )
-        externalSynchronizer.start(
+        external.start(
           remoteSequencer1.name,
           cantonReleaseVersion,
           failOnUnknownConfigKeys = false,
         )
-        participants.local.start()
+        external.start(
+          remoteParticipant2.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
+        external.start(
+          remoteParticipant3.name,
+          cantonReleaseVersion,
+          failOnUnknownConfigKeys = false,
+        )
+        sequencer2.start()
+        mediator2.start()
+        participant1.start()
 
         clue(
           "Waiting for remote sequencer1 to be ready for initialization. If this fails check the logs of the external process for any errors"
@@ -128,8 +145,10 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
         ) {
           remoteMediator1.health.wait_for_ready_for_initialization()
         }
+        sequencer2.health.wait_for_ready_for_initialization()
+        mediator2.health.wait_for_ready_for_initialization()
 
-        val identityTransactions =
+        val releaseIdentityTransactions =
           // generate_onboarding_transactions is the recommended way to retrieve
           // the identity transactions, but it was only introduced in 3.7, so we
           // need to branch here.
@@ -139,7 +158,15 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
           else
             remoteSequencer1.topology.transactions.generate_onboarding_transactions(pv) ++
               remoteMediator1.topology.transactions.generate_onboarding_transactions(pv)
+        val identityTransactions = releaseIdentityTransactions ++
+          sequencer2.topology.transactions.generate_onboarding_transactions(pv) ++
+          mediator2.topology.transactions.generate_onboarding_transactions(pv)
 
+        val mediatorSequencers = MediatorSequencersConfiguration(
+          sequencers.all,
+          trustThreshold = PositiveInt.two,
+          livenessMargin = NonNegativeInt.zero,
+        )
         val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
         NetworkBootstrapper(
           Seq(
@@ -147,17 +174,28 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
               daName,
               synchronizerOwners = Seq(remoteSequencer1),
               synchronizerThreshold = PositiveInt.one,
-              sequencers = Seq(remoteSequencer1),
-              mediators = Seq(remoteMediator1),
+              sequencers = sequencers.all,
+              mediators = Seq(remoteMediator1, mediator2),
               staticSynchronizerParameters = staticParams,
               identityTransactions = Some(identityTransactions),
+              mediatorThreshold = PositiveInt.two,
+              overrideMediatorToSequencers = Some(
+                Map[MediatorReference, MediatorSequencersConfiguration](
+                  remoteMediator1 -> mediatorSequencers,
+                  mediator2 -> mediatorSequencers,
+                )
+              ),
             )
           )
         )(env).bootstrap()
 
         remoteSequencer1.health.wait_for_initialized()
+        sequencer2.health.wait_for_initialized()
         remoteMediator1.health.wait_for_initialized()
-        participants.local.foreach(_.health.wait_for_initialized())
+        mediator2.health.wait_for_initialized()
+        participant1.health.wait_for_initialized()
+        remoteParticipant2.health.wait_for_initialized()
+        remoteParticipant3.health.wait_for_initialized()
 
         setupLedgerApiConformanceEnvironment(env)
 
@@ -178,85 +216,10 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
         // Shutdown
         shutdownLedgerApiConformanceEnvironment(env)
 
-        externalSynchronizer.kill(remoteMediator1.name)
-        externalSynchronizer.kill(remoteSequencer1.name)
-    }
-  }
-}
-
-/** For a given release R, these tests run the Ledger API compatibility tests against
-  *   - 1x synchronizer based on current main with the latest protocol version of release R
-  *   - 3x participants of release R
-  */
-trait ProtocolContinuityConformanceTestParticipant extends ProtocolContinuityConformanceTest {
-  val external = new UseExternalProcess(
-    loggerFactory,
-    externalParticipants = Set("participant1", "participant2", "participant3"),
-    fileNameHint = this.getClass.getSimpleName,
-    removeConfigPaths = ProtocolContinuityConformanceTest.removeConfigPaths,
-  )
-
-  registerPlugin(external)
-
-  testedReleases.foreach { case TestedRelease(release, protocolVersions) =>
-    lazy val binDir = ReleaseUtils
-      .retrieve(release)
-      .futureValue(timeout = PatienceConfiguration.Timeout(2.minutes))
-    lazy val pv = protocolVersions.max1
-
-    s"run conformance tests of shard $shard with release $release and protocol $pv" in {
-      implicit env =>
-        import env.*
-
-        val cantonReleaseVersion = ReleasePath(binDir)
-
-        sequencer1.start()
-        mediator1.start()
-        mediator1.health.wait_for_ready_for_initialization()
-        sequencer1.health.wait_for_ready_for_initialization()
-
-        val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
-        NetworkBootstrapper(
-          Seq(
-            EnvironmentDefinition.S1M1.copy(staticSynchronizerParameters = staticParams)
-          )
-        ).bootstrap()
-
-        // Run the participants from the release binary
-        external.start(
-          remoteParticipant1.name,
-          cantonReleaseVersion,
-          failOnUnknownConfigKeys = false,
-        )
-        external.start(
-          remoteParticipant2.name,
-          cantonReleaseVersion,
-          failOnUnknownConfigKeys = false,
-        )
-        external.start(
-          remoteParticipant3.name,
-          cantonReleaseVersion,
-          failOnUnknownConfigKeys = false,
-        )
-        remoteParticipant1.health.wait_for_initialized()
-        remoteParticipant2.health.wait_for_initialized()
-        remoteParticipant3.health.wait_for_initialized()
-
-        setupLedgerApiConformanceEnvironment(env)
-
-        TrafficControlUtils.applyTrafficControl(
-          TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
-          TrafficControlUtils.predictableTraffic,
-          topUpAllMembers = true,
-          disableCommitments = true,
-        )
-        runShardedTests(release, useJsonApi = false)(shard, numShards)(env)
-
-        // Shutdown
-        shutdownLedgerApiConformanceEnvironment(env)
-        external.kill(remoteParticipant1.name)
         external.kill(remoteParticipant2.name)
         external.kill(remoteParticipant3.name)
+        external.kill(remoteMediator1.name)
+        external.kill(remoteSequencer1.name)
     }
   }
 }

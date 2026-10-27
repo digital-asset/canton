@@ -31,6 +31,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestEngine
+import com.digitalasset.canton.version.InterpretationConfig as CantonInterpretationConfig
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPartyId, LfValue}
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
@@ -203,7 +204,8 @@ class StoreBackedCommandInterpreterSpec
     )
   )
 
-  private val interpretationConfig = InterpretationConfig.Default
+  private val interpretationConfig =
+    CantonInterpretationConfig.forProtocolVersion(testedProtocolVersion)
 
   private val submissionSeed = Hash.hashPrivateKey("a key")
 

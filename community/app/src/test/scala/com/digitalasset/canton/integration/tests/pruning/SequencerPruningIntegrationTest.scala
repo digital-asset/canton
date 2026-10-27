@@ -7,6 +7,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.console.{LocalParticipantReference, SequencerReference}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
@@ -16,7 +17,9 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.Database
+import com.digitalasset.canton.synchronizer.sequencer.SequencerMemberStatus.Active
 import com.digitalasset.canton.synchronizer.sequencer.{
+  SequencerMemberStatus,
   SequencerPruningStatus,
   SequencerReaderConfig,
 }
@@ -71,7 +74,13 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   ): Option[CantonTimestamp] =
     status.members
       .filterNot(_.member == participantId)
-      .flatMap(_.lastAcknowledged.toList)
+      .flatMap {
+        case SequencerMemberStatus.Onboarding(_) => Nil
+        case SequencerMemberStatus.Active(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+        case SequencerMemberStatus.Disabled(_, _, lastAcknowledged) =>
+          lastAcknowledged.toList
+      }
       .minOption
 
   private def onboardParticipant(participant: LocalParticipantReference)(implicit
@@ -81,8 +90,12 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
 
     participant.synchronizers.connect_local(sequencer1, alias = daName)
 
-    // advancing the clock just a little in order for the sequencer not to exclude the just onboarded participant as part of its status
-    environment.simClock.value.advance(config.NonNegativeFiniteDuration.ofMillis(50).asJava)
+    // Pruning status excludes members registered after the sequencer's clock time.
+    //  BFT sequencing time can run ahead of the static clock, so advance it to a timestamp
+    //  observed by the participant after registration.
+    val synchronizerTime = participant.testing.fetch_synchronizer_time(daId)
+    val simClock = environment.simClock.value
+    simClock.advanceTo(simClock.now.max(synchronizerTime))
 
     eventually() {
       participant.synchronizers.list_connected().map(_.synchronizerAlias) should contain(daName)
@@ -107,12 +120,16 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
   protected def waitForAllEnabledMembersToAck(
       sequencer: SequencerReference,
       acknowledgementBound: CantonTimestamp,
-  ): Unit = {
+  )(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
     logger.info(s"Waiting for acknowledgement bound at $acknowledgementBound")
     eventually(timeUntilSuccess = 60.seconds) {
+      // Acknowledgements are only sent when the sim clock ticks. The blocks carrying the required sequencing
+      // time may be delivered after the caller's tick, so tick again on every retry.
+      environment.simClock.value.advance(participant3SequencerClientAcknowledgementInterval.asJava)
+
       val status = sequencer.pruning.status()
-      val members =
-        status.members.filter(_.enabled)
+      val members = status.members.collect { case m: Active => m }
 
       forAll(members) { member =>
         assert(member.lastAcknowledged.exists(_ >= acknowledgementBound))
@@ -142,9 +159,8 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
       onboardParticipant(participant3)
       participant3Id = participant3.id
 
-      // Generate 2 traffic purchase.
-      //  We need 2 because we want to prune at least 1 and the latest one will always be kept,
-      //  even if it's in the pruning window (so that we don't lose all traffic information for a member forever),
+      // Submit two traffic purchases so pruning can remove the older entry.
+      // The latest entry is always retained to preserve the member's traffic balance.
       sequencer1.traffic_control.set_traffic_balance(
         participant1,
         PositiveInt.one,
@@ -156,19 +172,10 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
         NonNegativeLong.tryCreate(1000),
       )
 
-      // Pruning waits for an acknowledgement from participant3, which happens at regular intervals.
-      // Therefore we advance the clock to get passed participant3's acknowledgement interval.
-      environment.simClock.value.advance(config.NonNegativeFiniteDuration.ofHours(1).asJava)
-
-      // onboard a party such that everyone has something to acknowledge after the last jump of time
-      // properly synchronize with everything so that the next time jump is after the party enablement events have become clean
-      val startTime = environment.simClock.value.now
+      // Purchases are submitted asynchronously. Wait for the latest balance before the one-hour
+      // clock jump, which could otherwise move an in-flight purchase past its sequencing deadline.
+      // Generate sequencer activity so the updated traffic state becomes visible.
       sendMsgToAllMembers()
-
-      // Ensure both traffic updates are effective by asserting that the second extra traffic value is set.
-      //  However, traffic state gets effectively updated on the next sequenced event, so before checking
-      //  we must `sendMsgToAllMembers` to produce some sequencer activity, thus ensuring that the traffic
-      //  state is updated.
       eventually(timeUntilSuccess = 60.seconds) {
         sequencer1.traffic_control
           .traffic_state_of_members(Seq(participant1.id))
@@ -177,8 +184,19 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
           .map(_.extraTrafficPurchased.value) shouldBe Some(1000)
       }
 
-      // advance time to ensure that sequencer clients should eventually ack where they're at
-      // including participant3 that has the longest acknowledgement time
+      // Advance past participant3's acknowledgement interval so it can acknowledge earlier events.
+      environment.simClock.value.advance(config.NonNegativeFiniteDuration.ofHours(1).asJava)
+
+      // Generate activity after the pruning bound and wait for party enablement to complete
+      // before advancing the clock again to trigger acknowledgements.
+      val startTime = environment.simClock.value.now
+      // A block proposed before the clock jump can still be ordered with a stale BFT time and carry the
+      // party enablement. Wait until the sequencer has caught up with the jump so the activity below
+      // is sequenced at or after startTime.
+      TestUtils.waitForTargetTimeOnSynchronizerNode(startTime, logger)(sequencer1)
+      sendMsgToAllMembers()
+
+      // Trigger acknowledgements for the new activity, including participant3's slower timer.
       val acknowledgementBound = startTime
       environment.simClock.value.advance(participant3SequencerClientAcknowledgementInterval.asJava)
 
@@ -222,8 +240,8 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
       for {
         earliestAck <- earliestAckExcludingParticipant(status, participant3.id)
         ackParticipant3 <- status.members.collectFirst {
-          case memberStatus if memberStatus.member == participant3.id =>
-            memberStatus.safePruningTimestamp
+          case member: Active if member.member == participant3.id =>
+            member.safePruningTimestamp
         }
       } yield {
         assert(ackParticipant3.isBefore(earliestAck))
@@ -302,15 +320,24 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
 
     // move past the default retention period
     environment.simClock.value.advanceTo(pastDefaultRetentionTimestamp)
+    TestUtils.waitForTargetTimeOnSynchronizerNode(environment.simClock.value.now, logger)(
+      sequencer1
+    )
 
     // do some more stuff and move forward to convince some acks to occur
     participant1.health.ping(participant2)
     environment.simClock.value.advance(
       sequencerClientAcknowledgementInterval.asJava.multipliedBy(2)
     )
+    TestUtils.waitForTargetTimeOnSynchronizerNode(environment.simClock.value.now, logger)(
+      sequencer1
+    )
 
-    // make sure we're all ahead of this default retention period
-    eventually() {
+    // Make sure we're all ahead of this default retention period.
+    //  Advancing sim time triggers participant acknowledgements that are ordered asynchronously.
+    //  Allow 60s for ordering to complete, matching the patience in waitForAllEnabledMembersToAck,
+    //  instead of eventually's 20s default.
+    eventually(timeUntilSuccess = 60.seconds) {
       earliestAckExcludingParticipant(
         sequencer1.pruning.status(),
         participant3Id,

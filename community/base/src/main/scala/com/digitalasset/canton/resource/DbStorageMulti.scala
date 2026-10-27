@@ -251,7 +251,11 @@ final class DbStorageMulti private (
   ): FutureUnlessShutdown[A] =
     runIfSessionIsOpen("writing", operationName, maxRetries)(
       CloseContext.withCombinedContext(this.closeContext, closeContext, timeouts, logger)(
-        _.context.synchronizeWithClosingF(functionFullName)(writeDb.run(action))
+        _.context.synchronizeWithClosing(functionFullName)(
+          DbLockedConnectionPool.recoverPassiveInstanceException(
+            writeDb.run(action)
+          )
+        )
       )
     )
 
@@ -270,15 +274,16 @@ final class DbStorageMulti private (
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     writeConnectionPool.setPassive()
 
-  override def runJdbcWrite[T](
-      traceContext: TraceContext,
-      body: Connection => T,
+  override def runJdbcWrite[T](body: Connection => T)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[T] =
     runIfSessionIsOpen("writing", "runGenericJdbcWrite", 0)(
-      closeContext.context.synchronizeWithClosingF(functionFullName)(
-        writeDb.run(SimpleJdbcAction(c => body(c.connection)))
-      )(ec, traceContext)
-    )(traceContext, closeContext)
+      closeContext.context.synchronizeWithClosing(functionFullName)(
+        DbLockedConnectionPool.recoverPassiveInstanceException(
+          writeDb.run(SimpleJdbcAction(c => body(c.connection)))
+        )
+      )
+    )
 }
 
 object DbStorageMulti {

@@ -13,7 +13,6 @@ import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities.synchronizerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -27,7 +26,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
   import AcsCommitmentSenderWatermarkStoreTest.*
 
   "AcsCommitmentSenderWatermarkStore" should {
-    "retrieve None when there is no watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "retrieve None when there is no watermark" in {
       val watermarkStore1 = mkWatermarkStore(indexedSynchronizer1)
       val watermarkStore2 = mkWatermarkStore(indexedSynchronizer2)
 
@@ -35,7 +34,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore2.lookupWatermark().futureValueUS shouldBe None
     }
 
-    "increase and retrieve the expected watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "increase and retrieve the expected watermark" in {
       val watermarkStore1 = mkWatermarkStore(indexedSynchronizer1)
       val watermarkStore2 = mkWatermarkStore(indexedSynchronizer2)
 
@@ -46,7 +45,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore2.lookupWatermark().futureValueUS.value.tupled shouldBe tp1.tupled
     }
 
-    "increase the already existing watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "increase the already existing watermark" in {
       val watermarkStore = mkWatermarkStore(indexedSynchronizer1)
 
       watermarkStore.increaseWatermark(tp0).futureValueUS
@@ -59,7 +58,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore.lookupWatermark().futureValueUS.value.tupled shouldBe tp2a.tupled
     }
 
-    "not increase the already existing watermark if the existing value is higher" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not increase the already existing watermark if the existing value is higher" in {
       val watermarkStore = mkWatermarkStore(indexedSynchronizer1)
 
       watermarkStore.increaseWatermark(tp2).futureValueUS

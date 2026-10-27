@@ -380,7 +380,7 @@ class DbRequestJournalStore(
         select request_timestamp, request_counter
         from par_journal_requests
         where physical_synchronizer_idx = $physicalSynchronizerIdx and request_timestamp <= $requestTimestamp
-        order by (physical_synchronizer_idx, request_timestamp) desc
+        order by physical_synchronizer_idx desc, request_timestamp desc
         #${storage.limit(1)}
         """.as[TimeOfRequest].headOption,
       functionFullName,

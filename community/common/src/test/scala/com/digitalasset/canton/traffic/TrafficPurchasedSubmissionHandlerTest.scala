@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -65,7 +66,7 @@ class TrafficPurchasedSubmissionHandlerTest
   private val clock = new SimClock(loggerFactory = loggerFactory)
   private val trafficParams = TrafficControlParameters()
   private val handler = new TrafficPurchasedSubmissionHandler(clock, loggerFactory)
-  val crypto = TestingTopology(
+  val crypto: SynchronizerCryptoClient = TestingTopology(
     synchronizerParameters = List(
       SynchronizerParameters.WithValidity(
         validFrom = CantonTimestamp.Epoch.minusSeconds(1),
@@ -90,9 +91,11 @@ class TrafficPurchasedSubmissionHandlerTest
     val aggregationRuleCapture = ArgumentCaptor.forClass(classOf[Option[AggregationRule]])
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
+
     when(
       sequencerClient.send(
         batchCapture.capture(),
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         timestampsCapture.capture(),
         any[MessageId],
         aggregationRuleCapture.capture(),
@@ -106,6 +109,7 @@ class TrafficPurchasedSubmissionHandlerTest
     val resultF = handler
       .sendTrafficPurchasedRequest(
         recipient1,
+        isMemberActive = true,
         PositiveInt.tryCreate(5),
         NonNegativeLong.tryCreate(1000),
         sequencerClient,
@@ -173,6 +177,7 @@ class TrafficPurchasedSubmissionHandlerTest
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         timestampsCapture.capture(),
         any[MessageId],
         any[Option[AggregationRule]],
@@ -186,6 +191,7 @@ class TrafficPurchasedSubmissionHandlerTest
     val resultF = handler
       .sendTrafficPurchasedRequest(
         recipient1,
+        isMemberActive = true,
         PositiveInt.tryCreate(5),
         NonNegativeLong.tryCreate(1000),
         sequencerClient,
@@ -230,6 +236,7 @@ class TrafficPurchasedSubmissionHandlerTest
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
@@ -244,6 +251,7 @@ class TrafficPurchasedSubmissionHandlerTest
     handler
       .sendTrafficPurchasedRequest(
         recipient1,
+        isMemberActive = true,
         PositiveInt.tryCreate(5),
         NonNegativeLong.tryCreate(1000),
         sequencerClient,
@@ -265,6 +273,7 @@ class TrafficPurchasedSubmissionHandlerTest
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
@@ -290,6 +299,7 @@ class TrafficPurchasedSubmissionHandlerTest
       {
         val resultF = handler.sendTrafficPurchasedRequest(
           recipient1,
+          isMemberActive = true,
           PositiveInt.tryCreate(5),
           NonNegativeLong.tryCreate(1000),
           sequencerClient,
@@ -326,6 +336,7 @@ class TrafficPurchasedSubmissionHandlerTest
     when(
       sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
         any[SendRequestTimestamps],
         any[MessageId],
         any[Option[AggregationRule]],
@@ -342,6 +353,7 @@ class TrafficPurchasedSubmissionHandlerTest
       {
         val resultF = handler.sendTrafficPurchasedRequest(
           recipient1,
+          isMemberActive = true,
           PositiveInt.tryCreate(5),
           NonNegativeLong.tryCreate(1000),
           sequencerClient,
@@ -376,4 +388,58 @@ class TrafficPurchasedSubmissionHandlerTest
       any[TraceContext]
     )
   }
+
+  "remove member as recipient if it is inactive" in {
+    val callbackCapture: ArgumentCaptor[SendCallback] =
+      ArgumentCaptor.forClass(classOf[SendCallback])
+    val batchCapture: ArgumentCaptor[Batch[DefaultOpenEnvelope]] =
+      ArgumentCaptor.forClass(classOf[Batch[DefaultOpenEnvelope]])
+    val timestampsCapture = ArgumentCaptor.forClass(classOf[SendRequestTimestamps])
+
+    when(
+      sequencerClient.send(
+        batchCapture.capture(),
+        any[Option[SynchronizerSnapshotSyncCryptoApi]],
+        timestampsCapture.capture(),
+        any[MessageId],
+        any[Option[AggregationRule]],
+        callbackCapture.capture(),
+        any[TrafficCostValidator],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
+      )(any[TraceContext], any[MetricsContext])
+    ).thenReturn(EitherT.pure(()))
+
+    val resultF = handler
+      .sendTrafficPurchasedRequest(
+        recipient1,
+        isMemberActive = false,
+        PositiveInt.tryCreate(5),
+        NonNegativeLong.tryCreate(1000),
+        sequencerClient,
+        synchronizerTimeTracker,
+        crypto,
+      )
+      .value
+
+    eventually() {
+      Try(callbackCapture.getValue).isSuccess shouldBe true
+    }
+    callbackCapture.getValue.asInstanceOf[SendCallback.CallbackFuture](
+      UnlessShutdown.Outcome(SendResult.Success(mock[Deliver[Batch[Envelope[?]]]]))
+    )
+
+    resultF.failOnShutdown.futureValue shouldBe Either.unit
+
+    val batch = batchCapture.getValue
+    val recipients = batch.envelopes.head.recipients
+
+    recipients shouldBe Recipients(
+      NonEmpty.mk(
+        Seq,
+        RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, SequencersOfSynchronizer: Recipient)),
+      )
+    )
+  }
+
 }

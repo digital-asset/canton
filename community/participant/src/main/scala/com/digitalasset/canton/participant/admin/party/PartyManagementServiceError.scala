@@ -136,7 +136,7 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
     "Could not find the effective party-to-participant mapping topology transaction for the target participant after the specified begin offset within the given timeout."
   )
   @Resolution(
-    "Verify that the party-to-participant mapping was authorized and that the selected ledger 'begin offset exclusive' strictly predates this authorization, and retry."
+    "Verify that the party-to-participant mapping that onboards the party on the target participant was authorized and that the selected ledger 'begin offset exclusive' strictly predates this authorization, and retry. To export the ACS of a party that is already hosted on the target participant (for example, the exporting participant itself), use `repair.export_acs` instead."
   )
   object EffectivePartyToParticipantMappingNotFound
       extends ErrorCode(

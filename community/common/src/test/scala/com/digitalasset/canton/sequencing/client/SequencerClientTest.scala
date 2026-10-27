@@ -12,6 +12,7 @@ import com.digitalasset.base.error.{ErrorCode, RpcError}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeDouble,
   NonNegativeInt,
   NonNegativeLong,
   Port,
@@ -49,7 +50,6 @@ import com.digitalasset.canton.protocol.{
   StaticSynchronizerParameters,
   SynchronizerParametersLookup,
   TestSynchronizerParameters,
-  v31,
   v32,
 }
 import com.digitalasset.canton.sequencing.*
@@ -129,7 +129,9 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.nonempty.NonEmpty
+import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
+import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
 import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
@@ -580,7 +582,7 @@ final class SequencerClientTest
         val closeReasonF = for {
           _ <- env.subscribeAfter(CantonTimestamp.MinValue, alwaysSuccessfulHandler)
           subscription = subscriber
-            // we know the resilient sequencer subscription is using this type
+            // we know the sequencer subscription is using this type
             .map(_.subscription.asInstanceOf[MockSubscription[SequencerClientSubscriptionError]])
             .value
           closeReason <- loggerFactory.assertLogs(
@@ -593,7 +595,7 @@ final class SequencerClientTest
         } yield closeReason
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $error" =>
+          case e: UnrecoverableError if e.cause == s"event validation error: $error" =>
         }
         env.client.close()
       }
@@ -613,7 +615,7 @@ final class SequencerClientTest
         val closeReasonF = for {
           _ <- env.subscribeAfter(CantonTimestamp.MinValue, alwaysSuccessfulHandler)
           subscription = subscriber
-            // we know the resilient sequencer subscription is using this type
+            // we know the sequencer subscription is using this type
             .map(_.subscription.asInstanceOf[MockSubscription[SequencerClientSubscriptionError]])
             .value
           closeReason <- loggerFactory.assertLogs(
@@ -626,7 +628,7 @@ final class SequencerClientTest
         } yield closeReason
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $error" =>
+          case e: UnrecoverableError if e.cause == s"event validation error: $error" =>
         }
         env.client.close()
       }
@@ -661,7 +663,7 @@ final class SequencerClientTest
               logEntry.throwable shouldBe Some(error)
             },
             _.errorMessage should include(
-              s"Permanently closing sequencer subscription due to handler exception (this indicates a bug): $syncError"
+              s"Permanently closing sequencer subscription due to application handler exception (this indicates a bug): $syncError"
             ),
           )
 
@@ -671,7 +673,8 @@ final class SequencerClientTest
         }
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $syncError" =>
+          case e: UnrecoverableError
+              if e.cause == s"application handler returned error: $syncError" =>
         }
       }
 
@@ -740,13 +743,14 @@ final class SequencerClientTest
               logEntry.throwable shouldBe Some(error)
             },
             _.errorMessage should include(
-              s"Permanently closing sequencer subscription due to handler exception (this indicates a bug): $asyncException"
+              s"Permanently closing sequencer subscription due to application handler exception (this indicates a bug): $asyncException"
             ),
           )
         } yield closeReason
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $asyncException" =>
+          case e: UnrecoverableError
+              if e.cause == s"application handler returned error: $asyncException" =>
         }
       }
 
@@ -790,13 +794,14 @@ final class SequencerClientTest
               logEntry.throwable shouldBe Some(error)
             },
             _.errorMessage should include(
-              s"Permanently closing sequencer subscription due to handler exception (this indicates a bug): $asyncException"
+              s"Permanently closing sequencer subscription due to application handler exception (this indicates a bug): $asyncException"
             ),
           )
         } yield closeReason
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $asyncException" =>
+          case e: UnrecoverableError
+              if e.cause == s"application handler returned error: $asyncException" =>
         }
       }
 
@@ -897,7 +902,7 @@ final class SequencerClientTest
         } yield closeReason
 
         closeReasonF.futureValueUS should matchPattern {
-          case e: UnrecoverableError if e.cause == s"handler returned error: $error" =>
+          case e: UnrecoverableError if e.cause == s"event validation error: $error" =>
         }
         env.client.close()
         // The connection pool, unlike the ResilientSequencerSubscription, does not use a `maybeExitOnFatalError`
@@ -1705,6 +1710,8 @@ final class SequencerClientTest
       implicit val metricsContext: MetricsContext = MetricsContext.Empty
       client.send(
         batch,
+        // we send fake unsigned messages in the tests, so we let the sequencer client retrieve the latest snapshot itself.
+        currentSnapshotApproximation = None,
         messageId = messageId,
         amplify = amplify,
         useConfirmationResponseAmplificationParameters =
@@ -1770,6 +1777,9 @@ final class SequencerClientTest
 
     override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
+    override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
+      ()
+
     val lastSend = new AtomicReference[Option[SentSubmission]](None)
     def lastSubmissionTime: Option[CantonTimestamp] = lastSend.get.map(_.submissionTime)
 
@@ -1810,13 +1820,6 @@ final class SequencerClientTest
     override def getTime(timeout: Duration)(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]] = ???
-
-    override def downloadTopologyStateForInit(
-        request: TopologyStateForInitRequest,
-        timeout: Duration,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] = ???
 
     private val subscriberRef = new AtomicReference[Option[Subscriber[?]]](None)
 
@@ -1896,6 +1899,12 @@ final class SequencerClientTest
         : SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
       SubscriptionErrorRetryPolicyPekko.never
 
+    override def streamTopologyStateForInit(
+        request: TopologyStateForInitRequest,
+        timeout: Duration,
+    )(implicit
+        traceContext: TraceContext
+    ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] = ???
   }
 
   private class MockPool(clock: SimClock, firstSendAsyncResponseO: Option[SendAsyncResponse])
@@ -1930,6 +1939,7 @@ final class SequencerClientTest
         minRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
         maxRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
         warnConnectionValidationDelay = NonNegativeFiniteDuration.Zero,
+        sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
       )
 
     override def updateConfig(newConfig: SequencerConnectionPool.SequencerConnectionPoolConfig)(
@@ -1966,7 +1976,11 @@ final class SequencerClientTest
         traceContext: TraceContext
     ): Map[SequencerAlias, SequencerId] = ???
 
+    @VisibleForTesting
     override def contents: Map[SequencerId, Set[SequencerConnection]] = ???
+
+    @VisibleForTesting
+    override def connectionPenalties: Map[SequencerId, NonNegativeDouble] = ???
 
     override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
@@ -2133,9 +2147,6 @@ final class SequencerClientTest
 
     override protected val companionObj: AnyRef = TestProtocolMessage
 
-    override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
-      v31.EnvelopeContent.SomeEnvelopeContent.Empty
-
     override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
       v32.EnvelopeContent.SomeEnvelopeContent.Empty
 
@@ -2229,6 +2240,7 @@ final class SequencerClientTest
         None,
         replayConfigO = None,
         topologyClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         LoggingConfig(),
         Some(trafficStateController),
         exitOnFatalErrors = mockExitOnFatalErrorO.nonEmpty, // only "exit" when exit mock specified
@@ -2338,6 +2350,7 @@ final class SequencerClientTest
         None,
         replayEnabled = false,
         topologyClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         LoggingConfig(),
         Some(trafficStateController),
         exitOnTimeout = false,

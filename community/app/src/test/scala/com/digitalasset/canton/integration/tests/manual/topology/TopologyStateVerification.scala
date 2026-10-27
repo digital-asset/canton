@@ -28,7 +28,7 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{Storage, StorageSingleFactory}
 import com.digitalasset.canton.store.IndexedStringStore
-import com.digitalasset.canton.synchronizer.sequencer.SequencerSnapshot
+import com.digitalasset.canton.synchronizer.sequencer.{SequencerMemberStatus, SequencerSnapshot}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopologyStoreId
@@ -111,12 +111,13 @@ class TopologyStateVerification(
         .sliding(2)
         .foreach {
           case Seq((node1, snapshot1), (node2, snapshot2)) =>
-            val snapshot1_ = withoutLastAcknowledgedAndLowerBound(snapshot1)
-            val snapshot2_ = withoutLastAcknowledgedAndLowerBound(snapshot2)
+            val snapshot1_ = withoutNodeLocalInfo(snapshot1)
+            val snapshot2_ = withoutNodeLocalInfo(snapshot2)
 
             require(
               snapshot1_.hasSameContentsAs(snapshot2_),
               s"""sequencer snapshots were not the same
+             |differing fields: ${differingFields(snapshot1_, snapshot2_).mkString(", ")}
              |reference node ${node1.name}: $snapshot1_
              |node to verify ${node2.name}: $snapshot2_""".stripMargin,
             )
@@ -124,19 +125,42 @@ class TopologyStateVerification(
         }
     }
 
-  private def withoutLastAcknowledgedAndLowerBound(
+  /** Removes the parts of the snapshot that legitimately differ between sequencers:
+    *   - the last acknowledgements and the pruning lower bound
+    *   - the implementation-specific (BFT) info, which is computed from the node's local ordering
+    *     stores; these start at the onboarding epoch for sequencers onboarded after genesis
+    */
+  private def withoutNodeLocalInfo(
       snapshot: SequencerSnapshot
   ): SequencerSnapshot =
     snapshot
       .copy(
+        additional = None,
         status = snapshot.status
           .copy(
             lowerBound = CantonTimestamp.MinValue,
-            members = snapshot.status.members.map(
-              _.copy(lastAcknowledged = None)
-            ),
-          )
+            members = snapshot.status.members.map {
+              case m: SequencerMemberStatus.Onboarding => m
+              case m: SequencerMemberStatus.Active => m.copy(lastAcknowledged = None)
+              case m: SequencerMemberStatus.Disabled => m.copy(lastAcknowledged = None)
+            },
+          ),
       )(snapshot.representativeProtocolVersion)
+
+  private def differingFields(
+      snapshot1: SequencerSnapshot,
+      snapshot2: SequencerSnapshot,
+  ): Seq[String] =
+    Seq(
+      "lastTs" -> (snapshot1.lastTs == snapshot2.lastTs),
+      "latestBlockHeight" -> (snapshot1.latestBlockHeight == snapshot2.latestBlockHeight),
+      "previousTimestamps" -> (snapshot1.previousTimestamps == snapshot2.previousTimestamps),
+      "status" -> (snapshot1.status == snapshot2.status),
+      "inFlightAggregations" -> (snapshot1.inFlightAggregations == snapshot2.inFlightAggregations),
+      "additional" -> (snapshot1.additional == snapshot2.additional),
+      "trafficPurchased" -> (snapshot1.trafficPurchased.toSet == snapshot2.trafficPurchased.toSet),
+      "trafficConsumed" -> (snapshot1.trafficConsumed.toSet == snapshot2.trafficConsumed.toSet),
+    ).collect { case (field, false) => field }
 
   /** Verifies that transactions can be replayed
     */
@@ -356,7 +380,10 @@ class TopologyStateVerification(
           sys.error(s"did not find fully authorized transaction for proposal $prop"),
         )
         require(
-          latest.transaction.transaction.serial.increment == prop.transaction.transaction.serial
+          latest.transaction.transaction.serial.increment == prop.transaction.transaction.serial,
+          s"""proposal on ${node.name} does not follow the latest fully authorized transaction
+          |latest fully authorized: $latest
+          |proposal: $prop""".stripMargin,
         )
       }
     }

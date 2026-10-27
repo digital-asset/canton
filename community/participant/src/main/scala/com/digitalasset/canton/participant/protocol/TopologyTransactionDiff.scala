@@ -162,6 +162,10 @@ private[protocol] object TopologyTransactionDiff {
     * Returns a map specifying each party and participant's authorization level along with a flag
     * that specifies whether the party is in the "onboarding" state on the participant. The
     * onboarding flag is only set starting with ProtocolVersion.v35.
+    *
+    * Nominated and Freezing entries are left out, so the diff treats them as absent: moving such an
+    * entry to Onboarding or Active emits Onboarding or Added, as if the entry were added, and
+    * removing it emits nothing. A freeze emits no events for the party's other hosts.
     */
   private def partyToParticipant(
       state: PositiveSignedTopologyTransactions
@@ -172,6 +176,7 @@ private[protocol] object TopologyTransactionDiff {
         .view
       mapping = topologyTransaction.mapping
       participant <- mapping.participants
+      if participant.state.canHost
     } yield (
       mapping.partyId.toLf -> participant.participantId.toLf,
       (toAuthorizationLevel(participant.permission), participant.onboarding),

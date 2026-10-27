@@ -11,6 +11,8 @@ import com.digitalasset.base.error.{
   Resolution,
   RpcError,
 }
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TrafficEnforcementErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -93,6 +95,95 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
   }
 
   @Explanation(
+    "This error indicates that a credit was published on the ledger through PublishCredit, but" +
+      " its traffic was not credited because its arguments or acting parties do not match what" +
+      " TEA expects."
+  )
+  @Resolution(
+    "Check that the TEA version matches the deployed traffic credit Daml model and verify the credit's" +
+      " validity before crediting the affected account through the TEA API. The error metadata" +
+      " contains `update_id` and `offset`."
+  )
+  object TopUpNotCredited
+      extends ErrorCode(
+        id = "TRAFFIC_TOP_UP_NOT_CREDITED",
+        ErrorCategory.SystemInternalAssumptionViolated,
+      ) {
+    final case class Reject(updateId: String, offset: Long, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Top-up in transaction $updateId at offset $offset is committed on the ledger but will not be credited: $reason"
+        )
+        with TrafficEnforcementError {
+      override def context: Map[String, String] = Map(
+        "update_id" -> updateId,
+        "offset" -> offset.toString,
+      )
+    }
+  }
+
+  @Explanation(
+    "An earlier submission with the same change id and submission id is still waiting for its completion."
+  )
+  @Resolution(
+    "Retry shortly, use a new command id for a new command, or contact the participant operator" +
+      " if the problem continues. The error metadata contains `change_id_hash` and `submission_id`."
+  )
+  object CorrelationConflict
+      extends ErrorCode(
+        id = "TRAFFIC_CORRELATION_CONFLICT",
+        ErrorCategory.ContentionOnSharedResources,
+      ) {
+    final case class Reject(changeIdHash: String, submissionId: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "An earlier submission with the same change id and submission id is still waiting for its completion." +
+              " Retry shortly, use a new command id for a new command, or contact the participant operator if the problem continues."
+        )
+        with TrafficEnforcementError {
+      override def context: Map[String, String] = Map(
+        "change_id_hash" -> changeIdHash,
+        "submission_id" -> submissionId,
+      )
+    }
+  }
+
+  @Explanation(
+    "This error occurs if a prune request's cutoff is within the minimum pruning window, the same limit" +
+      " as ledger pruning: the participant's `init.ledger-api.max-deduplication-duration`."
+  )
+  @Resolution(
+    "Prune at or before `safe_before_or_at`. The retention is the participant's" +
+      " `init.ledger-api.max-deduplication-duration`." +
+      " The error metadata contains `before_or_at`, `safe_before_or_at` and `minimum_retention`."
+  )
+  object UnsafeToPrune
+      extends ErrorCode(
+        id = "TRAFFIC_UNSAFE_TO_PRUNE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject(
+        beforeOrAt: CantonTimestamp,
+        safeBeforeOrAt: CantonTimestamp,
+        minimumRetention: NonNegativeFiniteDuration,
+    )(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Cannot prune at $beforeOrAt, the participant's max deduplication duration of $minimumRetention only allows pruning at or before $safeBeforeOrAt."
+        )
+        with TrafficEnforcementError {
+      override def context: Map[String, String] = Map(
+        "before_or_at" -> beforeOrAt.toString,
+        "safe_before_or_at" -> safeBeforeOrAt.toString,
+        "minimum_retention" -> minimumRetention.toString,
+      )
+    }
+  }
+
+  @Explanation(
     "This error occurs if a traffic account operation failed for a reason expected to be transient," +
       " such as a database timeout, and the request can be retried."
   )
@@ -145,6 +236,9 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
     InsufficientBalance.id,
     MultiPartySubmissionRejected.id,
     TrafficUpdateOutOfBound.id,
+    TopUpNotCredited.id,
+    CorrelationConflict.id,
+    UnsafeToPrune.id,
     TransientFailure.id,
     FatalFailure.id,
   )

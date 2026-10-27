@@ -302,7 +302,7 @@ class LargeTransactionTest(
         participantId = participant,
         submissionSeed = seed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         prefetchKeys = Seq.empty,
       )
       .consume(

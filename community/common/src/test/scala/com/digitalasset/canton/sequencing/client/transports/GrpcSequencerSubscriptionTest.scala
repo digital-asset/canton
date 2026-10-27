@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.v30 as cryptoproto
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.OnShutdownRunner.PureOnShutdownRunner
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -15,7 +16,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v32}
 import com.digitalasset.canton.sequencer.api.v30 as v30Sequencer
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.TokenExpiration
@@ -36,6 +37,7 @@ import io.grpc.{Context, Status, StatusRuntimeException}
 import org.mockito.exceptions.base.MockitoAssertionError
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{Future, Promise}
 
@@ -57,14 +59,12 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
     .SubscriptionResponse(
       v30
         .SignedContent(
-          v31
+          v32
             .SequencedEvent(
               previousTimestamp = None,
               timestamp = 0,
               batch = Some(
-                v31.CompressedBatch(
-                  algorithm =
-                    v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED,
+                v32.CompressedBatch(
                   compressedEnvelopes = Seq(envelope.bytes),
                   compressedRecipients = ByteString.empty(),
                 )
@@ -128,6 +128,16 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       override def closingTimeout: FiniteDuration = 1.second
 
       override protected def useManualFlowControl: Boolean = manualFlowControl
+    }
+
+  private def verifyEventually(verification: => Unit): Unit =
+    eventually() {
+      try verification
+      catch {
+        // eventually only retries on TestFailedException, so we need to translate the mockito
+        // error into scalatest's TestFailedException to get the retries
+        case err: MockitoAssertionError => fail(err)
+      }
     }
 
   private def handlerResult(
@@ -273,6 +283,48 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
           case err: MockitoAssertionError => fail(err)
         }
       }
+    }
+
+    "keep requesting responses after a handler error without invoking the handler again with manual flow control" in {
+      // See comments in `GrpcSequencerSubscription.onNext` for the rationale.
+
+      val handlerInvocations = new AtomicInteger(0)
+      val sut = createSubscription(handler = _ => {
+        handlerInvocations.incrementAndGet().discard
+        handlerResult(Left("handler error"))
+      })
+      val ccso = mock[ClientCallStreamObserver[v30Sequencer.SubscriptionRequest]]
+      sut.observer.beforeStart(ccso)
+
+      sut.observer.onNext(messageP)
+      sut.closeReason.futureValue shouldBe SubscriptionCloseReason.HandlerError("handler error")
+      // The first message was drained
+      verifyEventually(verify(ccso, times(1)).request(1))
+
+      sut.observer.onNext(messageP)
+      // The second message was also drained...
+      verifyEventually(verify(ccso, times(2)).request(1))
+      // ...but the handler was not invoked again
+      handlerInvocations.get() shouldBe 1
+    }
+
+    "keep requesting responses after closing with manual flow control" in {
+      val handlerInvocations = new AtomicInteger(0)
+      val sut = createSubscription(handler = _ => {
+        handlerInvocations.incrementAndGet().discard
+        handlerResult(Either.unit)
+      })
+      val ccso = mock[ClientCallStreamObserver[v30Sequencer.SubscriptionRequest]]
+      sut.observer.beforeStart(ccso)
+
+      sut.close()
+
+      sut.observer.onNext(messageP)
+      sut.observer.onNext(messageP)
+      // The two messages were drained...
+      verifyEventually(verify(ccso, times(2)).request(1))
+      // ...but the handler was never invoked
+      handlerInvocations.get() shouldBe 0
     }
 
     "not wait for the handler to complete on shutdown" in {

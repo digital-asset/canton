@@ -9,8 +9,12 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoEncryptionError
 import com.digitalasset.canton.crypto.{
+  AsymmetricEncrypted,
   Hash,
+  HashAlgorithm,
+  HashPurpose,
   SecureRandomness,
   Signature,
   SynchronizerSnapshotSyncCryptoApi,
@@ -36,12 +40,12 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
 import com.digitalasset.canton.participant.protocol.decrypter.ViewMessageDecrypterImplV2.DecryptedViewsChained
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   EncryptedViewMessageError,
   MultipleViewTrees,
 }
+import com.digitalasset.canton.protocol.{SynchronizerLimits, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.{
   MemberRecipient,
   OpenEnvelope,
@@ -59,7 +63,7 @@ import com.digitalasset.nonempty.NonEmpty
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Decrypts encrypted transaction views and recursively resolves all referenced subviews using
   * ciphertext-ID-based references introduced in PV`transparency`+.
@@ -80,6 +84,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
     participantId: ParticipantId,
     sessionKeyStore: ConfirmationRequestSessionKeyStore,
     snapshot: SynchronizerSnapshotSyncCryptoApi,
+    withTransparencyChecks: Boolean,
     protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -132,6 +137,131 @@ private[decrypter] class ViewMessageDecrypterImplV2(
     * than one randomness value.
     */
   private[canton] val ciphertextRandomnessMap: TrieMap[Hash, SecureRandomness] = TrieMap.empty
+
+  /** Runs transparency checks by verifying that other nodes receiving a given randomness value can
+    * decrypt it.
+    *
+    * Uses deterministic encryption to re-encrypt the randomness with the other public keys and
+    * compares the resulting ciphertext against the one in the message. Because deterministic
+    * encryption is used, the ciphertexts must be the same. Valid encryption results are stored in a
+    * cache.
+    *
+    * The logic is optimized to use a cache of hashed encrypted randomness values. This is possible
+    * because a given randomness value is always tied to a specific set of recipients (i.e.
+    * recipients tree) and their public keys.
+    */
+  private def runTransparencyChecks(
+      randomness: SecureRandomness,
+      decryptedViews: MultipleViewTrees[LightTransactionViewTree],
+      viewHashes: NonEmpty[Seq[ViewHash]],
+      viewEncryptionKeyRandomness: NonEmpty[Seq[AsymmetricEncrypted[SecureRandomness]]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, Chain[EncryptedViewMessageError], Unit] = {
+    val viewContext = s"for message with hash(es) ${viewHashes.forgetNE.mkString(", ")}"
+
+    // Compute the hash of combination of all encrypted randomnesses
+    val builder = Hash.build(HashPurpose.Transparency, HashAlgorithm.Sha256)
+    builder.addIterator(
+      viewEncryptionKeyRandomness.forgetNE.iterator,
+      viewEncryptionKeyRandomness.size,
+    )((hb, encryptedRandomness) => hb.addByteString(encryptedRandomness.ciphertext))
+    val viewEncryptionKeyRandomnessHash = builder.finish()
+
+    // Note: There is a slight chance of encrypting the same randomness twice during concurrent requests.
+    // This trade-off is acceptable because randomness values are typically unique per transaction
+    // (even if technically reusable across transactions). Given current transaction throughput (TPS),
+    // highly concurrent requests are expected to be rare.
+    if (sessionKeyStore.hasTransparencyCheck(viewEncryptionKeyRandomnessHash)) {
+      // If the hash is in the cache, we can skip the transparency checks as these set of encryptions have already been
+      // verified.
+      EitherT.rightT[FutureUnlessShutdown, Chain[EncryptedViewMessageError]](())
+    } else {
+      for {
+        // Fetch all announced keys for the informees of the listed views
+        informeeParticipants <- getInformeeParticipants(decryptedViews).leftMap(Chain.one)
+        keys <- EitherT.right(snapshot.ipsSnapshot.encryptionKeys(informeeParticipants))
+        keysById = keys.values.flatten.map(k => k.id -> k).toMap
+
+        // Encrypt the randomness with each recipient's public key and compare the resulting ciphertext
+        // against the one in the message.
+        transparencyErrors <- EitherT
+          .right {
+            MonadUtil
+              .parTraverseWithLimit(pureCrypto.encryptionParallelism)(
+                viewEncryptionKeyRandomness.forgetNE
+              ) { sessionKeyRandomnessEncrypted =>
+                FutureUnlessShutdown.outcomeF(
+                  Future {
+                    keysById.get(sessionKeyRandomnessEncrypted.encryptedFor) match {
+                      case Some(key) =>
+                        pureCrypto
+                          .encryptDeterministicWith(
+                            randomness,
+                            key,
+                            sessionKeyRandomnessEncrypted.encryptionAlgorithmSpec,
+                          ) match {
+                          case Right(encryptedRandomness)
+                              if encryptedRandomness.ciphertext == sessionKeyRandomnessEncrypted.ciphertext =>
+                            Chain.empty[EncryptedViewMessageError]
+                          case Right(_) =>
+                            Chain.one(
+                              EncryptedViewMessageError.TransparencyCheckError(
+                                s"Re-encrypted ciphertext does not match the view ciphertext for recipient key ID ${sessionKeyRandomnessEncrypted.encryptedFor} $viewContext"
+                              ): EncryptedViewMessageError
+                            )
+                          case Left(err) =>
+                            Chain.one(
+                              EncryptedViewMessageError.SyncCryptoEncryptError(
+                                SyncCryptoEncryptionError(err)
+                              ): EncryptedViewMessageError
+                            )
+                        }
+                      case None =>
+                        Chain.one(
+                          EncryptedViewMessageError.TransparencyCheckError(
+                            s"No encryption key found for recipient key ID ${sessionKeyRandomnessEncrypted.encryptedFor} $viewContext"
+                          ): EncryptedViewMessageError
+                        )
+                    }
+                  }
+                )
+              }
+          }
+          .map(_.combineAll)
+
+        _ <-
+          if (transparencyErrors.nonEmpty) {
+            EitherT.leftT[FutureUnlessShutdown, Unit](transparencyErrors)
+          } else {
+            EitherT.rightT[FutureUnlessShutdown, Chain[EncryptedViewMessageError]](
+              sessionKeyStore.saveTransparencyCheck(viewEncryptionKeyRandomnessHash)
+            )
+          }
+      } yield ()
+    }
+  }
+
+  private def getInformeeParticipants(
+      decryptedViews: MultipleViewTrees[LightTransactionViewTree]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, Seq[ParticipantId]] = {
+    // get all the informees of the decrypted views
+    val informeeParties = decryptedViews.viewTrees.forgetNE.flatMap { viewTree =>
+      viewTree.informees
+    }
+    // get the active participants of the informees
+    snapshot.ipsSnapshot
+      .activeParticipantsOfAll(informeeParties.toList)
+      .bimap(
+        missingParties =>
+          EncryptedViewMessageError.TransparencyCheckError(
+            s"Failed to get active participants for informee parties: $missingParties"
+          ),
+        activeParticipants => activeParticipants.toSeq,
+      )
+  }
 
   private def decryptSubviewsAndMergeResults(
       parent: MultipleViewTrees[LightTransactionViewTree],
@@ -231,7 +361,6 @@ private[decrypter] class ViewMessageDecrypterImplV2(
         EncryptedViewMessageError
       ], MultipleViewTrees[LightTransactionViewTree]]
     ] =
-      // TODO(#34787): Add transparency checks here
       EncryptedViewMessage
         .decryptFor(
           snapshot,
@@ -251,7 +380,18 @@ private[decrypter] class ViewMessageDecrypterImplV2(
             )(_)
             .leftMap(err => DefaultDeserializationError(err.message))
         )
-        .leftMap(err => Chain.one(err))
+        .leftMap(Chain.one)
+        .flatMap(decryptedViews =>
+          if (withTransparencyChecks) {
+            runTransparencyChecks(
+              randomness,
+              decryptedViews,
+              encryptedViewsMessage.viewHashes,
+              encryptedViewsMessage.viewEncryptionKeyRandomness,
+            ).map(_ => decryptedViews)
+          } else
+            EitherT.rightT[FutureUnlessShutdown, Chain[EncryptedViewMessageError]](decryptedViews)
+        )
         .value
 
     // TODO(#15657): If transparency is enabled, we probably don't need to crash here for now, we make sure that a

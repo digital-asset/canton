@@ -803,19 +803,25 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       includeRejected: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): Source[GenericStoredTopologyTransaction, NotUsed] = {
-    logger.debug(s"Querying essential state as of $asOfInclusive")
+  ): Source[GenericStoredTopologyTransaction, NotUsed] =
+    findEssentialStateInInterval(fromExclusiveO = None, asOfInclusive, includeRejected)
 
+  override def findEssentialStateInInterval(
+      fromExclusiveO: Option[SequencedTime],
+      toInclusive: SequencedTime,
+      includeRejected: Boolean,
+  )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed] = {
     val maxEffectiveTimeF =
-      maxTimestamp(asOfInclusive, includeRejected = includeRejected).map(_.map {
+      maxTimestamp(toInclusive, includeRejected = includeRejected).map(_.map {
         case (_, effective @ EffectiveTime(_)) => effective
       })
 
     val sourceF = maxEffectiveTimeF.map {
       case None => Source.empty
       case Some(maxEffective) =>
-        findAndMapEssentialStateAtSequencedTime[QueryResult, GenericStoredTopologyTransaction](
-          asOfInclusive,
+        findAndMapEssentialStateBetween[QueryResult, GenericStoredTopologyTransaction](
+          fromExclusiveO,
+          toInclusive,
           includeRejected,
           selectFields = TxEntryWithIdFields,
           transform = toStoredTopologyTransactions(_).result.map { storedTx =>
@@ -827,12 +833,12 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           },
         )
     }
-
     PekkoUtil.futureSourceUS(sourceF)
   }
 
-  private def findAndMapEssentialStateAtSequencedTime[QueryRes, Output](
-      asOfInclusive: SequencedTime,
+  private def findAndMapEssentialStateBetween[QueryRes, Output](
+      fromExclusiveO: Option[SequencedTime],
+      toInclusive: SequencedTime,
       includeRejected: Boolean,
       selectFields: SQLActionBuilder,
       transform: Vector[QueryRes] => Seq[Output],
@@ -841,9 +847,14 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       traceContext: TraceContext,
   ): Source[Output, NotUsed] = {
     logger.debug(
-      s"find essential state asOfInclusive=$asOfInclusive"
+      s"Querying essential state between fromExclusive=$fromExclusiveO and toInclusive=$toInclusive"
     )
-    val timeFilter = sql" AND sequenced <= ${asOfInclusive.value}"
+
+    val timeFilter = fromExclusiveO match {
+      case Some(fromExclusive) =>
+        sql" AND sequenced > ${fromExclusive.value} AND sequenced <= ${toInclusive.value}"
+      case None => sql" AND sequenced <= ${toInclusive.value}"
+    }
 
     def minMaxRowQuery(orderBy: String) = {
       val query = buildQueryForTransactionsWithId[Option[Long]](
@@ -899,8 +910,9 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       asOfInclusive: SequencedTime
   )(implicit materializer: Materializer, traceContext: TraceContext): FutureUnlessShutdown[Hash] =
     FutureUnlessShutdown.outcomeF(
-      findAndMapEssentialStateAtSequencedTime[Hash, Hash](
-        asOfInclusive,
+      findAndMapEssentialStateBetween[Hash, Hash](
+        fromExclusiveO = None,
+        toInclusive = asOfInclusive,
         includeRejected = true,
         selectFields = TxHashWithIdFields,
         transform = identity,
@@ -985,6 +997,33 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       _.result.lastOption
     )
   }
+
+  override def findStoredByHashes(
+      asOfExclusive: CantonTimestamp,
+      hashes: Set[TxHash],
+      includeRejected: Boolean = false,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[TxHash, GenericStoredTopologyTransaction]] =
+    NonEmpty.from(hashes.toSeq) match {
+      case None => FutureUnlessShutdown.pure(Map.empty)
+      case Some(neHashes) =>
+        MonadUtil
+          .batchedSequentialTraverseNE(
+            parallelism = batchingConfig.parallelism,
+            chunkSize = batchingConfig.maxItemsInBatch,
+          )(neHashes) { batch =>
+            val query = buildQueryForTransactions(
+              sql" AND valid_from < $asOfExclusive AND " ++
+                DbStorage.toInClause("tx_hash", batch.map(_.hash)),
+              includeRejected = includeRejected,
+            )
+            toStoredTopologyTransactions(
+              storage.query(query, operationName = "findStoredByHashes")
+            ).map(_.result.iterator.map(tx => tx.hash -> tx).toMap.toSeq)
+          }
+          .map(_.toMap)
+    }
 
   override def findStoredForVersion(
       asOfExclusive: CantonTimestamp,

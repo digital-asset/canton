@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.daml.ledger.api.v2;
+
+import "com/daml/ledger/api/v2/fixture_imported_only.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+
+// The size_limit field option read by the generator (SizeConfigGenerator.sizeLimitFieldNumber).
+extend google.protobuf.FieldOptions {
+  optional bool size_limit = 51000;
+}
+
+// Reused by two requests: must get a single config class.
+message FixtureFormat {
+  map<string, FixtureFilters> filters_by_party = 1;
+  bool verbose = 2;
+}
+
+message FixtureFilters {
+  repeated string template_ids = 1;
+}
+
+message FixtureGetRequest {
+  message Nested {
+    repeated int64 values = 1;
+  }
+
+  FixtureFormat format = 1;
+  repeated string act_as = 2;
+  optional bytes page_token = 3;
+  bytes transaction_hash = 4;
+  string plain = 5;
+  string annotated_string = 6 [(size_limit) = true];
+  google.protobuf.Any payload = 7 [(size_limit) = true];
+  string not_annotated = 8 [(size_limit) = false];
+  oneof choice {
+    bytes blob = 9;
+    string text = 10;
+  }
+  Nested nested = 11;
+  FixtureImportedValue imported_value = 12;
+}
+
+// Only refers to FixtureFormat: gets no config class itself.
+message FixtureListRequest {
+  FixtureFormat format = 1;
+}
+
+message FixtureResponse {
+  repeated string items = 1;
+}
+
+// The outer message has no parameters, the nested one has.
+message FixtureOuter {
+  message Inner {
+    bytes data = 1;
+  }
+}
+
+message FixtureNoParams {
+  string a = 1;
+  int32 b = 2;
+}

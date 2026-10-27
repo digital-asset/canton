@@ -79,7 +79,7 @@ terminate-subprocesses
 
 # this test doesn't produce mediator and sequencer metrics
 # using these vars when we extract/load the metrics from files
-export KNOWN_MISSING_SEQUENCER_METRICS="true"
+export KNOWN_MISSING_SEQUENCER_BLOCK_METRICS="true"
 export KNOWN_MISSING_MEDIATOR_METRICS="true"
 export KNOWN_MISSING_FAILED_TRADER_METRICS="true"
 

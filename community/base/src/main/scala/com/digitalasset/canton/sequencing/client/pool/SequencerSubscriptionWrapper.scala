@@ -7,63 +7,37 @@ import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{AtomicHealthComponent, ComponentHealthState, HealthComponent}
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  HasRunOnClosing,
-  HasUnlessClosing,
-  SyncCloseable,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasRunOnClosing, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
-import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
-  ApplicationHandlerException,
-  ApplicationHandlerPassive,
-  ApplicationHandlerShutdown,
-}
-import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.HandlerException
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionWrapper.ClosingReasonHandler
 import com.digitalasset.canton.sequencing.client.pool.SubscriptionHandler.SubscriptionLivenessStatus
 import com.digitalasset.canton.sequencing.client.{
-  Fatal,
   SequencedEventValidatorFactory,
   SequencerClientSubscriptionError,
+  SequencerSubscription,
   SubscriptionCloseReason,
 }
-import com.digitalasset.canton.sequencing.handlers.HasReceivedEvent
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.LoggerUtil
-import org.apache.pekko.stream.AbruptStageTerminationException
+import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, SingleUseCell}
 
-import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.ExecutionContext
+import scala.util.Try
 
 /** A wrapper around a subscription to a sequencer. */
-trait SequencerSubscriptionWrapper extends FlagCloseableAsync with NamedLogging {
+trait SequencerSubscriptionWrapper extends FlagCloseable with NamedLogging {
 
   def connection: SequencerConnection
 
   def start()(implicit traceContext: TraceContext): Either[String, Unit]
 
-  protected val closeReasonPromise
-      : Promise[SubscriptionCloseReason[SequencerClientSubscriptionError]] =
-    Promise[SubscriptionCloseReason[SequencerClientSubscriptionError]]()
-
-  /** Future which is completed when the underlying subscription is closed. */
-  val closeReason: Future[SubscriptionCloseReason[SequencerClientSubscriptionError]] =
-    closeReasonPromise.future
-
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
-    Seq(
-      SyncCloseable(
-        "sequencer-subscription",
-        closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard,
-      )
-    )
+  def setClosingReasonHandler(closingReasonHandler: ClosingReasonHandler)(implicit
+      traceContext: TraceContext
+  ): Unit
 
   /** Check the liveness of the subscription.
     *
@@ -85,6 +59,14 @@ trait SequencerSubscriptionWrapper extends FlagCloseableAsync with NamedLogging 
   private[sequencing] def health: HealthComponent
 }
 
+object SequencerSubscriptionWrapper {
+  trait ClosingReasonHandler {
+    def handleClosingReason(
+        closingReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
+    )(implicit traceContext: TraceContext): Unit
+  }
+}
+
 /** Regular subscription to a sequencer.
   *
   * @param connection
@@ -95,21 +77,16 @@ trait SequencerSubscriptionWrapper extends FlagCloseableAsync with NamedLogging 
   *   timestamp at which to start the subscription; if undefined, we subscribe from the beginning
   * @param handler
   *   handler to process the events received from the subscription
-  * @param parent
-  *   component whose closing indicates the subscriptions will be closed soon; used to shortcut
-  *   errors and avoid warning logs when shutting down
   */
 class SequencerSubscriptionWrapperImpl private[sequencing] (
     override val connection: SequencerConnection,
     member: Member,
     startingTimestampO: Option[CantonTimestamp],
     handler: SubscriptionHandler,
-    parent: HasUnlessClosing,
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends SequencerSubscriptionWrapper {
-  private val retryPolicy = connection.subscriptionRetryPolicy
 
   override private[sequencing] val health: AtomicHealthComponent = new AtomicHealthComponent() {
     override def name: String = s"subscription-${connection.name}"
@@ -123,132 +100,42 @@ class SequencerSubscriptionWrapperImpl private[sequencing] (
     override protected def logger: TracedLogger = SequencerSubscriptionWrapperImpl.this.logger
   }
 
+  private val subscriptionRef =
+    new SingleUseCell[SequencerSubscription[SequencerClientSubscriptionError]]()
+
   override def start()(implicit traceContext: TraceContext): Either[String, Unit] = {
-    val startingTimestampStringO = startingTimestampO
-      .map(timestamp => s"the timestamp $timestamp")
-      .getOrElse("the beginning")
-    logger.info(s"Starting subscription at $startingTimestampStringO")
+    val tsString = startingTimestampO.fold("the beginning")(ts => s"timestamp $ts")
+    logger.info(s"Starting subscription at $tsString")
 
     val protocolVersion = connection.attributes.staticParameters.protocolVersion
     val request = SubscriptionRequest(member, startingTimestampO, protocolVersion)
 
-    val (hasReceivedEvent, wrappedHandler) = HasReceivedEvent(handler.handleEvent)
-
     connection
-      .subscribe(request, wrappedHandler, timeouts.network.duration)
+      .subscribe(request, handler.handleEvent, timeouts.network.duration)
       .map { newSubscription =>
-        newSubscription.closeReason.onComplete {
-          case reason @ Success(SubscriptionCloseReason.TokenExpiration) =>
-            giveUp(reason)
-
-          case Success(_: SubscriptionCloseReason.SubscriptionError) if parent.isClosing =>
-            giveUp(Success(SubscriptionCloseReason.Shutdown))
-
-          case error @ Success(subscriptionError: SubscriptionCloseReason.SubscriptionError) =>
-            val canRetry =
-              retryPolicy.retryOnError(
-                subscriptionError,
-                receivedItems = hasReceivedEvent.hasReceivedEvent,
-              )
-            if (canRetry) {
-              logger.debug(s"Closing sequencer subscription due to error: $subscriptionError.")
-              restartConnection(subscriptionError.toString)
-            } else {
-              // Permanently close the connection to this sequencer
-              giveUp(error)
-            }
-
-          case Failure(_: AbruptStageTerminationException) if parent.isClosing =>
-            giveUp(Success(SubscriptionCloseReason.Shutdown))
-
-          case Failure(exn) =>
-            val canRetry = retryPolicy.retryOnException(exn, logger)
-
-            if (canRetry) {
-              logger.warn(s"Closing sequencer subscription due to exception: $exn.", exn)
-              restartConnection(exn.toString)
-            } else {
-              // Permanently close the connection to this sequencer
-              giveUp(Failure(exn))
-            }
-
-          case unrecoverableReason =>
-            // Permanently close the connection to this sequencer
-            giveUp(unrecoverableReason)
-        }
+        subscriptionRef
+          .putIfAbsent(newSubscription)
+          .foreach(_ => ErrorUtil.invalidState("Subscription already exists"))
 
         health.resolveUnhealthy()
       }
   }
 
-  private def restartConnection(reason: String)(implicit traceContext: TraceContext): Unit =
-    // Stop the connection non-fatally and let the subscription pool start a new subscription.
-    connection.fail(reason)
-  // TODO(i28761): Warn after some delay or number of failures
-  // LostSequencerSubscription.Warn(connection.attributes.sequencerId).discard
-
-  // stop the current subscription, do not retry, and propagate the reason upstream
-  private def giveUp(
-      reason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
+  override def setClosingReasonHandler(
+      closingReasonHandler: ClosingReasonHandler
   )(implicit traceContext: TraceContext): Unit = {
-    // We need to complete the promise first, otherwise the `fatal()` will result in the close reason being
-    // completed with 'Closed'.
-    closeReasonPromise.tryComplete(reason).discard
-
-    reason match {
-      case Success(SubscriptionCloseReason.Closed) =>
-        logger.trace("Closing sequencer subscription")
-      // Normal closing of this subscription can be triggered either by:
-      // - closing of the subscription pool, which closed all the subscriptions; in this case, the connection pool
-      //   will also be closed and will take care of the connections
-      // - failure of a connection, and the subscription pool closed the associated subscription; in this case, the
-      //   connection will already be closed if need be
-      // We therefore don't need to explicitly close the connection.
-
-      case Success(SubscriptionCloseReason.Shutdown) =>
-        logger.info("Closing sequencer subscription due to an ongoing shutdown")
-      // If we reach here, it is due to a concurrent closing of the subscription (see above) and a subscription
-      // error. Again, we don't need to explicitly close the connection.
-
-      case Success(SubscriptionCloseReason.HandlerError(_: ApplicationHandlerShutdown.type)) =>
-        logger.info("Closing sequencer subscription due to handler shutdown")
-      // If we reach here, it is due to a concurrent closing of the subscription (see above) and a subscription
-      // error. Again, we don't need to explicitly close the connection.
-
-      case Success(SubscriptionCloseReason.TokenExpiration) =>
-        logger.debug("Sequencer subscription was closed by the server due to a token expiration")
-
-      case Success(SubscriptionCloseReason.HandlerError(exception: ApplicationHandlerException)) =>
-        logger.error(
-          s"Permanently closing sequencer subscription due to handler exception (this indicates a bug): $exception"
-        )
-        connection.fatal(exception.toString)
-
-      case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(reason))) =>
-        logger.info(
-          s"Permanently closing sequencer subscription because instance became passive: $reason"
-        )
-        connection.fatal("Instance became passive")
-
-      case Success(Fatal(reason)) if parent.isClosing =>
-        logger.info(
-          s"Permanently closing sequencer subscription after an error due to an ongoing shutdown: $reason"
-        )
-        connection.fatal("Error during shutdown")
-
-      case Success(ex: HandlerException) =>
-        logger.error(s"Permanently closing sequencer subscription due to handler exception: $ex")
-        connection.fatal(ex.toString)
-
-      case Success(error) =>
-        logger.warn(s"Permanently closing sequencer subscription due to error: $error")
-        connection.fatal(error.toString)
-
-      case Failure(exception) =>
-        logger.error(s"Permanently closing sequencer subscription due to exception", exception)
-        connection.fatal(exception.toString)
-    }
+    val closeReasonF =
+      subscriptionRef.getOrElse(ErrorUtil.invalidState("no subscription")).closeReason
+    closeReasonF.onComplete(closingReasonHandler.handleClosingReason(_))
   }
+
+  override def onClosed(): Unit =
+    LifeCycle.close(LifeCycle.toCloseableOption(subscriptionRef.get), handler)(logger)
+
+  private def completeSubscription(
+      reason: SubscriptionCloseReason[SequencerClientSubscriptionError]
+  )(implicit traceContext: TraceContext): Unit =
+    subscriptionRef.getOrElse(ErrorUtil.invalidState("No subscription")).complete(reason)
 
   override def toString: String = s"Subscription over ${connection.name}"
 
@@ -286,7 +173,7 @@ class SequencerSubscriptionWrapperImpl private[sequencing] (
       val message = "Subscription inactivity exceeded configured limits: " +
         s"$statusO vs. (${LoggerUtil.roundDurationForHumans(maxTimestampDelta.duration)}, $maxOrdinalDelta)"
       logger.warn(s"$message -- closing subscription")
-      restartConnection(reason = message)
+      completeSubscription(SubscriptionCloseReason.SubscriptionIsSilent)
     }
   }
 }
@@ -297,7 +184,6 @@ trait SequencerSubscriptionWrapperFactory {
       member: Member,
       preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
-      parent: HasUnlessClosing,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -315,7 +201,6 @@ class SequencerSubscriptionWrapperFactoryImpl(
       member: Member,
       preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
-      parent: HasUnlessClosing,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -341,7 +226,6 @@ class SequencerSubscriptionWrapperFactoryImpl(
       member = member,
       startingTimestampO = startingTimestampO,
       handler = subscriptionHandler,
-      parent = parent,
       timeouts = timeouts,
       loggerFactory = loggerWithConnection,
     )

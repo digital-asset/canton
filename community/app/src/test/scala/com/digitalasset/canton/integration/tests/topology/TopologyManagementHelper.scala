@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.topology
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.{InstanceReference, LocalInstanceReference}
 import com.digitalasset.canton.crypto.KeyPurpose.Signing
-import com.digitalasset.canton.crypto.SigningKeyUsage
+import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.nonempty.NonEmpty
@@ -37,58 +37,18 @@ trait TopologyManagementHelper { this: BaseTest =>
 
   }
 
-  def manuallyInitNodeId(
+  private case class InitKeys(
+      namespaceKey: SigningPublicKey,
+      sequencerAuthKey: SigningPublicKey,
+      signingKey: SigningPublicKey,
+      encryptionKey: Option[EncryptionPublicKey],
+  )
+
+  private def manualInitNodeKeys(
       node: LocalInstanceReference,
-      kmsKeysO: Option[TopologyKmsKeys] = None,
-  )(implicit ec: ExecutionContext): Unit = {
-
-    val namespaceKey = if (kmsKeysO.isDefined) {
-      val kmsKeys = kmsKeysO.valueOrFail("no kms key ids defined")
-
-      val namespaceKmsKeyId = kmsKeys.namespaceKeyId
-        .valueOrFail(s"node [${node.name}] expects a namespace key id")
-
-      val intermediateNsKmsKeyId = namespaceKmsKeyId
-      val intermediateKey = node.keys.secret
-        .register_kms_signing_key(
-          intermediateNsKmsKeyId,
-          SigningKeyUsage.NamespaceOnly,
-          name = s"${node.name}-${SigningKeyUsage.Namespace.identifier}",
-        )
-
-      node.crypto.cryptoPrivateStore
-        .existsPrivateKey(intermediateKey.id, Signing)
-        .valueOrFail("intermediate key not registered")
-        .futureValueUS
-
-      node.keys.secret
-        .register_kms_signing_key(
-          namespaceKmsKeyId,
-          SigningKeyUsage.NamespaceOnly,
-          name = s"${node.name}-${SigningKeyUsage.Namespace.identifier}",
-        )
-    } else {
-      node.keys.secret
-        .generate_signing_key(
-          name = node.name + s"-${SigningKeyUsage.Namespace.identifier}",
-          SigningKeyUsage.NamespaceOnly,
-        )
-    }
-
-    val namespace = Namespace(namespaceKey.id)
-    node.topology.init_id_from_uid(
-      UniqueIdentifier.tryCreate("manual-" + node.name, namespace)
-    )
-
-    node.health.wait_for_ready_for_initialization()
-  }
-
-  def manuallyInitParticipant(
-      node: LocalInstanceReference,
-      kmsKeysO: Option[TopologyKmsKeys] = None,
-  )(implicit ec: ExecutionContext): Unit = {
-
-    val (namespaceKey, sequencerAuthKey, signingKey, encryptionKey) = if (kmsKeysO.isDefined) {
+      kmsKeysO: Option[TopologyKmsKeys],
+  )(implicit ec: ExecutionContext): InitKeys =
+    if (kmsKeysO.isDefined) {
       val kmsKeys = kmsKeysO.valueOrFail("no kms key ids defined")
 
       val namespaceKmsKeyId = kmsKeys.namespaceKeyId
@@ -145,7 +105,7 @@ trait TopologyManagementHelper { this: BaseTest =>
 
       // user-manual-entry-end: ManualRegisterKmsKeys
 
-      (namespaceKey, sequencerAuthKey, signingKey, encryptionKey)
+      InitKeys(namespaceKey, sequencerAuthKey, signingKey, Some(encryptionKey))
     } else {
       // architecture-handbook-entry-begin: ManualInitKeys
 
@@ -178,8 +138,35 @@ trait TopologyManagementHelper { this: BaseTest =>
 
       // architecture-handbook-entry-end: ManualInitKeys
 
-      (namespaceKey, sequencerAuthKey, signingKey, encryptionKey)
+      InitKeys(namespaceKey, sequencerAuthKey, signingKey, Some(encryptionKey))
     }
+
+  def manuallyInitSynchronizerNode(
+      node: LocalInstanceReference,
+      kmsKeysO: Option[TopologyKmsKeys] = None,
+  )(implicit ec: ExecutionContext): Unit = {
+
+    val InitKeys(namespaceKey, _, _, _) = manualInitNodeKeys(node, kmsKeysO)
+
+    // Use the fingerprint of this key for the node identity.
+    val namespace = Namespace(namespaceKey.id)
+    node.topology.init_id_from_uid(
+      UniqueIdentifier.tryCreate("manual-" + node.name, namespace)
+    )
+
+    // Wait until the node is ready to receive the node identity.
+    node.health.wait_for_ready_for_initialization()
+
+  }
+
+  def manuallyInitParticipant(
+      node: LocalInstanceReference,
+      kmsKeysO: Option[TopologyKmsKeys] = None,
+  )(implicit ec: ExecutionContext): Unit = {
+
+    val InitKeys(namespaceKey, sequencerAuthKey, signingKey, encryptionKeyO) =
+      manualInitNodeKeys(node, kmsKeysO)
+    val encryptionKey = encryptionKeyO.valueOrFail(s"node [${node.name}] missing an encryption key")
 
     // architecture-handbook-entry-begin: ManualInitNode
 

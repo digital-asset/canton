@@ -13,8 +13,8 @@ import GrpcSubscriptionErrorRetryPolicy.*
 class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerFactory)
     extends CheckedSubscriptionErrorRetryPolicy[GrpcSubscriptionError]
     with NamedLogging {
-  override protected def retryInternal(error: GrpcSubscriptionError, receivedItems: Boolean)(
-      implicit traceContext: TraceContext
+  override protected def retryInternal(error: GrpcSubscriptionError)(implicit
+      traceContext: TraceContext
   ): Boolean = logAndDetermineRetry(error.grpcError)
 }
 
@@ -54,7 +54,7 @@ object GrpcSubscriptionErrorRetryPolicy {
         false // not retrying
 
       case _: GrpcError.GrpcServerError =>
-        // We believe these errors (INTERNAL, UNKNOWN, DATA_LOSS) can in some circumstances by transient, and
+        // We believe these errors (INTERNAL, UNKNOWN, DATA_LOSS) can in some circumstances be transient, and
         // therefore we err on the side of caution and retry.
         loggingContext.debug(
           s"Subscription failed with ${grpcError.status}. Retrying subscription as this could be transient."

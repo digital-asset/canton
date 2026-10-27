@@ -8,7 +8,11 @@ import com.daml.ledger.api.v2.reassignment.UnassignedEvent
 import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByOwner
-import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.integration.{
+  ConfigTransform,
+  ConfigTransforms,
+  TestConsoleEnvironment,
+}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -24,6 +28,9 @@ abstract class AbstractSynchronizerChangeRealClockIntegrationTest
         assignmentExclusivityTimeout = NonNegativeFiniteDuration.Zero,
       )
     ) {
+
+  override protected def additionalConfigTransforms: Seq[ConfigTransform] =
+    Seq(ConfigTransforms.disableAutomaticAssignment)
 
   protected def setupAndUnassign(alice: PartyId, bank: PartyId, painter: PartyId)(implicit
       env: TestConsoleEnvironment

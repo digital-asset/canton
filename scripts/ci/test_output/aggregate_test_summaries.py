@@ -67,7 +67,12 @@ def load_shard_summaries(paths):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             shard = normalize_shard_data(data, path)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+        ):  # failure-surfaced: collected in parse_errors and reported
             parse_errors.append(path)
             continue
         shards.append(shard)
@@ -92,7 +97,7 @@ def normalize_shard_data(data, path):
         value = source.get(key)
         try:
             return int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # failure-surfaced: recorded in invalid_fields and reported
             invalid_fields.append(key)
             return None
 
@@ -173,7 +178,10 @@ def load_previous_state(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ):  # silent-ok: unreadable previous state means start fresh
         return []
 
     raw_shards = data.get("shards", []) if isinstance(data, dict) else []
@@ -184,7 +192,10 @@ def load_previous_state(path):
     for shard in raw_shards:
         try:
             shards.append(normalize_shard_data(shard, str(shard.get("path", "previous-state"))))
-        except (ValueError, TypeError):
+        except (
+            ValueError,
+            TypeError,
+        ):  # silent-ok: a malformed previous shard is dropped, current ones still count
             continue
     return shards
 

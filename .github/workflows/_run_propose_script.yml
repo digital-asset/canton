@@ -1,0 +1,54 @@
+name: Run Propose Script
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      script_argument:
+        description: Argument passed to release/propose.sh
+        required: true
+        type: string
+    secrets:
+      MULTI_REPO_GITHUB_TOKEN:
+        required: true
+        description: GitHub token with write access to both DACH-NY/canton and digital-asset/canton
+
+jobs:
+  run_propose_script:
+    name: Run Propose Script
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      CIRCLE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Restore compile and sbt caches
+        if: ${{ inputs.script_argument != 'finish_release_process' }}
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Authorize git
+        uses: ./.github/actions/git/authorize_git
+
+      - name: Invoke propose.sh script for release step
+        timeout-minutes: 60
+        uses: ./.github/actions/nix/nix_run
+        env:
+          GITHUB_TOKEN: ${{ secrets.MULTI_REPO_GITHUB_TOKEN }}
+          SCRIPT_ARGUMENT: ${{ inputs.script_argument }}
+        with:
+          command: ./release/propose.sh "$SCRIPT_ARGUMENT"
+
+      - name: Reset origin URL
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        shell: bash
+        run: |
+          git remote set-url origin "${{ github.server_url }}/${{ github.repository }}.git"

@@ -7,7 +7,6 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, ShutdownFailedException}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, SynchronizerAlias}
@@ -68,14 +67,6 @@ class AcsCommitmentProcessorManagerTest
 
     "close successfully if the matcher stream completed normally" in {
       val mgr = createManager(Future.successful(Done))
-      mgr.close()
-      mgr.isClosing shouldBe true
-    }
-
-    "close successfully if the matcher stream failed because the storage became passive" in {
-      val mgr = createManager(
-        Future.failed(PassiveInstanceException("Connection pool is not active"))
-      )
       mgr.close()
       mgr.isClosing shouldBe true
     }

@@ -250,9 +250,6 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         ),
       )
     ) should contain theSameElementsAs RequiredClaims[String](
-      RequiredClaim.ReadAs("A"),
-      RequiredClaim.ReadAs("B"),
-      RequiredClaim.ReadAs("C"),
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -518,14 +515,14 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     )
   }
 
-  it should "compute the correct claims if no includeTransactions" in {
+  it should "require only a public claim if no includeTransactions" in {
     RequiredClaims.updateFormatClaims[String](
       UpdateFormat(
         includeTransactions = None,
         includeReassignments = None,
         includeTopologyEvents = None,
       )
-    ) shouldBe Nil
+    ) shouldBe List(RequiredClaim.Public[String]())
   }
 
   behavior of "idpAdminClaimsAndMatchingRequestIdpId"

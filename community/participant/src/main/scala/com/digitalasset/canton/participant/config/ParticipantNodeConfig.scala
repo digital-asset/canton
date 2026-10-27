@@ -131,8 +131,15 @@ final case class ParticipantNodeConfig(
       .modify(ReplicationConfig.withDefaultO(storage, _))
 }
 
-/** Participant features configuration */
-final case class ParticipantFeaturesConfig()
+/** Participant features configuration
+  *
+  * @param deprecated
+  *   Feature flags to temporarily re-enable endpoints and request fields that were deprecated in an
+  *   earlier release and are disabled by default in this one.
+  */
+final case class ParticipantFeaturesConfig(
+    deprecated: DeprecatedApiConfig = DeprecatedApiConfig()
+)
 
 /** Configuration to connect the console to a participant running remotely.
   *
@@ -361,12 +368,12 @@ object TestingTimeServiceConfig {
   *   When true (default), protocol feature flags will be automatically updated when the node
   *   connects to a synchronizer.
   * @param enableAllLedgerApiReassignments
-  *   Determines whether ACS imports use Created or Assigned events. Similarly, determines whether
-  *   the repair service uses Created/Archive events or Assigned/Unassigned events for add and purge
-  *   respectively. Only enable if your Ledger API consumers can process (un)assigned events and
-  *   require non-zero reassignment counters.
-  *   - false (Default): Uses Created/Archive; resets reassignment counters to zero.
-  *   - true: Uses Assigned/Unassigned; preserves existing reassignment counters.
+  *   Determines how ACS imports and the repair service add and purge commands are represented on
+  *   the Ledger API. Reassignment counters are preserved in both cases.
+  *   - false (Default): Contracts with a zero reassignment counter are represented as
+  *     Created/Archive events, contracts with a non-zero reassignment counter are represented as
+  *     Assigned/Unassigned events.
+  *   - true: All contracts are represented as Assigned/Unassigned events.
   *
   * Note: If multi-synchronizer is enabled via the EnableMultiSynchronizer flag, then Assigned and
   * Unassigned event will be emitted when processing reassignments messages from the synchronizer
@@ -392,7 +399,7 @@ final case class ParticipantNodeParameterConfig(
     caching: CachingConfigs = CachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
-      ParticipantProtocolVersion(ProtocolVersion.v35)
+      ParticipantProtocolVersion(ProtocolVersion.v36)
     ),
     devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,

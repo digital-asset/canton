@@ -22,7 +22,10 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   PreparedTransaction,
 }
-import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsRequest,
+  GetConnectedSynchronizersRequest,
+}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{
   EventFormat,
@@ -165,6 +168,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -190,6 +194,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -210,6 +215,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
   }
@@ -220,8 +226,42 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         activeAtOffset = 15,
         eventFormat = None,
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
+  }
+
+  behavior of "StateServiceAuthorization.getConnectedSynchronizersClaims"
+
+  it should "require only a public claim if no parameters are given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(party = "", participantId = "", identityProviderId = "")
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require only a public claim if no party is given, regardless of the other parameters" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "",
+        participantId = "some-participant",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require admin, IDP admin or operate as party rights with a matching IDP if a party is given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "alice",
+        participantId = "",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(
+      RequiredClaim.AdminOrIdpAdminOrOperateAsParty[GetConnectedSynchronizersRequest](Seq("alice")),
+      RequiredClaim.MatchIdentityProviderId(
+        StateServiceAuthorization.identityProviderIdForGetConnectedSynchronizersL
+      ),
+    )
   }
 
   behavior of "InteractiveSubmissionServiceAuthorization.prepareSubmission"
@@ -421,8 +461,6 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
       RequiredClaim.ReadAs("d"),
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
       RequiredClaim.ReadAsAnyParty(),
     )
   }
@@ -471,8 +509,6 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
       RequiredClaim.ReadAs("d"),
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
     )
   }
 
@@ -505,12 +541,11 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
+      RequiredClaim.Public()
     )
   }
 
-  it should "compute the correct claims if no filtersByParty in transactions and reassignments exists and topology format is empty" in {
+  it should "require only a public claim if no filtersByParty in transactions and reassignments exists and topology format is empty" in {
     val eventFormatO = Some(
       EventFormat(
         filtersByParty = Map.empty,
@@ -538,7 +573,9 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         ),
         descendingOrder = false,
       )
-    ) shouldBe Nil
+    ) should contain theSameElementsAs RequiredClaims[GetUpdatesRequest](
+      RequiredClaim.Public()
+    )
   }
 
   it should "compute the correct claims if no updateFormat exists" in {
@@ -552,7 +589,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     ) shouldBe Nil
   }
 
-  it should "compute the correct claims for topology format without wildcard" in {
+  it should "require only a public claim for topology format with parties" in {
     UpdateServiceAuthorization.getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
@@ -569,8 +606,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
+      RequiredClaim.Public()
     )
   }
 
@@ -629,7 +665,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     )
   }
 
-  it should "compute the correct claims for topology format with wildcard" in {
+  it should "require only a public claim for topology format with wildcard" in {
     UpdateServiceAuthorization.getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
@@ -646,7 +682,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAsAnyParty()
+      RequiredClaim.Public()
     )
   }
 

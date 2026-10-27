@@ -63,6 +63,11 @@ trait HasProtocolVersionedWrapperF[F[_], ValueClass <: HasRepresentativeProtocol
   def isEquivalentTo(protocolVersion: ProtocolVersion): Boolean =
     companionObj.protocolVersionRepresentativeFor(protocolVersion) == representativeProtocolVersion
 
+  def isAdmissibleFor(protocolVersion: ProtocolVersion): Boolean =
+    companionObj
+      .admissibleRpvs(companionObj.protocolVersionRepresentativeFor(protocolVersion).representative)
+      .contains(representativeProtocolVersion.representative)
+
   private def toProtoVersioned(
       serializer: ValueClass => F[ByteString],
       protoVersion: ProtoVersion,

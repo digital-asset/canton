@@ -137,7 +137,6 @@ class TopologyChangeIntegrationTest extends CommunityIntegrationTest with Shared
         Namespace(ns.fingerprint),
         ns,
         CanSignAllMappings,
-        synchronize = None,
       )
 
       participant1.topology.namespace_delegations.propose_delegation(
@@ -153,6 +152,7 @@ class TopologyChangeIntegrationTest extends CommunityIntegrationTest with Shared
         key3,
         CanSignAllButNamespaceDelegations,
         signedBy = Seq(key2.fingerprint),
+        synchronize = None,
       )
 
       participant1.topology.party_to_participant_mappings.propose(

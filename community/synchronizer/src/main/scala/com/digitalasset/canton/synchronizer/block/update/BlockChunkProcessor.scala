@@ -19,6 +19,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -257,7 +258,9 @@ final class BlockChunkProcessor(
 
     val sendOutcomesStr = sendOutcomes.mapFilter {
       case x: SubmissionOutcome.Deliver => Some((x.submission.messageId, "Deliver"))
-      case x: SubmissionOutcome.Reject => Some((x.submission.messageId, s"Reject(${x.error})"))
+      case x: SubmissionOutcome.Reject =>
+        val code = CantonBaseError.statusErrorCodes(x.error).headOption.getOrElse("Unknown")
+        Some((x.submission.messageId, s"Reject($code)"))
       case x: SubmissionOutcome.DeliverReceipt => Some((x.submission.messageId, "Receipt"))
       case SubmissionOutcome.Discard =>
         logger.error(
@@ -590,12 +593,10 @@ final class BlockChunkProcessor(
                     latestSequencerEventTimestamp,
                     warnIfApproximate,
                   )
-
-                /* Submission request signatures are always
-                 * created using an approximate snapshot and must therefore be verified using the sequencing time.
-                 * This keeps signing and verification timestamps aligned. Otherwise, delayed confirmation
-                 * responses/results may cause the session key (when enabled) to appear expired at verification time
-                 * and lead to valid requests being rejected.
+                /* Submission request signatures are always created using an approximate snapshot and must therefore be
+                 * verified using the sequencing time. This keeps signing and verification timestamps aligned.
+                 * Otherwise, delayed confirmation responses/results may cause the session key (when enabled) to appear
+                 * expired at verification time and lead to valid requests being rejected.
                  */
                 _ = logger.debug(
                   s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +

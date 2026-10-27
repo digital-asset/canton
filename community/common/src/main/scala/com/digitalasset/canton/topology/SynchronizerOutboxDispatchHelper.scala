@@ -8,12 +8,14 @@ import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.SynchronizerCrypto
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   LifeCycle,
   RunOnClosing,
+  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.PrettyPrintingFromCompanion
@@ -27,6 +29,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.*
+import scala.util.control.NonFatal
 
 trait SynchronizerOutboxDispatchHelper extends NamedLogging {
   protected def psid: PhysicalSynchronizerId
@@ -38,6 +41,45 @@ trait SynchronizerOutboxDispatchHelper extends NamedLogging {
   protected def crypto: SynchronizerCrypto
 
   protected def topologyConfig: TopologyConfig
+
+  /** Reports locally submitted topology transactions that were sequenced but subsequently rejected
+    * during topology validation on the synchronizer. Observing a transaction in the target store
+    * does not imply that it was accepted, so without this check the submitting node has no
+    * indication that its own request had no effect.
+    */
+  protected def logRejectedTransactions(
+      transactions: Seq[GenericSignedTopologyTransaction],
+      targetStore: TopologyStore[TopologyStoreId.SynchronizerStore],
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Unit] =
+    targetStore
+      .findStoredByHashes(
+        CantonTimestamp.MaxValue,
+        transactions.map(_.hash).toSet,
+        includeRejected = true,
+      )
+      .map { storedByHash =>
+        transactions.foreach { tx =>
+          storedByHash
+            .get(tx.hash)
+            .flatMap(stored => stored.rejectionReason.map(stored -> _))
+            .foreach { case (stored, reason) =>
+              logger.info(
+                s"Topology transaction ${topologyTransaction(tx)} submitted by $memberId was sequenced at " +
+                  s"${stored.sequenced.value} but rejected by $psid during topology validation: ${reason.str}"
+              )
+            }
+        }
+      }
+      .recover { case NonFatal(exception) =>
+        logger.warn(
+          s"Unable to inspect sequenced topology transactions submitted by $memberId on $psid for rejection reasons",
+          exception,
+        )
+        UnlessShutdown.Outcome(())
+      }
 
   protected def topologyTransaction(
       tx: GenericSignedTopologyTransaction

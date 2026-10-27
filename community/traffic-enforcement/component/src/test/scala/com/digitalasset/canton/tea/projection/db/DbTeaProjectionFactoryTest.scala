@@ -17,7 +17,7 @@ import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.Pr
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.projection.{
-  EventSource,
+  CompletionAccountingPolicy,
   TeaProjectionFactory,
   TeaProjectionTest,
   TeaTrafficStore,
@@ -37,6 +37,9 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
       DBIO.seq(
         sqlu"truncate table par_traffic_enforcement_event",
         sqlu"truncate table par_traffic_enforcement_balance",
+        sqlu"truncate table par_traffic_enforcement_correlations",
+        sqlu"truncate table par_traffic_enforcement_uncharged_completions",
+        sqlu"truncate table par_traffic_enforcement_state",
         // Double quotes to force H2 to use lower case table names
         sqlu"""truncate table "pekko_projection_offset_store"""",
         sqlu"""truncate table "pekko_projection_management"""",
@@ -48,6 +51,9 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   // The DB backends persist the offset in the pekko offset store, so a restarted projection
   // resumes exactly where the previous one left off.
   override protected def offsetsArePersisted: Boolean = true
+
+  // The deltas of an event and the offset bump run in the same DB transaction.
+  override protected def deltasAreAppliedAtomically: Boolean = true
 
   // The store is a stateless query wrapper; data isolation between tests is provided by cleanDb.
   // The execution context comes from HasExecutionContext (mixed in via DbTest).
@@ -69,14 +75,14 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
 
       override val store: TeaTrafficStore = dbStore
       // The slick projection needs the raw single/multi storage, not the idempotency wrapper.
-      override def newProjection(): TeaProjectionFactory =
+      override def newProjection(policy: CompletionAccountingPolicy): TeaProjectionFactory =
         new TeaDbProjectionFactory(
           storage.underlying,
           loggerFactory,
           dbStore,
-          EventSource.LedgerAPICompletions,
           ProjectionConfig(),
           metrics,
+          policy,
         )
     }
 

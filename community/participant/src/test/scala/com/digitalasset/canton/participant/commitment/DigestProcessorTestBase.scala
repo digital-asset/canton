@@ -68,7 +68,10 @@ object DigestProcessorTestBase extends TestDigestUtils {
   def partyHosting(party: LfPartyId)(participants: ParticipantId*): (LfPartyId, PartyInfo) =
     (
       party,
-      PartyInfo(PositiveInt.one, participants.map(_ -> ParticipantAttributes(Submission)).toMap),
+      PartyInfo.forTesting(
+        PositiveInt.one,
+        participants.map(_ -> ParticipantAttributes(Submission)).toMap,
+      ),
     )
 
   def tte(events: PartyToParticipantAuthorization*) =

@@ -20,7 +20,7 @@ import com.digitalasset.canton.sequencing.client.transports.ServerSubscriptionCl
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError.{
   EventsUnavailableForTimestamp,
-  MemberDisabled,
+  MemberNotActive,
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -161,7 +161,7 @@ private[service] class GrpcManagedSubscription[T](
                 // where a participant updates its sequencer connection config before it has caught up to the point
                 // where the sequencer was actually onboarded.
                 logger.info(message)
-              case _: MemberDisabled =>
+              case _: MemberNotActive =>
                 // Logging at INFO level because this can happen during normal operations when a participant is administratively
                 // disabled while off-line for >30d.
                 logger.info(message)

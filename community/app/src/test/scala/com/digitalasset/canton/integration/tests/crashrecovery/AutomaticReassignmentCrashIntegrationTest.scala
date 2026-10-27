@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.crashrecovery
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.console.{CommandFailure, RemoteParticipantReference}
 import com.digitalasset.canton.error.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
@@ -23,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendDecision,
   SendPolicy,
 }
+import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
 import scala.concurrent.Future
@@ -65,6 +67,11 @@ class AutomaticReassignmentCrashIntegrationTest
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
         ConfigTransforms.setCrashAfterFailedValidation(true),
+        // Submit the automatic assignment immediately after the unassignment
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.reassignmentsConfig.automaticAssignmentDelay)
+            .replace(NonNegativeFiniteDuration.Zero)
+        ),
       )
       .withSetup { implicit env =>
         import env.*

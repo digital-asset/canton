@@ -6,7 +6,11 @@ import SharedDependencies.*
 import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
 import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
-import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
+import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{
+  headerCreate,
+  headerResources,
+  headerSources,
+}
 import org.latestbit.sbt.gcs.GcsPlugin.autoImport.*
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
@@ -21,7 +25,7 @@ import sbtassembly.AssemblyPlugin.autoImport.*
 import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.{BuildInfoKey, *}
-import sbtide.Keys.ideExcludedDirectories
+import sbtide.Keys.{ideExcludedDirectories, ideOutputDirectory}
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
 import scalafix.sbt.ScalafixPlugin.autoImport.scalafix
@@ -156,6 +160,7 @@ object BuildCommon {
       Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
       Global / excludeLintKeys += Compile / ideExcludedDirectories,
       Global / excludeLintKeys += Test / ideExcludedDirectories,
+      Global / excludeLintKeys += `ledger-api-core` / Test / ideOutputDirectory,
     )
 
     publishSettings ++ buildSettings ++ globalSettings ++ commandAliases
@@ -312,6 +317,8 @@ object BuildCommon {
     }
   }
 
+  private object printTestsLock
+
   // Originally https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
   lazy val printTestTask = {
     val destination = "test-full-class-names.log"
@@ -320,7 +327,10 @@ object BuildCommon {
     printTests := {
       val testNames = (Test / definedTestNames).value.toVector
       val projectName = thisProjectRef.value.project
-      IO.writeLines(file(destination), testNames, append = true)
+      // Projects run this task in parallel; unsynchronized appends can splice lines together
+      printTestsLock.synchronized {
+        IO.writeLines(file(destination), testNames, append = true)
+      }
       println(s"Printed ${testNames.size} tests for `$projectName`")
     }
   }
@@ -336,7 +346,7 @@ object BuildCommon {
 
   lazy val bundleTask: Def.Initialize[Task[String]] = Def
     .task {
-      import CommunityProjects.`community-common`
+      import CommunityProjects.{`community-common`, `traffic-enforcement-component`}
 
       val log = streams.value.log
       dumpLicenseReport.value
@@ -358,6 +368,11 @@ object BuildCommon {
         val darOutput = (`community-common` / Compile / damlDarOutput).value
         packDars(darOutput, "dars")
       }
+      // include the pinned traffic credit DAR, for applications that credit traffic to TEA accounts
+      val trafficCreditDars = packDars(
+        (`traffic-enforcement-component` / Compile / resourceDirectory).value / "dar",
+        "dars",
+      )
       if (bundlePack.value.contains(enterpriseGeneratedPack)) {
         log.info("Adding version info to demo files")
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
@@ -448,7 +463,7 @@ object BuildCommon {
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ damlSampleSource ++ damlSampleDars ++ apiFiles
+        releaseNotes ++ licenseFiles ++ damlSampleSource ++ damlSampleDars ++ trafficCreditDars ++ apiFiles
       val args =
         bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
@@ -498,8 +513,6 @@ object BuildCommon {
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
     case PathList("META-INF", "okhttp.kotlin_module") => MergeStrategy.first
-    // TODO(i31788): Remove this merge strategy once zipkin exporter is removed
-    case PathList("okhttp3", _ @_*) => MergeStrategy.first
     // h2 and opentelemetry-runtime-telemetry both provide native-image reflect-config.json, discard both as we don't use native-image
     case PathList("META-INF", "native-image", "reflect-config.json") => MergeStrategy.discard
     case PathList("org", "publicsuffix", "list", "effective_tld_names.dat") => MergeStrategy.first
@@ -700,8 +713,6 @@ object BuildCommon {
       `performance-driver`,
       performance,
       `sequencer-driver-api`,
-      `sequencer-driver-api-conformance-tests`,
-      `sequencer-driver-lib`,
       `reference-sequencer-driver`,
       blake2b,
       `slick-fork`,
@@ -726,6 +737,8 @@ object BuildCommon {
       `transcode-daml-examples`,
       `transcode-test-conformance`,
       `transcode-test-utils`,
+      `ledger-api-size-config`,
+      `size-config-gen`,
       `ledger-api-core`,
       `ledger-json-api`,
       `ledger-json-client`,
@@ -811,7 +824,6 @@ object BuildCommon {
           opentelemetry_exporter_common,
           opentelemetry_exporter_otlp,
           opentelemetry_exporter_prometheus,
-          opentelemetry_exporter_zipkin,
           opentelemetry_sdk,
           scalatest % Test,
         ),
@@ -826,7 +838,6 @@ object BuildCommon {
         `community-common` % "compile->compile;test->test",
         `community-synchronizer` % "compile->compile;test->test",
         `community-integration-testing` % Test,
-        `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
         `ledger-common-dars` % Test,
@@ -959,6 +970,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "VettingMain-1.0.0.dar",
             "com.digitalasset.canton.tests.vettingmain.v1",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TeaTrafficPurchase",
+            (Test / damlDarOutput).value / "TeaTrafficPurchase-1.0.0.dar",
+            "com.digitalasset.canton.tea.tests",
+          ),
         ),
         Test / damlTsCodegen := {
           (`ledger-common-dars` / Compile / damlBuild).value
@@ -1070,7 +1086,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("35", "36")),
+          BuildInfoKey("stableProtocolVersions" -> List("36", "37")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1159,7 +1175,7 @@ object BuildCommon {
           grpc_inprocess % Test,
           h2,
           opentelemetry_instrumentation_grpc,
-          opentelemetry_instrumentation_runtime_metrics,
+          opentelemetry_instrumentation_runtime,
           pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
           pekko_http, // used for http health service
           pekko_stream,
@@ -1239,6 +1255,7 @@ object BuildCommon {
         DamlProjects.`daml-lf-archive-encoder` % Test,
         DamlProjects.`daml-lf-encoder` % Test,
         DamlProjects.`daml-lf-parser` % Test,
+        DamlProjects.`daml-lf-transaction`,
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`test-evidence-tag` % "test->test",
         `community-common` % "test->test",
@@ -1394,31 +1411,6 @@ object BuildCommon {
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := HouseRules.wartremoverErrorsForTestScope,
-
-        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-        UberLibrary.assemblySettings("community-integration-testing-lib"),
-        // when building the fat jar, we need to properly merge our artefacts
-        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
-      )
-
-    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-    lazy val `community-integration-testing-lib` = project
-      .settings(
-        sharedCantonCommunitySettings,
-        UberLibrary.of(`community-integration-testing`),
-        excludeTranscodeConflictingDependencies,
-        Compile / packageDoc := {
-          // TODO(i12766): producing an empty file because there are errors in running the `doc` task
-          val destination = (Compile / packageDoc / artifactPath).value
-          IO.touch(destination)
-          destination
-        },
-
-        // The dependency override is needed because `community-testing` depends transitively on
-        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
-        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
-        // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.5.0",
       )
 
     lazy val microbench = project
@@ -1587,35 +1579,7 @@ object BuildCommon {
           pureconfig_core,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        UberLibrary.assemblySettings("sequencer-driver-lib"),
       )
-
-    lazy val `sequencer-driver-api-conformance-tests` = project
-      .in(file("community/sequencer-driver-api-conformance-tests"))
-      .dependsOn(
-        `community-testing`,
-        `sequencer-driver-api`,
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          scalatest
-        ),
-      )
-
-    // TODO(i12761): package individual libraries instead of fat JARs for external consumption
-    lazy val `sequencer-driver-lib`: Project =
-      project
-        .settings(
-          sharedCantonCommunitySettings,
-          libraryDependencies ++= Seq(
-            circe_core,
-            circe_generic,
-            circe_parser,
-            better_files,
-          ),
-        )
-        .settings(UberLibrary.of(`sequencer-driver-api`))
 
     lazy val `reference-sequencer-driver` = project
       .in(file("community/reference-sequencer-driver"))
@@ -2010,6 +1974,110 @@ object BuildCommon {
         libraryDependencies ++= Seq(zioTest),
       )
 
+    // Protoc plugin generating size-limit config classes from protos
+    lazy val `size-config-gen` = project
+      .in(file("community/size-config-gen"))
+      // HouseRules fails on Scala 2.12 (Scala3Migration.onScalaVersion) and its scalac flags are
+      // 2.13-only.
+      .disablePlugins(HouseRules, BufPlugin)
+      .settings(
+        sharedSettings,
+        HouseRules.cantonRepoHeaderSettings,
+        baseCommunitySettings,
+        // sbt-protoc runs the generator inside sbt's JVM and shares scala.* with sbt,
+        // so it must be compiled with sbt's Scala version (2.12)
+        scalaVersion := scala.util.Properties.versionNumberString,
+        // -Ywarn-unused is required by the Scalafix rules (RemoveUnused, OrganizeImports); on 2.13 projects
+        // HouseRules adds the equivalent flags
+        scalacOptions ++= Seq(
+          "-feature",
+          "-deprecation",
+          "-Xfatal-warnings",
+          "-Xsource:3",
+          "-Ywarn-unused",
+        ),
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          protoc_gen_sbt,
+          google_protobuf_java,
+          google_protobuf_java % "protobuf",
+          scalatest % Test,
+        ),
+        // The test fixtures are compiled to a descriptor set
+        Test / PB.targets := Seq(
+          PB.gens.descriptorSet -> (Test / resourceManaged).value / "size-config-fixtures.desc"
+        ),
+        // The fixture loader needs the imported files (descriptor.proto, any.proto) in the set
+        Test / PB.protocOptions += "--include_imports",
+        // sbt-protoc only adds .java/.scala outputs to the sources; put the descriptor set on the test classpath
+        Test / resourceGenerators += (Test / PB.generate).taskValue,
+      )
+
+    // Size-limit configuration classes for ledger api protos
+    lazy val `ledger-api-size-config` = project
+      .in(file("community/ledger-api-size-config"))
+      .dependsOn(`util-external`)
+      .disablePlugins(BufPlugin)
+      .settings(
+        sharedCommunitySettings,
+        coverageEnabled := false,
+        Compile / PB.protoSources := (DamlProjects.`ledger-api-proto` / Compile / PB.protoSources).value,
+        // value.proto is imported, no config classes are generated for it: put it on the include path only
+        Compile / PB.includePaths ++= (DamlProjects.`ledger-api-value-proto` / Compile / PB.protoSources).value,
+        Compile / PB.targets := Seq(
+          protocbridge.Target(
+            generator = protocbridge.SandboxedJvmGenerator.forModule(
+              name = "sizeconfig",
+              artifact = protocbridge
+                .Artifact("com.digitalasset.canton", "size-config-gen", "in-build"),
+              generatorClass = "com.digitalasset.canton.sizeconfig.gen.SizeConfigGenerator$",
+              suggestedDependencies = Seq.empty,
+            ),
+            // put the generated classes in src/main/scala
+            outputPath = (Compile / scalaSource).value,
+            // pass the exclusion list to the plugin
+            options = Seq(
+              s"exclusions=${((Compile / sourceDirectory).value / "size-config" / "exclusions.txt").getAbsolutePath}"
+            ),
+          )
+        ),
+        // files on the include path are part of sbt-protoc's cache: editing exclusions.txt should regenerate the config classes
+        Compile / PB.includePaths += (Compile / sourceDirectory).value / "size-config",
+        // src/main/scala holds the generated files: list it only after generation, otherwise files that
+        // sbt-protoc deletes (e.g. newly excluded messages) are still passed to the compiler
+        Compile / unmanagedSources := (Compile / unmanagedSources)
+          .dependsOn(Compile / PB.generate)
+          .value,
+        // Serve the in-build generator's classpath to sbt-protoc. Jars rather than class directories:
+        // sbt-protoc keys its cache on file timestamps, and a jar's timestamp changes whenever the
+        // generator changes.
+        Compile / PB.artifactResolver := {
+          val cp = (`size-config-gen` / Compile / fullClasspathAsJars).value.map(_.data)
+          (_: protocbridge.Artifact) => cp
+        },
+        // The generator only does basic formatting: format the generated files right after generation.
+        Compile / PB.generate := Def.taskDyn {
+          val generated = (Compile / PB.generate).value
+          val args = generated.map(f => "\"" + f.getAbsolutePath + "\"").mkString(" ", " ", "")
+          Def
+            .sequential(
+              // format
+              (Compile / ScalafmtPlugin.autoImport.scalafmtOnly).toTask(args),
+              // add the license headers
+              Compile / headerCreate,
+            )
+            .map(_ => generated)
+        }.value,
+        libraryDependencies ++= Seq(
+          // imported by the Ledger API protos; unpacked onto the protoc include path only
+          google_common_protos % "protobuf",
+          google_protobuf_java % "protobuf",
+          pureconfig_core,
+          pureconfig_generic,
+          scalatest % Test,
+        ),
+      )
+
     lazy val Perf = config("perf") extend Test
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
@@ -2071,6 +2139,13 @@ object BuildCommon {
         Perf / fork := true,
         Perf / baseDirectory := (LocalRootProject / baseDirectory).value,
         Perf / javaOptions += "-Xmx" + sys.props.getOrElse("perf.xmx", "32G"),
+        // IntelliJ merges every Test-extending configuration into a single module and picks one of
+        // them as the module's test output directory. Without the settings below it picks `Perf`,
+        // so the module's test output becomes `target/scala-2.13/perf-classes` and no regular
+        // test class is on the IDE run classpath. It makes running tests from the IDE impossible.
+        // Pin both configurations to the regular `Test` output so the IDE always sees `test-classes`.
+        Test / ideOutputDirectory := Some((Test / classDirectory).value),
+        Perf / ideOutputDirectory := Some((Test / classDirectory).value),
       )
 
     lazy val `ledger-json-api` =
@@ -2661,6 +2736,7 @@ object BuildCommon {
       )
         .dependsOn(
           `traffic-enforcement-api`,
+          DamlProjects.`bindings-java`,
           DamlProjects.`ledger-api-scala`,
           `ledger-api-core`,
           DamlProjects.`ledger-api-proto`,
@@ -2680,6 +2756,19 @@ object BuildCommon {
               DamlProjects.`google-common-protos-scala` / PB.unpackDependencies
             )
             .value,
+          Compile / damlDarOutput := (Compile / target).value / "dar-output",
+          damlPinnedProjects := Seq(
+            (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit"
+          ),
+          Compile / useVersionedDarName := true,
+          Compile / damlJavaCodegen := Seq(
+            (
+              (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit",
+              (Compile / resourceDirectory).value / "dar" / "canton-traffic-credit-1.0.0.dar",
+              "com.digitalasset.canton.tea.daml",
+            )
+          ),
+          addFilesToHeaderCheck("*.daml", "daml", Compile),
           libraryDependencies ++= Seq(
             commons_io,
             pekko_actor_typed,
@@ -3490,7 +3579,8 @@ object BuildCommon {
         enablePublishLibrary,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          google_protobuf_java
+          google_protobuf_java,
+          scalatest % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
       )
@@ -3503,6 +3593,7 @@ object BuildCommon {
         `daml-lf-language`,
         `daml-lf-snapshot-proto`,
         `daml-lf-transaction`,
+        `daml-lf-parser` % Test,
       )
       .settings()
 
@@ -3841,6 +3932,9 @@ object BuildCommon {
           google_common_protos
         ),
         enablePublishLibrary,
+      )
+      .dependsOn(
+        `daml-lf-transaction` % "compile->compile;protobuf->protobuf"
       )
 
     lazy val `daml-lf-snapshot` = project

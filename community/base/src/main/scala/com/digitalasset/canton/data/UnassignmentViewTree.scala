@@ -6,12 +6,12 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
-import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, HashPurpose, Salt, Signature}
 import com.digitalasset.canton.data.MerkleTree.RevealSubtree
 import com.digitalasset.canton.data.ReassignmentRef.ContractIdRef
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingCompanion}
 import com.digitalasset.canton.protocol.messages.UnassignmentMediatorMessage
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{RootHash, Stakeholders, ViewHash, v30, v31}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -23,7 +23,17 @@ import com.digitalasset.canton.validation.{
   ProtoUnvalidatedString,
   ProtoValidation,
 }
-import com.digitalasset.canton.version.*
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedWrapper,
+  HasToByteString,
+  ProtoVersion,
+  ProtocolVersion,
+  ProtocolVersionValidation,
+  RepresentativeProtocolVersion,
+  VersionedProtoCodec,
+  VersioningCompanionContext,
+  VersioningCompanionContextMemoization,
+}
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -95,7 +105,7 @@ object UnassignmentViewTree
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ReassignmentViewTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.ReassignmentViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )
@@ -212,7 +222,7 @@ object UnassignmentCommonData
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.UnassignmentCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.UnassignmentCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -372,7 +382,7 @@ object UnassignmentView
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.UnassignmentView)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.UnassignmentView)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),

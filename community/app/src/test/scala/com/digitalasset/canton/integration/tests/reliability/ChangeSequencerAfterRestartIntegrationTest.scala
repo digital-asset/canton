@@ -12,10 +12,9 @@ import com.daml.test.evidence.tag.Reliability.{
 }
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalInstanceReference}
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -40,7 +39,7 @@ class ChangeSequencerAfterRestartIntegrationTest
     with SharedEnvironment {
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M1_Manual
@@ -139,6 +138,9 @@ class ChangeSequencerAfterRestartIntegrationTest
         import env.*
 
         // start up nodes
+        clue("starting up sequencer") {
+          sequencer1.start()
+        }
         clue("starting up participant") {
           participant1.start()
         }

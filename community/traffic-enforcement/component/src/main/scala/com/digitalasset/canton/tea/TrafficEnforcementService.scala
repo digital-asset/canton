@@ -6,25 +6,37 @@ package com.digitalasset.canton.tea
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
+import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.tea.TrafficEnforcementErrors.{InsufficientBalance, UnsafeToPrune}
 import com.digitalasset.canton.tea.projection.{
   AccountId,
+  CorrelationAccount,
+  CorrelationKey,
   EventId,
   EventSource,
+  SubmissionCorrelation,
   TeaTrafficStore,
   TrafficDelta,
 }
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
+  RegisterSubmissionRequest,
+  RegisterSubmissionResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -38,6 +50,8 @@ import scala.concurrent.ExecutionContext
 class TrafficEnforcementService(
     store: TeaTrafficStore,
     clock: Clock,
+    minimumPruningRetention: NonNegativeFiniteDuration,
+    metrics: TrafficEnforcementMetrics,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -62,6 +76,67 @@ class TrafficEnforcementService(
         case None => GetAccountResponse(request.accountId, 0L)
       }
     }
+
+    result.value
+  }
+
+  /** Record which account a submission is charged to, after checking its balance if requested.
+    *
+    * The balance check and the insert aren't atomic, so concurrent submissions can both pass it.
+    */
+  def registerSubmission(request: RegisterSubmissionRequest)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[RpcError, RegisterSubmissionResponse]] = {
+    def parsed[A](result: ParsingResult[A]): EitherT[FutureUnlessShutdown, RpcError, A] =
+      EitherT.fromEither[FutureUnlessShutdown](
+        result.leftMap[RpcError](ProtoDeserializationFailure.Wrap(_))
+      )
+
+    val result = for {
+      changeIdHash <- parsed(
+        LfHash
+          .fromString(request.changeIdHash)
+          .leftMap(ProtoDeserializationError.ValueConversionError("change_id_hash", _))
+      )
+      submissionId <- parsed(
+        Either.cond(
+          request.submissionId.nonEmpty,
+          request.submissionId,
+          ProtoDeserializationError.FieldNotSet("submission_id"),
+        )
+      )
+      accountO <- parsed(request.account.traverse { charged =>
+        // AccountId accepts "", but only an unset account means no account.
+        Either
+          .cond(
+            charged.accountId.nonEmpty,
+            charged.accountId,
+            ProtoDeserializationError.ValueConversionError("account_id", "must not be empty"),
+          )
+          .flatMap(AccountId.fromProtoPrimitive)
+      })
+      _ <- (accountO, request.account.flatMap(_.requiredBalance)) match {
+        case (Some(account), Some(requiredBalance)) =>
+          store.getBalance(account).leftWiden[RpcError].flatMap { stateO =>
+            val balance = stateO.fold(0L)(_.balance)
+            EitherT.cond[FutureUnlessShutdown](
+              balance >= requiredBalance,
+              (),
+              InsufficientBalance.Reject(account.unwrap, balance, requiredBalance): RpcError,
+            )
+          }
+        case _ => EitherT.rightT[FutureUnlessShutdown, RpcError](())
+      }
+      _ <- store
+        .insertCorrelation(
+          SubmissionCorrelation(
+            CorrelationKey(changeIdHash, submissionId),
+            CorrelationAccount.fromOption(accountO),
+            clock.now,
+          )
+        )
+        .leftWiden[RpcError]
+    } yield RegisterSubmissionResponse()
 
     result.value
   }
@@ -116,11 +191,11 @@ class TrafficEnforcementService(
     }
   }
 
-  def pruneEvents(request: PruneEventsRequest)(implicit
+  def prune(request: PruneRequest)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[RpcError, PruneEventsResponse]] = {
+  ): FutureUnlessShutdown[Either[RpcError, PruneResponse]] = {
 
-    val result: EitherT[FutureUnlessShutdown, RpcError, PruneEventsResponse] = for {
+    val result: EitherT[FutureUnlessShutdown, RpcError, PruneResponse] = for {
       ts <- EitherT.fromEither[FutureUnlessShutdown](
         ProtoConverter
           .parseRequired(
@@ -130,9 +205,22 @@ class TrafficEnforcementService(
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
-      pruneResult <- store.pruneEvents(ts).leftWiden[RpcError]
+      safeBeforeOrAt = clock.now.minus(minimumPruningRetention.asJava)
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        ts <= safeBeforeOrAt,
+        (),
+        UnsafeToPrune.Reject(ts, safeBeforeOrAt, minimumPruningRetention): RpcError,
+      )
+      pruneResult <- store.prune(ts).leftWiden[RpcError]
     } yield {
-      PruneEventsResponse(pruneResult)
+      metrics.markPrunedRows("events", pruneResult.events)
+      metrics.markPrunedRows("correlations", pruneResult.correlations)
+      metrics.markPrunedRows("uncharged_completions", pruneResult.unchargedCompletions)
+      PruneResponse(
+        prunedEventCount = pruneResult.events,
+        prunedCorrelationCount = pruneResult.correlations,
+        prunedUnchargedCompletionCount = pruneResult.unchargedCompletions,
+      )
     }
 
     result.value

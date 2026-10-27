@@ -8,7 +8,6 @@ import com.typesafe.scalalogging.LazyLogging
 
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{Semaphore, TimeUnit}
-import scala.util.control.NonFatal
 
 /** Although our integration tests are designed not to conflict with one another when running
   * concurrently, practically due to how resource heavy their setups are you will start encountering
@@ -83,9 +82,12 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
     change(name, Running)
     try block
     catch {
-      // creations can easily fail and throw
-      // capture these and immediately release the permit as the destroy method will not be called
-      case NonFatal(e) =>
+      // Creations can easily fail and throw.
+      // Capture these and immediately release the permit as the destroy method will not be called.
+      // This must also cover fatal errors such as a NoClassDefFoundError thrown while building the
+      // environment definition: otherwise the permit leaks and every later environment creation
+      // blocks forever on the semaphore, which shows up in CI as an sbt timeout.
+      case e: Throwable =>
         change(name, Failed, purge = true)
         semaphore.release(numPermits)
         throw e

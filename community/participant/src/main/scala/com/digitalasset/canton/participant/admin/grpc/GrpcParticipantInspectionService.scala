@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import cats.syntax.either.*
+import cats.syntax.parallel.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -245,52 +246,34 @@ class GrpcParticipantInspectionService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val result = for {
-
-      synchronizerSearchPeriodsF <-
+      synchronizerSearchPeriods <-
         if (request.timeRanges.isEmpty) fetchDefaultSynchronizerTimeRanges()
-        else
-          request.timeRanges
-            .traverse(dtr => validateSynchronizerTimeRange(dtr))
-      result <- for {
-        counterParticipantIds <- request.counterParticipantIds.traverse(pId =>
-          ParticipantId
-            .fromProtoPrimitive(pId, s"counter_participant_ids")
-            .leftMap(err => err.message)
-        )
-        states <- request.commitmentState
-          .map(CommitmentPeriodState.fromProtoV30)
-          .sequence
-          .leftMap(err => err.message)
-      } yield {
-        for {
-          synchronizerSearchPeriods <- Future.sequence(synchronizerSearchPeriodsF)
-        } yield syncStateInspection
-          .crossSynchronizerSentCommitmentMessages(
-            synchronizerSearchPeriods,
-            NonEmpty.from(counterParticipantIds),
-            states,
-            request.verbose,
+        else request.timeRanges.parTraverse(validateSynchronizerTimeRange)
+      response <- EitherT.fromEither[FutureUnlessShutdown](for {
+        counterParticipantIds <- request.counterParticipantIds
+          .traverse(
+            ParticipantId.fromProtoPrimitive(_, "counter_participant_ids")
           )
-      }
-    } yield result
-
-    result
-      .fold(
-        string => Future.failed(new IllegalArgumentException(string)),
-        _.map {
-          case Left(string) => Future.failed(new IllegalArgumentException(string))
-          case Right(value) =>
-            Future.successful(
-              v30.LookupSentAcsCommitmentsResponse(SentAcsCommitment.toProtoV30(value))
-            )
-        },
-      )
-      .flatten
+          .leftMap(_.message)
+        states <- request.commitmentState
+          .traverse(CommitmentPeriodState.fromProtoV30)
+          .leftMap(err => err.message)
+        messages <- syncStateInspection.crossSynchronizerSentCommitmentMessages(
+          synchronizerSearchPeriods,
+          NonEmpty.from(counterParticipantIds),
+          states,
+          request.verbose,
+        )
+      } yield v30.LookupSentAcsCommitmentsResponse(SentAcsCommitment.toProtoV30(messages)))
+    } yield response
+    result.valueOr(err => throw new IllegalArgumentException(err)).asGrpcFuture
   }
 
   /** List the counter-participants of a participant and their ACS commitments together with the
-    * match status TODO(#18749) R1 Can also be used for R1, to fetch commitments that a counter
-    * participant received from myself
+    * match status
+    *
+    * TODO(#18749) R1 Can also be used for R1, to fetch commitments that a counter participant
+    * received from myself
     */
   override def lookupReceivedAcsCommitments(
       request: v30.LookupReceivedAcsCommitmentsRequest
@@ -298,86 +281,62 @@ class GrpcParticipantInspectionService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val result = for {
-      synchronizerSearchPeriodsF <-
+      synchronizerSearchPeriods <-
         if (request.timeRanges.isEmpty) fetchDefaultSynchronizerTimeRanges()
-        else
-          request.timeRanges
-            .traverse(dtr => validateSynchronizerTimeRange(dtr))
+        else request.timeRanges.parTraverse(validateSynchronizerTimeRange)
 
-      result <- for {
-        counterParticipantIds <- request.counterParticipantIds.traverse(pId =>
-          ParticipantId
-            .fromProtoPrimitive(pId, "counter_participant_ids")
-            .leftMap(err => err.message)
-        )
-        states <- request.commitmentState
-          .map(CommitmentPeriodState.fromProtoV30)
-          .sequence
-          .leftMap(err => err.message)
-      } yield {
-        for {
-          synchronizerSearchPeriods <- Future.sequence(synchronizerSearchPeriodsF)
-        } yield syncStateInspection
-          .crossSynchronizerReceivedCommitmentMessages(
-            synchronizerSearchPeriods,
-            NonEmpty.from(counterParticipantIds),
-            states,
-            request.verbose,
+      response <- EitherT.fromEither[FutureUnlessShutdown](for {
+        counterParticipantIds <- request.counterParticipantIds
+          .traverse(
+            ParticipantId.fromProtoPrimitive(_, "counter_participant_ids")
           )
-      }
-    } yield result
-    result match {
-      case Left(string) => Future.failed(new IllegalArgumentException(string))
-      case Right(value) =>
-        value.map {
-          case Left(string) => Future.failed(new IllegalArgumentException(string))
-          case Right(value) =>
-            Future.successful(
-              v30.LookupReceivedAcsCommitmentsResponse(ReceivedAcsCommitment.toProtoV30(value))
-            )
-        }.flatten
-    }
+          .leftMap(_.message)
+        states <- request.commitmentState
+          .traverse(CommitmentPeriodState.fromProtoV30)
+          .leftMap(_.message)
+        messages <- syncStateInspection.crossSynchronizerReceivedCommitmentMessages(
+          synchronizerSearchPeriods,
+          NonEmpty.from(counterParticipantIds),
+          states,
+          request.verbose,
+        )
+      } yield v30.LookupReceivedAcsCommitmentsResponse(ReceivedAcsCommitment.toProtoV30(messages)))
+    } yield response
+    result.valueOr(err => throw new IllegalArgumentException(err)).asGrpcFuture
   }
 
   private def fetchDefaultSynchronizerTimeRanges()(implicit
       traceContext: TraceContext
-  ): Either[String, Seq[Future[SynchronizerSearchCommitmentPeriod]]] = {
-    val searchPeriods = synchronizerAliasManager.logicalSynchronizerIds.map(synchronizerId =>
-      for {
-        synchronizerAlias <- synchronizerAliasManager
-          .aliasForSynchronizerId(synchronizerId)
-          .toRight(s"No synchronizer alias found for $synchronizerId")
-        lastComputed <- syncStateInspection
-          .findLastComputedAndSent(synchronizerAlias)
-          .toRight(s"No computations done for $synchronizerId")
-      } yield {
+  ): EitherT[FutureUnlessShutdown, String, Seq[SynchronizerSearchCommitmentPeriod]] =
+    MonadUtil.sequentialTraverse(synchronizerAliasManager.logicalSynchronizerIds.toSeq) {
+      synchronizerId =>
         for {
-          indexedSynchronizer <- IndexedSynchronizer
-            .indexed(indexedStringStore)(synchronizerId)
-            .failOnShutdownToAbortException("fetchDefaultSynchronizerTimeRanges")
+          synchronizerAlias <- EitherT.fromEither[FutureUnlessShutdown](
+            synchronizerAliasManager
+              .aliasForSynchronizerId(synchronizerId)
+              .toRight(s"No synchronizer alias found for $synchronizerId")
+          )
+          lastComputed <- EitherT.fromEither[FutureUnlessShutdown](
+            syncStateInspection
+              .findLastComputedAndSent(synchronizerAlias)
+              .toRight(s"No computations done for $synchronizerId")
+          )
+          indexedSynchronizer <- EitherT.liftF(
+            IndexedSynchronizer.indexed(indexedStringStore)(synchronizerId)
+          )
         } yield SynchronizerSearchCommitmentPeriod(
           indexedSynchronizer,
           lastComputed.forgetRefinement,
           lastComputed.forgetRefinement,
         )
-      }
-    )
-
-    val (lefts, rights) = searchPeriods.partitionMap(identity)
-
-    NonEmpty.from(lefts) match {
-      case Some(leftsNe) => Left(leftsNe.head1)
-      case None => Right(rights.toSeq)
     }
-
-  }
 
   private def validateSynchronizerTimeRange(
       timeRange: v30.SynchronizerTimeRange
   )(implicit
       traceContext: TraceContext
-  ): Either[String, Future[SynchronizerSearchCommitmentPeriod]] =
-    for {
+  ): EitherT[FutureUnlessShutdown, String, SynchronizerSearchCommitmentPeriod] = {
+    val res = for {
       synchronizerId <- SynchronizerId.fromString(timeRange.synchronizerId)
 
       synchronizerAlias <- synchronizerAliasManager
@@ -387,32 +346,31 @@ class GrpcParticipantInspectionService(
         .findLastComputedAndSent(synchronizerAlias)
         .toRight(s"No computations done for $synchronizerId")
 
-      times <- timeRange.interval
+      interval = timeRange.interval.getOrElse(
         // when no timestamp is given we make a TimeRange of (lastComputedAndSentTs,lastComputedAndSentTs), this should give the latest elements since the comparison later on is inclusive.
-        .fold(
-          Right(
-            v30.TimeRange(Some(lastComputed.toProtoTimestamp), Some(lastComputed.toProtoTimestamp))
-          )
-        )(Right(_))
-        .flatMap(interval =>
-          for {
-            min <- interval.fromExclusive
-              .toRight(s"Missing start timestamp for ${timeRange.synchronizerId}")
-              .flatMap(ts => CantonTimestamp.fromProtoTimestamp(ts).left.map(_.message))
-            max <- interval.toInclusive
-              .toRight(s"Missing end timestamp for ${timeRange.synchronizerId}")
-              .flatMap(ts => CantonTimestamp.fromProtoTimestamp(ts).left.map(_.message))
-          } yield (min, max)
+        v30.TimeRange(Some(lastComputed.toProtoTimestamp), Some(lastComputed.toProtoTimestamp))
+      )
+      start <- ProtoConverter
+        .parseRequired(
+          CantonTimestamp.fromProtoTimestamp,
+          s"fromExclusive for ${timeRange.synchronizerId}",
+          interval.fromExclusive,
         )
-      (start, end) = times
-
+        .leftMap(_.message)
+      end <- ProtoConverter
+        .parseRequired(
+          CantonTimestamp.fromProtoTimestamp,
+          s"toInclusive for ${timeRange.synchronizerId}",
+          interval.toInclusive,
+        )
+        .leftMap(_.message)
     } yield {
       for {
-        indexedSynchronizer <- IndexedSynchronizer
-          .indexed(indexedStringStore)(synchronizerId)
-          .failOnShutdownToAbortException("validateSynchronizerTimeRange")
+        indexedSynchronizer <- IndexedSynchronizer.indexed(indexedStringStore)(synchronizerId)
       } yield SynchronizerSearchCommitmentPeriod(indexedSynchronizer, start, end)
     }
+    EitherT(res.sequence)
+  }
 
   /** Request metadata about shared contracts used in commitment computation at a specific time
     * Subject to the data still being available on the participant

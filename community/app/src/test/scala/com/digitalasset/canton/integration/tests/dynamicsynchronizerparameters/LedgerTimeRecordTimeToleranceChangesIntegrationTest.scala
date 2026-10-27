@@ -3,14 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.dynamicsynchronizerparameters
 
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -140,27 +135,17 @@ trait LedgerTimeRecordTimeToleranceChangesIntegrationTest
   }
 }
 
-class LedgerTimeRecordTimeToleranceChangesIntegrationTestDefault
-    extends LedgerTimeRecordTimeToleranceChangesIntegrationTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory)
-  )
-  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
-}
-
 class LedgerTimeRecordTimeToleranceChangesBftOrderingIntegrationTestDefault
     extends LedgerTimeRecordTimeToleranceChangesIntegrationTest {
-  registerPlugin(
-    new UseBftSequencer(loggerFactory)
-  )
+  registerPlugin(new UseBftSequencer(loggerFactory))
   // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-//class LedgerTimeRecordTimeToleranceChangesIntegrationTestPostgres extends LedgerTimeRecordTimeToleranceChangesIntegrationTest {
+//class LedgerTimeRecordTimeToleranceChangesBftOrderingIntegrationTestPostgres
+//    extends LedgerTimeRecordTimeToleranceChangesIntegrationTest {
 //  registerPlugin(new UsePostgres(loggerFactory))
-//  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+//  registerPlugin(new UseBftSequencer(loggerFactory))
 //  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
 //  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 //}

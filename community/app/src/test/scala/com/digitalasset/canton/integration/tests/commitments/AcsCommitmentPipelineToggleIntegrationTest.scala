@@ -22,7 +22,6 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil.withResource
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, config}
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
@@ -48,7 +47,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
       )
 
   // setup happens as a test case rather than `withSetup` so that we don't repeat this on the other environments we create in the test
-  "setup the environment" onlyRunWithOrGreaterThan ProtocolVersion.v36 in { implicit env =>
+  "setup the environment" in { implicit env =>
     import env.*
 
     sequencer1.topology.synchronisation.await_idle()
@@ -235,117 +234,116 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
     }
   }
 
-  "happily toggle pipeline disabled/enabled" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-    disabledEnv =>
-      {
-        implicit val env: TestConsoleEnvironment = disabledEnv
-        import env.*
+  "happily toggle pipeline disabled/enabled" in { disabledEnv =>
+    {
+      implicit val env: TestConsoleEnvironment = disabledEnv
+      import env.*
 
-        logger.info(
-          "Deploying first round of contracts with pipeline disabled on both participants"
-        )
+      logger.info(
+        "Deploying first round of contracts with pipeline disabled on both participants"
+      )
 
-        createIou(daId, participant1, participant2)
-        // Make sure that the shared ACS on the second domain is non-empty so that we also produce commitments there
-        createIou(acmeId, participant1, participant2)
+      createIou(daId, participant1, participant2)
+      // Make sure that the shared ACS on the second domain is non-empty so that we also produce commitments there
+      createIou(acmeId, participant1, participant2)
 
-        advanceBeyondNextTick()
-        always() {
-          assertDigestCheckpoint(participant1, daId, empty = true)
-          assertDigestCheckpoint(participant2, daId, empty = true)
-        }
-      }
-
-      setPipelineStatus(disabledEnv, Seq("participant1", "participant2"), enablePipeline = true) {
-        implicit enabledEnv =>
-          import enabledEnv.*
-          // Advance the clock so that we do not overlap with the previous environment's timestamps
-          environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(60))
-          // Ensure that the block sequencers observe time advancing
-          participant3.testing.fetch_synchronizer_times()
-
-          logger.info(
-            s"Deploying second round of contracts with pipeline enabled on both participants."
-          )
-
-          // Sanity-check that the config really was applied
-          participant1.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
-          participant2.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
-
-          createIou(daId, participant1, participant2)
-
-          val period = awaitNextTick()
-          checkMatchingCommitment(period, participant1, participant2, daId)
-          checkMatchingCommitment(period, participant2, participant1, daId)
-
-          stopAllNodes()
-      }
-
-      {
-        implicit val env: TestConsoleEnvironment = disabledEnv
-        import env.*
-        restartAllNodes()
-
-        // Advance the clock so that we do not overlap with the previous environment's timestamps
-        // Use absolute timestamps because the different environments have unsynchronized sim clocks
-        environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(120))
-        // Ensure that the block sequencers observe time advancing
-        participant3.testing.fetch_synchronizer_times()
-
-        logger.info(
-          "Deploying third round of contracts with the pipeline disabled on both participants"
-        )
-        createIou(daId, participant1, participant2)
-
-        advanceBeyondNextTick()
+      advanceBeyondNextTick()
+      always() {
         assertDigestCheckpoint(participant1, daId, empty = true)
         assertDigestCheckpoint(participant2, daId, empty = true)
       }
+    }
 
-      setPipelineStatus(disabledEnv, Seq("participant1"), enablePipeline = true) {
-        implicit enabledP1Env =>
-          import enabledP1Env.*
-
-          // Advance the clock so that we do not overlap with the previous environment's timestamps
-          environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(180))
-          // Ensure that the block sequencers observe time advancing
-          participant3.testing.fetch_synchronizer_times()
-
-          logger.info(
-            "Deploying fourth round of contract with the pipeline enabled only on participant1"
-          )
-          createIou(daId, participant1, participant2)
-
-          advanceBeyondNextTick()
-          assertDigestCheckpoint(participant1, daId, empty = false)
-          assertDigestCheckpoint(participant2, daId, empty = true)
-      }
-
-      setPipelineStatus(
-        disabledEnv,
-        Seq("participant1", "participant2"),
-        enablePipeline = true,
-        stopNodes = false,
-      ) { implicit enabledEnv =>
+    setPipelineStatus(disabledEnv, Seq("participant1", "participant2"), enablePipeline = true) {
+      implicit enabledEnv =>
         import enabledEnv.*
-
         // Advance the clock so that we do not overlap with the previous environment's timestamps
-        environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(240))
+        environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(60))
         // Ensure that the block sequencers observe time advancing
         participant3.testing.fetch_synchronizer_times()
 
         logger.info(
-          "Deploying fifth round of contracts with the pipeline enabled only both participants"
+          s"Deploying second round of contracts with pipeline enabled on both participants."
         )
+
+        // Sanity-check that the config really was applied
+        participant1.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
+        participant2.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
+
         createIou(daId, participant1, participant2)
 
         val period = awaitNextTick()
-        assertDigestCheckpoint(participant1, daId, empty = false)
-        assertDigestCheckpoint(participant2, daId, empty = false)
-
         checkMatchingCommitment(period, participant1, participant2, daId)
         checkMatchingCommitment(period, participant2, participant1, daId)
-      }
+
+        stopAllNodes()
+    }
+
+    {
+      implicit val env: TestConsoleEnvironment = disabledEnv
+      import env.*
+      restartAllNodes()
+
+      // Advance the clock so that we do not overlap with the previous environment's timestamps
+      // Use absolute timestamps because the different environments have unsynchronized sim clocks
+      environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(120))
+      // Ensure that the block sequencers observe time advancing
+      participant3.testing.fetch_synchronizer_times()
+
+      logger.info(
+        "Deploying third round of contracts with the pipeline disabled on both participants"
+      )
+      createIou(daId, participant1, participant2)
+
+      advanceBeyondNextTick()
+      assertDigestCheckpoint(participant1, daId, empty = true)
+      assertDigestCheckpoint(participant2, daId, empty = true)
+    }
+
+    setPipelineStatus(disabledEnv, Seq("participant1"), enablePipeline = true) {
+      implicit enabledP1Env =>
+        import enabledP1Env.*
+
+        // Advance the clock so that we do not overlap with the previous environment's timestamps
+        environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(180))
+        // Ensure that the block sequencers observe time advancing
+        participant3.testing.fetch_synchronizer_times()
+
+        logger.info(
+          "Deploying fourth round of contract with the pipeline enabled only on participant1"
+        )
+        createIou(daId, participant1, participant2)
+
+        advanceBeyondNextTick()
+        assertDigestCheckpoint(participant1, daId, empty = false)
+        assertDigestCheckpoint(participant2, daId, empty = true)
+    }
+
+    setPipelineStatus(
+      disabledEnv,
+      Seq("participant1", "participant2"),
+      enablePipeline = true,
+      stopNodes = false,
+    ) { implicit enabledEnv =>
+      import enabledEnv.*
+
+      // Advance the clock so that we do not overlap with the previous environment's timestamps
+      environment.simClock.value.advanceTo(CantonTimestamp.ofEpochSecond(240))
+      // Ensure that the block sequencers observe time advancing
+      participant3.testing.fetch_synchronizer_times()
+
+      logger.info(
+        "Deploying fifth round of contracts with the pipeline enabled only both participants"
+      )
+      createIou(daId, participant1, participant2)
+
+      val period = awaitNextTick()
+      assertDigestCheckpoint(participant1, daId, empty = false)
+      assertDigestCheckpoint(participant2, daId, empty = false)
+
+      checkMatchingCommitment(period, participant1, participant2, daId)
+      checkMatchingCommitment(period, participant2, participant1, daId)
+    }
   }
 }
 

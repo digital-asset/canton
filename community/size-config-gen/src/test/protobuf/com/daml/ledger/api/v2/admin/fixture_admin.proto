@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.daml.ledger.api.v2.admin;
+
+import "com/daml/ledger/api/v2/fixture_public.proto";
+
+message FixtureUpdateRequest {
+  map<string, string> annotations = 1;
+}
+
+// Refers to a message of the public package: FixtureFormat stays in the public root.
+message FixtureUsesPublic {
+  com.daml.ledger.api.v2.FixtureFormat format = 1;
+}

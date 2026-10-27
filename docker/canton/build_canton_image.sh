@@ -39,6 +39,14 @@ fi
 
 staging_suffix="${release_suffix}-pre"
 
+delete_staging_tags() {
+  echo "🧹 Deleting staging tags..."
+  for image_type in "${image_types[@]}"; do
+    gcloud artifacts docker tags delete "${oci_path}canton-${image_type}:${staging_suffix}" --quiet || true
+    echo "✅ Deleted staging tag canton-${image_type}:${staging_suffix}"
+  done
+}
+
 if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
   echo "▶️ Publishing images to ${oci_path}"
 fi
@@ -71,13 +79,23 @@ for image_type in "${image_types[@]}"; do
   echo "✅ Finished ${image_type} image"
 done
 
-delete_staging_tags() {
-  echo "🧹 Deleting staging tags..."
+if [ "${PUBLISH_IMAGES:-false}" = "true" ]; then
+  echo "▶️ Verifying staging images are multi-arch..."
+  staging_refs=()
   for image_type in "${image_types[@]}"; do
-    gcloud artifacts docker tags delete "${oci_path}canton-${image_type}:${staging_suffix}" --quiet || true
-    echo "✅ Deleted staging tag canton-${image_type}:${staging_suffix}"
+    staging_refs+=("${oci_path}canton-${image_type}:${staging_suffix}")
   done
-}
+  set +e
+  ../../scripts/ci/check-multiarch-images.py "${staging_refs[@]}"
+  exit_code=$?
+  set -e
+  if [[ $exit_code -ne 0 ]]; then
+    echo "❌ Multi-arch verification failed for staging images (exit code $exit_code). Aborting."
+    delete_staging_tags
+    exit $exit_code
+  fi
+  echo "✅ All staging images are multi-arch!"
+fi
 
 echo "▶️ Running ping test for images (from ./tests/ping)..."
 set +e

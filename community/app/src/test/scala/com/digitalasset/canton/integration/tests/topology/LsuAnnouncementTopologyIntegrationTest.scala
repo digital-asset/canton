@@ -11,13 +11,12 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -54,7 +53,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     with SharedEnvironment {
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S2M2

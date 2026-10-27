@@ -40,7 +40,7 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.LockedContracts
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
-import com.digitalasset.canton.protocol.{LocalRejectError, RequestId, SynchronizerLimits}
+import com.digitalasset.canton.protocol.{LocalRejectError, RequestId}
 import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.mediator.MediatorVerdict
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.{
@@ -196,7 +196,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
                 closedEnvelope
                   .toOpenEnvelope(
                     hashOps,
-                    SynchronizerLimits.defaultFor(testedProtocolVersion),
+                    testedSynchronizerLimits,
                     testedProtocolVersion,
                   )
                   .valueOrFail("open envelopes")

@@ -29,11 +29,13 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionError,
 }
 import com.digitalasset.daml.lf.value.Value as V
+import com.google.common.annotations.VisibleForTesting
 
 import java.nio.charset.StandardCharsets
-import java.security.spec.InvalidKeySpecException
+import java.security.spec.{InvalidKeySpecException, X509EncodedKeySpec}
 import java.security.{
   InvalidKeyException,
+  KeyFactory,
   NoSuchAlgorithmException,
   NoSuchProviderException,
   PublicKey,
@@ -767,7 +769,7 @@ private[lf] object SBuiltinFun {
                 )
               )
             )
-          publicKey = extractPublicKey(derEncodedPublicKey)
+          publicKey = ECPublicKeyUtil.extractPublicKey(derEncodedPublicKey)
         } yield {
           SBool(crypto.MessageSignature.verify(signature, message, publicKey))
         }
@@ -806,12 +808,83 @@ private[lf] object SBuiltinFun {
         case _: NoSuchAlgorithmException =>
           crash("BouncyCastle provider fails to support SECP256K1")
       }
+  }
+
+  @VisibleForTesting
+  private[speedy] object ECPublicKeyUtil {
+
+    @throws(classOf[NoSuchAlgorithmException])
+    @throws(classOf[InvalidKeySpecException])
+    def decodePublicKey(bytes: Array[Byte]): PublicKey = {
+      checkProviders
+      checkDerHeader(bytes)
+      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(bytes))
+    }
+
+    // Check that the JCE providers for EC KeyFactory are exactly SunEC and BC in this order.
+    // This ensures that the behavior of decodePublicKey is not changed by unexpected provider registrations.
+    private lazy val checkProviders: Unit = {
+      val ecProviders = java.security.Security.getProviders
+        .filter(_.getService("KeyFactory", "EC") != null)
+        .map(_.getName)
+        .toList
+      if (ecProviders != List("SunEC", "BC"))
+        throw SError.Crash(
+          getClass.getCanonicalName,
+          s"Unexpected JCE security provider order for EC KeyFactory. " +
+            s"Expected exactly [SunEC, BC] in this order, but found [${ecProviders.mkString(", ")}]. " +
+            s"SunEC must have higher priority than BouncyCastle. " +
+            s"Fix: Update your JVM's 'java.security' config and disable overriding hardware drivers (e.g., SunPKCS11, SunMSCAPI).",
+        )
+    }
+
+    /** Sanitizes the DER encoded key to enforce ASN.1 TLV encoding and prevent JDK-specific parser
+      * malleability.
+      */
+    @throws(classOf[InvalidKeySpecException])
+    def checkDerHeader(bytes: Array[Byte]): Unit = {
+      // Minimum 2 bytes required for ASN.1 Type-Length-Value (Tag and Length)
+      if (bytes.length < 2)
+        throw new InvalidKeySpecException("public key is too short to contain a DER header")
+// 0x30 is the ASN.1 tag for SEQUENCE (required for X.509 SubjectPublicKeyInfo)
+      if (bytes(0) != 0x30.toByte)
+        throw new InvalidKeySpecException("public key does not start with DER SEQUENCE tag 0x30")
+// Read length byte as an unsigned 8-bit integer
+      val firstLength = bytes(1) & 0xff
+      // Short form (< 0x80): single length byte. Long form: 0x80 | n, followed by n length bytes.
+      val (headerLength, contentLength) =
+        if (firstLength < 0x80) (2, firstLength)
+        else {
+          // Long-form: highest bit is 1, remaining 7 bits indicate how many bytes hold the length
+          val n = firstLength & 0x7f
+// Prevent indefinite length (0), oversized keys (>16MB), and buffer overruns
+          if (n == 0 || n > 3 || bytes.length < 2 + n)
+            throw new InvalidKeySpecException("public key has an invalid DER length encoding")
+// Length must use the shortest possible byte representation (no leading zeros)
+          if (bytes(2) == 0)
+            throw new InvalidKeySpecException("public key has a non-canonical DER length")
+          val length = bytes.slice(2, 2 + n).foldLeft(0)((acc, b) => (acc << 8) | (b & 0xff))
+          if (length < 0x80)
+            throw new InvalidKeySpecException("public key has a non-canonical DER length")
+          (2 + n, length)
+        }
+// Rejects trailing garbage bytes to prevent parser discrepancies
+// across Java versions (e.g., JDK 17 permissively ignores trailing bytes, while JDK 21
+// throws an exception). See https://bugs.openjdk.org/browse/JDK-8308010.
+      if (bytes.length != headerLength + contentLength)
+        throw new InvalidKeySpecException(
+          s"Public key length ${bytes.length} does not match declared DER length ${headerLength + contentLength}"
+        )
+    }
 
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
+    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
+      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
+
+      ECPublicKeyUtil.decodePublicKey(byteEncodedPublicKey)
+    }
   }
 
   final case object SBSECP256K1ValidateKey extends SBuiltinFun(1) {
@@ -832,7 +905,7 @@ private[lf] object SBuiltinFun {
                 )
               )
             )
-          publicKey = extractPublicKey(derEncodedPublicKey)
+          publicKey = ECPublicKeyUtil.extractPublicKey(derEncodedPublicKey)
         } yield {
           SBool(crypto.MessageSignature.validateKey(publicKey))
         }
@@ -865,12 +938,6 @@ private[lf] object SBuiltinFun {
         case _: NoSuchAlgorithmException =>
           crash("BouncyCastle provider fails to support SECP256K1")
       }
-
-    @throws(classOf[IllegalArgumentException])
-    @throws(classOf[NoSuchAlgorithmException])
-    @throws(classOf[InvalidKeySpecException])
-    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
   }
 
   final case object SBDecodeHex extends SBuiltinFun(1) {

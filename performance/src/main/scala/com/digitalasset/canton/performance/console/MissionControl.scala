@@ -87,6 +87,7 @@ class MissionControl(
     baseSynchronizerId: SynchronizerId,
     otherSynchronizers: Seq[SynchronizerId],
     otherSynchronizersRatio: Double,
+    allocatedPartyInitialNumber: Long = 0,
 )(implicit ec: ExecutionContextExecutor)
     extends AutoCloseable
     with NoTracing
@@ -149,6 +150,7 @@ class MissionControl(
       ),
       metricsRegistry,
       loggerFactory.appendUnnamedKey("participant", participant.name),
+      allocatedPartyInitialNumber = allocatedPartyInitialNumber,
     )
     addToFlushAndLogError("runner startup")(runner.startup())
     runner

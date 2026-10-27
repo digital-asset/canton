@@ -45,10 +45,7 @@ import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTr
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.OutdatedTrafficCost
 import com.digitalasset.canton.sequencing.protocol.TrafficState
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{
-  TrafficControlSerialTooLow,
-  TrafficPurchasedRequestAsyncSendFailed,
-}
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlSerialTooLow
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
   TimestampSelector,
@@ -337,14 +334,6 @@ trait TrafficControlTest
           .extraTrafficPurchased
           .value shouldBe topUpAmount
       }
-  }
-
-  "send an error if topping up for an unknown member" in { implicit env =>
-    import env.*
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      updateBalanceForMember(participant3, PositiveLong.one),
-      _.errorMessage should include(TrafficPurchasedRequestAsyncSendFailed.id),
-    )
   }
 
   "fail to exercise a large command with not enough traffic" in { implicit env =>
@@ -813,6 +802,17 @@ trait TrafficControlTest
 
     sequencer1.topology.synchronisation.await_idle()
     sequencer2.topology.synchronisation.await_idle()
+
+    // The clock was advanced beyond the tolerance window for outdated traffic costs, so a participant that has
+    // not yet processed the topology update computes a cost against a stale topology and its submissions are
+    // refused with OUTDATED_TRAFFIC_COST (not retried). Wait until the participants observed the new config.
+    eventually() {
+      Seq(participant1, participant2).foreach { p =>
+        p.topology.synchronizer_parameters
+          .get_dynamic_synchronizer_parameters(daId)
+          .trafficControl shouldBe Some(updatedConfig)
+      }
+    }
 
     // Run a ping such that the topology gets updated and the new config comes in effect
     participant1.health.ping(participant2.id)

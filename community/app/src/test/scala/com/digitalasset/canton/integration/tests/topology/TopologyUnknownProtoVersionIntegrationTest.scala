@@ -85,7 +85,12 @@ final class TopologyUnknownProtoVersionIntegrationTest
     // `originalBytes`, even if no deserializer exists for `protoVersion`
     val transaction = TopologyTransaction.versioningTable
       .deserializerFor(ProtoVersion(30))
-      .value(ProtocolVersionValidation.NoValidation, (), originalBytes, transactionP.toByteString)
+      .value(
+        ProtocolVersionValidation.NoValidation,
+        testedTopologyTransactionContext,
+        originalBytes,
+        transactionP.toByteString,
+      )
       .value
 
     (party, transaction)
@@ -164,8 +169,7 @@ final class TopologyUnknownProtoVersionIntegrationTest
   }
 
   "Topology transactions with wrong proto version" should {
-    // TODO(#35499): Switch to stable PV
-    "be accepted with the legacy proto version 29" onlyRunLessThan ProtocolVersion.dev in {
+    "be accepted with the legacy proto version 29" onlyRunLessThan ProtocolVersion.v37 in {
       implicit env =>
         import env.*
 

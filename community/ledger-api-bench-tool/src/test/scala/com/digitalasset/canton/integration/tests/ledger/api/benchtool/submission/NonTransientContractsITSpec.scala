@@ -55,6 +55,10 @@ class NonTransientContractsITSpec
         ),
       )
       (for {
+        // Submission must stay sequential (the fixture default of 1 in-flight command): with
+        // `allowNonTransientContracts` a consuming exercise targets the key of a contract created by
+        // an *earlier* command, so submitting concurrently can exercise a key that is not committed
+        // yet and fail with CONTRACT_KEY_NOT_FOUND.
         (apiServices, allocatedParties, submission) <- benchtoolFooSubmissionFixture(
           submissionConfig
         )
@@ -78,8 +82,8 @@ class NonTransientContractsITSpec
         val transientContracts = createAndConsumeOffsetPairs.count {
           case (createOffset, archiveOffset) => createOffset == archiveOffset
         }
-        cp(discard(nonTransientContracts shouldBe 47))
-        cp(discard(transientContracts shouldBe 16))
+        cp(discard(nonTransientContracts shouldBe 57))
+        cp(discard(transientContracts shouldBe 17))
         // sanity check:
         cp(
           discard(

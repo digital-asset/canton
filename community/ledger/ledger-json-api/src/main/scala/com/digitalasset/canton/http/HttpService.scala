@@ -49,7 +49,7 @@ import java.io.InputStream
 import java.nio.file.{Files, Path}
 import java.security.cert.{Certificate, CertificateFactory}
 import java.security.{Key, KeyStore}
-import javax.net.ssl.SSLContext
+import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -220,13 +220,10 @@ object HttpService extends NoTracing {
 
   def buildSSLContext(keyStore: KeyStore): SSLContext = {
     import java.security.SecureRandom
-    import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 
-    val keyManagerFactory = KeyManagerFactory.getInstance("SunX509")
-    keyManagerFactory.init(keyStore, emptyPassword)
+    val keyManagerFactory = buildKeyManagerFactory(keyStore)
 
-    val trustManagerFactory = TrustManagerFactory.getInstance("SunX509")
-    trustManagerFactory.init(keyStore)
+    val trustManagerFactory = buildTrustManagerFactory(keyStore)
 
     val context = SSLContext.getInstance("TLS")
     context.init(
@@ -235,6 +232,26 @@ object HttpService extends NoTracing {
       new SecureRandom,
     )
     context
+  }
+
+  /** Uses the PKIX (a.k.a. "NewSunX509") key manager, which, unlike the legacy "SunX509" one,
+    * selects the certificate to present based on the negotiated algorithm constraints and the
+    * certificate's key usage, extended key usage and validity.
+    */
+  private[http] def buildKeyManagerFactory(keyStore: KeyStore): KeyManagerFactory = {
+    val keyManagerFactory = KeyManagerFactory.getInstance("PKIX")
+    keyManagerFactory.init(keyStore, emptyPassword)
+    keyManagerFactory
+  }
+
+  /** Uses the PKIX trust manager, which performs full RFC 5280 certification path validation
+    * (including name constraints). The legacy "SunX509" trust manager only performs simplified
+    * chain validation and, for example, ignores name constraints of intermediate CAs.
+    */
+  private[http] def buildTrustManagerFactory(keyStore: KeyStore): TrustManagerFactory = {
+    val trustManagerFactory = TrustManagerFactory.getInstance("PKIX")
+    trustManagerFactory.init(keyStore)
+    trustManagerFactory
   }
 
   private def httpsConnectionContext(

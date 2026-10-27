@@ -21,6 +21,7 @@ import com.digitalasset.daml.lf.engine.TransactionCoderSpec.{
   versionInIncreasingOrder,
   versionInStrictIncreasingOrder,
 }
+import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.transaction.{
   ExternalCallResult,
   GlobalKey,
@@ -225,7 +226,7 @@ final class TransactionCoderSpec
       forAll(noDanglingRefGenTransaction, minSuccessful(30)) { tx =>
         forAll(stringVersionGen, minSuccessful(10)) { badTxVer =>
           whenever(SerializationVersion.fromString(badTxVer).isLeft) {
-            val encodedTxWithBadTxVer: proto.Transaction = assertRight(
+            val encodedTxWithBadTxVer: Snapshot.Transaction = assertRight(
               TransactionCoder
                 .encodeTransaction(
                   VersionedTransaction(

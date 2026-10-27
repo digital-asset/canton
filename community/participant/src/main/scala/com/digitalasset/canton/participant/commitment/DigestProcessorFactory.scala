@@ -270,7 +270,6 @@ object DigestProcessorFactoryImpl {
       ledgerApiStore: LedgerApiStore,
       synchronizerId: SynchronizerId,
   ): Option[Timepoint] =
-    // TODO(#36393) - Once the Github issue 27992 is solved, switch to new method
     for {
       end <- ledgerApiStore.ledgerEnd
       index <- end.synchronizerIndices.get(synchronizerId)

@@ -364,9 +364,9 @@ final class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimu
             // The test is a bit slow with the default interval
             requestInterval = Some(10.seconds),
             requestApproximateByteSize =
-              // -100 to account for tags and payloads' prefixes
+              // -6000 to account for tags and payloads' prefixes
               // Exceeding the default size results in warning logs and dropping messages in Mempool
-              Some(PositiveInt.tryCreate(MaxBytesToDecompress.HardcodedDefault.limit.value - 100)),
+              Some(PositiveInt.tryCreate(MaxBytesToDecompress.HardcodedDefault.limit.value - 6000)),
           ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),

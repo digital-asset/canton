@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client.pool
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
@@ -50,6 +51,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.Duration
@@ -65,6 +68,7 @@ class GrpcSequencerConnection(
     override val name: String,
     stub: UserSequencerConnectionStub,
     clientAuth: GrpcSequencerClientAuth,
+    penaltyModifier: SequencerPenaltyModifier,
     override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
@@ -83,6 +87,9 @@ class GrpcSequencerConnection(
 
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit =
     underlying.fatal(reason)
+
+  override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
+    penaltyModifier.increase(amount)
 
   override def onClosed(): Unit =
     LifeCycle.close(clientAuth)(logger)
@@ -253,23 +260,10 @@ class GrpcSequencerConnection(
   ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]] =
     stub.getTime(timeout, retryPolicy = retryPolicy(retryOnUnavailable = false)).leftMap(_.toString)
 
-  override def downloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] = {
-    logger.debug("Downloading topology state for initialization")
-
-    for {
-      result <- stub.downloadTopologyStateForInit(request, timeout).leftMap(_.toString)
-      storedTxs = result.topologyTransactions.value
-      _ = logger.debug(
-        s"Downloaded topology state for initialization with last change timestamp at ${storedTxs.lastChangeTimestamp}: " +
-          s"${storedTxs.result.size} transactions"
-      )
-    } yield result
-  }
+  override def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(
+      implicit traceContext: TraceContext
+  ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] =
+    stub.streamTopologyStateForInit(request, timeout).leftMap(_.toString)
 
   override def subscribe[E](
       request: SubscriptionRequest,

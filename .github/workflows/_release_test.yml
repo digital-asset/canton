@@ -1,0 +1,161 @@
+name: Release Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'The runner to use for the release test workflow'
+        required: true
+        type: string
+      is_manual:
+        description: 'Whether the workflow is triggered manually or not'
+        required: true
+        type: boolean
+      is_nightly_workflow:
+        description: 'Whether the workflow is triggered as part of a nightly workflow or not'
+        required: true
+        type: boolean
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  resolve_timings:
+    name: Resolve Timings Artifact Run
+    # One repo-wide artifact lookup for the whole matrix instead of one per shard,
+    # so the shared GITHUB_TOKEN rate-limit budget is not drained at run start.
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/utils/resolve_previous_artifact_run
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve previous timings artifact run
+        id: resolve
+        # Best-effort. If the lookup is rate limited the shards just fall back to
+        # unbalanced splitting rather than failing the run.
+        continue-on-error: true
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: release_test-timings-latest
+
+  release_test:
+    name: Release Test
+    needs: resolve_timings
+    runs-on: ${{ inputs.runner }}
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Set up workspace path
+        shell: bash
+        run: |
+          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
+          mkdir -p "$TMP_WORKSPACE"
+          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Restore KMS driver artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: kms-driver-release-jars-poms
+          path: .
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
+
+      - name: Allow automatic protocol version selection
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will select the protocol version automatically"
+        shell: bash
+
+      - name: Run tests
+        uses: ./.github/actions/test/run_tests
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          restore_compile_sbt_caches: "false"
+          setup_gcp_kms: "true"
+          command:
+            '"testOnly com.digitalasset.canton.integration.tests.release* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors'
+          num_parallel_tasks: "1"
+          shard_index: "0"
+          num_test_buckets: "0"
+          execution_context_size: "1"
+          release_path: ${{ env.TMP_WORKSPACE }}
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: release_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: release_test
+      runner: ${{ inputs.runner }}
+      protocol_version: ""

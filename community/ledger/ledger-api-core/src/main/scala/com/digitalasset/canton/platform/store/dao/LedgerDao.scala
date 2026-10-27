@@ -51,6 +51,7 @@ private[platform] trait LedgerDaoUpdateReader {
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]

@@ -33,7 +33,7 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   Digest,
 }
-import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
+import com.digitalasset.canton.protocol.{AcsCommitmentLimits, StaticSynchronizerParameters}
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
@@ -44,7 +44,6 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.util.SingleUseCell
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -78,7 +77,7 @@ class ReceivedAcsCommitmentValidatorTest
         enableTransparencyChecks = false,
         protocolVersion = testedProtocolVersion,
         serial = NonNegativeInt.zero,
-        synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+        synchronizerLimits = testedSynchronizerLimits,
       )
       .value
 
@@ -128,46 +127,60 @@ class ReceivedAcsCommitmentValidatorTest
       loggerFactory,
     )
 
-  private lazy val goodCommitmentP2 = AcsCommitment.create(
-    physicalSynchronizerId,
-    participant2.toLf,
-    participant1.toLf,
-    CommitmentPeriod
-      .tryCreate(CantonTimestamp.ofEpochSecond(1), CantonTimestamp.ofEpochSecond(3)),
-    Digest.hashDigest(ByteString.copyFromUtf8("Good digest")).getCryptographicEvidence,
-    testedProtocolVersion,
-  )
+  private lazy val goodCommitmentP2 = AcsCommitment
+    .create(
+      physicalSynchronizerId,
+      participant2.toLf,
+      participant1.toLf,
+      CommitmentPeriod
+        .tryCreate(CantonTimestamp.ofEpochSecond(1), CantonTimestamp.ofEpochSecond(3)),
+      Digest.hashDigest(ByteString.copyFromUtf8("Good digest")).getCryptographicEvidence,
+      testedProtocolVersion,
+    )
+    .value
 
-  private lazy val goodCommitmentP3 = AcsCommitment.create(
-    physicalSynchronizerId,
-    sender = participant3.toLf,
-    counterparticipant = participant1.toLf,
-    CommitmentPeriod
-      .tryCreate(CantonTimestamp.ofEpochSecond(3), CantonTimestamp.ofEpochSecond(8)),
-    Digest.hashDigest(ByteString.copyFromUtf8("Another digest")).getCryptographicEvidence,
-    testedProtocolVersion,
-  )
-  private lazy val invalidRecipientCommitment = AcsCommitment.create(
-    physicalSynchronizerId,
-    sender = participant2.toLf,
-    // Invalid recipient, the expected recipient is participant1
-    counterparticipant = participant3.toLf,
-    CommitmentPeriod
-      .tryCreate(CantonTimestamp.ofEpochSecond(1), CantonTimestamp.ofEpochSecond(3)),
-    ByteString.copyFromUtf8("invalid recipient"),
-    testedProtocolVersion,
-  )
+  private lazy val goodCommitmentP3 = AcsCommitment
+    .create(
+      physicalSynchronizerId,
+      sender = participant3.toLf,
+      counterparticipant = participant1.toLf,
+      CommitmentPeriod
+        .tryCreate(CantonTimestamp.ofEpochSecond(3), CantonTimestamp.ofEpochSecond(8)),
+      Digest.hashDigest(ByteString.copyFromUtf8("Another digest")).getCryptographicEvidence,
+      testedProtocolVersion,
+    )
+    .value
+  private lazy val invalidRecipientCommitment = AcsCommitment
+    .create(
+      physicalSynchronizerId,
+      sender = participant2.toLf,
+      // Invalid recipient, the expected recipient is participant1
+      counterparticipant = participant3.toLf,
+      CommitmentPeriod
+        .tryCreate(CantonTimestamp.ofEpochSecond(1), CantonTimestamp.ofEpochSecond(3)),
+      ByteString.copyFromUtf8("invalid recipient"),
+      testedProtocolVersion,
+    )
+    .value
+
+  private lazy val defaultMaxAcsSize = AcsCommitmentLimits.default.maxCommitmentSizeBytes
 
   "ReceivedAcsCommitmentValidatorImpl" should {
-    "pass protocol messages to publish" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "pass protocol messages to publish" in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher
 
       val messages = NonEmpty(
         Seq,
-        AcsCommitmentProtocolMessage.signAndCreate(p2client, goodCommitmentP2).futureValueUS.value,
-        AcsCommitmentProtocolMessage.signAndCreate(p3client, goodCommitmentP3).futureValueUS.value,
+        AcsCommitmentProtocolMessage
+          .signAndCreate(p2client, goodCommitmentP2, defaultMaxAcsSize)
+          .futureValueUS
+          .value,
+        AcsCommitmentProtocolMessage
+          .signAndCreate(p3client, goodCommitmentP3, defaultMaxAcsSize)
+          .futureValueUS
+          .value,
       )
       val envelopes = messages.map(message =>
         OpenEnvelope(
@@ -198,35 +211,43 @@ class ReceivedAcsCommitmentValidatorTest
       metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
-    "not publish invalid protocol messages" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not publish invalid protocol messages" in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher
 
-      val futurePeriodCommitment = AcsCommitment.create(
-        physicalSynchronizerId,
-        sender = participant2.toLf,
-        counterparticipant = participant1.toLf,
-        CommitmentPeriod
-          .tryCreate(
-            CantonTimestamp.ofEpochSecond(3),
-            CantonTimestamp.ofEpochSecond(10).immediateSuccessor,
-          ),
-        Digest.hashDigest(ByteString.copyFromUtf8("future period end")).getCryptographicEvidence,
-        testedProtocolVersion,
-      )
+      val futurePeriodCommitment = AcsCommitment
+        .create(
+          physicalSynchronizerId,
+          sender = participant2.toLf,
+          counterparticipant = participant1.toLf,
+          CommitmentPeriod
+            .tryCreate(
+              CantonTimestamp.ofEpochSecond(3),
+              CantonTimestamp.ofEpochSecond(10).immediateSuccessor,
+            ),
+          Digest.hashDigest(ByteString.copyFromUtf8("future period end")).getCryptographicEvidence,
+          testedProtocolVersion,
+        )
+        .value
       val messages = NonEmpty(
         Seq,
-        AcsCommitmentProtocolMessage.signAndCreate(p2client, goodCommitmentP2).futureValueUS.value,
         AcsCommitmentProtocolMessage
-          .signAndCreate(p2client, invalidRecipientCommitment)
+          .signAndCreate(p2client, goodCommitmentP2, defaultMaxAcsSize)
           .futureValueUS
           .value,
         AcsCommitmentProtocolMessage
-          .signAndCreate(p2client, futurePeriodCommitment)
+          .signAndCreate(p2client, invalidRecipientCommitment, defaultMaxAcsSize)
           .futureValueUS
           .value,
-        AcsCommitmentProtocolMessage.signAndCreate(p3client, goodCommitmentP2).futureValueUS.value,
+        AcsCommitmentProtocolMessage
+          .signAndCreate(p2client, futurePeriodCommitment, defaultMaxAcsSize)
+          .futureValueUS
+          .value,
+        AcsCommitmentProtocolMessage
+          .signAndCreate(p3client, goodCommitmentP2, defaultMaxAcsSize)
+          .futureValueUS
+          .value,
       )
       val envelopes = messages.map(message =>
         OpenEnvelope(
@@ -268,7 +289,7 @@ class ReceivedAcsCommitmentValidatorTest
       metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
-    "not publish anything if no envelopes pass validation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not publish anything if no envelopes pass validation" in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher
@@ -276,7 +297,7 @@ class ReceivedAcsCommitmentValidatorTest
       val messages = NonEmpty(
         Seq,
         AcsCommitmentProtocolMessage
-          .signAndCreate(p2client, invalidRecipientCommitment)
+          .signAndCreate(p2client, invalidRecipientCommitment, defaultMaxAcsSize)
           .futureValueUS
           .value,
       )

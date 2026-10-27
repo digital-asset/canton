@@ -4,11 +4,11 @@
 package com.digitalasset.canton.integration.tests.dynamicsynchronizerparameters
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
+  UseH2,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -19,10 +19,12 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects.LocalTimeout
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
+import com.digitalasset.canton.sequencing.protocol.TimeProof
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencer,
   ProgrammableSequencerPolicies,
+  SendDecision,
 }
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level.WARN
@@ -64,13 +66,28 @@ trait SynchronizerParametersTimeoutChangesIntegrationTest
            The delays are the maximum ones such that a ping succeeds when the dynamic
            synchronizer parameters are the default ones.
          */
-        sequencer.setPolicy("maximum delay policy")(
-          ProgrammableSequencerPolicies.delay(environment = environment)(
-            confirmationResponses =
-              Map(participant1.id -> defaultsParameters.confirmationResponseTimeout),
-            mediatorMessages = Some(defaultsParameters.mediatorReactionTimeout),
-          )
+        val delayPolicy = ProgrammableSequencerPolicies.delay(environment = environment)(
+          confirmationResponses =
+            Map(participant1.id -> defaultsParameters.confirmationResponseTimeout),
+          mediatorMessages = Some(defaultsParameters.mediatorReactionTimeout),
         )
+        val simClock = environment.simClock.value
+        val sequencerTimeTracker = sequencer1.underlying.value.sequencer.timeTracker
+
+        // With the BFT sequencer, a block's time lags behind the sim clock: a message submitted right
+        // after the clock jump may still land in a block stamped with the pre-jump time, in which case
+        // it would not be delayed at all. So after the delay policy has advanced the clock, hold the
+        // message back until the sequencer has observed a time at or after the new clock time.
+        // (Holding back instead of blocking: policies run one at a time, and the sequencer needs to
+        // process its own time proof request to observe the new time.)
+        sequencer.setPolicy("maximum delay policy") { traceContext => submissionRequest =>
+          val decision = delayPolicy(traceContext)(submissionRequest)
+          if (TimeProof.isTimeProofSubmission(submissionRequest)) decision
+          else
+            sequencerTimeTracker
+              .awaitTick(simClock.now)(traceContext)
+              .fold(decision)(tickObserved => SendDecision.HoldBack(tickObserved))
+        }
       }
 
   protected var sequencer: ProgrammableSequencer = _
@@ -155,9 +172,10 @@ trait SynchronizerParametersTimeoutChangesIntegrationTest
   }
 }
 
-class SynchronizerParametersTimeoutChangesReferenceIntegrationTestDefault
+class SynchronizerParametersTimeoutChangesIntegrationTestDefault
     extends SynchronizerParametersTimeoutChangesIntegrationTest {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
-  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+  // we need to register the ProgrammableSequencer after the BftSequencer
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

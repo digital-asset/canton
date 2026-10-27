@@ -1,0 +1,32 @@
+name: Docker Log Into GCR
+description: Docker login to Google Cloud Artifact Registry (GCR) using the provided service account key.
+
+inputs:
+  gac_json:
+    description: Google Cloud service account credentials JSON
+    required: true
+  oci_registry:
+    description: OCI registry hostname
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v3
+      with:
+        credentials_json: ${{ inputs.gac_json }}
+
+    - name: Setup gcloud SDK
+      uses: google-github-actions/setup-gcloud@v3
+
+    - name: Log Docker into GCR
+      shell: bash
+      env:
+        OCI_REGISTRY: ${{ inputs.oci_registry }}
+      run: |
+        echo "Authenticating to Google Cloud..."
+        echo "Logging Docker in to $OCI_REGISTRY..."
+        ACCESS_TOKEN="$(gcloud auth print-access-token)"
+        printf '%s\n' "$ACCESS_TOKEN" | \
+          docker login -u oauth2accesstoken --password-stdin "https://$OCI_REGISTRY" >/dev/null

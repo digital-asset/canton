@@ -10,6 +10,7 @@ import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.{
+  ECPublicKeyUtil,
   SBSECP256K1ValidateKey,
   SBSECP256K1WithEcdsaBool,
 }
@@ -40,19 +41,40 @@ class SBSECP256K1CryptoPrimitiveTest
     Ast.EBuiltinCon(Ast.BCUnit),
   )
 
+  // secp256k1 generator point as a DER encoded SubjectPublicKeyInfo (88 bytes, short form length).
+  private val validKey: Array[Byte] = Ref.HexString
+    .decode(
+      Ref.HexString.assertFromString(
+        "3056301006072a8648ce3d020106052b8104000a034200" +
+          "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798" +
+          "483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8"
+      )
+    )
+    .toByteArray
+
+  private def hex(bytes: Array[Byte]): Ref.HexString =
+    Ref.HexString.encode(Bytes.fromByteArray(bytes))
+
+  private val nonCanonicalCases: Map[String, Array[Byte]] = Map(
+    "trailing-zero" -> (validKey :+ 0x00.toByte),
+    "trailing-garbage" -> (validKey ++ Array(0xde, 0xad, 0xbe, 0xef).map(_.toByte)),
+    "outer-length-long-form" -> (Array(0x30, 0x81).map(_.toByte) ++ validKey.drop(1)),
+    "outer-length-padded" -> (Array(0x30, 0x82, 0x00).map(_.toByte) ++ validKey.drop(1)),
+  )
+
   "SBSECP256K1WithEcdsaBool" - {
     "PublicKeys are correctly built from hex encoded public key strings" in {
       val actualPublicKey = MessageSignatureUtil.generateKeyPair.getPublic
       val hexEncodedPublicKey = Bytes.fromByteArray(actualPublicKey.getEncoded).toHexString
 
-      SBSECP256K1WithEcdsaBool.extractPublicKey(hexEncodedPublicKey) shouldBe actualPublicKey
+      ECPublicKeyUtil.extractPublicKey(hexEncodedPublicKey) shouldBe actualPublicKey
     }
 
     "PublicKeys fail to be built from invalid hex encoded public key strings" in {
       val invalidHexEncodedPublicKey = Ref.HexString.assertFromString("deadbeef")
 
       assertThrows[InvalidKeySpecException](
-        SBSECP256K1WithEcdsaBool.extractPublicKey(invalidHexEncodedPublicKey)
+        ECPublicKeyUtil.extractPublicKey(invalidHexEncodedPublicKey)
       )
     }
 
@@ -64,7 +86,7 @@ class SBSECP256K1CryptoPrimitiveTest
         Ref.HexString.encode(Bytes.fromByteArray(badFormatPublicKey.getEncoded))
 
       assertThrows[InvalidKeySpecException](
-        SBSECP256K1WithEcdsaBool.extractPublicKey(invalidHexEncodedPublicKey)
+        ECPublicKeyUtil.extractPublicKey(invalidHexEncodedPublicKey)
       )
     }
 
@@ -176,6 +198,83 @@ class SBSECP256K1CryptoPrimitiveTest
           case _ =>
             fail()
         }
+      }
+    }
+  }
+
+  // Non canonical DER encodings of an EC public key (trailing bytes, non minimal outer length) must
+  // be rejected before reaching the JCE providers.
+  "ECPublicKey" - {
+    "accepts a valid canonical key" in {
+      noException should be thrownBy ECPublicKeyUtil.checkDerHeader(validKey)
+      ECPublicKeyUtil.extractPublicKey(hex(validKey)) should not be null
+    }
+
+    nonCanonicalCases.foreach { case (name, bytes) =>
+      s"rejects $name" in {
+        an[InvalidKeySpecException] should be thrownBy ECPublicKeyUtil.checkDerHeader(bytes)
+        an[InvalidKeySpecException] should be thrownBy
+          ECPublicKeyUtil.extractPublicKey(hex(bytes))
+      }
+    }
+
+    val malformedCases: Map[String, Array[Byte]] = nonCanonicalCases ++ List(
+      "empty" -> Array.emptyByteArray,
+      "single byte" -> Array(0x30.toByte),
+      "wrong tag" -> (0x31.toByte +: validKey.drop(1)),
+      "indefinite length" -> (Array(0x30, 0x80).map(_.toByte) ++ validKey.drop(2)),
+      "length of length too large" ->
+        (Array(0x30, 0x84, 0x00, 0x00, 0x00, 0x56).map(_.toByte) ++ validKey.drop(2)),
+      "truncated long form header" -> Array(0x30, 0x82, 0x01).map(_.toByte),
+      "truncated key" -> validKey.dropRight(1),
+      "three length bytes with leading zero" ->
+        (Array(0x30, 0x83, 0x00, 0x01, 0x00).map(_.toByte) ++ Array.fill(256)(0.toByte)),
+    )
+
+    "checkDerHeader" - {
+      "accepts a valid key" in {
+        noException should be thrownBy ECPublicKeyUtil.checkDerHeader(validKey)
+      }
+
+      "accepts canonical long form lengths" - {
+        "one length byte (0x81 0x80)" in {
+          val bytes = Array(0x30, 0x81, 0x80).map(_.toByte) ++ Array.fill(128)(0.toByte)
+          noException should be thrownBy ECPublicKeyUtil.checkDerHeader(bytes)
+        }
+        "two length bytes (0x82 0x01 0x00)" in {
+          val bytes = Array(0x30, 0x82, 0x01, 0x00).map(_.toByte) ++ Array.fill(256)(0.toByte)
+          noException should be thrownBy ECPublicKeyUtil.checkDerHeader(bytes)
+        }
+        "three length bytes (0x83 0x01 0x00 0x00)" in {
+          val bytes =
+            Array(0x30, 0x83, 0x01, 0x00, 0x00).map(_.toByte) ++ Array.fill(65536)(0.toByte)
+          noException should be thrownBy ECPublicKeyUtil.checkDerHeader(bytes)
+        }
+      }
+
+      malformedCases.foreach { case (name, bytes) =>
+        s"rejects $name" in {
+          an[InvalidKeySpecException] should be thrownBy ECPublicKeyUtil.checkDerHeader(bytes)
+        }
+      }
+    }
+
+    "decodePublicKey" - {
+      "decodes a valid key" in {
+        val key = ECPublicKeyUtil.decodePublicKey(validKey)
+        key.getAlgorithm shouldBe "EC"
+        key.getEncoded shouldBe validKey
+      }
+
+      malformedCases.foreach { case (name, bytes) =>
+        s"rejects $name" in {
+          an[InvalidKeySpecException] should be thrownBy ECPublicKeyUtil.decodePublicKey(bytes)
+        }
+      }
+
+      "rejects a well formed DER header with an invalid body" in {
+        val garbage = Array(0x30, 0x03, 0x01, 0x02, 0x03).map(_.toByte)
+        an[InvalidKeySpecException] should be thrownBy ECPublicKeyUtil.decodePublicKey(garbage)
       }
     }
   }

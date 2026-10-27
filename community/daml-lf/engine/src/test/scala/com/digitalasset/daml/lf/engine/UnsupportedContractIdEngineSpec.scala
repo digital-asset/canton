@@ -63,7 +63,7 @@ abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
       preparationTime = now,
       seeding = InitialSeeding.TransactionSeed(seed),
       contractIdVersion = ContractIdVersion.V1,
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.DefaultForTesting,
     )
   }
 
@@ -77,7 +77,7 @@ abstract class UnsupportedContractIdEngineSpec(executionMode: ExecutionMode)
       preparationTime = now,
       seeding = InitialSeeding.TransactionSeed(seed),
       contractIdVersion = ContractIdVersion.V1,
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.DefaultForTesting,
     )
   }
 

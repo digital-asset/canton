@@ -22,13 +22,15 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.data.{
   ActiveContract,
   ContractImportMode,
-  PartyOnboardingFlagStatus,
-  RepairContract,
   RepresentativePackageIdOverride,
+  *,
 }
 import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.PartyReplicationArguments
-import com.digitalasset.canton.participant.admin.party.acsreplication.PartyParticipantPermission
+import com.digitalasset.canton.participant.admin.party.acsreplication.{
+  AcsReplicator,
+  PartyParticipantPermission,
+}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.store.SyncPersistentState
@@ -40,6 +42,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
@@ -61,7 +64,7 @@ import java.io.OutputStream
 import java.util.UUID
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContextExecutor, Future, TimeoutException}
 import scala.util.{Failure, Success}
 
 /** grpc service to allow modifying party hosting on participants
@@ -69,6 +72,7 @@ import scala.util.{Failure, Success}
 class GrpcPartyManagementService(
     participantId: ParticipantId,
     partyReplicatorO: Option[PartyReplicator],
+    acsReplicatorO: Option[AcsReplicator],
     sync: CantonSyncService,
     internalIndexService: Eval[InternalIndexService],
     topologyLookup: TopologyLookup,
@@ -224,6 +228,32 @@ class GrpcPartyManagementService(
       )
     )
 
+  override def getAcsReplicationStatus(
+      request: GetAcsReplicationStatusRequest
+  ): Future[GetAcsReplicationStatusResponse] =
+    (for {
+      acsReplicator <- ensureSequencerChannelAcsReplicationEnabled()
+      requestId <- Hash
+        .fromHexString(request.acsReplicationRequestId)
+        .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
+      status <- acsReplicator
+        .getAcsReplicationStatus(requestId)
+        .toRight(
+          toStatusRuntimeException(Status.UNKNOWN)(
+            s"ACS replication request id ${request.acsReplicationRequestId} not found"
+          )
+        )
+      apiStatus = com.digitalasset.canton.participant.admin.data.AcsReplicationStatus
+        .fromInternal(status)
+    } yield v30.GetAcsReplicationStatusResponse(Some(apiStatus.toProtoV30))).toFuture(identity)
+
+  private def ensureSequencerChannelAcsReplicationEnabled() = acsReplicatorO
+    .toRight(
+      toStatusRuntimeException(Status.UNIMPLEMENTED)(
+        "ACS replication commands require the `alpha_online_party_replication_support` configuration"
+      )
+    )
+
   override def exportPartyAcs(
       request: v30.ExportPartyAcsRequest,
       responseObserver: StreamObserver[v30.ExportPartyAcsResponse],
@@ -295,14 +325,12 @@ class GrpcPartyManagementService(
             )
         )
 
-      // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag
-      activeParticipants <- EitherT.right(snapshot.activeParticipantsOf(party.toLf))
+      // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag,
+      // so read the target's hosting state instead
+      targetIsOnboarding <- EitherT.right(isOnboarding(snapshot, party, targetParticipant))
       _ <-
         EitherT.cond[FutureUnlessShutdown](
-          activeParticipants.exists { case (participantId, participantAttributes) =>
-            participantId == targetParticipant &&
-            participantAttributes.onboarding
-          },
+          targetIsOnboarding,
           (),
           PartyManagementServiceError.AcsExportMissingTargetOnboardingMapping.Error(
             party,
@@ -310,13 +338,24 @@ class GrpcPartyManagementService(
           ): PartyManagementServiceError,
         )
 
-      partiesHostedByTargetParticipant <- EitherT.right(
+      partiesWithTargetEntry <- EitherT.right(
         snapshot.inspectKnownParties(
           filterParty = "",
           filterParticipant = targetParticipant.filterString,
           // we cannot filter by participant in the db, therefore we also cannot impose a limit.
           limit = Int.MaxValue,
         )
+      )
+      // Leave out the contracts the target gets as host of another stakeholder: a party for which
+      // the target has an Onboarding or Active entry, frozen or not. With a Nominated or Freezing
+      // entry, the target does not host the party.
+      partyInfos <- EitherT.right(
+        snapshot.activeParticipantsOfPartiesWithInfoIgnoringFreeze(
+          partiesWithTargetEntry.toSeq.map(_.toLf)
+        )
+      )
+      partiesHostedByTargetParticipant = partiesWithTargetEntry.filter(p =>
+        partyInfos.get(p.toLf).exists(_.participants.contains(targetParticipant))
       )
 
       // Set removal (excl) is O(1); filterNot is O(N)
@@ -406,7 +445,9 @@ class GrpcPartyManagementService(
       ec: ExecutionContextExecutor,
       traceContext: TraceContext,
       actorSystem: ActorSystem,
-  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, LapiTopologyTransaction] =
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, LapiTopologyTransaction] = {
+    val timeout =
+      waitForActivationTimeout.getOrElse(NonNegativeFiniteDuration.tryOfMinutes(2)).toScala
     for {
       topologyTx <- EitherT
         .apply[Future, PartyManagementServiceError, LapiTopologyTransaction](
@@ -423,12 +464,26 @@ class GrpcPartyManagementService(
               }
             }
             .take(1)
-            .completionTimeout(
-              waitForActivationTimeout.getOrElse(NonNegativeFiniteDuration.tryOfMinutes(2)).toScala
-            )
+            .completionTimeout(timeout)
             .runWith(Sink.head)
             .transform {
               case Success(tx) => Success(Right(tx))
+              case Failure(_: TimeoutException) =>
+                Success(
+                  Left(
+                    PartyManagementServiceError.EffectivePartyToParticipantMappingNotFound
+                      .Error(
+                        party,
+                        targetParticipant,
+                        s"No topology transaction onboarding or adding participant $targetParticipant as host " +
+                          s"of the party was found after ledger offset ${beginOffsetExclusive.unwrap} " +
+                          s"(exclusive) within $timeout. Ensure that the begin offset strictly predates the " +
+                          s"party-to-participant mapping that onboards the party on the target participant. " +
+                          s"Exporting the ACS of a party already hosted on the target participant (e.g., the " +
+                          s"exporting participant itself) is not supported; use `repair.export_acs` instead.",
+                      )
+                  )
+                )
               case Failure(e) =>
                 Success(
                   Left(
@@ -440,6 +495,7 @@ class GrpcPartyManagementService(
         )
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield topologyTx
+  }
 
   private def extractOffsetAndTimestamp(
       topologyTransaction: LapiTopologyTransaction
@@ -453,6 +509,20 @@ class GrpcPartyManagementService(
   } yield (offset, EffectiveTime(effectiveTime))).valueOr(error =>
     throw new IllegalStateException(s"Unable to parse topology data from LAPI: ${error.message}")
   )
+
+  /** Returns whether the participant's entry for the party is Onboarding in the snapshot.
+    *
+    * Reads the freeze-ignoring view, because the hosting view is empty while any entry of the party
+    * is Freezing, but legacy OffPR must keep working during a freeze.
+    */
+  private def isOnboarding(
+      snapshot: TopologySnapshot,
+      party: PartyId,
+      participant: ParticipantId,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    snapshot
+      .activeParticipantsOfPartiesWithInfoIgnoringFreeze(Seq(party.toLf))
+      .map(_.get(party.toLf).flatMap(_.participants.get(participant)).exists(_.onboarding))
 
   /** Parse the global parameters that can be set only in the first message of the stream.
     */
@@ -936,7 +1006,7 @@ class GrpcPartyManagementService(
         waitForActivationTimeout,
       )
 
-      (_activationOffset, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
+      (_, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
 
       snapshot <- EitherT.right(
         connectedSynchronizer.topologyClient.awaitSnapshot(
@@ -944,15 +1014,12 @@ class GrpcPartyManagementService(
         )
       )
 
-      // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag
-      activeParticipants <- EitherT.right(
-        snapshot.activeParticipantsOf(party.toLf)
-      )
+      // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag,
+      // so read the participant's hosting state instead
+      participantIsOnboarding <- EitherT.right(isOnboarding(snapshot, party, participantId))
 
       _ <- EitherT.cond[FutureUnlessShutdown](
-        activeParticipants.exists { case (pId, participantAttributes) =>
-          pId == participantId && participantAttributes.onboarding
-        },
+        participantIsOnboarding,
         (),
         PartyManagementServiceError.OnboardingClearanceMissingMapping.Error(
           party,

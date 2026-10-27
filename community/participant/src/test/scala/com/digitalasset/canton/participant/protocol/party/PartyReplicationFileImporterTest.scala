@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.party
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.daml.ledger.api.v2.state_service.ActiveContract as LapiActiveContract
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
@@ -163,7 +164,7 @@ class PartyReplicationFileImporterTest extends AsyncWordSpec with BaseTest with 
           .failOnShutdown("Resuming import failed")
 
       } yield {
-        resumeResult.isRight shouldBe true
+        resumeResult shouldBe Either.unit
 
         // Verify the stream restarted from zero and processed all 100 contracts,
         // safely overwriting the first 50 contracts.

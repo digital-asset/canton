@@ -1,0 +1,218 @@
+name: Move stale PRs to draft
+
+# Sweep open pull requests that are ready for review and convert the ones with no activity for
+# longer than the `days` input to drafts, leaving a comment that tells the author how to proceed.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1' # Every Monday at 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print what would be converted without actually converting'
+        type: boolean
+        default: true
+      days:
+        description: 'Age in days beyond which a PR is stale'
+        type: string
+
+# A scheduled run and a manual run must not sweep the same PRs concurrently.
+concurrency:
+  group: draft-stale-prs
+  cancel-in-progress: false
+
+jobs:
+  draft-stale-prs:
+    name: Move PRs with no activity for sufficiently long to draft
+    # Pure GitHub API calls with no checkout, so a GitHub-hosted runner is enough.
+    runs-on: ubuntu-latest
+    # Only sweep the canonical repository. The OSS mirror carries its own PRs.
+    if: github.repository == 'DACH-NY/canton'
+    permissions:
+      # pull-requests: write converts the PR to draft; issues: write posts the comment,
+      # since PR comments go through the issues API.
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Move stale PRs to draft
+        uses: actions/github-script@v9
+        env:
+          # A scheduled sweep always acts for real; only a manual run can ask for a dry run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          # The fallback covers the scheduled run, where the inputs context is unset.
+          DAYS: ${{ inputs.days || '14' }}
+        with:
+          script: |
+            // A PR carrying this label is never moved to draft, however old it is.
+            const SKIP_LABEL = 'keep-open';
+            // Each conversion costs two content-generating requests (mutation, then comment),
+            // and GitHub's secondary limit is 80 per minute. 2s spacing keeps the sweep at 60/min.
+            const WRITE_DELAY_MS = 2000;
+            // The same limit is 500 content-generating requests per hour. Stop well short of it
+            // and let the weekly schedule drain the rest. This bounds PRs attempted, not PRs
+            // converted, so a systemic failure cannot spend the whole budget on failing retries.
+            const MAX_PRS_PER_RUN = 100;
+
+            const dryRun = process.env.DRY_RUN === 'true';
+            const days = Number(process.env.DAYS);
+            if (!Number.isInteger(days) || days <= 0) {
+              core.setFailed(`days must be a positive integer, got ${JSON.stringify(process.env.DAYS)}.`);
+              return;
+            }
+
+            const now = Date.now();
+            const cutoff = now - days * 24 * 60 * 60 * 1000;
+            const ageInDays = (stamp) => Math.floor((now - Date.parse(stamp)) / (24 * 60 * 60 * 1000));
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            // A 429, or a 403 once the budget is spent, means we are rate limited. Anything else
+            // is a real per-PR failure.
+            const isRateLimit = (error) =>
+              error.status === 429 ||
+              (error.status === 403 &&
+                (error.response?.headers?.['x-ratelimit-remaining'] === '0' ||
+                  /rate limit|secondary/i.test(error.message ?? ''))) ||
+              (error.errors ?? []).some(({ type }) => type === 'RATE_LIMITED');
+
+            // The REST API cannot convert a PR to draft, so this goes through GraphQL.
+            const convertToDraft = (pr) =>
+              github.graphql(
+                `mutation($id: ID!) {
+                  convertPullRequestToDraft(input: { pullRequestId: $id }) {
+                    pullRequest { isDraft }
+                  }
+                }`,
+                { id: pr.node_id }
+              );
+
+            // pulls.list has no draft filter and no result cap, so scan every open PR and
+            // filter locally. sort/direction can misorder long-untouched PRs, so it is not
+            // trusted; the local sort below is authoritative.
+            const iterator = github.paginate.iterator(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'updated',
+              direction: 'asc',
+              per_page: 100,
+            });
+
+            const stale = [];
+            let scanned = 0;
+            let scannedReady = 0;
+            let skippedLabel = 0;
+            let notStale = 0;
+            for await (const { data: page } of iterator) {
+              for (const pr of page) {
+                scanned += 1;
+                if (pr.draft) {
+                  continue;
+                }
+                scannedReady += 1;
+                if (Date.parse(pr.updated_at) >= cutoff) {
+                  notStale += 1;
+                  continue;
+                }
+                if ((pr.labels ?? []).some(({ name }) => name === SKIP_LABEL)) {
+                  core.info(`#${pr.number} ${pr.title}: has the ${SKIP_LABEL} label, skipping`);
+                  skippedLabel += 1;
+                  continue;
+                }
+                stale.push(pr);
+              }
+            }
+
+            core.info(
+              `Scanned ${scanned} open PRs (${scannedReady} ready for review). ${stale.length} stale, ` +
+              `${notStale} not old enough, ${skippedLabel} skipped by the ${SKIP_LABEL} label. ` +
+              `Cutoff: ${new Date(cutoff).toISOString().slice(0, 10)} (${days} days ago).`
+            );
+
+            // Sort locally so the per-run cap below converts the oldest stale PRs first.
+            stale.sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+
+            const comment = (pr) => {
+              const mention = pr.user?.login ? `@${pr.user.login}: ` : '';
+              return (
+                `${mention}moving to draft automatically: this pull request has had no ` +
+                `activity for ${ageInDays(pr.updated_at)} days (threshold: ${days} days). ` +
+                `When it is ready for review again, mark it ready for review. ` +
+                `Add the \`${SKIP_LABEL}\` label to exempt it from this sweep.`
+              );
+            };
+
+            const converted = [];
+            const failed = [];
+            let deferred = [];
+            // Leave everything from `from` onwards to the next run rather than pressing on.
+            const deferRest = (from, reason) => {
+              deferred = stale.slice(from).map((rest) => `#${rest.number} ${rest.title}`);
+              core.warning(`${reason} ${deferred.length} stale PRs are left for the next run.`);
+            };
+
+            for (const [index, pr] of stale.entries()) {
+              const label = `#${pr.number} ${pr.title} (${ageInDays(pr.updated_at)}d, author ${pr.user?.login ?? 'unknown'})`;
+              if (index >= MAX_PRS_PER_RUN) {
+                deferRest(index, `Reached the per-run cap of ${MAX_PRS_PER_RUN} PRs.`);
+                break;
+              }
+              if (dryRun) {
+                core.info(`[dry-run] would move ${label} to draft with comment: ${comment(pr)}`);
+                converted.push(label);
+                continue;
+              }
+              // Convert before commenting, so a failed conversion never leaves a comment that
+              // announces a change that did not happen.
+              try {
+                await convertToDraft(pr);
+              } catch (error) {
+                if (isRateLimit(error)) {
+                  deferRest(index, `Rate limited converting #${pr.number}, stopping the sweep.`);
+                  break;
+                }
+                // One unconvertible PR must not abandon the rest of the sweep.
+                core.warning(`Failed to convert #${pr.number}: ${error.message}`);
+                failed.push(`${label}: ${error.message}`);
+                await sleep(WRITE_DELAY_MS);
+                continue;
+              }
+              converted.push(label);
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: comment(pr),
+                });
+                core.info(`Moved ${label} to draft`);
+              } catch (error) {
+                core.warning(`Converted #${pr.number} but could not post the explanation: ${error.message}`);
+                failed.push(`${label}: converted without the explanatory comment: ${error.message}`);
+                if (isRateLimit(error)) {
+                  deferRest(index + 1, `Rate limited commenting on #${pr.number}, stopping the sweep.`);
+                  break;
+                }
+              }
+              await sleep(WRITE_DELAY_MS);
+            }
+
+            const action = dryRun ? 'Would move' : 'Moved';
+            core.summary
+              .addHeading('Stale PR sweep', 2)
+              .addRaw(
+                `${action} **${converted.length}** of ${stale.length} stale PRs to draft ` +
+                `(threshold: ${days} days without activity${dryRun ? ', dry run' : ''}).`,
+                true
+              )
+              .addList(converted.length > 0 ? converted : ['(none)']);
+            if (deferred.length > 0) {
+              core.summary.addHeading('Deferred to the next run', 3).addList(deferred);
+            }
+            if (failed.length > 0) {
+              core.summary.addHeading('Failed', 3).addList(failed);
+            }
+            await core.summary.write();
+
+            if (failed.length > 0) {
+              core.setFailed(`${failed.length} of ${stale.length} stale PRs could not be moved to draft.`);
+            }

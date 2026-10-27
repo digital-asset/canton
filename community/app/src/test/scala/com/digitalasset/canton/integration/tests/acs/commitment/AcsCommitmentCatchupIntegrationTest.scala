@@ -204,7 +204,7 @@ class AcsCommitmentCatchupIntegrationTestPostgres extends AcsCommitmentCatchupIn
 //class AcsCommitmentCatchupIntegrationTestH2 extends AcsCommitmentCatchupIntegrationTest {
 //  registerPlugin(new UseH2(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](
+//    new UseBftSequencer(
 //      loggerFactory,
 //      sequencerGroups = MultiSynchronizer(
 //        Seq(

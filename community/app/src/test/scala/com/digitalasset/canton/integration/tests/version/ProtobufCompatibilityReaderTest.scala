@@ -31,7 +31,7 @@ final class ProtobufCompatibilityReaderTest
   // modified message:
   // my.proto:Field "3" with name "bar" on message "Foo" changed type from "bytes" to "string".
   //         ^ notice the removed line and column numbers
-  val acceptedBreakingChangesByVersion = Map(
+  private val acceptedBreakingChangesByVersion: Map[(Int, Int), Seq[String]] = Map(
     (3, 4) -> Seq(
       // Contract id recomputation had to be removed
       """com/digitalasset/canton/admin/participant/v30/acs_import.proto:Previously present enum value "3" on enum "ContractImportMode" was deleted.""",
@@ -126,21 +126,12 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
       // CantonBFT blacklisting
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Field "2" with name "v30" on message "OnboardingStateForSequencer" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "v30" on message "InitializeSequencerFromGenesisStateRequest" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters_v30" on message "InitializeSequencerFromGenesisStateV2Request" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "v31" on message "OnboardingStateForSequencer" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present oneof "parameters" on message "OnboardingStateForSequencer" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Field "2" with name "static_synchronizer_parameters" on message "OnboardingStateForSequencer" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "3" with name "v31" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateRequest" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "3" with name "synchronizer_parameters_v31" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "v31" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Adding of new StaticSynchronizerParameters v32 in other messages
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
@@ -148,22 +139,35 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
       // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Removal of pv=35
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "2" with name "parameters_v1" on message "GetSynchronizerParametersResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateRequest" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateV2Request" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "GetSynchronizerParametersResponse" is missing values: [2] were removed.""",
+      // Added new StaticSynchronizerParameters in v33
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
     ),
     (3, 5) -> Seq(
-      // Changed for 3.5.1-rc4
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present enum value "5001" on enum "BuiltinFunction" was deleted.""",
       // Added ML-DSA support to 3.6, crypto handshake handles missing schemes with 3.5
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "5" on enum "SigningKeySpec" was deleted.""",
       """com/digitalasset/canton/crypto/v30/crypto.proto:Previously present enum value "4" on enum "SigningAlgorithmSpec" was deleted.""",
       // transaction_hash added to TransactionSubmissionTrackingData in 3.6; older nodes simply ignore the new field
       """com/digitalasset/canton/participant/protocol/v30/submission_tracking.proto:Previously present field "4" with name "transaction_hash" on message "TransactionSubmissionTrackingData" was deleted.""",
-      // Transaction snapshot does not need to be included in the forward/backward compatibility testing
+      // Daml-LF archive backward compatibility is checked separately; the transaction snapshot has no compatibility guarantees
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/snapshot.proto" was deleted.""",
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf.proto" was deleted.""",
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf1.proto" was deleted.""",
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf2.proto" was deleted.""",
       // Removal of LookupByKeyActionDescription
       """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "4" with name "lookup_by_key" on message "ActionDescription" was deleted.""",
-      // removal of lookup_by_key from Update
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "8" with name "lookup_by_key" on message "Update" was deleted.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present reserved range "[8]" on message "Update" is missing values: [8] were removed.""",
       // Added `subscription_liveness_limits` to `SequencerConnections` for silent subscription detection
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "6" with name "subscription_liveness_limits" on message "SequencerConnections" was deleted.""",
       // Changes relating to the v31 proto version bump regarding signing key usage and topology transactions, manually reviewed to be compatible
@@ -191,32 +195,26 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Field "2" with name "v30" on message "OnboardingStateForSequencer" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "v30" on message "InitializeSequencerFromGenesisStateRequest" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "v30" on message "InitializeSequencerFromLsuPredecessorRequest" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters_v30" on message "InitializeSequencerFromGenesisStateV2Request" moved from outside to inside a oneof.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "4" with name "v31" on message "OnboardingStateForSequencer" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present oneof "parameters" on message "OnboardingStateForSequencer" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Field "2" with name "static_synchronizer_parameters" on message "OnboardingStateForSequencer" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "3" with name "v31" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateRequest" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v31" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "synchronizer_id" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromLsuPredecessorRequest" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "3" with name "synchronizer_parameters_v31" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present oneof "parameters" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" moved from inside to outside a oneof.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "3" with name "v31" on message "GetSynchronizerParametersResponse" was deleted.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present enum value "74" on enum "BuiltinFunction" was deleted.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1000" with name "unpack_template" on message "Update" was deleted.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1001" with name "unpack_interface" on message "Update" was deleted.""",
-      """com/digitalasset/daml/lf/transaction.proto:Previously present field "9" with name "external_call_results" on message "Exercise" was deleted.""",
       // Removal of pv=34
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" was deleted.""",
+      // Removal of pv=35
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "2" with name "parameters_v1" on message "GetSynchronizerParametersResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateRequest" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromLsuPredecessorRequest" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateV2Request" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "GetSynchronizerParametersResponse" is missing values: [2] were removed.""",
       // Adding of new StaticSynchronizerParameters v32 in other messages
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "6" with name "v32" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
@@ -225,28 +223,73 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/admin/time/v30/time_tracker_config.proto:Previously present field "4" with name "request_timeout" on message "TimeProofRequestConfig" was deleted.""",
       // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Added new StaticSynchronizerParameters in v33
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "7" with name "v33" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
     ),
     (3, 6) -> Seq(
+      // Daml-LF archive backward compatibility is checked separately
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf.proto" was deleted.""",
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf1.proto" was deleted.""",
+      """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf2.proto" was deleted.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionRequest" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1000" with name "unpack_template" on message "Update" was deleted.""",
-      """com/digitalasset/daml/lf/archive/daml_lf2.proto:Previously present field "1001" with name "unpack_interface" on message "Update" was deleted.""",
       // Removal of pv=34
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "3" with name "dynamic_sequencing_parameters_payload" on message "GetOrderingTopologyResponse" was deleted.""",
       """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved name "lookup_by_key" on message "ActionDescription" was deleted.""",
       """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present reserved range "[4]" on message "ActionDescription" is missing values: [4] were removed.""",
+      // Removal of pv=35
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "v30" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "v30" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "2" with name "synchronizer_parameters_v30" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "2" with name "v30" on message "GetSynchronizerParametersResponse" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateRequest" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromLsuPredecessorRequest" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present reserved range "[2]" on message "InitializeSequencerFromGenesisStateV2Request" is missing values: [2] were removed.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present reserved range "[2]" on message "GetSynchronizerParametersResponse" is missing values: [2] were removed.""",
       // Adding of new StaticSynchronizerParameters v32 in other messages
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present field "5" with name "v32" on message "OnboardingStateForSequencer" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "6" with name "v32" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "v32" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "4" with name "synchronizer_parameters_v32" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "4" with name "v32" on message "GetSynchronizerParametersResponse" was deleted.""",
       // labels added to ComponentStatus in 3.6 (per-synchronizer health reporting); older nodes/consoles simply ignore the new field
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "6" with name "labels" on message "ComponentStatus" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_administration_service.proto:Previously present RPC "OnboardingState" on service "SequencerAdministrationService" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present RPC "InitializeSequencerFromOnboardingState" on service "SequencerInitializationService" was deleted.""",
+      // Added new StaticSynchronizerParameters in v33
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "7" with name "v33" on message "InitializeSequencerFromLsuPredecessorRequest" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_initialization_service.proto:Previously present field "5" with name "v33" on message "InitializeSequencerFromGenesisStateV2Request" was deleted.""",
+      """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
+      // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
+      """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
     ),
   )
+
+  // Transaction and Node are only used for internal profiling (snapshot.proto), not in production
+  private val transactionProtoMovedToSnapshotChanges = Seq(
+    """com/digitalasset/daml/lf/transaction.proto:File option "java_outer_classname" changed from "" to "TransactionOuterClass".""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Node" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Node.Exercise" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Node.Fetch" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Node.QueryByKey" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Node.Rollback" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "ThinContractInstance" was deleted from file.""",
+    """com/digitalasset/daml/lf/transaction.proto:Previously present message "Transaction" was deleted from file.""",
+  )
+
+  // The 3.4 image does not contain these messages
+  private def transactionProtoMovedToSnapshot(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 5))) Seq.empty
+    else transactionProtoMovedToSnapshotChanges
 
   // 3.6 and later releases already ship the current google protobuf files
   private def googleProtobufBreakingChanges(majorMinor: (Int, Int)): Seq[String] =
@@ -286,7 +329,7 @@ final class ProtobufCompatibilityReaderTest
     """google/protobuf/descriptor.proto:Previously present field "2" with name "features" on message "FeatureSetEditionDefault" was deleted.""",
   )
 
-  val removalOfPv34 = Seq(
+  val removalOfPv34Changes = Seq(
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "1" with name "create" on message "ActionDescription" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "2" with name "exercise" on message "ActionDescription" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "3" with name "fetch" on message "ActionDescription" was deleted.""",
@@ -301,6 +344,10 @@ final class ProtobufCompatibilityReaderTest
     """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "1" with name "algorithm" on message "CompressedBatch" was deleted.""",
     """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "2" with name "compressed_batch" on message "CompressedBatch" was deleted.""",
   )
+
+  // 3.7 and later releases no longer contain the pv=34 messages
+  private def removalOfPv34(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 7))) removalOfPv34Changes else Seq.empty
 
   "protobuf" should {
 
@@ -338,9 +385,11 @@ final class ProtobufCompatibilityReaderTest
               processLogger.outputLines().map(_.replaceAll(raw".proto:\d+:\d+:", ".proto:"))
 
             val acceptedBreakingChanges =
-              acceptedBreakingChangesByVersion(
-                majorMinor
-              ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34
+              acceptedBreakingChangesByVersion.getOrElse(
+                majorMinor,
+                Nil,
+              ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34(majorMinor) ++
+                transactionProtoMovedToSnapshot(majorMinor)
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

@@ -46,6 +46,11 @@ object SubscriptionCloseReason {
 
   /** The subscription was closed by the server due to a token expiration. */
   case object TokenExpiration extends SubscriptionCloseReason[Nothing]
+
+  /** The subscription was closed because it has been silent for too long while events are being
+    * aggregated from other subscriptions.
+    */
+  case object SubscriptionIsSilent extends SubscriptionCloseReason[Nothing]
 }
 
 /** A running subscription to a sequencer. Can be closed by the consumer or the producer. Once
@@ -165,12 +170,3 @@ object SequencerSubscriptionError extends SequencerSubscriptionErrorGroup {
       )
 
 }
-
-/** Errors that may occur on the creation of a sequencer subscription
-  */
-sealed trait SequencerSubscriptionCreationError extends SubscriptionCloseReason.SubscriptionError
-
-/** When a fatal error occurs on the creation of a sequencer subscription, the subscription will not
-  * retry the subscription creation. Instead, the subscription will fail.
-  */
-final case class Fatal(msg: String) extends SequencerSubscriptionCreationError

@@ -96,6 +96,8 @@ def main() -> int:
         for record in collapse_log_records(sys.stdin):
             print(record)
     except BrokenPipeError:
+        # silent-ok: standard Unix pipe idiom, the downstream reader (e.g. `| head`)
+        # closed early, that's not a failure of this tool
         return 0
     return 0
 

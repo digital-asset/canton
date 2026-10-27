@@ -463,7 +463,7 @@ if __name__ == "__main__":
         "--protocol-version",
         type=str,
         help="Protocol version",
-        required=True,
+        default="37",
     )
 
     subparsers = parser.add_subparsers(required=True, dest="subcommand")

@@ -17,9 +17,12 @@ import com.digitalasset.canton.{
   LedgerCommandId,
   LedgerSubmissionId,
   LedgerUserId,
+  LfPackageId,
   LfPartyId,
   LfWorkflowId,
 }
+
+import java.util.UUID
 
 trait HasReassignmentCommandsHelpers {
   this: BaseTest & HasCommandRunnersHelpers =>
@@ -32,6 +35,9 @@ trait HasReassignmentCommandsHelpers {
       target: SynchronizerId,
       submittingParty: LfPartyId,
       participantOverride: Option[LocalParticipantReference] = None,
+      overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+      overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+      submissionId: LedgerSubmissionId = freshSubmissionId(),
   )(implicit
       env: TestConsoleEnvironment
   ): (UpdateService.UnassignedWrapper, Completion) = {
@@ -51,7 +57,9 @@ trait HasReassignmentCommandsHelpers {
       commandId = commandId,
       userId = userId,
       workflowId = workflowId,
-      submissionId = LedgerSubmissionId.assertFromString("some-submission-id"),
+      submissionId = submissionId,
+      overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+      overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
     )
 
     logger.debug(s"Listening for completion and update starting at $ledgerEnd")
@@ -92,6 +100,7 @@ trait HasReassignmentCommandsHelpers {
       target: SynchronizerId,
       submittingParty: PartyId,
       participantOverrideO: Option[LocalParticipantReference] = None,
+      submissionId: LedgerSubmissionId = freshSubmissionId(),
   )(implicit
       env: TestConsoleEnvironment
   ): Completion = {
@@ -99,7 +108,7 @@ trait HasReassignmentCommandsHelpers {
       cmd = getUnassignmentCmd(cid = cid, source = source, target = target),
       userId = userId,
       workflowId = Some(workflowId),
-      submissionId = submissionId,
+      submissionId = Some(submissionId),
       commandId = commandId,
       submittingParty = submittingParty,
     )
@@ -122,6 +131,7 @@ trait HasReassignmentCommandsHelpers {
       target: SynchronizerId,
       submittingParty: LfPartyId,
       participantOverride: Option[LocalParticipantReference] = None,
+      submissionId: LedgerSubmissionId = freshSubmissionId(),
   )(implicit
       env: TestConsoleEnvironment
   ): (UpdateService.AssignedWrapper, Completion) = {
@@ -141,7 +151,7 @@ trait HasReassignmentCommandsHelpers {
       commandId = commandId,
       userId = userId,
       workflowId = workflowId,
-      submissionId = LedgerSubmissionId.assertFromString("some-submission-id"),
+      submissionId = submissionId,
     )
 
     logger.debug(s"Listening for completion and update starting at $ledgerEnd")
@@ -182,6 +192,7 @@ trait HasReassignmentCommandsHelpers {
       target: SynchronizerId,
       submittingParty: PartyId,
       participantOverrideO: Option[LocalParticipantReference] = None,
+      submissionId: LedgerSubmissionId = freshSubmissionId(),
   )(implicit
       env: TestConsoleEnvironment
   ): Completion = {
@@ -193,7 +204,7 @@ trait HasReassignmentCommandsHelpers {
       ),
       userId = userId,
       workflowId = Some(workflowId),
-      submissionId = submissionId,
+      submissionId = Some(submissionId),
       commandId = commandId,
       submittingParty = submittingParty,
     )
@@ -228,12 +239,16 @@ trait HasReassignmentCommandsHelpers {
       cid: LfContractId,
       source: SynchronizerId,
       target: SynchronizerId,
+      overrideSourceValidationPackageId: Option[LfPackageId] = None,
+      overrideTargetValidationPackageId: Option[LfPackageId] = None,
   ): proto.reassignment_commands.ReassignmentCommand.Command.UnassignCommand =
     proto.reassignment_commands.ReassignmentCommand.Command.UnassignCommand(
       proto.reassignment_commands.UnassignCommand(
         contractId = cid.coid,
         source = source.toProtoPrimitive,
         target = target.toProtoPrimitive,
+        overrideSourceValidationPackageId = overrideSourceValidationPackageId,
+        overrideTargetValidationPackageId = overrideTargetValidationPackageId,
       )
     )
 
@@ -253,7 +268,7 @@ trait HasReassignmentCommandsHelpers {
   protected def getReassignmentCommands(
       cmds: Seq[proto.reassignment_commands.ReassignmentCommand.Command],
       userId: LedgerUserId = HasCommandRunnersHelpers.userId,
-      submissionId: Option[LedgerSubmissionId] = HasCommandRunnersHelpers.submissionId,
+      submissionId: Option[LedgerSubmissionId] = Some(freshSubmissionId()),
       commandId: LedgerCommandId = HasCommandRunnersHelpers.commandId,
       workflowId: Option[LfWorkflowId] = None,
       submittingParty: PartyId,
@@ -270,7 +285,7 @@ trait HasReassignmentCommandsHelpers {
   protected def getReassignmentCommand(
       cmd: proto.reassignment_commands.ReassignmentCommand.Command,
       userId: LedgerUserId = HasCommandRunnersHelpers.userId,
-      submissionId: Option[LedgerSubmissionId] = HasCommandRunnersHelpers.submissionId,
+      submissionId: Option[LedgerSubmissionId] = Some(freshSubmissionId()),
       commandId: LedgerCommandId = HasCommandRunnersHelpers.commandId,
       workflowId: Option[LfWorkflowId] = None,
       submittingParty: PartyId,
@@ -282,4 +297,8 @@ trait HasReassignmentCommandsHelpers {
     workflowId,
     submittingParty,
   )
+
+  // With traffic accounting, a repeated (command id, submission id) for a submitter conflicts in TEA.
+  protected def freshSubmissionId(): LedgerSubmissionId =
+    LedgerSubmissionId.assertFromString(UUID.randomUUID().toString)
 }

@@ -49,7 +49,7 @@ private[topology] class SynchronizerOwnerChaos(
       env: TestConsoleEnvironment,
       globalReservations: Reservations,
   ): Unit = {
-    val initializedNodes = env.nodes.local.filter(_.is_initialized).toList
+    val initializedNodes = env.nodes.local.filter(canUseNode).toList
     val (_, namespace) = getNamespaceDefinition(env.sequencer1)
     val (owners, nonOwners) =
       initializedNodes.partition(node => namespace.owners.contains(node.namespace))

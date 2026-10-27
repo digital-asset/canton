@@ -227,6 +227,20 @@ final class AcsReplicationStateManager(
       case _ => false
     })
 
+  /** Finds replication status by Daml sequencer channel proposal contract id.
+    *
+    * @param proposalContractId
+    *   Daml replication proposal contract id
+    * @return
+    *   party replication status if found, None otherwise
+    */
+  def findByProposalContractId(proposalContractId: LfContractId): Option[AcsReplicationStatus] =
+    acsReplications.values.find(_.agreementStatus match {
+      case AcsReplicationStatus.AgreementStatus.Proposed(contractId) =>
+        contractId.coid == proposalContractId.coid
+      case _ => false
+    })
+
   def collectFirst[T](
       f: PartialFunction[(AcsReplicationRequestId, AcsReplicationStatus), T]
   ): Option[T] = acsReplications.iterator.collectFirst(f)

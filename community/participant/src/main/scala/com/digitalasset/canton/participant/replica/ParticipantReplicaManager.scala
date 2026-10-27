@@ -6,13 +6,14 @@ package com.digitalasset.canton.participant.replica
 import cats.implicits.toTraverseOps
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.ParticipantServices
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
 
 import scala.concurrent.ExecutionContext
@@ -64,7 +65,7 @@ class ParticipantReplicaManager(
       case Some(participantServices) =>
         logger.info("Participant replica is becoming active")
 
-        for {
+        (for {
           _ <- participantServices.persistentStateContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: PersistentState started")
 
@@ -90,16 +91,9 @@ class ParticipantReplicaManager(
           _ = logger.info("Participant replica is becoming active: ACS Replicator started")
           _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
           _ = logger.info("Participant replica is becoming active: Party Replicator started")
-          // Start up the Ledger API server
-          _ <- participantServices.ledgerApiServerContainer.initializeNext()
-          _ = logger.info("Participant replica is becoming active: Ledger API Server started")
-
-          _ <- participantServices.acsCommitmentProcessorManagerO.traverse(_.initializeNext())
-          _ = participantServices.acsCommitmentProcessorManagerO.foreach(_ =>
-            logger.info("Participant replica is becoming active: ACS digest processing started")
-          )
-
-          // Start up the traffic enforcement in-process app and backend (if enabled)
+          // Start up the traffic enforcement in-process app and backend (if enabled) before the
+          // Ledger API server, which takes the backend by value. The app's ingestion retries until
+          // the Ledger API is up.
           _ <- participantServices.trafficEnforcementAppContainerO.traverse(
             _.initializeNext().map(_ =>
               logger.info(
@@ -113,6 +107,15 @@ class ParticipantReplicaManager(
                 "Participant replica is becoming active: Traffic enforcement backend started"
               )
             )
+          )
+
+          // Start up the Ledger API server
+          _ <- participantServices.ledgerApiServerContainer.initializeNext()
+          _ = logger.info("Participant replica is becoming active: Ledger API Server started")
+
+          _ <- participantServices.acsCommitmentProcessorManagerO.traverse(_.initializeNext())
+          _ = participantServices.acsCommitmentProcessorManagerO.foreach(_ =>
+            logger.info("Participant replica is becoming active: ACS digest processing started")
           )
 
           // Start up the Ledger API-dependent Canton services
@@ -135,9 +138,19 @@ class ParticipantReplicaManager(
 
           _ = logger.info("Participant replica is becoming active: Synchronizers reconnected")
           // Start the schedulers, pruning scheduler depends on the Ledger API server
-          _ <- FutureUnlessShutdown.outcomeF(participantServices.schedulers.start())
+          _ <- participantServices.schedulers.start()
           _ = logger.info("Participant replica is becoming active: Schedulers started")
-        } yield ()
+        } yield ()).thereafterSuccessOrFailure(
+          _ => (),
+          LifeCycle.close(
+            participantServices.trafficEnforcementBackendContainerO
+              .map(_.currentAutoCloseable())
+              .toList ++
+              participantServices.trafficEnforcementAppContainerO
+                .map(_.currentAutoCloseable())
+                .toList
+          )(logger),
+        )
 
       case None =>
         // If the node is not yet initialized, we will perform the creation of participant services during initialization and not here
@@ -161,7 +174,9 @@ class ParticipantReplicaManager(
           "Participant replica is becoming passive: Ledger API dependent services stopped"
         )
 
-        // Stop the traffic enforcement in-process app and backend (if enabled)
+        // Stop the traffic enforcement in-process app and backend (if enabled) before the Ledger API
+        // server: ingestion stops cleanly, and until the server is closed it answers traffic calls with
+        // the retryable ABORTED_DUE_TO_SHUTDOWN.
         participantServices.trafficEnforcementBackendContainerO.foreach {
           trafficEnforcementBackend =>
             trafficEnforcementBackend.closeCurrent()

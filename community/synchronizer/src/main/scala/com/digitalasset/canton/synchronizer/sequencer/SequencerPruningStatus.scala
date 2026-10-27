@@ -4,61 +4,155 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.sequencer.admin.v30
+import com.digitalasset.canton.sequencer.admin.v31.SequencerMemberStatus.Status
+import com.digitalasset.canton.sequencer.admin.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.SequencerMemberStatus.{
+  Active,
+  Disabled,
+  Onboarding,
+}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 
-trait AbstractSequencerMemberStatus extends Product with Serializable {
-  def registeredAt: CantonTimestamp
-  def lastAcknowledged: Option[CantonTimestamp]
+sealed trait SequencerMemberStatus extends PrettyPrintingFromCompanion {
+  def member: Member
 
-  def safePruningTimestamp: CantonTimestamp =
-    lastAcknowledged.getOrElse(registeredAt)
-}
+  /** The v30 message can only express a registration timestamp plus an enabled flag, so it has no
+    * representation for a member without a registration timestamp: one that is still onboarding, or
+    * one that was disabled while it was still onboarding. Such members must therefore not reach
+    * this encoding, which is only used below
+    * [[com.digitalasset.canton.version.ProtocolVersion.v37]]. This is enforced upstream by
+    * [[com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager.addTrafficPurchased]],
+    * which does not register onboarding members below that protocol version.
+    */
+  def toProtoV30: Either[String, v30.SequencerMemberStatus] = {
+    val fieldsE = this match {
+      case Onboarding(onboardingMember) =>
+        Left(
+          s"Cannot serialize the onboarding member '$onboardingMember' to a v30 sequencer member status."
+        )
+      case Active(_, registeredAt, lastAcknowledged) =>
+        Right((registeredAt, lastAcknowledged, true))
+      case Disabled(disabledMember, None, _) =>
+        Left(
+          s"Cannot serialize the disabled member '$disabledMember' to a v30 sequencer member status:" +
+            s" it has no registration timestamp because it was disabled while still onboarding."
+        )
+      case Disabled(_, Some(registeredAt), lastAcknowledged) =>
+        Right((registeredAt, lastAcknowledged, false))
+    }
 
-final case class InternalSequencerMemberStatus(
-    override val registeredAt: CantonTimestamp,
-    override val lastAcknowledged: Option[CantonTimestamp],
-) extends AbstractSequencerMemberStatus
-    with PrettyPrintingFromCompanion {
-  override def prettyCompanion: PrettyPrintingCompanion[InternalSequencerMemberStatus] =
-    InternalSequencerMemberStatus
-}
+    fieldsE.map { case (registeredAt, lastAcknowledged, enabled) =>
+      v30.SequencerMemberStatus(
+        member = member.toProtoPrimitive,
+        registeredAt = registeredAt.toProtoPrimitive,
+        lastAcknowledged = lastAcknowledged.map(_.toProtoPrimitive),
+        enabled = enabled,
+      )
+    }
+  }
 
-object InternalSequencerMemberStatus
-    extends PrettyPrintingCompanion[InternalSequencerMemberStatus] {
-  override protected val pretty: Pretty[InternalSequencerMemberStatus] = prettyOfClass(
-    param("registered at", _.registeredAt),
-    paramIfDefined("last acknowledged", _.lastAcknowledged),
-  )
-}
-
-final case class SequencerMemberStatus(
-    member: Member,
-    registeredAt: CantonTimestamp,
-    lastAcknowledged: Option[CantonTimestamp],
-    enabled: Boolean = true,
-) extends AbstractSequencerMemberStatus
-    with PrettyPrintingFromCompanion {
-
-  def toProtoV30: v30.SequencerMemberStatus =
-    v30.SequencerMemberStatus(
-      member.toProtoPrimitive,
-      registeredAt.toProtoPrimitive,
-      lastAcknowledged.map(_.toProtoPrimitive),
-      enabled,
-    )
+  def toProtoV31: v31.SequencerMemberStatus = {
+    val statusP = this match {
+      case Onboarding(_) =>
+        v31.SequencerMemberStatus.Status.Onboarding(v31.SequencerMemberStatus.Onboarding())
+      case Active(_, registeredAt, lastAcknowledged) =>
+        v31.SequencerMemberStatus.Status.Active(
+          v31.SequencerMemberStatus.Active(
+            registeredAt.toProtoPrimitive,
+            lastAcknowledged.map(_.toProtoPrimitive),
+          )
+        )
+      case Disabled(_, registeredAt, lastAcknowledged) =>
+        v31.SequencerMemberStatus.Status.Disabled(
+          v31.SequencerMemberStatus.Disabled(
+            registeredAt.map(_.toProtoPrimitive),
+            lastAcknowledged.map(_.toProtoPrimitive),
+          )
+        )
+    }
+    v31.SequencerMemberStatus(member.toProtoPrimitive, statusP)
+  }
 
   override def prettyCompanion: PrettyPrintingCompanion[SequencerMemberStatus] =
     SequencerMemberStatus
+}
+
+object SequencerMemberStatus extends PrettyPrintingCompanion[SequencerMemberStatus] {
+
+  final case class Onboarding(member: Member) extends SequencerMemberStatus
+
+  final case class Active(
+      member: Member,
+      registeredAt: CantonTimestamp,
+      lastAcknowledged: Option[CantonTimestamp],
+  ) extends SequencerMemberStatus {
+    def safePruningTimestamp: CantonTimestamp = lastAcknowledged.getOrElse(registeredAt)
+  }
+
+  final case class Disabled(
+      member: Member,
+      registeredAt: Option[CantonTimestamp],
+      lastAcknowledged: Option[CantonTimestamp],
+  ) extends SequencerMemberStatus
+
+  override protected val pretty: Pretty[SequencerMemberStatus] = {
+    case onboarding: Onboarding =>
+      prettyOfClass[Onboarding](param("member", _.member)).treeOf(onboarding)
+    case active: Active =>
+      prettyOfClass[Active](
+        param("member", _.member),
+        param("registered at", _.registeredAt),
+        paramIfDefined("last acknowledged", _.lastAcknowledged),
+      ).treeOf(active)
+    case disabled: Disabled =>
+      prettyOfClass[Disabled](
+        param("member", _.member),
+        param("registered at", _.registeredAt),
+        paramIfDefined("last acknowledged", _.lastAcknowledged),
+      ).treeOf(disabled)
+  }
+
+  def fromProtoV30(
+      memberStatusP: v30.SequencerMemberStatus
+  ): ParsingResult[SequencerMemberStatus] =
+    for {
+      member <- Member.fromProtoPrimitive(memberStatusP.member, "member")
+      registeredAt <- CantonTimestamp.fromProtoPrimitive(memberStatusP.registeredAt)
+      lastAcknowledged <- memberStatusP.lastAcknowledged.traverse(
+        CantonTimestamp.fromProtoPrimitive
+      )
+    } yield
+      if (memberStatusP.enabled) Active(member, registeredAt, lastAcknowledged)
+      else Disabled(member, Some(registeredAt), lastAcknowledged)
+
+  def fromProtoV31(p: v31.SequencerMemberStatus): ParsingResult[SequencerMemberStatus] =
+    for {
+      member <- Member.fromProtoPrimitive(p.member, "member")
+      status <- p.status match {
+        case Status.Onboarding(_) => Right(Onboarding(member): SequencerMemberStatus)
+        case Status.Active(a) =>
+          for {
+            registeredAt <- CantonTimestamp.fromProtoPrimitive(a.registeredAt)
+            lastAcknowledged <- a.lastAcknowledged.traverse(CantonTimestamp.fromProtoPrimitive)
+          } yield Active(member, registeredAt, lastAcknowledged): SequencerMemberStatus
+        case Status.Disabled(d) =>
+          for {
+            registeredAt <- d.registeredAt.traverse(CantonTimestamp.fromProtoPrimitive)
+            lastAcknowledged <- d.lastAcknowledged.traverse(CantonTimestamp.fromProtoPrimitive)
+          } yield Disabled(member, registeredAt, lastAcknowledged): SequencerMemberStatus
+        case Status.Empty => Left(ProtoDeserializationError.FieldNotSet("status"))
+      }
+    } yield status
 }
 
 /** Structure housing both members and instances of those members. Used to list clients that have
@@ -67,84 +161,6 @@ final case class SequencerMemberStatus(
 final case class SequencerClients(
     members: Set[Member] = Set.empty
 )
-
-trait AbstractSequencerPruningStatus {
-
-  /** Disabled members */
-  def disabledClients: SequencerClients
-
-  /** The earliest [[AbstractSequencerMemberStatus.safePruningTimestamp]] of any enabled member
-    */
-  def earliestMemberSafePruningTimestamp: Option[CantonTimestamp]
-
-  /** Using the member details, calculate based on their acknowledgements when is the latest point
-    * we can safely prune without losing any data that may still be read.
-    *
-    * @param timestampForNoMembers
-    *   The timestamp to return if there are no unignored members
-    */
-  def safePruningTimestampFor(timestampForNoMembers: CantonTimestamp): CantonTimestamp =
-    earliestMemberSafePruningTimestamp.getOrElse(timestampForNoMembers)
-}
-
-private[canton] final case class InternalSequencerPruningStatus(
-    lowerBound: CantonTimestamp,
-    membersMap: Map[Member, InternalSequencerMemberStatus],
-    disabledMembers: Set[Member],
-) extends AbstractSequencerPruningStatus
-    with PrettyPrintingFromCompanion {
-
-  override def disabledClients: SequencerClients = SequencerClients(disabledMembers)
-
-  override def earliestMemberSafePruningTimestamp: Option[CantonTimestamp] =
-    membersMap.view
-      .filterKeys(!disabledMembers.contains(_))
-      .values
-      .map(_.safePruningTimestamp)
-      .minOption
-
-  def members: Set[SequencerMemberStatus] = membersMap.map {
-    case (member, InternalSequencerMemberStatus(registeredAt, lastAcknowledged)) =>
-      SequencerMemberStatus(
-        member,
-        registeredAt,
-        lastAcknowledged,
-        !disabledMembers.contains(member),
-      )
-  }.toSet
-
-  def toSequencerPruningStatus(now: CantonTimestamp): SequencerPruningStatus =
-    SequencerPruningStatus(lowerBound, now, members)
-
-  override def prettyCompanion: PrettyPrintingCompanion[InternalSequencerPruningStatus] =
-    InternalSequencerPruningStatus
-}
-
-private[canton] object InternalSequencerPruningStatus
-    extends PrettyPrintingCompanion[InternalSequencerPruningStatus] {
-
-  override protected val pretty: Pretty[InternalSequencerPruningStatus] = prettyOfClass(
-    param("lower bound", _.lowerBound),
-    param("members", _.membersMap),
-    param("disabled", _.disabledMembers),
-  )
-
-  /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
-  val Unimplemented =
-    InternalSequencerPruningStatus(CantonTimestamp.MinValue, membersMap = Map.empty, Set.empty)
-
-  def apply(
-      lowerBound: CantonTimestamp,
-      members: Set[SequencerMemberStatus],
-  ): InternalSequencerPruningStatus =
-    InternalSequencerPruningStatus(
-      lowerBound,
-      members.view
-        .map(m => m.member -> InternalSequencerMemberStatus(m.registeredAt, m.lastAcknowledged))
-        .toMap,
-      members.view.filterNot(_.enabled).map(_.member).toSet,
-    )
-}
 
 /** Pruning status of a Sequencer.
   *
@@ -155,18 +171,18 @@ final case class SequencerPruningStatus(
     lowerBound: CantonTimestamp,
     now: CantonTimestamp,
     members: Set[SequencerMemberStatus],
-) extends AbstractSequencerPruningStatus
-    with PrettyPrintingFromCompanion {
+) extends PrettyPrintingFromCompanion {
 
-  override def disabledClients: SequencerClients = SequencerClients(
-    members = members.filterNot(_.enabled).map(_.member)
+  /** Inactive members, for testing */
+  private[sequencer] def inactiveClients: SequencerClients = SequencerClients(
+    members = members
+      .filter {
+        case _: Onboarding => true
+        case _: Active => false
+        case _: Disabled => true
+      }
+      .map(_.member)
   )
-
-  override def earliestMemberSafePruningTimestamp: Option[CantonTimestamp] =
-    members.filter(_.enabled).map(_.safePruningTimestamp).minOption
-
-  def toInternal: InternalSequencerPruningStatus =
-    InternalSequencerPruningStatus(lowerBound, members)
 
   /** Using the member details, calculate based on their acknowledgements when is the latest point
     * we can safely prune without losing any data that may still be read.
@@ -175,47 +191,53 @@ final case class SequencerPruningStatus(
     * in practice a synchronizer will register a IDM, Sequencer and Mediator, this will most likely
     * never occur.
     */
-  lazy val safePruningTimestamp: CantonTimestamp = safePruningTimestampFor(now)
+  lazy val safePruningTimestamp: CantonTimestamp =
+    members
+      .collect { case a: Active => a }
+      .map(_.safePruningTimestamp)
+      .minOption
+      .getOrElse(now)
 
   /** List clients that would need to be disabled to allow pruning at the given timestamp.
     */
   def clientsPreventingPruning(timestamp: CantonTimestamp): SequencerClients =
-    members.foldLeft(SequencerClients()) { (disabled, memberStatus) =>
-      if (memberStatus.safePruningTimestamp.isBefore(timestamp) && memberStatus.enabled) {
-        disabled.copy(members = disabled.members + memberStatus.member)
-      } else disabled
+    SequencerClients(
+      members
+        .collect {
+          case a: Active if a.safePruningTimestamp.isBefore(timestamp) => a
+        }
+        .map(_.member)
+    )
+
+  /** Drops the members without a registration timestamp: those still onboarding and those disabled
+    * while onboarding. The v30 encoding cannot represent them, and as they have no events they do
+    * not affect pruning.
+    */
+  def withoutUnregisteredMembers: SequencerPruningStatus =
+    copy(members = members.filter {
+      case _: Onboarding => false
+      case _: Active => true
+      case disabled: Disabled => disabled.registeredAt.isDefined
+    })
+
+  def toProtoV30: Either[String, v30.SequencerPruningStatus] =
+    members.toSeq.traverse(_.toProtoV30).map { membersP =>
+      v30.SequencerPruningStatus(
+        earliestEventTimestamp = lowerBound.toProtoPrimitive,
+        now = now.toProtoPrimitive,
+        members = membersP,
+      )
     }
 
-  def toProtoV30: v30.SequencerPruningStatus =
-    v30.SequencerPruningStatus(
+  def toProtoV31: v31.SequencerPruningStatus =
+    v31.SequencerPruningStatus(
       earliestEventTimestamp = lowerBound.toProtoPrimitive,
       now = now.toProtoPrimitive,
-      members = members.toSeq.map(_.toProtoV30),
+      members = members.toSeq.map(_.toProtoV31),
     )
 
   override def prettyCompanion: PrettyPrintingCompanion[SequencerPruningStatus] =
     SequencerPruningStatus
-}
-
-object SequencerMemberStatus extends PrettyPrintingCompanion[SequencerMemberStatus] {
-
-  override protected val pretty: Pretty[SequencerMemberStatus] = prettyOfClass(
-    param("member", _.member),
-    param("registered at", _.registeredAt),
-    paramIfDefined("last acknowledged", _.lastAcknowledged),
-    paramIfTrue("enabled", _.enabled),
-  )
-
-  def fromProtoV30(
-      memberStatusP: v30.SequencerMemberStatus
-  ): ParsingResult[SequencerMemberStatus] =
-    for {
-      member <- Member.fromProtoPrimitive(memberStatusP.member, "member")
-      registeredAt <- CantonTimestamp.fromProtoPrimitive(memberStatusP.registeredAt)
-      lastAcknowledgedO <- memberStatusP.lastAcknowledged.traverse(
-        CantonTimestamp.fromProtoPrimitive
-      )
-    } yield SequencerMemberStatus(member, registeredAt, lastAcknowledgedO, memberStatusP.enabled)
 }
 
 object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningStatus] {
@@ -244,5 +266,21 @@ object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningSt
       earliestEventTimestamp <- CantonTimestamp.fromProtoPrimitive(statusP.earliestEventTimestamp)
       now <- CantonTimestamp.fromProtoPrimitive(statusP.now)
       members <- validatedMembers.traverse(SequencerMemberStatus.fromProtoV30).map(_.toSet)
+    } yield SequencerPruningStatus(earliestEventTimestamp, now, members)
+
+  def fromProtoV31(
+      statusP: v31.SequencerPruningStatus
+  ): ParsingResult[SequencerPruningStatus] =
+    // TODO(#35385): Reinstate a practical admin API members limit.
+    for {
+      validatedMembers <- ProtoValidation.validateLength(
+        statusP.members,
+        "members",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )
+      earliestEventTimestamp <- CantonTimestamp.fromProtoPrimitive(statusP.earliestEventTimestamp)
+      now <- CantonTimestamp.fromProtoPrimitive(statusP.now)
+      members <- validatedMembers.traverse(SequencerMemberStatus.fromProtoV31).map(_.toSet)
     } yield SequencerPruningStatus(earliestEventTimestamp, now, members)
 }

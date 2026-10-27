@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.crypto.SynchronizerSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -71,6 +72,11 @@ trait SequencerClientSend {
     *   [[com.digitalasset.canton.sequencing.protocol.AggregationRule]] to the request for
     *   deduplication, unless one is already present. False disables amplification for this request
     *   independent of the configuration.
+    * @param currentSnapshotApproximation
+    *   The current approximate snapshot. If you already have an approximate snapshot available that
+    *   was used previously (for example, to sign an inner `SignedProtocolMessage` such as a
+    *   `ConfirmationResponse` or `ConfirmationResultMessage`), you should pass it here. Otherwise,
+    *   leave it empty and the sequencer client will retrieve it internally via the crypto client.
     * @param timestamps
     *   Aggregated timestamps needed for sending a request.
     * @param trafficCostValidator
@@ -80,6 +86,7 @@ trait SequencerClientSend {
     */
   def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps = defaultSendRequestTimestamps,
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
@@ -98,6 +105,7 @@ trait SequencerClientSend {
     */
   def send(
       batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       timestamps: SendRequestTimestamps = defaultSendRequestTimestamps,
       messageId: MessageId = generateMessageId,
       aggregationRule: Option[AggregationRule] = None,
@@ -110,6 +118,7 @@ trait SequencerClientSend {
       metricsContext: MetricsContext,
   ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = sendAsync(
     batch = batch,
+    currentSnapshotApproximation = currentSnapshotApproximation,
     timestamps = timestamps,
     messageId = messageId,
     aggregationRule = aggregationRule,

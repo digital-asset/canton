@@ -3,12 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -90,20 +85,6 @@ trait MediatorPruningIntegrationTest extends CommunityIntegrationTest with Share
 
     daMediatorStateInspection.finalizedResponseCount()
   }.onShutdown(throw new RuntimeException("Unexpected shutdown."))(env.executionContext)
-}
-
-//class MediatorPruningIntegrationTestH2 extends MediatorPruningIntegrationTest {
-//  registerPlugin(new UseH2(loggerFactory))
-//  registerPlugin (
-//    new UseReferenceBlockSequencer[DbConfig.H2] (loggerFactory)
-//  )
-//}
-
-class MediatorPruningReferenceIntegrationTestPostgres extends MediatorPruningIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
-  )
 }
 
 class MediatorPruningBftOrderingIntegrationTestPostgres extends MediatorPruningIntegrationTest {

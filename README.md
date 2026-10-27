@@ -1,10 +1,7 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/digital-asset/.github/raw/main/images/Landscape%20New%20DA%20Brand%20Social%20Template%20%20-%20Dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://github.com/digital-asset/.github/raw/main/images/Landscape%20New%20DA%20Brand%20Social%20Template.png">
-    <img src="https://github.com/digital-asset/.github/raw/main/images/Landscape%20New%20DA%20Brand%20Social%20Template.png" width="100%" alt="Digital Asset and Canton logos">
-  </picture>
-</p>
+<picture>
+ <source media="(prefers-color-scheme: dark)" srcset="https://github.com/digital-asset/.github/raw/main/images/Canton - Horizontal-stack-Logo-White.png">
+ <img alt="Canton" src="https://github.com/digital-asset/.github/raw/main/images/Canton-Vertical-logo-Black-logo-Yellow-C-Black-diamond.png" width="50%">
+</picture>
 
 <br/><br/>
 

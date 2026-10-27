@@ -10,9 +10,11 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{
+  CachingConfigs,
   ProcessingTimeout,
   SessionEncryptionKeyCacheConfig,
   StorageConfig,
@@ -161,6 +163,7 @@ class ProtocolProcessorTest
   when(
     mockSequencerClient.send(
       any[Batch[DefaultOpenEnvelope]],
+      any[Option[SynchronizerSnapshotSyncCryptoApi]],
       any[SendRequestTimestamps],
       any[MessageId],
       any[Option[AggregationRule]],
@@ -173,6 +176,7 @@ class ProtocolProcessorTest
     .thenAnswer {
       (
           batch: Batch[DefaultOpenEnvelope],
+          _: Option[SynchronizerSnapshotSyncCryptoApi],
           _: SendRequestTimestamps,
           messageId: MessageId,
           _: Option[AggregationRule],
@@ -405,6 +409,7 @@ class ProtocolProcessorTest
         // Disable the session encryption key cache: it starts a scheduler that must be closed properly,
         // otherwise we see RejectedExecutionException warnings during shutdown.
         SessionEncryptionKeyCacheConfig(enabled = false),
+        CachingConfigs.defaultTransparencyCheckCache,
         timeouts,
         loggerFactory,
         FutureSupervisor.Noop,
@@ -446,6 +451,11 @@ class ProtocolProcessorTest
         override protected def metricsContextForSubmissionParam(
             submissionParam: Int
         ): MetricsContext = MetricsContext.Empty
+
+        override protected def validateLocalTrafficCost(submissionParam: Int)(
+            trafficCost: Long,
+            traceContext: TraceContext,
+        ): EitherT[FutureUnlessShutdown, RpcError, Unit] = EitherT.rightT(())
       }
 
     (sut, persistentState, ephemeralState.get(), participantNodeEphemeralState)
@@ -535,6 +545,7 @@ class ProtocolProcessorTest
       when(
         failingSequencerClient.send(
           any[Batch[DefaultOpenEnvelope]],
+          any[Option[SynchronizerSnapshotSyncCryptoApi]],
           any[SendRequestTimestamps],
           any[MessageId],
           any[Option[AggregationRule]],

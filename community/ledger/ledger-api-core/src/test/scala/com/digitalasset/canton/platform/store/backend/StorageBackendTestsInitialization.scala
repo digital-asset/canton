@@ -22,28 +22,19 @@ private[backend] trait StorageBackendTestsInitialization extends Matchers with S
       within = {
         executeSql(
           backend.parameter.initializeParameters(
-            ParameterStorageBackend.IdentityParams(
-              participantId = thisParticipantId
-            ),
-            loggerFactory,
+            ParameterStorageBackend.IdentityParams(participantId = thisParticipantId)
           )
         )
         val error = intercept[RuntimeException](
           executeSql(
             backend.parameter.initializeParameters(
-              ParameterStorageBackend.IdentityParams(
-                participantId = otherParticipantId
-              ),
-              loggerFactory,
+              ParameterStorageBackend.IdentityParams(participantId = otherParticipantId)
             )
           )
         )
         executeSql(
           backend.parameter.initializeParameters(
-            ParameterStorageBackend.IdentityParams(
-              participantId = thisParticipantId
-            ),
-            loggerFactory,
+            ParameterStorageBackend.IdentityParams(participantId = thisParticipantId)
           )
         )
 

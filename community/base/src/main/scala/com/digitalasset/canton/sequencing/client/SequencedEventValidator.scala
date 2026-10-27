@@ -242,7 +242,7 @@ object SequencedEventValidator extends HasLoggerName {
             event,
             ProtocolVersionValidation.NoValidation,
             DecompressionPolicy.MaxValueUnsafe,
-            SynchronizerLimits.max,
+            SynchronizerLimits.default,
           )
         )
       )
@@ -657,14 +657,18 @@ class SequencedEventValidatorImpl(
     if (psid.protocolVersion == ProtocolVersion.v35)
       FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
     else
-      snapshot.ipsSnapshot
-        .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
-        .map(parameters =>
-          DecompressionPolicy.forProtocolVersion(
-            psid.protocolVersion,
-            MaxBytesToDecompress(parameters.maxRequestSize.value),
+      // Guard with the validator's close context: an in-flight lookup is drained before close, and a
+      // later one short-circuits to AbortedDueToShutdown instead of racing the closing storage layer.
+      synchronizeWithClosing("decompression-bound")(
+        snapshot.ipsSnapshot
+          .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
+          .map(parameters =>
+            DecompressionPolicy.forProtocolVersion(
+              psid.protocolVersion,
+              MaxBytesToDecompress(parameters.maxRequestSize.value),
+            )
           )
-        )
+      )
 
   /** Verifies the event's signature against the resolved topology snapshot and decompresses its
     * batch within the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] derived

@@ -1,0 +1,17 @@
+name: Publish to GitHub releases
+description: Publish release artifacts to GitHub Releases
+
+inputs:
+  github_token:
+    required: true
+    description: GitHub token with write access to release repositories
+
+runs:
+  using: composite
+  steps:
+    - name: Publish to GitHub releases
+      uses: ./.github/actions/nix/nix_run
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      with:
+        command: scripts/ci/publish-to-github.sh

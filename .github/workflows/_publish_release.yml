@@ -1,0 +1,159 @@
+name: Publish Release
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_CF_CANTON_IO_DISTRIBUTION_ID:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+      GAC_JSON:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      GPG_CODE_SIGNING:
+        required: true
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+      MULTI_REPO_GITHUB_TOKEN:
+        required: true
+        description: GitHub token with write access to both DACH-NY/canton and digital-asset/canton
+
+jobs:
+  publish_release:
+    name: Publish Release
+    runs-on: ${{ inputs.runner }}
+    env:
+      # Needed by scripts/ci/publish-to-github.sh to detect formal release tags
+      CIRCLE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      OCI_REGISTRY: europe-docker.pkg.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Prepare GPG home
+        shell: bash
+        run: |
+          GNUPG_HOME="${RUNNER_TEMP}/gnupg-${GITHUB_RUN_ID}"
+          mkdir -p "$GNUPG_HOME"
+          chmod 700 "$GNUPG_HOME"
+          echo "GNUPGHOME=$GNUPG_HOME" >> "$GITHUB_ENV"
+
+      - name: Set up release workspace
+        shell: bash
+        run: |
+          rm -rf /tmp/workspace
+          mkdir -p /tmp/workspace/community/app/target/release
+          mkdir -p /tmp/workspace/community/ledger-test-tool/target/scala-2.13
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Download packaged community tarballs
+        uses: actions/download-artifact@v7
+        with:
+          name: package-community-release.tar.gz
+          path: /tmp/workspace/community/app/target/release
+
+      - name: Download packaged community zip archives
+        uses: actions/download-artifact@v7
+        with:
+          name: package-community-release.zip
+          path: /tmp/workspace/community/app/target/release
+
+      - name: Download ScalaDoc artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: scaladoc.tar.gz
+          path: /tmp/workspace
+
+      - name: Download ledger API test tool artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: assembly_ledger_api_test_tool-release.jar
+          path: /tmp/workspace/community/ledger-test-tool/target/scala-2.13
+
+      - name: Publish release to S3
+        uses: ./.github/actions/publish/publish_release_on_s3
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+          aws_cf_canton_io_distribution_id: ${{ secrets.AWS_CF_CANTON_IO_DISTRIBUTION_ID }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish release to OCI registry
+        uses: ./.github/actions/publish/publish_release_on_oci_registry
+        with:
+          gcloud_service_key: ${{ secrets.GCLOUD_SERVICE_KEY }}
+          nightly_release: ${{ inputs.is_nightly_workflow }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish API artifacts to unstable GAR
+        if: ${{ inputs.is_nightly_workflow || inputs.is_manual }}
+        uses: ./.github/actions/publish/publish_api_to_gar
+        with:
+          gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven-unstable
+          gac_json: ${{ secrets.GAC_JSON }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish API artifacts to stable GAR
+        if: ${{ !inputs.is_nightly_workflow && !inputs.is_manual }}
+        uses: ./.github/actions/publish/publish_api_to_gar
+        with:
+          gar_maven_repo_url: https://europe-maven.pkg.dev/da-images/public-maven
+          gac_json: ${{ secrets.GAC_JSON }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish API artifacts to Maven Central
+        if: ${{ !inputs.is_nightly_workflow && !inputs.is_manual }}
+        uses: ./.github/actions/publish/publish_api_to_maven_central
+        with:
+          gpg_code_signing: ${{ secrets.GPG_CODE_SIGNING }}
+          maven_username: ${{ secrets.MAVEN_USERNAME }}
+          maven_password: ${{ secrets.MAVEN_PASSWORD }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish to GitHub releases
+        uses: ./.github/actions/publish/publish_to_github_releases
+        with:
+          github_token: ${{ secrets.MULTI_REPO_GITHUB_TOKEN }}
+
+      - name: Cleanup temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "${GOOGLE_CREDENTIALS_FILE:-}"
+          rm -f "${DPM_REGISTRY_AUTH:-}"
+          if [[ -n "${GNUPGHOME:-}" ]]; then
+            rm -rf "$GNUPGHOME"
+          fi

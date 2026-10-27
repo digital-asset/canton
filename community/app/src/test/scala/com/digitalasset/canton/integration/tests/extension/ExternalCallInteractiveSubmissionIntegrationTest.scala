@@ -89,100 +89,97 @@ class ExternalCallInteractiveSubmissionIntegrationTest
   private def hexBytes(hex: String): ByteString = HexString.parseToByteString(hex).value
 
   "an external call in an interactive submission" should {
-    "record the results in the V4-prepared transaction and execute it" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-      implicit env =>
-        import env.*
-        extensionService.reset()
+    "record the results in the V4-prepared transaction and execute it" in { implicit env =>
+      import env.*
+      extensionService.reset()
 
-        val prepared = participant1.ledger_api.javaapi.interactive_submission.prepare(
-          Seq(aliceE),
-          Seq(callExtensionCommand),
-          hashingSchemeVersion = HASHING_SCHEME_VERSION_V4,
-        )
-        prepared.hashingSchemeVersion shouldBe HASHING_SCHEME_VERSION_V4
+      val prepared = participant1.ledger_api.javaapi.interactive_submission.prepare(
+        Seq(aliceE),
+        Seq(callExtensionCommand),
+        hashingSchemeVersion = HASHING_SCHEME_VERSION_V4,
+      )
+      prepared.hashingSchemeVersion shouldBe HASHING_SCHEME_VERSION_V4
 
-        // The prepared transaction's exercise node carries the recorded external-call results,
-        // so they are part of what the external party signs.
-        val result = prepared.getPreparedTransaction.getTransaction.nodes
-          .map(_.versionedNode.v1.value.nodeType)
-          .collect { case NodeType.Exercise(value) => value }
-          .loneElement
-          .externalCallResults
-          .loneElement
-        result.extensionId shouldBe extensionService.extensionId
-        result.functionId shouldBe "test-function"
-        result.config shouldBe hexBytes("00ff")
-        result.input shouldBe hexBytes("deadbeef")
-        result.output shouldBe hexBytes(UseExtensionService.defaultResponseHex)
+      // The prepared transaction's exercise node carries the recorded external-call results,
+      // so they are part of what the external party signs.
+      val result = prepared.getPreparedTransaction.getTransaction.nodes
+        .map(_.versionedNode.v1.value.nodeType)
+        .collect { case NodeType.Exercise(value) => value }
+        .loneElement
+        .externalCallResults
+        .loneElement
+      result.extensionId shouldBe extensionService.extensionId
+      result.functionId shouldBe "test-function"
+      result.config shouldBe hexBytes("00ff")
+      result.input shouldBe hexBytes("deadbeef")
+      result.output shouldBe hexBytes(UseExtensionService.defaultResponseHex)
 
-        val transaction =
-          participant1.ledger_api.interactive_submission.execute_and_wait_for_transaction(
-            prepared.getPreparedTransaction,
-            Map(aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)),
-            submissionId = UUID.randomUUID().toString,
-            hashingSchemeVersion = HASHING_SCHEME_VERSION_V4,
-          )
-
-        // The committed exercise returns the recorded output.
-        val exercised = transaction.events
-          .map(_.event)
-          .collect { case Event.Event.Exercised(event) => event }
-          .loneElement
-        exercised.getExerciseResult.getText shouldBe UseExtensionService.defaultResponseHex
-
-        // The participant calls the service once to compute the output when the transaction is
-        // prepared and once to re-validate the recorded output in the confirmation workflow.
-        extensionService.observedCalls.map(_.mode) shouldBe Seq("submission", "validation")
-    }
-
-    "refuse to prepare with hashing scheme V2" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-      implicit env =>
-        import env.*
-        extensionService.reset()
-
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          participant1.ledger_api.javaapi.interactive_submission
-            .prepare(
-              Seq(aliceE),
-              Seq(callExtensionCommand),
-              hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
-            ),
-          _.errorMessage should include(
-            "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
-          ),
-        )
-
-        // Interpretation precedes hashing, so the service computed the output once, but the
-        // refused transaction never reaches the confirmation workflow.
-        extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
-    }
-
-    "refuse to execute a V4-prepared transaction presented as V2" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-      implicit env =>
-        import env.*
-        extensionService.reset()
-
-        val prepared = participant1.ledger_api.javaapi.interactive_submission.prepare(
-          Seq(aliceE),
-          Seq(callExtensionCommand),
+      val transaction =
+        participant1.ledger_api.interactive_submission.execute_and_wait_for_transaction(
+          prepared.getPreparedTransaction,
+          Map(aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)),
+          submissionId = UUID.randomUUID().toString,
           hashingSchemeVersion = HASHING_SCHEME_VERSION_V4,
         )
 
-        loggerFactory.assertThrowsAndLogs[CommandFailure](
-          participant1.ledger_api.interactive_submission.execute_and_wait_for_transaction(
-            prepared.getPreparedTransaction,
-            Map(aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)),
-            submissionId = UUID.randomUUID().toString,
+      // The committed exercise returns the recorded output.
+      val exercised = transaction.events
+        .map(_.event)
+        .collect { case Event.Event.Exercised(event) => event }
+        .loneElement
+      exercised.getExerciseResult.getText shouldBe UseExtensionService.defaultResponseHex
+
+      // The participant calls the service once to compute the output when the transaction is
+      // prepared and once to re-validate the recorded output in the confirmation workflow.
+      extensionService.observedCalls.map(_.mode) shouldBe Seq("submission", "validation")
+    }
+
+    "refuse to prepare with hashing scheme V2" in { implicit env =>
+      import env.*
+      extensionService.reset()
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.ledger_api.javaapi.interactive_submission
+          .prepare(
+            Seq(aliceE),
+            Seq(callExtensionCommand),
             hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
           ),
-          _.errorMessage should include(
-            "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
-          ),
-        )
+        _.errorMessage should include(
+          "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
+        ),
+      )
 
-        // The hash verification failure precedes submission, so the service only saw the
-        // preparation-time call and the transaction never reaches the confirmation workflow.
-        extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
+      // Interpretation precedes hashing, so the service computed the output once, but the
+      // refused transaction never reaches the confirmation workflow.
+      extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
+    }
+
+    "refuse to execute a V4-prepared transaction presented as V2" in { implicit env =>
+      import env.*
+      extensionService.reset()
+
+      val prepared = participant1.ledger_api.javaapi.interactive_submission.prepare(
+        Seq(aliceE),
+        Seq(callExtensionCommand),
+        hashingSchemeVersion = HASHING_SCHEME_VERSION_V4,
+      )
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.ledger_api.interactive_submission.execute_and_wait_for_transaction(
+          prepared.getPreparedTransaction,
+          Map(aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)),
+          submissionId = UUID.randomUUID().toString,
+          hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
+        ),
+        _.errorMessage should include(
+          "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
+        ),
+      )
+
+      // The hash verification failure precedes submission, so the service only saw the
+      // preparation-time call and the transaction never reaches the confirmation workflow.
+      extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
     }
   }
 }

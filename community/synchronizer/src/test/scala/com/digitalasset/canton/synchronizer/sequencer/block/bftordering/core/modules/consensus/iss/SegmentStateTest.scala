@@ -47,7 +47,7 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
-import org.slf4j.event.Level.INFO
+import org.slf4j.event.Level.{INFO, WARN}
 
 import java.time.Duration
 
@@ -96,6 +96,49 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       segmentState.isSegmentComplete shouldBe true
     }
 
+    "validate received view-change and new-view messages before processing them" in {
+      val segment = createSegmentState()
+      val invalidBlockMetadata = BlockMetadata(epochInfo.number, BlockNumber(2L))
+      val viewChange = ViewChange
+        .create(
+          invalidBlockMetadata,
+          ViewNumber(ViewNumber.First + 1),
+          Seq.empty,
+          from = otherId1,
+        )
+        .fakeSign
+
+      assertLogs(
+        segment.processEvent(PbftSignedNetworkMessage(viewChange)),
+        log => {
+          log.level shouldBe WARN
+          log.message should include("received invalid PbftViewChangeMessage")
+          log.message should include("the blockNumber 2 is not the first block in segment 0")
+        },
+      ) shouldBe empty
+      segment.getViewChangeState shouldBe empty
+
+      val newView = NewView
+        .create(
+          blockMetaData,
+          ViewNumber(ViewNumber.First + 2),
+          Seq.empty,
+          Seq.empty,
+          from = otherId1,
+        )
+        .fakeSign
+
+      assertLogs(
+        segment.processEvent(PbftSignedNetworkMessage(newView)),
+        log => {
+          log.level shouldBe WARN
+          log.message should include("received invalid PbftViewChangeMessage")
+          log.message should include("expected 3 view-change messages, but got 0")
+        },
+      ) shouldBe empty
+      segment.getViewChangeState shouldBe empty
+    }
+
     "compute round-robin leader rotation" in {
 
       val originalLeader = myId
@@ -111,6 +154,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           (ViewNumber.First + 3, otherId3),
           (ViewNumber.First + 4, myId),
           (ViewNumber.First + 50, farIntoTheFutureLeader),
+          (ViewNumber(Long.MaxValue), otherId3), // can handle overflow
         )
       ) { case (n, expectedLeader) =>
         computeLeaderOfView(ViewNumber(n), originalLeaderIndex, allIds) shouldBe expectedLeader
@@ -128,7 +172,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       val message = ViewChange
@@ -191,7 +235,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       ) should contain theSameElementsInOrderAs List(
         SignPbftMessage(viewChangeMessage.message)
@@ -340,7 +384,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       ) shouldBe List(
         SignPbftMessage(viewChangeMessage.message)
@@ -455,6 +499,15 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       )
       val commitCertificate = CommitCertificate(pp1, commits)
 
+      assertLogs(
+        segment.processEvent(
+          PbftSignedNetworkMessage(
+            createBottomPrePrepare(block1, view2, otherId1, actualSender = Some(otherId1))
+          )
+        ),
+        _.message should include("early PbftNormalCaseMessage"),
+      ) shouldBe empty
+
       val bottomPP1 = createBottomPrePrepare(slotNumbers(1), view2, otherId1)
       val bottomPP2 = createBottomPrePrepare(slotNumbers(2), view2, otherId1)
 
@@ -490,7 +543,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(newViewMessage)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       segment.isViewChangeInProgress shouldBe false
@@ -563,7 +616,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId3))),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       val viewChangeMessage2 = ViewChange
@@ -617,7 +670,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId2))),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       val myViewChangeMessage = ViewChange
@@ -709,7 +762,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage5(from = otherId2))),
           log => {
             log.level shouldBe INFO
-            log.message should include("Segment 0 moving from view number 0 to 5")
+            log.message should include("starting at block number 0 moving from view number 0 to 5")
           },
         )
       val myViewChangeMessage5 = ViewChange
@@ -752,7 +805,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage21(from = otherId2))),
           log => {
             log.level shouldBe INFO
-            log.message should include("Segment 0 moving from view number 5 to 21")
+            log.message should include("starting at block number 0 moving from view number 5 to 21")
           },
         )
       val myViewChangeMessageEvenFurther = ViewChange
@@ -815,6 +868,156 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       segment.getViewChangeState.get(view3) shouldBe None
     }
 
+    "use the NewView proposal instead of a conflicting queued PrePrepare" in {
+      // A and B denote two distinct PrePrepare proposals for the same epoch and block number:
+      //
+      //  A = conflictingPrePrepare, injected early by the target-view leader;
+      //  B = selectedPrePrepare, selected by the NewView's prior-view Prepare certificate.
+      //
+      //  Exercise both ways a proposal can arrive before its NewView: while still in the old view,
+      //  or after a timeout has started the target view's view change. Repeat each schedule through
+      //  both queues, since network delivery and replay from storage must obey the same invariant.
+      forAll(
+        Table(
+          ("viewChangeStarted", "rehydrated"),
+          (false, false),
+          (true, false),
+          (false, true),
+          (true, true),
+        )
+      ) { (viewChangeStarted, rehydrated) =>
+        val segment = createSegmentState(originalLeader = myId)
+        val blockNumber = slotNumbers.head1
+
+        // B has a Prepare certificate from the preceding view. The NewView evidence therefore
+        //  requires this exact PrePrepare to be carried forward,
+        //  including its original view/leader.
+        val certificate = createPrepareCertificate(blockNumber, ViewNumber.First, myId)
+        val selectedPrePrepare = certificate.prePrepare
+
+        // The Byzantine target-view leader sends A before sending the valid NewView selecting B.
+        //  Both helpers use empty ordering blocks, but the different view/leader makes their hashes
+        //  distinct.
+        val nextView = ViewNumber(ViewNumber.First + 1)
+        val conflictingPrePrepare = createBottomPrePrepare(
+          blockNumber,
+          nextView,
+          otherId1,
+          actualSender = Some(otherId1),
+        )
+        conflictingPrePrepare.message.hash should not be selectedPrePrepare.message.hash
+
+        // Without this timeout, A is queued as a future-view message. With it, A is queued because
+        //  the target view is active but its view change has not yet completed.
+        if (viewChangeStarted)
+          assertLogs(
+            segment.processEvent(createTimeout(ViewNumber.First)),
+            _.message should include("moving from view number 0 to 1"),
+          )
+
+        val earlyMessage = PbftSignedNetworkMessage(conflictingPrePrepare)
+        // Neither arrival path may produce a vote yet. The attack occurs when completing the
+        //  view change later drains this queue, not when the early proposal is initially received.
+        if (rehydrated)
+          assertLogs(
+            segment.processEvent(earlyMessage, rehydrated = true),
+            _.message should include("received rehydrated PbftNormalCaseMessage"),
+          ) shouldBe empty
+        else
+          assertLogs(
+            segment.processEvent(earlyMessage),
+            _.message should include("early PbftNormalCaseMessage"),
+          ) shouldBe empty
+
+        // Supply a complete, valid NewView: a strong quorum of view changes carries B's Prepare
+        //  certificate, while the other segment slots have no certificates
+        //  and use bottom proposals.
+        val prePrepares = selectedPrePrepare +: slotNumbers.tail1.map { slot =>
+          createBottomPrePrepare(slot, nextView, otherId1, actualSender = Some(otherId1))
+        }
+        val newView = createNewView(
+          nextView,
+          otherId1,
+          Seq(myId, otherId1, otherId2).map { node =>
+            ViewChange.create(blockMetaData, nextView, Seq(certificate), node).fakeSign
+          },
+          prePrepares,
+          actualSender = Some(otherId1),
+        )
+
+        // Starting the view change here may log at INFO; an already-started view change does not.
+        //  With no expected log entries, assertWarns rejects any WARN or ERROR while allowing INFO
+        //  and DEBUG. No warning is expected for the valid NewView; check its exact actions below.
+        val results = assertWarns(segment.processEvent(PbftSignedNetworkMessage(newView)))
+        val localPrepares = prePrepares.map { pp =>
+          createPrepare(pp.message.blockMetadata.blockNumber, nextView, myId, pp.message.hash)
+        }
+
+        // This is the primary assertion: the local node must sign for B, never A.
+        results shouldBe Seq(
+          ViewChangeCompleted(blockMetaData, nextView, Some(StoreViewChangeMessage(newView)))
+        ) ++ localPrepares.map(prepare => SignPbftMessage(prepare.message))
+
+        // Simulate the asynchronous signing callbacks. Signing is allowed before storage, but
+        //  broadcasting these Prepares must wait until the authoritative NewView has been
+        //  persisted.
+        localPrepares.foreach { prepare =>
+          assertNoLogs(segment.processEvent(PbftSignedNetworkMessage(prepare))) shouldBe empty
+        }
+        assertNoLogs(segment.processEvent(createNewViewStored(nextView))) shouldBe
+          localPrepares.map(prepare => SendPbftMessage(prepare, None, traceContext))
+
+        // Continue consensus on B to show that rejecting the injected proposal preserves progress.
+        //  The local Prepare plus two peer Prepares form a strong quorum in this four-node
+        //  topology.
+        val hash = selectedPrePrepare.message.hash
+        val otherPrepares = Seq(otherId1, otherId2).map { node =>
+          createPrepare(blockNumber, nextView, node, hash)
+        }
+        assertNoLogs(
+          segment.processEvent(PbftSignedNetworkMessage(otherPrepares.head))
+        ) shouldBe empty
+        val commit = createCommit(blockNumber, nextView, myId, hash)
+        assertNoLogs(
+          segment.processEvent(PbftSignedNetworkMessage(otherPrepares(1)))
+        ) shouldBe Seq(SignPbftMessage(commit.message))
+
+        // Feed back the signed local Commit. Its send action persists the Prepare quorum first;
+        //  explicitly acknowledge that storage before allowing the block to finish.
+        assertNoLogs(segment.processEvent(PbftSignedNetworkMessage(commit))) shouldBe Seq(
+          SendPbftMessage(
+            commit,
+            Some(StorePrepares((localPrepares.take(1) ++ otherPrepares).sortBy(_.from))),
+            traceContext,
+          )
+        )
+        assertNoLogs(
+          segment.processEvent(createPreparesStored(blockNumber, nextView))
+        ) shouldBe empty
+
+        // Two matching peer Commits complete the strong quorum. Assert the exact completed
+        //  certificate, not just completion, so a block containing A cannot satisfy the test.
+        val otherCommits = Seq(otherId1, otherId2).map { node =>
+          createCommit(blockNumber, nextView, node, hash)
+        }
+        assertNoLogs(
+          segment.processEvent(PbftSignedNetworkMessage(otherCommits.head))
+        ) shouldBe empty
+        assertNoLogs(
+          segment.processEvent(PbftSignedNetworkMessage(otherCommits(1)))
+        ) shouldBe Seq(
+          CompletedBlock(
+            CommitCertificate(selectedPrePrepare, (commit +: otherCommits).sortBy(_.from)),
+            traceContext,
+          )
+        )
+
+        // Completion becomes externally visible only after the resulting certificate is stored.
+        segment.confirmCompleteBlockStored(blockNumber)
+        segment.isBlockComplete(blockNumber) shouldBe true
+      }
+    }
+
     "replay previously early messages once a view change completes" in {
       val originalLeader = myId
       val segment = createSegmentState(originalLeader)
@@ -836,7 +1039,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId3))),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
 
@@ -932,8 +1135,28 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       segment.futureQueueSize shouldBe 3
       segment.isViewChangeInProgress shouldBe true
 
-      // Now, process the new view message. Upon completing the view change, two of the three queued future
-      // prepares should also be processed, resulting in the local node sending a Commit for slot 0
+      Seq(otherId1, otherId2).foreach { node =>
+        assertLogs(
+          segment.processEvent(
+            PbftSignedNetworkMessage(
+              Commit
+                .create(
+                  blockMetaData,
+                  nextView,
+                  ppBottom1.message.hash,
+                  CantonTimestamp.Epoch,
+                  node,
+                  actualSender = Some(node),
+                )
+                .fakeSign
+            )
+          ),
+          _.message should include("early PbftNormalCaseMessage"),
+        ) shouldBe empty
+      }
+      segment.futureQueueSize shouldBe 5
+
+      // Completing the view change replays current-view votes, leaving the later-view prepare queued.
       val results = assertNoLogs(segment.processEvent(PbftSignedNetworkMessage(newView)))
       results should contain theSameElementsInOrderAs List(
         ViewChangeCompleted(blockMetaData, nextView, store = Some(StoreViewChangeMessage(newView))),
@@ -975,6 +1198,13 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         traceContext,
       )
 
+      val completed = assertNoLogs(
+        segment.processEvent(createPreparesStored(slotNumbers.head1, nextView))
+      )
+      extractCompletedBlocks(completed) shouldBe Seq(blockMetaData)
+      segment.confirmCompleteBlockStored(slotNumbers.head1)
+      segment.isBlockComplete(slotNumbers.head1) shouldBe true
+
       segment.isViewChangeInProgress shouldBe false
       segment.currentView shouldBe nextView
       segment.futureQueueSize shouldBe 1
@@ -994,7 +1224,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(firstView)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       val viewChangeFromTimeout = ViewChange
@@ -1048,7 +1278,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(secondView, nested = true)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 1 to 2")
+          log.message should include("starting at block number 0 moving from view number 1 to 2")
         },
       )
       val viewChangeFromNewTimeout = ViewChange
@@ -1231,7 +1461,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(view1)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
       val commitCertificate = CommitCertificate(
@@ -1340,7 +1570,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(view2)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 1 to 2")
+          log.message should include("starting at block number 0 moving from view number 1 to 2")
         },
       )
       val myViewChange = inside(results) { case Seq(SignPbftMessage(vc: ViewChange)) =>
@@ -1435,7 +1665,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           ),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       )
 
@@ -1490,6 +1720,26 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       segment.processEvent(PbftSignedNetworkMessage(prepare2), rehydrated = true) shouldBe empty
       segment.processEvent(PbftSignedNetworkMessage(prepare3), rehydrated = true) shouldBe empty
 
+      Seq(false, true).foreach { rehydrated =>
+        val conflictingPrePrepare = createBottomPrePrepare(
+          slotNumbers.head1,
+          view2,
+          otherId1,
+          actualSender = Some(otherId1),
+        )
+        if (rehydrated)
+          assertLogs(
+            segment
+              .processEvent(PbftSignedNetworkMessage(conflictingPrePrepare), rehydrated = true),
+            _.message should include("received rehydrated PbftNormalCaseMessage"),
+          ) shouldBe empty
+        else
+          assertLogs(
+            segment.processEvent(PbftSignedNetworkMessage(conflictingPrePrepare)),
+            _.message should include("early PbftNormalCaseMessage"),
+          ) shouldBe empty
+      }
+
       // getting new-view message without having gotten any view-change messages
       // although this could indeed happen in real life, it is more commonly seen during rehydration of messages
       clock.advance(Duration.ofMinutes(5))
@@ -1511,7 +1761,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           ),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       ) should matchPattern { case List(_: ViewChangeCompleted) => }
 
@@ -1548,7 +1798,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMsgForView2)),
           log => {
             log.level shouldBe INFO
-            log.message should include("Segment 0 moving from view number 0 to 1")
+            log.message should include("starting at block number 0 moving from view number 0 to 1")
           },
         )
       results shouldBe Seq(SendPbftMessage(viewChangeMsgForView2, None, traceContext))
@@ -1814,7 +2064,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should include("Segment 0 moving from view number 0 to 1")
+          log.message should include("starting at block number 0 moving from view number 0 to 1")
         },
       ) shouldBe List(
         SignPbftMessage(createViewChange(view1 + 1, myId).message)
@@ -1849,6 +2099,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
     val membership = Membership.forTesting(myId, otherNodes.toSet)
     new SegmentState(
       Segment(originalLeader, slotNumbers),
+      segmentIndex = 0,
       Epoch(
         epochInfo,
         currentMembership = membership,

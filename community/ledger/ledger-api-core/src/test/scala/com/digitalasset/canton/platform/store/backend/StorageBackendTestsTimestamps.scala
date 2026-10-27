@@ -27,7 +27,7 @@ private[backend] trait StorageBackendTestsTimestamps extends Matchers with Stora
       ledger_effective_time = let.micros,
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
 
     executeSql(ingest(consuming.toVector, _))
     executeSql(updateLedgerEnd(offset(1), 1L))

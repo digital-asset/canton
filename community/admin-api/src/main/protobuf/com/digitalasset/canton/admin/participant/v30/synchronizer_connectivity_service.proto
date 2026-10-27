@@ -77,6 +77,9 @@ message SynchronizerConnectionConfig {
   // If true, allows a participant to connect to a synchronizer that it was previously connected to,
   // without issuing a new synchronizer trust certificate.
   bool initialize_from_trusted_synchronizer = 10;
+  // If true, the participant does not push the transactions of its authorized store to this synchronizer.
+  // Set when the operator provides the onboarding transactions at registration.
+  bool disable_authorized_store_dispatching = 11;
 }
 
 message ReconnectSynchronizersRequest {

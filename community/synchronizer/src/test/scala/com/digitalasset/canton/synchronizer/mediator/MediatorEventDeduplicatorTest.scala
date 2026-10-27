@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.mediator
 import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
+import com.digitalasset.canton.crypto.SynchronizerSnapshotSyncCryptoApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -64,7 +65,8 @@ final class MediatorEventDeduplicatorTest
       new InMemoryFinalizedResponseStore(loggerFactory)
 
     val sequencerSend = mock[SequencerClientSend]
-    val verdictSender = new TestVerdictSender(null, daMediator, sequencerSend, loggerFactory)
+    val verdictSender =
+      new TestVerdictSender(null, daMediator, sequencerSend, wallClock, loggerFactory)
 
     val state = new MediatorState(
       finalizedResponseStore,
@@ -381,6 +383,8 @@ final class MediatorEventDeduplicatorTest
       override def sendResultBatch(
           requestId: RequestId,
           batch: Batch[DefaultOpenEnvelope],
+          currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
+          approximateTimestampForSigning: CantonTimestamp,
           decisionTime: CantonTimestamp,
           aggregationRule: AggregationRule,
           sendVerdictWithDelay: Option[Duration],

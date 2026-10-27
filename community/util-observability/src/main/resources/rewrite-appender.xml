@@ -374,13 +374,6 @@
             <testing>true</testing>
         </rewrite>
 
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>org.apache.pekko.stream.scaladsl.RestartWithBackoffSource</logger>
-            <contains>Ledger API offset dispatcher is not running</contains>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-
         <!-- TeaProjectionTest feeds the projection a delta it cannot apply, so pekko-projection reports the
              rejection on its own logger, which canton's log suppression does not reach. The in-memory backend
              fails immediately and attaches the cause, the slick backend retries first and inlines it instead. -->

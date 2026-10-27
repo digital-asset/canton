@@ -24,6 +24,11 @@ final case class RowDef[+T](
   ): Option[T] =
     sql(columnsCSql).asSingleOpt(rowParser)(connection)
 
+  def querySingleRow(sql: CompositeSql => SimpleSql[Row])(implicit
+      connection: Connection
+  ): T =
+    sql(columnsCSql).asSingle(rowParser)(connection)
+
   private def mapRowParser[U](f: RowParser[T] => RowParser[U]): RowDef[U] =
     RowDef(columns = columns, rowParser = f(rowParser))
 

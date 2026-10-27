@@ -24,7 +24,10 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.
 }
 import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
-import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
+import com.digitalasset.canton.participant.store.{
+  StoredSynchronizerConnectionConfig,
+  SynchronizerConnectionConfigStore,
+}
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   MigrationErrors,
   SyncServiceUnknownSynchronizer,
@@ -43,6 +46,7 @@ import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
   PhysicalSynchronizerId,
   SynchronizerId,
+  UnknownPhysicalSynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -172,6 +176,32 @@ class SynchronizerMigration(
       )
   }
 
+  /** Target connection, if registered, with or without its physical synchronizer id. */
+  private def lookupTargetConfig(
+      target: Target[SynchronizerConnectionConfig],
+      targetPsid: Target[PhysicalSynchronizerId],
+  ): Option[Target[StoredSynchronizerConnectionConfig]] = {
+    val alias = target.unwrap.synchronizerAlias
+    synchronizerConnectionConfigStore
+      .get(alias, KnownPhysicalSynchronizerId(targetPsid.unwrap))
+      .orElse(synchronizerConnectionConfigStore.get(alias, UnknownPhysicalSynchronizerId))
+      .toOption
+      .map(Target(_))
+  }
+
+  /** Sets the physical synchronizer id of a target connection registered without a handshake. */
+  private def setTargetPsidIfUnknown(
+      targetConfig: Target[StoredSynchronizerConnectionConfig],
+      targetPsid: Target[PhysicalSynchronizerId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SynchronizerMigrationError, Unit] =
+    if (targetConfig.unwrap.configuredPsid == UnknownPhysicalSynchronizerId)
+      synchronizerConnectionConfigStore
+        .setPhysicalSynchronizerId(targetConfig.unwrap.config.synchronizerAlias, targetPsid.unwrap)
+        .leftMap[SynchronizerMigrationError](err => InternalError.Generic(err.toString))
+    else EitherT.rightT[FutureUnlessShutdown, SynchronizerMigrationError](())
+
   /** Checks whether the migration is possible:
     *   - Participant needs to be disconnected from both synchronizers.
     *   - No in-flight submission (except if `force = true`)
@@ -276,44 +306,43 @@ class SynchronizerMigration(
         }
 
         // check if the target alias already exists.
-        targetStatusO = target.traverse(config =>
-          synchronizerConnectionConfigStore
-            .get(config.synchronizerAlias, KnownPhysicalSynchronizerId(targetPsid.unwrap))
-            .toOption
-            .map(_.status)
-        )
+        targetConfigO = lookupTargetConfig(target, targetPsid)
         // check if we are already active on the target synchronizer
-        _ <- targetStatusO.fold {
+        _ <- targetConfigO.fold {
           // synchronizer not yet configured, add the configuration
           registerNewSynchronizer(target, targetPsid.value)
-        } { targetStatus =>
+        } { targetConfig =>
+          val targetStatus = targetConfig.map(_.status)
           logger.debug(s"Checking status of target synchronizer ${target.unwrap.synchronizerAlias}")
-          EitherT.fromEither[FutureUnlessShutdown](
-            for {
-              // check target status
-              _ <- Either.cond(
-                targetStatus.unwrap.canMigrateTo,
-                (),
-                InvalidArgument.InvalidSynchronizerConfigStatus(
-                  target.map(_.synchronizerAlias),
-                  targetStatus,
-                ),
-              )
-              // check stored alias if it exists
-              _ <- aliasManager.synchronizerIdForAlias(target.unwrap.synchronizerAlias).traverse_ {
-                storedSynchronizerId =>
-                  Either.cond(
-                    targetPsid.unwrap.logical == storedSynchronizerId,
-                    (),
-                    InvalidArgument.ExpectedSynchronizerIdsDiffer(
-                      target.map(_.synchronizerAlias),
-                      storedSynchronizerId,
-                      targetPsid.map(_.logical),
-                    ),
-                  )
-              }
-            } yield ()
-          )
+          EitherT
+            .fromEither[FutureUnlessShutdown](
+              for {
+                // check target status
+                _ <- Either.cond(
+                  targetStatus.unwrap.canMigrateTo,
+                  (),
+                  InvalidArgument.InvalidSynchronizerConfigStatus(
+                    target.map(_.synchronizerAlias),
+                    targetStatus,
+                  ),
+                )
+                // check stored alias if it exists
+                _ <- aliasManager
+                  .synchronizerIdForAlias(target.unwrap.synchronizerAlias)
+                  .traverse_ { storedSynchronizerId =>
+                    Either.cond(
+                      targetPsid.unwrap.logical == storedSynchronizerId,
+                      (),
+                      InvalidArgument.ExpectedSynchronizerIdsDiffer(
+                        target.map(_.synchronizerAlias),
+                        storedSynchronizerId,
+                        targetPsid.map(_.logical),
+                      ),
+                    )
+                  }
+              } yield ()
+            )
+            .flatMap(_ => setTargetPsidIfUnknown(targetConfig, targetPsid))
         }
         _ <- updateSynchronizerStatus(
           target.map(_.synchronizerAlias),

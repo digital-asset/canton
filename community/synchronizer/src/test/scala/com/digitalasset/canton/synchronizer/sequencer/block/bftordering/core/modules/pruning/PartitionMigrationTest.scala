@@ -113,8 +113,15 @@ object PartitionMigrationTest {
       TraceContext.withNewTraceContext("migrate_database") { implicit traceContext =>
         withDb() { createdDb =>
           ResourceUtil.withResource(createdDb) { db =>
-            val flyway =
-              createFlywayConfig(DbMigrations.createDataSource(db.source)).target(target).load()
+            val flyway = createFlywayConfig(DbMigrations.createDataSource(db.source))
+              .locations(
+                dbConfig.buildMigrationsPaths(
+                  alphaVersionSupport,
+                  includeRepeatableMigrations = target == "latest",
+                )*
+              )
+              .target(target)
+              .load()
             migrateDatabaseInternal(flyway)
           }
         }

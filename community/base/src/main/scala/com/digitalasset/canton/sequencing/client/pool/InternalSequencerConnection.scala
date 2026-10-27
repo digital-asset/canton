@@ -82,12 +82,15 @@ trait InternalSequencerConnection extends FlagCloseable with NamedLogging {
     *   member for which to authenticate
     * @param crypto
     *   crypto to use for authentication
+    * @param penaltyModifier
+    *   function to modify the penalty of the associated sequencer
     */
   def buildUserConnection(
       authConfig: AuthenticationTokenManagerConfig,
       member: Member,
       crypto: SynchronizerCrypto,
       clock: Clock,
+      penaltyModifier: SequencerPenaltyModifier,
   ): Either[SequencerConnectionError, SequencerConnection]
 }
 

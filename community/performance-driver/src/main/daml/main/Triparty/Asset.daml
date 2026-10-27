@@ -1,0 +1,161 @@
+module Triparty.Asset where
+
+import DA.Action
+import DA.Traversable
+
+assertEquals : (Show a, Ord a) => Text -> a -> a -> Update ()
+assertEquals msg expected actual = assertMsg ("Mismatched " <> msg <> "expected: " <> show expected <> " actual: " <> show actual)  (expected == actual)
+
+fetchQtyAndArchive : Party -> Text -> Text -> Party -> ContractId Asset -> Update Decimal 
+fetchQtyAndArchive owner account id issuer cid = do
+  other <- fetch cid    
+  archive cid
+  assertEquals "owner" owner other.owner
+  assertEquals "account" account other.account
+  assertEquals "id" id other.id
+  assertEquals "issuer" issuer other.issuer
+  return other.qty 
+
+template Asset
+  with  
+    registry : Party
+    issuer : Party    
+    id : Text
+    qty : Decimal
+    owner : Party    
+    account : Text
+    viewer : Party    
+  where
+    signatory registry, owner
+    observer viewer
+
+    choice DirectTransfer : (ContractId Asset, Optional (ContractId Asset))
+      with
+        newOwner : Party
+        newAccount : Text
+        viewer: Party
+        transferQty : Decimal
+        otherSrc : [ContractId Asset]
+        target : [ContractId Asset]
+      controller owner, newOwner
+      do
+        -- we archive and sum the quantities of the other source and target assets
+        myOtherQty <- sum <$> DA.Traversable.mapA (fetchQtyAndArchive owner account id issuer) otherSrc
+        theirsQty <- sum <$> DA.Traversable.mapA (fetchQtyAndArchive newOwner newAccount id issuer) target
+        assertMsg "Insufficient quantity to transfer" (transferQty <= qty + myOtherQty)
+        let remainingQty = qty + myOtherQty - transferQty
+        remainder <- if (remainingQty > 0.0) then do
+          ret <- create this with qty = remainingQty
+          return (Some ret)
+        else
+          return None
+        out <- create this with owner = newOwner, viewer = viewer, qty = transferQty + theirsQty, account = newAccount
+        return (out, remainder)
+
+    choice Merge : ContractId Asset
+      with
+        otherCids : [ContractId Asset]
+      controller owner
+      do        
+        quantities <- DA.Traversable.mapA (fetchQtyAndArchive owner account id issuer) otherCids
+        let newQty = qty + sum quantities
+        create this with qty = newQty
+
+    choice RequestBurn : ContractId BurnRequest
+      controller owner
+      do
+        create BurnRequest with ..
+  
+template Registry
+  with
+    registry : Party
+    issuer : Party
+    id : Text
+    outstanding : Decimal    
+  where
+    signatory registry, issuer
+
+    choice Mint : ([ContractId Asset], ContractId Registry)
+      with
+        requests : [ContractId MintRequest]
+      controller issuer
+      do
+        qtyAndCid <- DA.Action.mapA (\reqCid -> do
+          req <- fetch reqCid
+          assertEquals "id" id req.id
+          assertEquals "issuer" issuer req.issuer
+          assertMsg "Quantity must be positive" (req.qty > 0.0)
+          cid <- exercise reqCid ApproveMint with registry = registry
+          return (req.qty, cid)) requests
+        reg <- create this with outstanding = outstanding + sum (map fst qtyAndCid)
+        return (map snd qtyAndCid, reg)
+
+    choice Burn : ()
+      with
+        requests : [ContractId BurnRequest]
+      controller issuer
+      do
+        qty <- DA.Action.mapA (\reqCid -> do
+          req <- fetch reqCid
+          assertEquals "id" id req.id
+          assertEquals "issuer" issuer req.issuer          
+          _ <- archive reqCid          
+          return req.qty) requests
+        create this with outstanding = outstanding + sum qty          
+        return ()
+
+template SubRegister
+  with
+    registry : Party
+    subRegistry : Party
+  where
+    signatory registry, subRegistry
+
+    nonconsuming choice Reassign : ContractId Asset 
+      with
+        assetCid : ContractId Asset
+        newRegister : Party
+        owner : Party
+      controller owner
+      do
+        asset <- fetch assetCid
+        -- only owner can reassign
+        assertMsg "invalid owner" (asset.owner == owner)
+        -- validate registry and target registry
+        assertMsg "invalid registry" (asset.registry == registry || asset.registry == subRegistry)
+        assertMsg "invalid target registry" (newRegister == registry || newRegister == subRegistry)
+        archive assetCid 
+        create asset with registry = newRegister        
+      
+template MintRequest
+  with  
+    issuer : Party    
+    id : Text
+    qty : Decimal
+    owner : Party    
+    account : Text
+    viewer : Party    
+  where
+    signatory owner
+    observer issuer
+
+    choice ApproveMint : ContractId Asset
+      with 
+        registry : Party
+      controller issuer, registry
+      do
+        create Asset with registry = registry, issuer = issuer, id = id, qty = qty, owner = owner, account = account, viewer = viewer
+
+template BurnRequest        
+  with  
+    registry : Party
+    issuer : Party    
+    id : Text
+    qty : Decimal
+    owner : Party    
+    account : Text
+    viewer : Party    
+  where
+    signatory owner, registry
+    observer issuer
+

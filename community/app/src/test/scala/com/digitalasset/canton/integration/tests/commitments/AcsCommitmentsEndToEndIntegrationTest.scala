@@ -39,7 +39,6 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
 }
 import com.digitalasset.canton.time.NonNegativeSeconds
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.syntax.all.*
 import org.slf4j.event.Level
 
@@ -63,122 +62,120 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
         ),
       )
 
-  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-    implicit env =>
-      import env.*
+  "the digest processor creates digests for counterparticipants" in { implicit env =>
+    import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, daName)
-      participant2.synchronizers.connect_local(sequencer1, daName)
-      Seq(participant1, participant2).dars.upload(CantonExamplesPath)
+    participant1.synchronizers.connect_local(sequencer1, daName)
+    participant2.synchronizers.connect_local(sequencer1, daName)
+    Seq(participant1, participant2).dars.upload(CantonExamplesPath)
 
-      // running a ping exchanges contracts
-      participant1.health.ping(participant2, timeout = 30.seconds)
+    // running a ping exchanges contracts
+    participant1.health.ping(participant2, timeout = 30.seconds)
 
-      // create parties and a contract using those parties
-      val alice = participant1.parties.enable("alice")
-      val bob = participant2.parties.enable("bob")
+    // create parties and a contract using those parties
+    val alice = participant1.parties.enable("alice")
+    val bob = participant2.parties.enable("bob")
 
-      val pruningBound = participant1.testing.fetch_synchronizer_time(daId)
+    val pruningBound = participant1.testing.fetch_synchronizer_time(daId)
 
-      val iou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
+    val iou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
 
-      // party allocations always trigger a checkpoint
-      participant1.parties.enable("checkpoint-trigger-1")
+    // party allocations always trigger a checkpoint
+    participant1.parties.enable("checkpoint-trigger-1")
 
-      eventually() {
-        validateDigestAtOffsetOfSharedContract(participant1, participant2, iou.id.contractId)
-      }
+    eventually() {
+      validateDigestAtOffsetOfSharedContract(participant1, participant2, iou.id.contractId)
+    }
 
-      // disconnect participant2
-      participant2.synchronizers.disconnect_all()
+    // disconnect participant2
+    participant2.synchronizers.disconnect_all()
 
-      // create more contracts while participant2 is disconnected
-      val latestIou =
-        List
-          .fill(3)(
-            IouSyntax
-              .createIou(participant1)(alice, alice, observers = List(bob), optTimeout = None)
-          )
-          .last
-
-      // party allocations always trigger a checkpoint
-      participant1.parties.enable("checkpoint-trigger-2")
-
-      participant2.synchronizers.reconnect_all()
-      // retry for all exceptions, in case the contract cannot be found in the first few retries until p2 has caught up
-      eventually(retryOnTestFailuresOnly = false) {
-        loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.ERROR))(
-          validateDigestAtOffsetOfSharedContract(
-            participant1,
-            participant2,
-            latestIou.id.contractId,
-          ),
-          LogEntry.assertLogSeq(
-            Seq.empty,
-            Seq(
-              _.shouldBeCantonErrorCode(NotFound.ContractEvents)
-            ),
-          ),
+    // create more contracts while participant2 is disconnected
+    val latestIou =
+      List
+        .fill(3)(
+          IouSyntax
+            .createIou(participant1)(alice, alice, observers = List(bob), optTimeout = None)
         )
-      }
+        .last
 
-      logger.info(
-        "Check that the journal background collector prunes the ACS even if the legacy commitment processor is disabled"
+    // party allocations always trigger a checkpoint
+    participant1.parties.enable("checkpoint-trigger-2")
+
+    participant2.synchronizers.reconnect_all()
+    // retry for all exceptions, in case the contract cannot be found in the first few retries until p2 has caught up
+    eventually(retryOnTestFailuresOnly = false) {
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.ERROR))(
+        validateDigestAtOffsetOfSharedContract(
+          participant1,
+          participant2,
+          latestIou.id.contractId,
+        ),
+        LogEntry.assertLogSeq(
+          Seq.empty,
+          Seq(
+            _.shouldBeCantonErrorCode(NotFound.ContractEvents)
+          ),
+        ),
       )
-      val p1acsStore = participant1.underlying.value.sync.syncPersistentStateManager
-        .activeContractStore(daId)
-        .value
-      eventually(timeUntilSuccess = 90.seconds) {
-        participant1.health.ping(participant1)
-        val acsPruningStatus = p1acsStore.pruningStatus.futureValueUS
-        acsPruningStatus.value.lastSuccess.value should be >= pruningBound
-      }
+    }
+
+    logger.info(
+      "Check that the journal background collector prunes the ACS even if the legacy commitment processor is disabled"
+    )
+    val p1acsStore = participant1.underlying.value.sync.syncPersistentStateManager
+      .activeContractStore(daId)
+      .value
+    eventually(timeUntilSuccess = 90.seconds) {
+      participant1.health.ping(participant1)
+      val acsPruningStatus = p1acsStore.pruningStatus.futureValueUS
+      acsPruningStatus.value.lastSuccess.value should be >= pruningBound
+    }
   }
 
   // the following test case should only run when the synchronizer actually runs with `ProtocolVersion.v36`,
   // because otherwise a synchronizer parameter change doesn't trigger a checkpoint
-  "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-    implicit env =>
-      import env.*
+  "synchronizer parameter changes trigger a checkpoint" in { implicit env =>
+    import env.*
 
-      val beforeParams =
-        participant1.topology.synchronizer_parameters.list(daId).loneElement
+    val beforeParams =
+      participant1.topology.synchronizer_parameters.list(daId).loneElement
 
-      var startOffset = Offset.tryFromLong(participant1.ledger_api.state.end())
-      sequencer1.topology.synchronizer_parameters.propose(
-        daId,
-        DynamicSynchronizerParameters(
-          beforeParams.item.update(reconciliationInterval =
-            beforeParams.item.reconciliationInterval.add(NonNegativeSeconds.tryOfSeconds(1))
-          )
-        ),
-        serial = Some(beforeParams.context.serial.increment.value),
-      )
+    var startOffset = Offset.tryFromLong(participant1.ledger_api.state.end())
+    sequencer1.topology.synchronizer_parameters.propose(
+      daId,
+      DynamicSynchronizerParameters(
+        beforeParams.item.update(reconciliationInterval =
+          beforeParams.item.reconciliationInterval.add(NonNegativeSeconds.tryOfSeconds(1))
+        )
+      ),
+      serial = Some(beforeParams.context.serial.increment.value),
+    )
 
-      val expectedCheckpointTime = eventually() {
-        val params = participant1.topology.synchronizer_parameters.list(daId).loneElement
-        params.context.serial shouldBe beforeParams.context.serial.increment.value
-        params.context.validFrom
-      }
+    val expectedCheckpointTime = eventually() {
+      val params = participant1.topology.synchronizer_parameters.list(daId).loneElement
+      params.context.serial shouldBe beforeParams.context.serial.increment.value
+      params.context.validFrom
+    }
 
-      val digestStore =
-        participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
+    val digestStore =
+      participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
-      eventually() {
-        // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
-        val cp =
-          digestStore.firstCheckpointAfter(startOffset, allCheckpointsFilter).futureValueUS.value
+    eventually() {
+      // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
+      val cp =
+        digestStore.firstCheckpointAfter(startOffset, allCheckpointsFilter).futureValueUS.value
 
-        // if there was a checkpoint, update the offset to look for the next checkpoint
-        startOffset = cp.offset
-        // finally check whether we have reached the checkpoint with the expected checkpoint time or later
-        // (as reconciliation checkpoints can be skipped).
-        cp.recordTime.toInstant should be >= expectedCheckpointTime
-        cp.checkpointType shouldBe CheckpointType.ReconciliationIntervalBoundary
-      }
+      // if there was a checkpoint, update the offset to look for the next checkpoint
+      startOffset = cp.offset
+      // finally check whether we have reached the checkpoint with the expected checkpoint time or later
+      // (as reconciliation checkpoints can be skipped).
+      cp.recordTime.toInstant should be >= expectedCheckpointTime
+      cp.checkpointType shouldBe CheckpointType.ReconciliationIntervalBoundary
+    }
   }
 
-  s"start reinitializing on one participant when running digest processor is active" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+  s"start reinitializing on one participant when running digest processor is active" in {
     implicit env =>
       import env.*
 
@@ -278,7 +275,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 // the test case below stops and starts participant3, which doesn't work for InMemory storage
 sealed trait AcsCommitmentsEndToEndIntegrationTestStorage {
   self: AcsCommitmentsEndToEndIntegrationTest =>
-  "does not attempt automatic reinitialization if no data has been received by the synchronizer" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+  "does not attempt automatic reinitialization if no data has been received by the synchronizer" in {
     implicit env =>
       import env.*
 

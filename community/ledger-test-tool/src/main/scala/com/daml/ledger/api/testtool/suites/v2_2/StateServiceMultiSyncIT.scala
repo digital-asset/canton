@@ -43,9 +43,15 @@ final class StateServiceMultiSyncIT extends LedgerTestSuite {
         .submitAndWaitForTransactionRequest(party, new Dummy(party).create.commands)
         .update(_.commands.synchronizerId := synchronizer1)
       tr1 <- ledger.submitAndWaitForTransaction(requestForSynchronizer1)
-      ledgerEnd1 <- eventually("wait for contract db pruning finishes") { // After transaction is ingested, contract db pruning kicks in and increases offset twice
+      ledgerEnd1 <- eventually("wait for contract db pruning finishes") {
+        // After transaction is ingested, contract db pruning kicks in and increases offset twice
+        // (other events might increase the ledger end too)
         ledger.getLedgerEnd(Seq(synchronizer1, synchronizer2)).map { le =>
-          assertEquals(le.offset, tr1.transaction.value.offset + 2)
+          assertGreaterOrEquals(
+            s"Ledger end offset should be gte than transaction offset",
+            le.offset,
+            tr1.transaction.value.offset + 2,
+          )
           le
         }
       }
@@ -53,17 +59,23 @@ final class StateServiceMultiSyncIT extends LedgerTestSuite {
         .submitAndWaitForTransactionRequest(party, new Dummy(party).create.commands)
         .update(_.commands.synchronizerId := synchronizer2)
       tr2 <- ledger.submitAndWaitForTransaction(requestForSynchronizer2)
-      ledgerEnd2 <- eventually("wait for contract db pruning finishes") { // After transaction is ingested, contract db pruning kicks in and increases offset twice
+      ledgerEnd2 <- eventually("wait for contract db pruning finishes") {
+        // After transaction is ingested, contract db pruning kicks in and increases offset twice
+        // (other events might increase the ledger end too)
         ledger.getLedgerEnd(Seq(synchronizer1, synchronizer2)).map { le =>
-          assertEquals(le.offset, ledgerEnd1.offset + 3)
+          assertGreaterOrEquals(
+            s"Ledger end offset should be gte than the previous end",
+            le.offset,
+            ledgerEnd1.offset + 3,
+          )
           le
         }
       }
     } yield {
       val transaction1 = tr1.transaction.value
       assert(
-        ledgerEnd1.offset == transaction1.offset + 2,
-        s"ledger end offset after first transaction: expected ${transaction1.offset}+2 but got ${ledgerEnd1.offset}",
+        ledgerEnd1.offset >= transaction1.offset + 2,
+        s"ledger end offset after first transaction: expected gte ${transaction1.offset}+2 but got ${ledgerEnd1.offset}",
       )
       val synchronizer1RecordTimeAfterTx1 = assertDefined(
         ledgerEnd1.synchronizerTimes.find(_.synchronizerId == transaction1.synchronizerId),
@@ -77,8 +89,8 @@ final class StateServiceMultiSyncIT extends LedgerTestSuite {
 
       val transaction2 = tr2.transaction.value
       assert(
-        ledgerEnd2.offset == transaction2.offset + 2,
-        s"ledger end offset after second transaction: expected ${transaction2.offset}+2 but got ${ledgerEnd2.offset}",
+        ledgerEnd2.offset >= transaction2.offset + 2,
+        s"ledger end offset after second transaction: expected gte ${transaction2.offset}+2 but got ${ledgerEnd2.offset}",
       )
       val synchronizer1RecordTimeAfterTx2 = assertDefined(
         ledgerEnd2.synchronizerTimes.find(_.synchronizerId == transaction1.synchronizerId),
@@ -86,8 +98,8 @@ final class StateServiceMultiSyncIT extends LedgerTestSuite {
             .map(_.synchronizerId)}",
       ).recordTime
       assert(
-        synchronizer1RecordTimeAfterTx2 == synchronizer1RecordTimeAfterTx1,
-        s"ledger end record time for synchronizer ${transaction1.synchronizerId} after second transaction (unchanged from first transaction): expected ${transaction1.recordTime} but got $synchronizer1RecordTimeAfterTx2",
+        synchronizer1RecordTimeAfterTx2 >= synchronizer1RecordTimeAfterTx1,
+        s"ledger end record time for synchronizer ${transaction1.synchronizerId} after second transaction: expected at least $synchronizer1RecordTimeAfterTx1 but got $synchronizer1RecordTimeAfterTx2",
       )
       val synchronizer2RecordTimeAfterTx2 = assertDefined(
         ledgerEnd2.synchronizerTimes.find(_.synchronizerId == transaction2.synchronizerId),

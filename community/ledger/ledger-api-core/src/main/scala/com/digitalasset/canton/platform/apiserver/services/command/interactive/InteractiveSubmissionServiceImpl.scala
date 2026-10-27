@@ -60,6 +60,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.CommandServic
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.ExternalTransactionProcessor
 import com.digitalasset.canton.platform.apiserver.services.command.{
   CommandServiceImpl,
+  SubmissionAccounting,
   TrafficEnforcementBackend,
 }
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker.SubmissionKey
@@ -260,9 +261,13 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       costEstimation <- costEstimationHints.traverse(doCostEstimations(commandExecutionResult, _))
       _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
         trafficEnforcementBackend
-          .validateTraffic(
-            actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
-            trafficCost =
+          .checkEstimatedCost(
+            accounting = SubmissionAccounting.forSubmitter(
+              accountId = None,
+              actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs.toSet,
+              adminParty = trafficEnforcementBackend.adminParty,
+            ),
+            estimatedCost =
               costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
           )
           .leftWiden[RpcError]

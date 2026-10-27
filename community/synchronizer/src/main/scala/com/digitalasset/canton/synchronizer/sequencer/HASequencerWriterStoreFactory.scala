@@ -23,7 +23,6 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.resource.DbLockedConnectionPool.NoActiveConnectionAvailable
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.WriterStartupError.AllInstanceIndexesInUse
@@ -222,7 +221,7 @@ class HASequencerWriterStoreFactory(
 
   override def expectedOfflineException(error: Throwable): Boolean = error match {
     // thrown by [[DbStorageMulti]] when a write requiring the exclusive writer lock is attempted
-    case _: PassiveInstanceException | _: NoActiveConnectionAvailable => true
+    case _: NoActiveConnectionAvailable => true
     case _ => false
   }
 }

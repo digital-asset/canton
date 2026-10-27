@@ -30,7 +30,6 @@ import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentStat
 }
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
@@ -220,14 +219,7 @@ class AcsCommitmentProcessorManager(
       state.matcherF
         .flatMap { case (killSwitch, doneF) =>
           killSwitch.shutdown()
-          FutureUnlessShutdown.outcomeF(
-            doneF.void.recover {
-              // The storage became passive while the stream was running, so its DB operations were rejected.
-              // This is expected when the replica transitions to passive and the failure has already been
-              // reported via the matcher's health, so we treat it as a normal termination of the stream.
-              case _: PassiveInstanceException => ()
-            }
-          )
+          FutureUnlessShutdown.outcomeF(doneF.void)
         }
         .onShutdown(()),
       timeouts.shutdownProcessing,

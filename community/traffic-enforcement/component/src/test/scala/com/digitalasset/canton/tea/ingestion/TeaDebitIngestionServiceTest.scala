@@ -8,27 +8,21 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.offset_checkpoint.{OffsetCheckpoint, SynchronizerTime}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.client.services.completions.CompletionServiceClient
-import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
-import com.digitalasset.canton.tea.projection.{
-  AccountId,
-  DeltaEvent,
-  EventSource,
-  OffsetDeltaEvent,
-  ProjectionEvent,
-  TrafficDelta,
-}
+import com.digitalasset.canton.tea.projection.{ProjectionEvent, TestCompletions}
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.google.rpc.status.Status
+import io.grpc.Status.Code
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.concurrent.Await
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future}
 
 class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -41,24 +35,18 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
     super.afterAll()
   }
 
-  private val alice = AccountId.tryCreate("alice")
-  private val bob = AccountId.tryCreate("bob")
-
   private val defaultRecordTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(1000)
 
-  /** Builds the service under test on top of freshly created mocks of the two services. The mocks
-    * are returned so that individual tests can refine their stubbing or verify the interactions.
+  /** Builds the service under test on top of a freshly created mock of the completion service. The
+    * mock is returned so that individual tests can refine its stubbing or verify the interactions.
     */
   private def serviceWith(
       completions: Seq[CompletionStreamResponse] = Seq.empty,
-      ledgerEnd: Long = 0L,
+      ledgerEndAtStart: Long = 0L,
       config: ProjectionConfig = ProjectionConfig(),
-  ): (TeaDebitIngestionService, CompletionServiceClient, StateServiceClient) = {
+  ): (TeaDebitIngestionService, CompletionServiceClient) = {
     val completionServiceClient = mock[CompletionServiceClient]
-    val stateServiceClient = mock[StateServiceClient]
 
-    when(stateServiceClient.getLedgerEndOffset(any[Option[String]])(any[TraceContext]))
-      .thenReturn(Future.successful(ledgerEnd))
     when(
       completionServiceClient
         .getCompletionsSource(any[Long], any[Seq[String]], any[Option[String]])(any[TraceContext])
@@ -67,22 +55,38 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
     val service =
       new TeaDebitIngestionService(
         completionServiceClient,
-        stateServiceClient,
+        ledgerEndAtStart,
         config,
         loggerFactory,
       )
-    (service, completionServiceClient, stateServiceClient)
+    (service, completionServiceClient)
   }
+
+  private def verifyCompletionsRequestedFrom(
+      completionServiceClient: CompletionServiceClient,
+      offset: Long,
+      count: Int = 1,
+  ): Unit =
+    verify(completionServiceClient, times(count)).getCompletionsSource(
+      eqTo(offset),
+      eqTo(Seq.empty[String]),
+      any[Option[String]],
+    )(any[TraceContext])
 
   private def completionResponse(
       actAs: Seq[String],
       offset: Long,
       paidTrafficCost: Long,
       recordTime: Option[CantonTimestamp] = Some(defaultRecordTime),
+      status: Option[Status] = Some(Status(Code.OK.value)),
   ): CompletionStreamResponse = TraceContext.withNewTraceContext("test-tc") { tc =>
     CompletionStreamResponse(
       CompletionStreamResponse.CompletionResponse.Completion(
         Completion.defaultInstance.copy(
+          userId = "user",
+          commandId = s"command-$offset",
+          submissionId = s"submission-$offset",
+          status = status,
           actAs = actAs,
           offset = offset,
           paidTrafficCost = paidTrafficCost,
@@ -98,10 +102,21 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
     )
   }
 
-  private val checkpointResponse: CompletionStreamResponse =
+  private def checkpointResponse(
+      offset: Long,
+      recordTime: Option[CantonTimestamp] = Some(defaultRecordTime),
+  ): CompletionStreamResponse =
     CompletionStreamResponse(
       CompletionStreamResponse.CompletionResponse.OffsetCheckpoint(
-        OffsetCheckpoint.defaultInstance.copy(offset = 99L)
+        OffsetCheckpoint(
+          offset = offset,
+          synchronizerTimes = recordTime.toList.map(rt =>
+            SynchronizerTime(
+              synchronizerId = "synchronizer::tea",
+              recordTime = Some(rt.toProtoTimestamp),
+            )
+          ),
+        )
       )
     )
 
@@ -112,140 +127,97 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
   "TeaDebitIngestionService" should {
 
     "use the configured initial offset" in {
-      val (service, completionServiceClient, stateServiceClient) = serviceWith(
-        ledgerEnd = 42L,
+      val (service, completionServiceClient) = serviceWith(
+        ledgerEndAtStart = 42L,
         config = ProjectionConfig(initialCompletionOffsetBeginExclusive = Some(31380)),
       )
 
       runEvents(service.grpcSource(beginOffset = None))
 
-      verify(stateServiceClient, never).getLedgerEndOffset(any[Option[String]])(any[TraceContext])
-      verify(completionServiceClient).getCompletionsSource(
-        eqTo(31380L),
-        eqTo(Seq.empty[String]),
-        any[Option[String]],
-      )(any[TraceContext])
+      verifyCompletionsRequestedFrom(completionServiceClient, 31380L)
     }
 
-    "resolve the begin offset from the ledger end when none is provided" in {
-      val (service, completionServiceClient, stateServiceClient) = serviceWith(ledgerEnd = 42L)
+    "start from the ledger end at start when no offset is provided" in {
+      val (service, completionServiceClient) = serviceWith(ledgerEndAtStart = 42L)
 
       runEvents(service.grpcSource(beginOffset = None))
 
-      verify(stateServiceClient).getLedgerEndOffset(any[Option[String]])(any[TraceContext])
-      verify(completionServiceClient).getCompletionsSource(
-        eqTo(42L),
-        eqTo(Seq.empty[String]),
-        any[Option[String]],
-      )(any[TraceContext])
+      verifyCompletionsRequestedFrom(completionServiceClient, 42L)
     }
 
-    "use the provided begin offset without querying the ledger end" in {
-      val (service, completionServiceClient, stateServiceClient) = serviceWith()
+    "use the provided begin offset" in {
+      val (service, completionServiceClient) = serviceWith(ledgerEndAtStart = 42L)
 
       runEvents(service.grpcSource(beginOffset = Some(7L)))
 
-      verify(stateServiceClient, never).getLedgerEndOffset(any[Option[String]])(any[TraceContext])
-      verify(completionServiceClient).getCompletionsSource(
-        eqTo(7L),
-        eqTo(Seq.empty[String]),
-        any[Option[String]],
-      )(any[TraceContext])
+      verifyCompletionsRequestedFrom(completionServiceClient, 7L)
     }
 
-    "emit a negative (debit) delta event for a completion with a single act-as party" in {
-      val (service, _, _) = serviceWith(
-        completions = Seq(
-          completionResponse(actAs = Seq("alice"), offset = 5L, paidTrafficCost = 3L)
-        )
+    "not skip completions recorded while reconnecting without a persisted offset" in {
+      val (service, completionServiceClient) = serviceWith(ledgerEndAtStart = 42L)
+      // The first connection fails, e.g. because the Ledger API server is not up yet. A completion
+      // is recorded at offset 43 before the retry connects.
+      when(
+        completionServiceClient
+          .getCompletionsSource(any[Long], any[Seq[String]], any[Option[String]])(any[TraceContext])
+      ).thenReturn(
+        Source.failed(
+          io.grpc.Status.UNAVAILABLE.withDescription("Could not find server").asRuntimeException()
+        ),
+        Source.single(completionResponse(actAs = Seq("alice"), offset = 43L, paidTrafficCost = 3L)),
       )
 
-      runEvents(service.grpcSource(beginOffset = Some(0L))) shouldBe Seq(
-        ProjectionEvent(
-          alice,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(3),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
+      service.grpcSource(beginOffset = None).runWith(Sink.seq).failed.futureValue
+      // The projection retries with no offset, as nothing was emitted
+      runEvents(service.grpcSource(beginOffset = None)).map(_.offset) shouldBe Seq(43L)
+
+      verifyCompletionsRequestedFrom(completionServiceClient, 42L, count = 2)
+    }
+
+    "preserve order, keep multi-party and zero-cost completions, and drop checkpoints" in {
+      val (service, _) = serviceWith(
+        completions = Seq(
+          checkpointResponse(offset = 1L),
+          completionResponse(actAs = Seq("alice"), offset = 2L, paidTrafficCost = 2L),
+          checkpointResponse(offset = 3L),
+          completionResponse(actAs = Seq("bob", "carol"), offset = 4L, paidTrafficCost = 7L),
+          completionResponse(
+            actAs = Seq("bob"),
             offset = 5L,
+            paidTrafficCost = 4L,
+            status = Some(Status(Code.ABORTED.value)),
           ),
-        )
-      )
-    }
-
-    "preserve order and drop checkpoints and multi-party completions" in {
-      val (service, _, _) = serviceWith(
-        completions = Seq(
-          completionResponse(actAs = Seq("alice"), offset = 1L, paidTrafficCost = 2L),
-          checkpointResponse,
-          completionResponse(actAs = Seq("bob", "carol"), offset = 2L, paidTrafficCost = 7L),
-          completionResponse(actAs = Seq("bob"), offset = 3L, paidTrafficCost = 4L),
+          completionResponse(actAs = Seq("carol"), offset = 6L, paidTrafficCost = 0L),
         )
       )
 
       runEvents(service.grpcSource(beginOffset = Some(0L))) shouldBe Seq(
-        ProjectionEvent(
-          alice,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(2),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
-            1L,
-          ),
-        ),
-        ProjectionEvent(
-          bob,
-          OffsetDeltaEvent(
-            DeltaEvent(
-              TrafficDelta.debitBalanceDelta(4),
-              defaultRecordTime,
-              EventSource.LedgerAPICompletions,
-            ),
-            3L,
-          ),
-        ),
+        TestCompletions.checkpoint(1L, defaultRecordTime),
+        TestCompletions.event(2L, defaultRecordTime, Set("alice"), 2L),
+        TestCompletions.checkpoint(3L, defaultRecordTime),
+        TestCompletions.event(4L, defaultRecordTime, Set("bob", "carol"), 7L),
+        TestCompletions.event(5L, defaultRecordTime, Set("bob"), 4L, accepted = false),
+        TestCompletions.event(6L, defaultRecordTime, Set("carol"), 0L),
       )
     }
 
-    "drop and warn about a completion without an act-as party" in {
-      val (service, _, _) = serviceWith(
-        completions = Seq(completionResponse(actAs = Seq.empty, offset = 1L, paidTrafficCost = 3L))
-      )
-
-      val events = loggerFactory.assertLogs(
-        runEvents(service.grpcSource(beginOffset = Some(0L))),
-        _.errorMessage should include("No actAs for completion"),
-      )
-      events shouldBe empty
-    }
-
-    "drop and warn about a completion with an invalid act-as party" in {
-      // AccountId is limited to 255 chars
+    "emit a checkpoint for a completion whose party doesn't parse" in {
+      // Party ids are limited to 255 chars
       val invalidActAs = Iterator.continually('a').take(256).mkString
-      val (service, _, _) = serviceWith(
+      val (service, _) = serviceWith(
         completions =
           Seq(completionResponse(actAs = Seq(invalidActAs), offset = 1L, paidTrafficCost = 3L))
       )
 
       val events = loggerFactory.assertLogs(
         runEvents(service.grpcSource(beginOffset = Some(0L))),
-        _.warningMessage should include("is not a valid AccountId"),
+        _.errorMessage should include("Invalid identifiers on completion"),
       )
-      events shouldBe empty
-    }
-
-    "drop responses that are not completions" in {
-      val (service, _, _) = serviceWith(completions = Seq(checkpointResponse))
-
-      runEvents(service.grpcSource(beginOffset = Some(0L))) shouldBe empty
+      events shouldBe Seq(TestCompletions.checkpoint(1L, defaultRecordTime))
     }
 
     "fail when the completion carries no record time" in {
-      val (service, _, _) = serviceWith(
+      val (service, _) = serviceWith(
         completions = Seq(
           completionResponse(
             actAs = Seq("alice"),

@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.daml.ledger.api.v2;
 
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "com/daml/ledger/api/v2/value.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -36,7 +37,7 @@ message CreateCommand {
   // The arguments required for creating a contract from this template.
   //
   // Required
-  Record create_arguments = 2;
+  Record create_arguments = 2 [(size_limit) = true];
 }
 
 // Exercise a choice on an existing contract.
@@ -64,7 +65,7 @@ message ExerciseCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // Exercise a choice on an existing contract specified by its key.
@@ -79,7 +80,7 @@ message ExerciseByKeyCommand {
   // The key of the contract the client wants to exercise upon.
   //
   // Required
-  Value contract_key = 2;
+  Value contract_key = 2 [(size_limit) = true];
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``)
@@ -90,7 +91,7 @@ message ExerciseByKeyCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // Create a contract and exercise a choice on it in the same transaction.
@@ -105,7 +106,7 @@ message CreateAndExerciseCommand {
   // The arguments required for creating a contract from this template.
   //
   // Required
-  Record create_arguments = 2;
+  Record create_arguments = 2 [(size_limit) = true];
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``).
@@ -116,7 +117,7 @@ message CreateAndExerciseCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // An additional contract that is used to resolve
@@ -285,7 +286,7 @@ message PrefetchContractKey {
   // The key of the contract the client wants to prefetch.
   //
   // Required
-  Value contract_key = 2;
+  Value contract_key = 2 [(size_limit) = true];
 
   // The number of contracts to prefetch for this key, if available.
   // This is in addition to disclosed contracts.

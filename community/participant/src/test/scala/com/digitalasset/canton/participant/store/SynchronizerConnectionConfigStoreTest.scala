@@ -40,6 +40,7 @@ import com.digitalasset.canton.participant.synchronizer.{
 }
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
+  SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
@@ -134,6 +135,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           SubmissionRequestAmplification.NoAmplification,
           SequencerConnectionPoolDelays.default,
           SubscriptionLivenessLimits.default,
+          SequencerConnectionPenaltyConfig.default,
         ),
       manualConnect = manualConnect,
       None,
@@ -206,6 +208,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
             submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
             sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
             subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+            sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
           )
         )
 

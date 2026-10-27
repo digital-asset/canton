@@ -82,7 +82,7 @@ final case class CommandSubmitter(
       commands = commands,
       userId = names.benchtoolUserId,
       useSubmitAndWait = true,
-    )
+    ).map(_ => ())
 
   def generateAndSubmit(
       generator: CommandGenerator,
@@ -90,10 +90,10 @@ final case class CommandSubmitter(
       baseActAs: List[Party],
       maxInFlightCommands: Int,
       submissionBatchSize: Int,
-  )(implicit ec: ExecutionContext): Future[Unit] = {
+  )(implicit ec: ExecutionContext): Future[Option[Long]] = {
     logger.info("Generating contracts...")
     (for {
-      _ <- submitCommands(
+      lastOffsetO <- submitCommands(
         generator = generator,
         config = config,
         maxInFlightCommands = maxInFlightCommands,
@@ -102,7 +102,7 @@ final case class CommandSubmitter(
       )
     } yield {
       logger.info("Commands submitted successfully.")
-      ()
+      lastOffsetO
     })
       .recoverWith { case NonFatal(ex) =>
         logger.error(s"Command submission failed. Details: ${ex.getLocalizedMessage}", ex)
@@ -141,7 +141,7 @@ final case class CommandSubmitter(
       useSubmitAndWait: Boolean,
   )(implicit
       ec: ExecutionContext
-  ): Future[Unit] = {
+  ): Future[Option[Long]] = {
     def makeCommands(commands: Seq[Command]) =
       new Commands(
         userId = userId,
@@ -161,11 +161,15 @@ final case class CommandSubmitter(
         tapsMaxPasses = None,
       )
 
-    (if (useSubmitAndWait) {
-       benchtoolUserServices.commandService.submitAndWait(makeCommands(commands))
-     } else {
-       benchtoolUserServices.commandSubmissionService.submit(makeCommands(commands))
-     }).map(_ => ())
+    if (useSubmitAndWait) {
+      benchtoolUserServices.commandService
+        .submitAndWait(makeCommands(commands))
+        .map(response => Some(response.completionOffset))
+    } else {
+      benchtoolUserServices.commandSubmissionService
+        .submit(makeCommands(commands))
+        .map(_ => None)
+    }
   }
 
   private def submitCommands(
@@ -176,7 +180,7 @@ final case class CommandSubmitter(
       submissionBatchSize: Int,
   )(implicit
       ec: ExecutionContext
-  ): Future[Unit] = {
+  ): Future[Option[Long]] = {
     implicit val resourceContext: ResourceContext = ResourceContext(ec)
 
     val numBatches: Int = config.numberOfInstances / submissionBatchSize
@@ -184,13 +188,15 @@ final case class CommandSubmitter(
     // Output a log line roughly once per 10% progress, or once every 10000 submissions (whichever comes first)
     val progressLogInterval = math.min(config.numberOfInstances / 10 + 1, 10000)
     val progressLoggingSink =
-      Sink.fold[Int, Int](0)((lastInterval, index) =>
-        if (index / progressLogInterval != lastInterval) {
-          logger.info(progressMeter.getProgress(index))
-          index / progressLogInterval
-        } else
-          lastInterval
-      )
+      Sink.fold[(Int, Option[Long]), (Int, Option[Long])]((0, None)) {
+        case ((lastInterval, maxOffset), (index, offsetO)) =>
+          val newMaxOffset = (maxOffset.toList ++ offsetO.toList).maxOption
+          if (index / progressLogInterval != lastInterval) {
+            logger.info(progressMeter.getProgress(index))
+            (index / progressLogInterval, newMaxOffset)
+          } else
+            (lastInterval, newMaxOffset)
+      }
 
     logger.info(
       s"Submitting commands ($numBatches commands, $submissionBatchSize contracts per command)..."
@@ -198,7 +204,7 @@ final case class CommandSubmitter(
     materializerOwner()
       .use { implicit materializer =>
         for {
-          _ <- generator
+          result <- generator
             .commandBatchSource(config.numberOfInstances, commandGenerationParallelism)
             .groupedWithin(submissionBatchSize, 1.minute)
             .map(cmds => cmds.headOption.map(cmd => cmd._1 -> cmds.map(_._2).toList))
@@ -214,13 +220,13 @@ final case class CommandSubmitter(
                     useSubmitAndWait = config.waitForSubmission,
                   )
                 }
-                  .map(_ => index + commands.length - 1)
+                  .map(offsetO => (index + commands.length - 1, offsetO))
                   .recoverWith {
                     case e: io.grpc.StatusRuntimeException
                         if e.getStatus.getCode == Status.Code.ABORTED =>
                       logger.info(s"Flow rate limited at index $index: ${e.getLocalizedMessage}")
                       Threading.sleep(10) // Small back-off period
-                      Future.successful(index + commands.length - 1)
+                      Future.successful((index + commands.length - 1, None))
                     case ex =>
                       logger.error(
                         s"Command submission failed. Details: ${ex.getLocalizedMessage}",
@@ -234,7 +240,7 @@ final case class CommandSubmitter(
               case None => Future.failed(new NoSuchElementException("Empty command group"))
             }
             .runWith(progressLoggingSink)
-        } yield ()
+        } yield result._2
       }
   }
 

@@ -4,28 +4,24 @@
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.{
-  DbConfig,
-  NonNegativeFiniteDuration as ConfigNonNegativeFiniteDuration,
-}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.{CantonTimestamp, UnassignmentData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.HasCommandRunnersHelpers.{
   commandId as defaultCommandId,
-  submissionId as defaultSubmissionId,
   userId as defaultUserId,
 }
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
 }
@@ -43,10 +39,12 @@ import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.store.ReassignmentStore.UnknownReassignmentId
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.{ReassignmentId, TestSynchronizerParameters}
+import com.digitalasset.canton.sequencing.protocol.TimeProof
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencer,
   ProgrammableSequencerPolicies,
+  SendDecision,
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -73,6 +71,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
@@ -83,17 +82,11 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
 
-        def disableAssignmentExclusivityTimeout(d: InitializedSynchronizer): Unit =
-          d.synchronizerOwners.foreach(
-            _.topology.synchronizer_parameters
-              .propose_update(
-                d.synchronizerId,
-                _.update(assignmentExclusivityTimeout = ConfigNonNegativeFiniteDuration.Zero),
-              )
-          )
+        def disableAutomaticAssignment(d: InitializedSynchronizer): Unit =
+          AutomaticAssignment.disable(d.synchronizerOwners, d.synchronizerId)
 
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(daName))
-        disableAssignmentExclusivityTimeout(getInitializedSynchronizer(acmeName))
+        disableAutomaticAssignment(getInitializedSynchronizer(daName))
+        disableAutomaticAssignment(getInitializedSynchronizer(acmeName))
 
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
@@ -113,12 +106,28 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
 
-    programmableSequencers(synchronizerName).setPolicy("maximum delay policy")(
-      ProgrammableSequencerPolicies.delay(environment = environment)(
-        confirmationResponses = Map(participant1.id -> delayConfirmationResponse),
-        mediatorMessages = Some(delayMediator),
-      )
+    val delayPolicy = ProgrammableSequencerPolicies.delay(environment = environment)(
+      confirmationResponses = Map(participant1.id -> delayConfirmationResponse),
+      mediatorMessages = Some(delayMediator),
     )
+    val simClock = environment.simClock.value
+    val sequencerTimeTracker =
+      (if (synchronizerName == daName) sequencer1
+       else sequencer2).underlying.value.sequencer.timeTracker
+
+    // With the BFT sequencer, a block's time lags behind the sim clock: a message submitted right
+    // after the clock jump may still land in a block stamped with the pre-jump time, in which case
+    // it would not be delayed at all. So after the delay policy has advanced the clock, hold the
+    // message back until the sequencer has observed a time at or after the new clock time.
+    programmableSequencers(synchronizerName).setPolicy("maximum delay policy") {
+      traceContext => submissionRequest =>
+        val decision = delayPolicy(traceContext)(submissionRequest)
+        if (TimeProof.isTimeProofSubmission(submissionRequest)) decision
+        else
+          sequencerTimeTracker
+            .awaitTick(simClock.now)(traceContext)
+            .fold(decision)(tickObserved => SendDecision.HoldBack(tickObserved))
+    }
   }
 
   private lazy val reassignmentFailureLogAssertions: Seq[LogEntry] => Assertion =
@@ -173,6 +182,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
+          val submissionId = freshSubmissionId()
           // Trying to unassignment contract
           val unassignmentCompletion =
             failingUnassignment(
@@ -181,6 +191,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
               target = acmeId,
               signatory.toLf,
               Some(participant1),
+              submissionId = submissionId,
             )
 
           participant1.testing.state_inspection
@@ -193,7 +204,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
                 )
               )
             )
-            .futureValue shouldBe None
+            .futureValueUS shouldBe None
 
           val unassignmentTs = CantonTimestamp
             .fromProtoTimestamp(unassignmentCompletion.synchronizerTime.value.recordTime.value)
@@ -225,7 +236,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
           )
 
           unassignmentCompletion.userId shouldBe defaultUserId
-          unassignmentCompletion.submissionId shouldBe defaultSubmissionId.getOrElse("")
+          unassignmentCompletion.submissionId shouldBe submissionId
           unassignmentCompletion.commandId shouldBe defaultCommandId
 
           // Cleaning
@@ -283,12 +294,14 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
       // Trying to assign contract
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
+          val submissionId = freshSubmissionId()
           val failedAssignmentCompletion = failingAssignment(
             reassignmentId = unassignedEvent.reassignmentId,
             source = daId,
             target = acmeId,
             submittingParty = signatory.toLf,
             participantOverrideO = Some(participant1),
+            submissionId = submissionId,
           )
 
           val status = failedAssignmentCompletion.status.value
@@ -298,7 +311,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
           )
 
           failedAssignmentCompletion.userId shouldBe defaultUserId
-          failedAssignmentCompletion.submissionId shouldBe defaultSubmissionId.getOrElse("")
+          failedAssignmentCompletion.submissionId shouldBe submissionId
           failedAssignmentCompletion.commandId shouldBe defaultCommandId
 
           // Cleaning
@@ -325,14 +338,15 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
 
 //class ReassignmentServiceTimeoutCommandRejectedIntegrationTestDefault
 //    extends ReassignmentServiceTimeoutCommandRejectedIntegrationTest {
+//  registerPlugin(new UseH2(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](
+//    new UseBftSequencer(
 //      loggerFactory,
 //      sequencerGroups = Seq(Set("sequencer1"), Set("sequencer2"))
 //        .map(_.map(InstanceName.tryCreate)),
 //    )
 //  )
-//  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
+//  // we need to register the ProgrammableSequencer after the BftSequencer
 //  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 //}
 
@@ -340,7 +354,7 @@ class ReassignmentServiceTimeoutCommandRejectedIntegrationTestPostgres
     extends ReassignmentServiceTimeoutCommandRejectedIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"))
@@ -348,6 +362,6 @@ class ReassignmentServiceTimeoutCommandRejectedIntegrationTestPostgres
       ),
     )
   )
-  // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
+  // we need to register the ProgrammableSequencer after the BftSequencer
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

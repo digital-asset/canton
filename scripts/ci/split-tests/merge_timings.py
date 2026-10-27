@@ -80,7 +80,11 @@ def main():
             with open(args.previous_timings, encoding="utf-8") as f:
                 previous = json.load(f)
             merge_previous_as_fallback(merged, previous)
-        except (OSError, ValueError, json.JSONDecodeError):
+        except (
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+        ):  # silent-ok: previous timings are only a fallback
             # If we can't read previous timings, just continue with current ones
             pass
 

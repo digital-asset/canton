@@ -182,6 +182,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
           ledgerParticipantId = ledgerParticipantId,
           ledgerApiDatabaseConnectionTimeout = ledgerApiServerConfig.databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = ledgerApiServerConfig.postgresDataSource,
+          disableMergeAndHashJoins = ledgerApiServerConfig.indexService.disableMergeAndHashJoins,
           timeouts = timeouts,
           loggerFactory = loggerFactory,
           metrics = metrics.ledgerApiServer,

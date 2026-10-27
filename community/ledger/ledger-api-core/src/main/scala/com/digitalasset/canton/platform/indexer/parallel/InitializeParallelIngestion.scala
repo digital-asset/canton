@@ -80,8 +80,7 @@ private[platform] final case class InitializeParallelIngestion(
         parameterStorageBackend.initializeParameters(
           ParameterStorageBackend.IdentityParams(
             participantId = ParticipantId(providedParticipantId)
-          ),
-          loggerFactory,
+          )
         )
       )
       ledgerEnd <- dbDispatcher.executeSql(metrics.index.db.getLedgerEnd)(

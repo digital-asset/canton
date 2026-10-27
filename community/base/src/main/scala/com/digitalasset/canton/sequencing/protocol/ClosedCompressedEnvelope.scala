@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashOps, Signature}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -10,7 +11,7 @@ import com.digitalasset.canton.protocol.{SynchronizerLimits, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -25,6 +26,8 @@ final case class ClosedCompressedEnvelope(
     deferredDecompression: DeferredDecompression,
     // The negotiated validation from the batch this envelope was parsed out of.
     pvv: ProtocolVersionValidation,
+    // Bound on the "signatures" field of the decompressed envelope for protocol >= newBoundsOnPV37
+    maxSignaturesPerEnvelope: PositiveInt,
 ) extends ClosedEnvelope {
   // Internal cache in case we need to uncompress more than once.
   private lazy val uncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
@@ -62,7 +65,7 @@ final case class ClosedCompressedEnvelope(
         protoEnvelope.signatures,
         "signatures",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(ProtocolVersion.newBoundsOnPV37 -> maxSignaturesPerEnvelope),
       )((element, _) => Signature.fromProtoV30(element))
   } yield ClosedUncompressedEnvelope.create(
     protoEnvelope.content,
@@ -85,7 +88,11 @@ final case class ClosedCompressedEnvelope(
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedCompressedEnvelope =
     // Share the deferred decompression, so that copies draw the budget at most once
-    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(deferredDecompression, pvv)
+    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(
+      deferredDecompression,
+      pvv,
+      maxSignaturesPerEnvelope,
+    )
 
   override private[protocol] def withDecompressionBudget(
       decompressionBudget: DecompressionBudget
@@ -93,6 +100,7 @@ final case class ClosedCompressedEnvelope(
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
       DeferredDecompression(bytes, decompressionBudget, algorithm),
       pvv,
+      maxSignaturesPerEnvelope,
     )
 }
 
@@ -106,10 +114,12 @@ object ClosedCompressedEnvelope {
   def create(bytes: ByteString, recipients: Recipients, algorithm: CompressionAlgorithm)(
       decompressionBudget: DecompressionBudget,
       pvv: ProtocolVersionValidation,
+      maxSignaturesPerEnvelope: PositiveInt,
   ): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
       DeferredDecompression(bytes, decompressionBudget, algorithm),
       pvv,
+      maxSignaturesPerEnvelope,
     )
 }
 

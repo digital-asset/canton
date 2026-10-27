@@ -44,7 +44,8 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
     )
   implicit val sequencerConnectionPoolDelaysArb: Arbitrary[SequencerConnectionPoolDelays] =
     genArbitrary
-  implicit val subscriptionLivenessLimitsArb: Arbitrary[SubscriptionLivenessLimits] =
+  implicit val subscriptionLivenessLimitsArb: Arbitrary[SubscriptionLivenessLimits] = genArbitrary
+  implicit val sequencerConnectionPenaltyConfigArb: Arbitrary[SequencerConnectionPenaltyConfig] =
     genArbitrary
 
   implicit val sequencerConnectionsArb: Arbitrary[SequencerConnections] = Arbitrary(
@@ -60,6 +61,7 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
       submissionRequestAmplification <- submissionRequestAmplificationArb.arbitrary
       sequencerConnectionPoolDelays <- sequencerConnectionPoolDelaysArb.arbitrary
       subscriptionLivenessLimits <- subscriptionLivenessLimitsArb.arbitrary
+      sequencerConnectionPenaltyConfig <- sequencerConnectionPenaltyConfigArb.arbitrary
     } yield SequencerConnections.tryMany(
       connections,
       sequencerTrustThreshold,
@@ -67,6 +69,7 @@ final class GeneratorsSequencing(generatorsTopology: GeneratorsTopology) {
       submissionRequestAmplification,
       sequencerConnectionPoolDelays,
       subscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig,
     )
   )
 }

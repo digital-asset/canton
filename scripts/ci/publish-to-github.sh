@@ -49,14 +49,16 @@ else
 
   # clone public repository (hub requires the git repo we're targetting in the working directory - even if only calling api endpoints like release)
   # can clone the repo bare as we don't actually need any of its content locally
+  public_repo_dir="${RUNNER_TEMP:-/tmp}/canton-public"
+  rm -rf "$public_repo_dir"
   git clone --bare \
       "https://${GITHUB_TOKEN}@github.com/digital-asset/canton.git" \
-      ~/canton-public
+      "$public_repo_dir"
 
   info "Creating release in the OSS repository"
 
   # hub uses the repo in the current working directory
-  cd ~/canton-public && \
+  cd "$public_repo_dir" && \
   # push new release to public repo
   # note: wildcard can be used but at most one asset is pushed per --attach. Therefore, we use explicit names.
   # commitish flag will cause the HEAD of `main` to be tagged with this release

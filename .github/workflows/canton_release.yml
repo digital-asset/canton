@@ -9,6 +9,7 @@ on:
       - 'v*'
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -38,16 +39,6 @@ jobs:
     name: Package Community
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_package_community.yml
-    secrets: inherit
-    with:
-      is_nightly_workflow: false
-      is_manual: false
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
-  package_sequencer_driver_api:
-    name: Package Sequencer Driver API
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_package_sequencer_driver_api.yml
     secrets: inherit
     with:
       is_nightly_workflow: false
@@ -109,7 +100,7 @@ jobs:
 
   tag_new_releases:
     name: Tag New Releases
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-') }}
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-')}}
     needs: pick_runner
     uses: ./.github/workflows/_tag_new_releases.yml
     permissions:
@@ -118,23 +109,121 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  release_test:
+    name: Release Test
+    needs: [pick_runner, package_community, package_kms_driver]
+    uses: ./.github/workflows/_release_test.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_and_publish_docker:
+    name: Build and Publish Docker
+    if: ${{ github.repository == 'DACH-NY/canton' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
+    needs: [pick_runner, package_community, release_test]
+    uses: ./.github/workflows/_build_and_publish_docker.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  publish_libraries:
+    name: Publish Libraries
+    needs: [pick_runner, compile, tag_new_releases]
+    if: >
+      always() &&
+      !cancelled() &&
+      needs.compile.result == 'success' &&
+      (needs.tag_new_releases.result == 'success' || needs.tag_new_releases.result == 'skipped')
+    uses: ./.github/workflows/_publish_libraries.yml
+    permissions:
+      contents: read
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: false
+      is_manual: false
+
+  publish_release:
+    name: Publish Release
+    needs:
+      - pick_runner
+      - package_community
+      - package_jsonapi
+      - package_kms_driver
+      - assembly_ledger_api_test_tool
+      - build_scaladoc
+      - compile
+      - release_test
+      - tag_new_releases
+    if: |
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      startsWith(github.ref, 'refs/heads/gha-migration/')
+    uses: ./.github/workflows/_publish_release.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: false
+      is_manual: false
+
+  verify_publish_release:
+    needs: [ publish_release ]
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/gha-migration/'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if publish_release was skipped
+        env:
+          PUBLISH_RELEASE_RESULT: ${{ needs.publish_release.result }}
+        run: |
+          if [[ "$PUBLISH_RELEASE_RESULT" == "skipped" ]]; then
+            echo "::error::publish_release skipped on tag release"
+            exit 1
+          fi
+
+  run_propose_script:
+    name: Update main after release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - pick_runner
+      - publish_libraries
+      - publish_release
+    uses: ./.github/workflows/_run_propose_script.yml
+    permissions:
+      contents: write
+      pull-requests: write
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      script_argument: finish_release_process
+
   notify:
     name: Notify on Failure
     needs:
       - pick_runner
       - compile
       - package_community
-      - package_sequencer_driver_api
       - build_scaladoc
       - package_jsonapi
       - package_kms_driver
       - assembly_ledger_api_test_tool
-#      - build_and_publish_docker
-#      - publish_libraries
-#      - publish_release
-#      - release_test
+      - build_and_publish_docker
+      - publish_libraries
+      - publish_release
+      - verify_publish_release
+      - release_test
       - tag_new_releases
-#      - run_propose_script
+      - run_propose_script
       - generate_data_continuity_dumps
     if: |
       always() &&

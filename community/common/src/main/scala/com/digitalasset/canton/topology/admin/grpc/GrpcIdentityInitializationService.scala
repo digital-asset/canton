@@ -7,12 +7,19 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.topology.admin.v30 as adminProto
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.PositiveSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyTransactionDeserializationContext,
+}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
@@ -46,8 +53,8 @@ class GrpcIdentityInitializationService(
     val adminProto.InitIdRequest(identifierP, namespaceP, certificatesP) = request
     def handleProtoFailure[T](
         either: Either[ProtoDeserializationError, T]
-    ): EitherT[Future, StatusRuntimeException, T] =
-      EitherT.fromEither[Future](
+    ): EitherT[FutureUnlessShutdown, StatusRuntimeException, T] =
+      EitherT.fromEither[FutureUnlessShutdown](
         either.leftMap(err => ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
       )
     val ret = for {
@@ -71,7 +78,11 @@ class GrpcIdentityInitializationService(
           .flatMap(certs =>
             MonadUtil.sequentialTraverse(certs)(
               SignedTopologyTransaction
-                .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
+                .fromProtoV30(
+                  ProtocolVersionValidation.AlwaysValidation,
+                  TopologyTransactionDeserializationContext(TopologyLimits.default),
+                  _,
+                )
                 .flatMap { tx =>
                   tx.selectOp[TopologyChangeOp.Replace]
                     .toRight(
@@ -88,7 +99,7 @@ class GrpcIdentityInitializationService(
           io.grpc.Status.FAILED_PRECONDITION.withDescription(err).asRuntimeException()
         )
     } yield adminProto.InitIdResponse()
-    EitherTUtil.toFuture(ret)
+    EitherTUtil.toFuture(CantonGrpcUtil.shutdownAsGrpcErrorE(ret))
   }
 
   override def getId(request: adminProto.GetIdRequest): Future[adminProto.GetIdResponse] = {
@@ -115,7 +126,7 @@ object GrpcIdentityInitializationService {
         certificates: Seq[PositiveSignedTopologyTransaction],
     )(implicit
         traceContext: TraceContext
-    ): EitherT[Future, String, Unit]
+    ): EitherT[FutureUnlessShutdown, String, Unit]
     def getId: Option[UniqueIdentifier]
     def isInitialized: Boolean
   }

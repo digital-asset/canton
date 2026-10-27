@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.PruningOffsetService
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.localstore.{
@@ -86,11 +85,11 @@ trait StorageBackendProviderPostgres
     with BaseTest {
   this: Suite =>
   override protected def jdbcUrl: String = postgresDatabase.url
-  override protected val backend: TestBackend = TestBackend(
-    participantId,
-    PostgresStorageBackendFactory(loggerFactory),
-    loggerFactory,
-  )
+  override protected val backend: TestBackend =
+    TestBackend(
+      participantId,
+      PostgresStorageBackendFactory(disableMergeAndHashJoins = true, loggerFactory = loggerFactory),
+    )
 }
 
 trait StorageBackendProviderH2 extends StorageBackendProvider with BaseTest { this: Suite =>
@@ -98,7 +97,7 @@ trait StorageBackendProviderH2 extends StorageBackendProvider with BaseTest { th
   override protected def lockIdSeed: Int =
     throw new UnsupportedOperationException //  DB Locking is not supported for H2
   override protected val backend: TestBackend =
-    TestBackend(participantId, H2StorageBackendFactory, loggerFactory)
+    TestBackend(participantId, H2StorageBackendFactory(loggerFactory))
 }
 
 final case class TestBackend(
@@ -126,7 +125,6 @@ object TestBackend {
   def apply(
       participantId: Ref.ParticipantId,
       storageBackendFactory: StorageBackendFactory,
-      loggerFactory: NamedLoggerFactory,
   ): TestBackend = {
     val ledgerEndCache = MutableLedgerEndCache()
     val stringInterning = new MockStringInterning
@@ -140,12 +138,11 @@ object TestBackend {
         ledgerEndCache,
         stringInterning,
       ),
-      completion = storageBackendFactory
-        .createCompletionStorageBackend(stringInterning, ledgerEndCache, loggerFactory),
+      completion =
+        storageBackendFactory.createCompletionStorageBackend(stringInterning, ledgerEndCache),
       contract =
         storageBackendFactory.createContractStorageBackend(stringInterning, ledgerEndCache),
-      event = storageBackendFactory
-        .createEventStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
+      event = storageBackendFactory.createEventStorageBackend(ledgerEndCache, stringInterning),
       dataSource = storageBackendFactory.createDataSourceStorageBackend,
       dbLock = storageBackendFactory.createDBLockStorageBackend,
       integrity = storageBackendFactory.createIntegrityStorageBackend,

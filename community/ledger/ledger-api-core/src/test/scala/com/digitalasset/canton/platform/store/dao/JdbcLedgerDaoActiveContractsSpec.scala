@@ -52,6 +52,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       activeContractsAfter <- activeContractsOf(
@@ -64,6 +65,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -91,6 +93,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       (_, _) <- store(singleCreate)
@@ -109,6 +112,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -146,6 +150,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -189,6 +194,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -239,6 +245,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -290,6 +297,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -337,6 +345,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -386,6 +395,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -435,6 +445,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -492,6 +503,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       resultUnknownParty <- activeContractsOf(
@@ -512,6 +524,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       resultUnknownTemplate <- activeContractsOf(
@@ -536,6 +549,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       resultUnknownTemplatePartyWildcard <- activeContractsOf(
@@ -562,6 +576,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       resultUnknownPartyAndTemplate <- activeContractsOf(
@@ -586,6 +601,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       resultUnknownsOnly <- activeContractsOf(
@@ -608,6 +624,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {
@@ -635,6 +652,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
           )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
           rangeInfo = AcsRangeInfo.empty,
           configOverrides = None,
+          includeIncompleteReassignments = true,
         )
         .runWith(Sink.seq)
 
@@ -658,6 +676,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
       activeContractsAfter <- activeContractsOf(
@@ -670,6 +689,7 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
             rangeInfo = AcsRangeInfo.empty,
             configOverrides = None,
+            includeIncompleteReassignments = true,
           )
       )
     } yield {

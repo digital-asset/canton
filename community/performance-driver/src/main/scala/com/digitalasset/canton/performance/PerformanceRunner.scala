@@ -158,6 +158,7 @@ object PartyRole {
       override val settings: RateSettings,
       selfRegistrar: Boolean = true,
       numPending: Int = 5,
+      maxPerBatch: Int = 10000,
   ) extends ActivePartyRole {
     override def role: M.orchestration.Role = M.orchestration.Role.ISSUER
 
@@ -248,8 +249,6 @@ object PartyRole {
           quorumParticipants > 1,
           s"quorumParticipants must be more than one: $quorumParticipants.",
         )
-      case _: M.orchestration.runtype.NoRun =>
-        throw new IllegalArgumentException("Not supported run type NoRun")
     }
 
     override def commandClientConfiguration: CommandClientConfiguration =
@@ -329,6 +328,7 @@ class PerformanceRunner(
     config: PerformanceRunnerConfig,
     metricsRegistry: MetricsFactoryProvider,
     val loggerFactory: NamedLoggerFactory,
+    allocatedPartyInitialNumber: Long = 0,
 )(implicit val ec: ExecutionContextExecutor)
     extends NamedLogging
     with AutoCloseable
@@ -427,6 +427,7 @@ class PerformanceRunner(
                   baseSynchronizerId = config.baseSynchronizerId,
                   otherSynchronizers = config.otherSynchronizers,
                   otherSynchronizersRatio = config.otherSynchronizersRatio,
+                  allocatedPartyInitialNumber = allocatedPartyInitialNumber,
                 )
               case isr: DvpIssuer =>
                 new dvp.IssuerDriver(

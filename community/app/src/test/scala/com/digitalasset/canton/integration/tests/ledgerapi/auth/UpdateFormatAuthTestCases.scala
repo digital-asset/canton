@@ -52,14 +52,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of the wrong party" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read for the single party of topology filters"
-        )
+    "allow calls with topology filters of the wrong party" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read for the single party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(
@@ -72,14 +70,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of the wrong party along with the correct" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read for a party of topology filters"
-        )
+    "allow calls with topology filters of the wrong party along with the correct" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read for a party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(
@@ -92,14 +88,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of party wildcard with a user that can act as main actor" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read as any party of topology filters"
-        )
+    "allow calls with topology filters of party wildcard" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read as any party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(

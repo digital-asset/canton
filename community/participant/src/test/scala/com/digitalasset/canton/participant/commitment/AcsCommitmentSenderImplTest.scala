@@ -40,7 +40,6 @@ import com.digitalasset.canton.participant.store.{
   TestDigestUtils,
 }
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
-import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -51,6 +50,7 @@ import com.digitalasset.canton.protocol.messages.{
   DigestForCounterparticipant,
   ProtocolMessage,
 }
+import com.digitalasset.canton.protocol.{AcsCommitmentLimits, TestSynchronizerParameters}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.client.{SendResult, TestSequencerClientSend}
@@ -103,7 +103,7 @@ trait AcsCommitmentSenderImplTest
   private val defaultSyncCryptoApi = defaultCryptoApi.snapshot(t3).futureValueUS
 
   "AcsCommitmentSenderImpl" should {
-    "send the expected messages when all messages fit in one batch" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "send the expected messages when all messages fit in one batch" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient, metrics)
@@ -149,7 +149,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "skip the updates with empty digests and send messages for the rest" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "skip the updates with empty digests and send messages for the rest" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient, metrics)
@@ -196,7 +196,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "skip the updates for inactive participants and include them in unsent digests" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "skip the updates for inactive participants and include them in unsent digests" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val cryptoApi = mkCryptoApi(
         mkTopology(
@@ -237,8 +237,12 @@ trait AcsCommitmentSenderImplTest
         participants = Seq(participant4),
         commitmentTick = sendTimestamp,
         unsentDigests = Seq(
-          DigestForCounterparticipant(hashedDigest0, participant2.toLf),
-          DigestForCounterparticipant(hashedDigest1, participant3.toLf),
+          DigestForCounterparticipant
+            .create(testedProtocolVersionValidation, hashedDigest0, participant2.toLf)
+            .value,
+          DigestForCounterparticipant
+            .create(testedProtocolVersionValidation, hashedDigest1, participant3.toLf)
+            .value,
         ),
       )
 
@@ -252,7 +256,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "send nothing if all updates have empty digests" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "send nothing if all updates have empty digests" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient, metrics)
@@ -279,7 +283,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "send nothing if snapshot contains no updates" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "send nothing if snapshot contains no updates" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (_, watermarkStore, sender) = mkStoresAndSender(sequencerClient, metrics)
@@ -302,7 +306,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "send the expected messages when messages are split into multiple batches" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "send the expected messages when messages are split into multiple batches" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (digestStore, watermarkStore, sender) =
@@ -372,7 +376,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "not try to send the next batch if sending the first batch fails with a non-retriable error" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not try to send the next batch if sending the first batch fails with a non-retriable error" in {
       val sequencerClient =
         new TestSequencerClientSend(wallClock, nonRetriableErrorSendResultFactory.some)
       val metrics = mkMetrics()
@@ -432,7 +436,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "keep attempting to send messages when getting retriable errors" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "keep attempting to send messages when getting retriable errors" in {
       val sendResultFactory = consecutiveSendResultsFactory(
         Seq(
           timeoutSendResultFactory,
@@ -485,7 +489,7 @@ trait AcsCommitmentSenderImplTest
       assertCounterMetricValue(metrics.sendAttemptCount, 1)
     }
 
-    "not increase the batch index if all digests in the batch are empty" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "not increase the batch index if all digests in the batch are empty" in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
       val (digestStore, watermarkStore, sender) =
@@ -537,7 +541,7 @@ trait AcsCommitmentSenderImplTest
     val originalDelay = FiniteDuration(2, TimeUnit.SECONDS)
     val maxDelay = FiniteDuration(10, TimeUnit.SECONDS)
 
-    "return None if there is no base delay" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "return None if there is no base delay" in {
       val retryStrategy = RetryStrategy(retryDelay = None)
 
       AcsCommitmentSender.calculateFinalRetryDelay(
@@ -547,7 +551,7 @@ trait AcsCommitmentSenderImplTest
       ) shouldBe None
     }
 
-    "return original delay if exponential backoff is disabled" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "return original delay if exponential backoff is disabled" in {
       val retryStrategy =
         RetryStrategy(retryDelay = originalDelay.some, useExponentialBackoff = false)
 
@@ -558,7 +562,7 @@ trait AcsCommitmentSenderImplTest
       ) shouldBe originalDelay.some
     }
 
-    "return increased delay within the limit if exponential backoff is enabled" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "return increased delay within the limit if exponential backoff is enabled" in {
       val retryStrategy =
         RetryStrategy(retryDelay = originalDelay.some, useExponentialBackoff = true)
 
@@ -745,23 +749,25 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
     ),
     replacesOffset = None,
   )
-
+  import org.scalatest.EitherValues.*
   private def mkAcsCommitment(
       counterparticipantId: ParticipantId,
       hashedDigest: HashedDigest,
       fromExclusive: CantonTimestamp,
       toInclusive: CantonTimestamp,
-  ) = AcsCommitment.create(
-    synchronizerId = psid,
-    sender = participant1.toLf, // Can be hardcoded, as we only use this participant
-    counterparticipant = counterparticipantId.toLf,
-    period = CommitmentPeriod.tryCreate(
-      fromExclusive = fromExclusive,
-      toInclusive = toInclusive,
-    ),
-    digest = hashedDigest,
-    protocolVersion = ProtocolVersion.dev,
-  )
+  ) = AcsCommitment
+    .create(
+      synchronizerId = psid,
+      sender = participant1.toLf, // Can be hardcoded, as we only use this participant
+      counterparticipant = counterparticipantId.toLf,
+      period = CommitmentPeriod.tryCreate(
+        fromExclusive = fromExclusive,
+        toInclusive = toInclusive,
+      ),
+      digest = hashedDigest,
+      protocolVersion = ProtocolVersion.dev,
+    )
+    .value
 
   private def mkAcsCommitmentSummary(
       participants: Seq[ParticipantId],
@@ -769,15 +775,18 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
       batchIndex: NonNegativeInt = NonNegativeInt.zero,
       lastBatch: Boolean = true,
       unsentDigests: Seq[DigestForCounterparticipant] = Seq.empty,
-  ) = AcsCommitmentSummary.create(
-    psid = psid,
-    commitmentTick = commitmentTick,
-    addressedCounterparticipants = participants.map(_.toLf),
-    unsentDigests = unsentDigests,
-    batchIndex = batchIndex,
-    lastBatch = lastBatch,
-    protocolVersion = ProtocolVersion.dev,
-  )
+  ) = AcsCommitmentSummary
+    .create(
+      psid = psid,
+      commitmentTick = commitmentTick,
+      addressedCounterparticipants = participants.map(_.toLf),
+      unsentDigests = unsentDigests,
+      batchIndex = batchIndex,
+      lastBatch = lastBatch,
+      protocolVersion = ProtocolVersion.dev,
+      AcsCommitmentLimits.default,
+    )
+    .value
 
   private def splitMessages(
       batch: Batch[DefaultOpenEnvelope]

@@ -12,8 +12,6 @@ object FutureUnlessShutdownUtil {
 
   /** If the future fails, log the associated error and re-throw. The returned future completes
     * after logging.
-    * @param logPassiveInstanceAtInfo:
-    *   If true, log [[PassiveInstanceException]] at INFO instead of ERROR level. Default is false.
     */
   def logOnFailureUnlessShutdown[T](
       future: FutureUnlessShutdown[T],
@@ -21,7 +19,6 @@ object FutureUnlessShutdownUtil {
       onFailure: Throwable => Unit = _ => (),
       level: => Level = Level.ERROR,
       closeContext: Option[CloseContext] = None,
-      logPassiveInstanceAtInfo: Boolean = false,
   )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[T] =
     FutureUnlessShutdown(
       FutureUtil.logOnFailure(
@@ -30,7 +27,6 @@ object FutureUnlessShutdownUtil {
         onFailure,
         level,
         closeContext,
-        logPassiveInstanceAtInfo,
       )
     )
 

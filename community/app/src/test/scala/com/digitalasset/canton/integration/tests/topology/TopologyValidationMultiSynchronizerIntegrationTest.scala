@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.examples.java.cycle as C
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.util.{
+  AutomaticAssignment,
   EntitySyntax,
   PartiesAllocator,
   PartyToParticipantDeclarative,
@@ -23,7 +24,6 @@ import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.topology.ForceFlag.AllowInsufficientSignatoryAssigningParticipantsForParty
 import com.digitalasset.canton.topology.ForceFlags
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Observation, Submission}
-import com.digitalasset.canton.{BaseTest, config}
 
 class TopologyValidationMultiSynchronizerIntegrationTest
     extends CommunityIntegrationTest
@@ -35,6 +35,7 @@ class TopologyValidationMultiSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
@@ -46,17 +47,8 @@ class TopologyValidationMultiSynchronizerIntegrationTest
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         // Disable automatic assignment so that we really control it
-        def disableAutomaticAssignment(
-            sequencer: LocalSequencerReference
-        ): Unit =
-          sequencer.topology.synchronizer_parameters
-            .propose_update(
-              sequencer.synchronizer_id,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-
-        disableAutomaticAssignment(sequencer1)
-        disableAutomaticAssignment(sequencer2)
+        AutomaticAssignment.disable(Seq(sequencer1), sequencer1.synchronizer_id)
+        AutomaticAssignment.disable(Seq(sequencer2), sequencer2.synchronizer_id)
 
         val alice = "alice"
         // Enable alice on other participants, on all synchronizers

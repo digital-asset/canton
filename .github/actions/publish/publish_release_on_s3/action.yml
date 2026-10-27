@@ -1,0 +1,42 @@
+name: Publish release on S3
+description: Publish release artifacts to S3
+
+inputs:
+  release_suffix:
+    description: Release version suffix
+    required: true
+  aws_access_key_id:
+    description: AWS access key id
+    required: true
+  aws_secret_access_key:
+    description: AWS secret access key
+    required: true
+  aws_session_token:
+    description: AWS session token, if required
+    required: false
+    default: ""
+  aws_region:
+    description: AWS region for S3 and CloudFront operations
+    required: false
+    default: us-east-1
+  aws_cf_canton_io_distribution_id:
+    description: CloudFront distribution id for canton.io invalidation
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish to S3
+      uses: ./.github/actions/nix/nix_run
+      env:
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws_access_key_id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws_secret_access_key }}
+        AWS_SESSION_TOKEN: ${{ inputs.aws_session_token }}
+        AWS_REGION: ${{ inputs.aws_region }}
+        AWS_DEFAULT_REGION: ${{ inputs.aws_region }}
+        AWS_CF_CANTON_IO_DISTRIBUTION_ID: ${{ inputs.aws_cf_canton_io_distribution_id }}
+        AWS_RETRY_MODE: adaptive
+        AWS_MAX_ATTEMPTS: "10"
+      with:
+        command: scripts/ci/publish-to-s3.sh

@@ -6,7 +6,7 @@ package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.Error as IE
+import com.digitalasset.daml.lf.interpretation.{LimitConfig, Error as IE}
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -89,7 +89,7 @@ class LimitsSpec
         updateSE = SExpr.SEApp(pkgs.compiler.unsafeCompile(e), agrs.view.to(ArraySeq)),
         committers = committers,
         logger = MachineLogger(),
-        limits = limits,
+        limits = LimitConfig(limits, None),
       ),
       getContract = contracts,
     )

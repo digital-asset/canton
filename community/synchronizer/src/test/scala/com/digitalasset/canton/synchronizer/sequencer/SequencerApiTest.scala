@@ -962,11 +962,11 @@ abstract class SequencerApiTest
         } yield {
           sendError.code.id shouldBe SequencerErrors.SubmissionRequestRefused.id
           sendError.cause should (
-            include("is disabled at the sequencer") and
+            include("is not active at the sequencer") and
               include(p7.toString)
           )
           subscribeError should matchPattern {
-            case CreateSubscriptionError.MemberDisabled(member) if member == sender =>
+            case CreateSubscriptionError.MemberNotActive(member) if member == sender =>
           }
         }
       }

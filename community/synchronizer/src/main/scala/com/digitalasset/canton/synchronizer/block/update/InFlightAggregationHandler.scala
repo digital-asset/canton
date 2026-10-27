@@ -114,7 +114,7 @@ class InFlightAggregationHandler(
 
     val aggregationIdETO = EitherT.fromEither[FutureUnlessShutdown](
       submissionRequest
-        .aggregationId(syncCryptoClient.pureCrypto)
+        .aggregationId(syncCryptoClient.pureCrypto, protocolVersion)
         .leftMap { err =>
           SubmissionRequestValidator.discardOrBetterRejectInvalidRequest(
             submissionRequest = submissionRequest,

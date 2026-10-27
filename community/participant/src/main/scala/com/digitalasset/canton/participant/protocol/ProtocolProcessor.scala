@@ -88,7 +88,6 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
-import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -133,7 +132,6 @@ abstract class ProtocolProcessor[
       ephemeral,
       crypto,
       sequencerClient,
-      clock,
     )
     with RequestProcessor[RequestViewType, SequencedEventUpdate] {
 
@@ -207,16 +205,22 @@ abstract class ProtocolProcessor[
               submissionParam,
               untracked,
               pendingSubmission,
+              Some(recentSnapshot),
               untracked.approximateTimestampForSigning,
               untracked.maxSequencingTime,
-            ).tapLeft(submissionError =>
-              logger.warn(s"Failed to submit submission due to $submissionError")
-            )
+            ).tapLeft {
+              // A TEA rejection is a client error, not a participant problem, so only log it as info.
+              case submissionError @ TrafficEnforcementRejection(_) =>
+                logger.info(s"Failed to submit submission due to $submissionError")
+              case submissionError =>
+                logger.warn(s"Failed to submit submission due to $submissionError")
+            }
           case tracked: steps.TrackedSubmission =>
             submitWithTracking(
               submissionParam,
               tracked,
               pendingSubmission,
+              Some(recentSnapshot),
               tracked.approximateTimestampForSigning,
               tracked.maxSequencingTime,
             )
@@ -278,6 +282,7 @@ abstract class ProtocolProcessor[
       submissionParam: SubmissionParam,
       untracked: steps.UntrackedSubmission,
       pendingSubmission: steps.PendingSubmissionData,
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
@@ -289,6 +294,7 @@ abstract class ProtocolProcessor[
         untracked.pendingSubmissionId,
         MessageId.randomMessageId(),
         untracked.batch,
+        currentSnapshotApproximation,
         approximateTimestampForSigning,
         maxSequencingTime,
         untracked.embedSubmissionError,
@@ -317,6 +323,7 @@ abstract class ProtocolProcessor[
       submissionParam: SubmissionParam,
       tracked: steps.TrackedSubmission,
       pendingSubmission: steps.PendingSubmissionData,
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
   )(implicit
@@ -412,6 +419,7 @@ abstract class ProtocolProcessor[
             preparedBatch.pendingSubmissionId,
             messageId,
             preparedBatch.batch,
+            currentSnapshotApproximation,
             approximateTimestampForSigning,
             maxSequencingTime,
             preparedBatch.embedSequencerRequestError,
@@ -459,15 +467,12 @@ abstract class ProtocolProcessor[
 
   protected def metricsContextForSubmissionParam(submissionParam: SubmissionParam): MetricsContext
 
-  @unused("default implementation")
   protected def validateLocalTrafficCost(
       submissionParam: SubmissionParam
   )(
       trafficCost: Long,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    // TODO(#33681): Remove default implementation
-    EitherT.rightT(())
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit]
 
   /** Submit the batch to the sequencer. Also registers `submissionParam` as pending submission.
     */
@@ -476,6 +481,7 @@ abstract class ProtocolProcessor[
       submissionId: steps.PendingSubmissionId,
       messageId: MessageId,
       batch: Batch[DefaultOpenEnvelope],
+      currentSnapshotApproximation: Option[SynchronizerSnapshotSyncCryptoApi],
       approximateTimestampForSigning: CantonTimestamp,
       maxSequencingTime: CantonTimestamp,
       embedSubmissionError: SequencerRequestError => steps.SubmissionSendError,
@@ -512,6 +518,7 @@ abstract class ProtocolProcessor[
       _ <- sequencerClient
         .send(
           batch,
+          currentSnapshotApproximation = currentSnapshotApproximation,
           timestamps = SendRequestTimestamps(
             approximateTimestampForSigning = approximateTimestampForSigning,
             maxSequencingTime = maxSequencingTime,
@@ -844,7 +851,6 @@ abstract class ProtocolProcessor[
                         rootHash,
                         requestDataHandle,
                         mediator,
-                        snapshot,
                         malformedPayloads,
                         publishUpdate,
                       )
@@ -1018,7 +1024,6 @@ abstract class ProtocolProcessor[
             rootHash,
             requestDataHandle,
             mediator,
-            snapshot,
             Nil,
             publishUpdate,
           ).map(_ => None)
@@ -1212,8 +1217,9 @@ abstract class ProtocolProcessor[
     phase3validationCompleted(parsedRequest.rootHash)
     // Check whether the declared mediator is still an active mediator.
     for {
+      snapshot <- EitherT.rightT(parsedRequest.snapshot)
       mediatorIsActive <- EitherT
-        .right(parsedRequest.snapshot.ipsSnapshot.isMediatorActive(mediator))
+        .right(snapshot.ipsSnapshot.isMediatorActive(mediator))
       _ <-
         if (mediatorIsActive)
           for {
@@ -1371,10 +1377,37 @@ abstract class ProtocolProcessor[
       _ = EitherTUtil.doNotAwaitUS(timeoutET, "Handling timeout failed")
 
       responsesTo <- responsesToET
+      // we use a snapshot approximation so we can potentially batch multiple requests together
+      currentSnapshotApproximation <- EitherT.right[steps.RequestError](
+        crypto.currentSnapshotApproximation
+      )
+      synchronizerParameters <- EitherT(
+        currentSnapshotApproximation.ipsSnapshot.findDynamicSynchronizerParameters()
+      ).leftMap(_ =>
+        steps.embedRequestError(
+          UnableToGetDynamicSynchronizerParameters(
+            currentSnapshotApproximation.psid,
+            currentSnapshotApproximation.ipsSnapshot.timestamp,
+          )
+        )
+      )
+      maxSequencingTime = requestId.unwrap.add(
+        synchronizerParameters.parameters.confirmationResponseTimeout.unwrap
+      )
+      // Reused for both the inner response signing and the submission request signing below, so
+      // that both signatures are computed as of the same approximate time.
+      signingTimestamp = clock.now
 
       signedResponsesTo <- EitherT.right[steps.RequestError](
         responsesTo.traverse { case (responses, recipients) =>
-          signResponses(parsedRequest.snapshot, responses).map(_ -> recipients)
+          signResponses(
+            currentSnapshotApproximation,
+            responses,
+            signingTimestamp,
+            maxSequencingTime,
+          ).map(
+            _ -> recipients
+          )
         }
       )
 
@@ -1402,7 +1435,14 @@ abstract class ProtocolProcessor[
                 s"Phase 4: Sending for request=${requestId.unwrap} with msgId=$messageId approved=$approved, rejected=$rejected, abstained=$abstained"
               )
               EitherT.right[steps.RequestError](
-                sendResponses(requestId, Seq(spm -> recipients), Some(messageId))
+                sendResponses(
+                  requestId,
+                  Seq(spm -> recipients),
+                  currentSnapshotApproximation,
+                  signingTimestamp,
+                  maxSequencingTime,
+                  Some(messageId),
+                )
               )
             case _ =>
               logger.info(
@@ -1425,7 +1465,6 @@ abstract class ProtocolProcessor[
         steps.requestType.PendingRequestData
       ],
       mediatorGroup: MediatorGroupRecipient,
-      snapshot: SynchronizerSnapshotSyncCryptoApi,
       malformedPayloads: Seq[MalformedPayload],
       publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
@@ -1450,12 +1489,39 @@ abstract class ProtocolProcessor[
           rootHash,
           malformedPayloads,
         )
+
+        // we use a snapshot approximation for signing so we can potentially batch multiple requests together
+        currentSnapshotApproximation <- EitherT.right(crypto.currentSnapshotApproximation)
+
+        maxSequencingTime <- EitherT.right(
+          maxSequencingTimeForConfirmationResponse(
+            requestId,
+            currentSnapshotApproximation,
+          )
+        )
+        // Reused for both the inner response signing and the submission request signing below, so
+        // that both signatures are computed as of the same approximate time.
+        signingTimestamp = clock.now
+
         _ <- confirmationResponsesO match {
           case Some(responses) =>
             val recipients = Recipients.cc(mediatorGroup)
             EitherT.right(
-              signResponses(snapshot, responses)
-                .map(message => sendResponses(requestId, Seq(message -> recipients)))
+              signResponses(
+                currentSnapshotApproximation,
+                responses,
+                signingTimestamp,
+                maxSequencingTime,
+              )
+                .map(message =>
+                  sendResponses(
+                    requestId,
+                    Seq(message -> recipients),
+                    currentSnapshotApproximation,
+                    signingTimestamp,
+                    maxSequencingTime,
+                  )
+                )
             )
           case None => EitherTUtil.unitUS
         }
@@ -2080,6 +2146,16 @@ object ProtocolProcessor {
 
   object SequencerRequestError extends PrettyPrintingCompanion[SequencerRequestError] {
     override protected val pretty: Pretty[SequencerRequestError] = prettyOfParam(_.sendError)
+  }
+
+  /** Matches submissions rejected by TEA and passes the error to the client. */
+  object TrafficEnforcementRejection {
+    def unapply(error: WrapsProcessorError): Option[RpcError] =
+      error.underlyingProcessorError() match {
+        case Some(SequencerRequestError(SendAsyncClientError.TrafficEnforcementRejected(reason))) =>
+          Some(reason)
+        case _ => None
+      }
   }
 
   /** The sequencer refused to sequence the batch for delivery */

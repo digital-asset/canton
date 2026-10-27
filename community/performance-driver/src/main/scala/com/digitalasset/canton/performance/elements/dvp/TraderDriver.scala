@@ -126,6 +126,7 @@ class TraderDriver(
     val baseSynchronizerId: SynchronizerId,
     val otherSynchronizers: Seq[SynchronizerId],
     otherSynchronizersRatio: Double,
+    allocatedPartyInitialNumber: Long = 0,
 )(implicit
     val ec: ExecutionContextExecutor,
     actorSystem: ActorSystem,
@@ -246,6 +247,7 @@ class TraderDriver(
           bystanderMetric,
           growth,
           loggerFactory,
+          allocatedPartyInitialNumber = allocatedPartyInitialNumber,
         )
         bystanderAllocator.set(Some(allocator))
         allocator

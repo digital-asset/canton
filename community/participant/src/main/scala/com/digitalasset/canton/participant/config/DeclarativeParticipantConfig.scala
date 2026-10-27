@@ -13,6 +13,7 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
+  SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
@@ -323,6 +324,7 @@ final case class DeclarativeConnectionConfig(
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
         subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+        sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
       )
 
     sequencerConnectionsE.map { sequencerConnections =>

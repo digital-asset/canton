@@ -25,7 +25,9 @@ import com.digitalasset.canton.performance.util.{
   ParticipantSimulatorController,
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
@@ -77,6 +79,8 @@ object LongRunning {
       pruningRetention: FiniteDuration = 7.days,
       otherSynchronizersRatio: Double = 0.5,
       disableTrafficControl: Boolean = sys.env.contains("DISABLE_TRAFFIC_CONTROL"),
+      allocatedPartyInitialNumber: Long =
+        sys.env.get("ALLOCATED_PARTY_INITIAL_NUMBER").fold(0L)(_.toLong),
   )(implicit
       consoleEnvironment: ConsoleEnvironment
   ): (MissionControl, Option[ParticipantSimulatorController]) = {
@@ -184,6 +188,8 @@ object LongRunning {
           sequencerLivenessMargin,
         )
       else participant.synchronizers.reconnect_all()
+      LongRunning.enableMultisync(participant)
+
     }
     uploadDarToNodes(participants.all, myLogger)
 
@@ -264,6 +270,7 @@ object LongRunning {
       baseSynchronizerId = baseSynchronizer.logical,
       otherSynchronizers = otherSynchronizers.map(_.logical),
       otherSynchronizersRatio = otherSynchronizersRatio,
+      allocatedPartyInitialNumber = allocatedPartyInitialNumber,
     )(consoleEnvironment.environment.executionContext)
 
     onClose.set(Some(() => mc.close()))
@@ -337,6 +344,14 @@ object LongRunning {
       )
     else
       Right(runTypeConfig)
+
+  def enableMultisync(participant: ParticipantReference): Unit =
+    participant.synchronizers.list_connected().foreach { sync =>
+      if (sync.physicalSynchronizerId.protocolVersion <= ProtocolVersion.v36) {
+        participant.synchronizers.feature_flags
+          .add(sync.synchronizerId, ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
+      }
+    }
 
   def growTopologyState(
       participant: ParticipantReference,

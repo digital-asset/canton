@@ -51,9 +51,8 @@ class DbStorageIdempotency(
 
   override def isActive: Boolean = underlying.isActive
 
-  override def runJdbcWrite[T](
-      traceContext: TraceContext,
-      body: Connection => T,
+  override def runJdbcWrite[T](body: Connection => T)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[T] =
-    underlying.runJdbcWrite(traceContext, body)
+    underlying.runJdbcWrite(body)
 }

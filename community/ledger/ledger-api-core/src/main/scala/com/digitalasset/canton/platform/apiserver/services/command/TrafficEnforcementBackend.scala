@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command
 
-import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
@@ -19,35 +20,40 @@ import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClien
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
-import com.digitalasset.canton.tea.v1.GetAccountRequest
+import com.digitalasset.canton.tea.v1.RegisterSubmissionRequest.ChargedAccount
+import com.digitalasset.canton.tea.v1.{GetAccountRequest, RegisterSubmissionRequest}
 import com.digitalasset.canton.tracing.Spanning.SpanWrapper
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.daml.lf.data.Ref
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContext
 
 trait TrafficEnforcementBackend {
 
-  /** Validates that the account associated with the given actAs parties has sufficient balance to
-    * cover the specified traffic cost.
-    *
-    * @param actAs
-    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
-    *   If it does not, the traffic validation for the request is either skipped (with an
-    *   informational message logged) or the submission is rejected, depending on
-    *   `rejectMultiPartySubmissions`.
-    * @param trafficCost
-    *   The expected traffic cost of the submission request
-    * @return
-    *   Success if validation is successful
+  /** Stores the account to charge and checks if its balance covers `trafficCost` when enforced.
+    * Called just before sending the confirmation request. TEA errors return as `Left`, not failed
+    * futures.
     */
-  def validateTraffic(
-      actAs: Seq[LfPartyId],
+  def registerSubmission(
+      info: SubmissionAccountingInfo,
       trafficCost: Long,
   )(implicit
       traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit]
+
+  /** Checks if the selected account's balance covers the estimated cost, without storing anything.
+    * Used when preparing an interactive submission.
+    */
+  def checkEstimatedCost(
+      accounting: SubmissionAccounting,
+      estimatedCost: Long,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit]
+
+  def adminParty: LfPartyId
 
   def trafficServiceClient: RichTrafficServiceClient
 }
@@ -56,14 +62,15 @@ trait TrafficEnforcementBackend {
   * submission requests in the Phase 1 of the Canton protocol.
   *
   * @param enforceCostOnSubmissions
-  *   Whether to enforce traffic cost on submissions. When disabled, no account lookup is performed
-  *   at all on the submission path.
+  *   Whether to check the account balance when registering a submission. When disabled, the
+  *   submission is still registered, just without a balance check.
   * @param rejectMultiPartySubmissions
-  *   Whether to reject submissions whose actAs has more than one party (or none), instead of
-  *   skipping traffic enforcement validation for them.
+  *   Whether to reject submissions without an account whose actAs has more than one party (or
+  *   none), instead of registering them with a no-account marker.
   * @param allowSubmissionsOnDegradation
-  *   Whether to let a submission proceed without a balance check when the account lookup fails,
-  *   instead of failing the submission.
+  *   Whether to let submissions proceed if account lookup or registration fails without a response
+  *   from the traffic service. Correlation conflicts and refusals still fail the submission.
+  *   No-account marker writes are always best effort.
   * @param trafficServiceClient
   *   The traffic service client used to communicate with the traffic enforcement server.
   */
@@ -72,7 +79,7 @@ class TrafficEnforcementBackendImpl(
     rejectMultiPartySubmissions: Boolean,
     allowSubmissionsOnDegradation: Boolean,
     override val trafficServiceClient: RichTrafficServiceClient,
-    adminParty: LfPartyId,
+    override val adminParty: LfPartyId,
     metrics: TrafficEnforcementMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
@@ -82,17 +89,187 @@ class TrafficEnforcementBackendImpl(
     with FlagCloseable
     with Spanning {
 
-  def validateTraffic(
-      actAs: Seq[LfPartyId],
+  override def registerSubmission(
+      info: SubmissionAccountingInfo,
       trafficCost: Long,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
+    metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
+      withSpan(TrafficEnforcementBackend.RegisterSubmissionSpanName) { spanTraceContext => span =>
+        register(info, trafficCost, span)(spanTraceContext, errorLoggingContext)
+      },
+      labelMapping = {
+        // Redacted statuses decode without an error id, so we label all internal failures the same.
+        case Left(e) if e.code.category.redactDetails => TrafficEnforcementOutcome.Failed
+        case Left(e) => e.code.id
+        case Right(_) => "success"
+      },
+      failedStatus = TrafficEnforcementOutcome.Failed,
+    )
+  }
+
+  private def register(
+      info: SubmissionAccountingInfo,
+      trafficCost: Long,
+      span: SpanWrapper,
+  )(implicit
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
+    logger.debug(
+      s"Registering submission ${info.submissionId} with ${info.accounting.selection}, trafficCost: $trafficCost"
+    )
+    def send(
+        accountId: Option[String],
+        requiredBalance: Option[Long],
+        outcome: String,
+        reason: Option[String],
+    ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+      sendRegistration(
+        RegisterSubmissionRequest(
+          changeIdHash = info.changeId.hash.toHexString,
+          submissionId = info.submissionId,
+          account = accountId.map(ChargedAccount(_, requiredBalance)),
+        ),
+        span,
+        outcome,
+        reason,
+      )
+
+    def forAccount(accountId: String): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+      if (enforceCostOnSubmissions)
+        send(Some(accountId), Some(trafficCost), TrafficEnforcementOutcome.Accepted, None)
+      else
+        send(
+          Some(accountId),
+          None,
+          TrafficEnforcementOutcome.Skipped,
+          Some(TrafficEnforcementOutcome.EnforcementDisabled),
+        )
+
+    info.accounting.selection match {
+      case TrafficAccountSelection.Explicit(accountId) => forAccount(accountId)
+      case TrafficAccountSelection.FallbackParty(party) => forAccount(party)
+      case TrafficAccountSelection.AdminFallback(admin) =>
+        logger.debug(
+          show"Skipping traffic enforcement validation for participant admin party: $admin"
+        )
+        send(
+          Some(admin),
+          None,
+          TrafficEnforcementOutcome.Skipped,
+          Some(TrafficEnforcementOutcome.AdminParty),
+        )
+      case TrafficAccountSelection.NoAccount if rejectMultiPartySubmissions =>
+        EitherT.leftT[FutureUnlessShutdown, Unit](
+          rejectNoAccount(
+            span,
+            show"Traffic enforcement rejected submission with non-singleton actAs parties: ${info.changeId.actAs.toSeq}",
+          ): RpcError
+        )
+      case TrafficAccountSelection.NoAccount =>
+        logger.info(
+          show"Skipping traffic enforcement validation due to non-singleton actAs parties: ${info.changeId.actAs.toSeq}"
+        )
+        send(
+          None,
+          None,
+          TrafficEnforcementOutcome.Skipped,
+          Some(TrafficEnforcementOutcome.NonSingletonActAs),
+        )
+    }
+  }
+
+  private def sendRegistration(
+      request: RegisterSubmissionRequest,
+      span: SpanWrapper,
+      successOutcome: String,
+      successReason: Option[String],
+  )(implicit
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    EitherT(trafficServiceClient.registerSubmission(request).value.map {
+      case Right(_) =>
+        recordOutcome(span, successOutcome, successReason)
+        Right(())
+      case Left(grpcError) => registrationFailure(request, grpcError, span)
+    })
+
+  private def registrationFailure(
+      request: RegisterSubmissionRequest,
+      grpcError: GrpcError,
+      span: SpanWrapper,
+  )(implicit
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Either[RpcError, Unit] = {
+    val teaErrorId = grpcError.decodedCantonError.map(_.code.id)
+
+    def reject(outcome: String, reason: String): Either[RpcError, Unit] = {
+      recordOutcome(span, outcome, Some(reason))
+      Left(RichTrafficServiceClient.normalizeTeaErrorToRpcError(grpcError))
+    }
+
+    request.account.map(_.accountId) match {
+      case _ if teaErrorId.contains(TrafficEnforcementErrors.CorrelationConflict.id) =>
+        reject(TrafficEnforcementOutcome.Rejected, TrafficEnforcementOutcome.CorrelationConflict)
+      case None =>
+        // If the marker is lost, the completion only logs a missing-correlation warning.
+        degrade(
+          span,
+          grpcError,
+          TrafficEnforcementOutcome.MarkerWriteFailed,
+          s"Failed to store the no-account marker for submission ${request.submissionId};" +
+            " allowing the submission to proceed without it.",
+        )
+        Right(())
+      case Some(_) if teaErrorId.contains(TrafficEnforcementErrors.InsufficientBalance.id) =>
+        reject(TrafficEnforcementOutcome.Rejected, TrafficEnforcementOutcome.InsufficientBalance)
+      case Some(accountId)
+          if TrafficEnforcementBackend.allowsSubmissionOnLookupFailure(
+            allowSubmissionsOnDegradation,
+            grpcError,
+          ) =>
+        degrade(
+          span,
+          grpcError,
+          TrafficEnforcementOutcome.LookupUnavailable,
+          s"Traffic enforcement submission registration failed for account $accountId;" +
+            " degrading and allowing the submission to proceed without a balance check.",
+        )
+        Right(())
+      case Some(_) =>
+        span.recordException(grpcError.asRuntimeException)
+        reject(TrafficEnforcementOutcome.Failed, TrafficEnforcementOutcome.LookupFailed)
+    }
+  }
+
+  private def degrade(
+      span: SpanWrapper,
+      grpcError: GrpcError,
+      reason: String,
+      message: String,
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.warn(s"$message\n$grpcError")
+    recordOutcome(span, TrafficEnforcementOutcome.Degraded, Some(reason))
+    span.recordException(grpcError.asRuntimeException)
+  }
+
+  override def checkEstimatedCost(
+      accounting: SubmissionAccounting,
+      estimatedCost: Long,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
-      withSpan(TrafficEnforcementBackend.EnforcementSpanName) { spanTraceContext => span =>
-        decide(actAs, trafficCost, span)(spanTraceContext, errorLoggingContext)
+      withSpan(TrafficEnforcementBackend.CheckEstimatedCostSpanName) { spanTraceContext => span =>
+        decide(accounting, estimatedCost, span)(spanTraceContext, errorLoggingContext)
       },
       labelMapping = {
         case Left(e) => e.code.id
@@ -103,7 +280,7 @@ class TrafficEnforcementBackendImpl(
   }
 
   private def decide(
-      actAs: Seq[LfPartyId],
+      accounting: SubmissionAccounting,
       trafficCost: Long,
       span: SpanWrapper,
   )(implicit
@@ -111,12 +288,12 @@ class TrafficEnforcementBackendImpl(
       errorLoggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
     logger.debug(
-      s"Validating traffic enforcement for actAs parties: $actAs, trafficCost: $trafficCost"
+      s"Validating traffic enforcement for ${accounting.selection}, trafficCost: $trafficCost"
     )
-    actAs match {
-      case singleActAs :: Nil if singleActAs == adminParty =>
+    accounting.selection match {
+      case TrafficAccountSelection.AdminFallback(admin) =>
         logger.debug(
-          show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
+          show"Skipping traffic enforcement validation for participant admin party: $admin"
         )
         recordOutcome(
           span,
@@ -124,24 +301,20 @@ class TrafficEnforcementBackendImpl(
           Some(TrafficEnforcementOutcome.AdminParty),
         )
         EitherT.pure(())
-      case singleActAs :: Nil =>
-        // In Canton 3.5, the account ID is bound to the submitter party
-        validateBalance(accountId = singleActAs, trafficCost = trafficCost, span = span)
-          .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
-      case nonSingletonActAs if rejectMultiPartySubmissions =>
-        recordOutcome(
-          span,
-          TrafficEnforcementOutcome.Rejected,
-          Some(TrafficEnforcementOutcome.MultiPartySubmission),
-        )
+      case TrafficAccountSelection.Explicit(accountId) =>
+        validateBalance(accountId, trafficCost, span)
+      case TrafficAccountSelection.FallbackParty(party) =>
+        validateBalance(party, trafficCost, span)
+      case TrafficAccountSelection.NoAccount if rejectMultiPartySubmissions =>
         EitherT.leftT[FutureUnlessShutdown, Unit](
-          TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(
-            show"Traffic enforcement rejected submission with non-singleton actAs parties: $nonSingletonActAs"
-          )
+          rejectNoAccount(
+            span,
+            "Traffic enforcement rejected submission with non-singleton actAs parties",
+          ): TrafficEnforcementErrors.TrafficEnforcementError
         )
-      case nonSingletonActAs =>
+      case TrafficAccountSelection.NoAccount =>
         logger.info(
-          show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
+          "Skipping traffic enforcement validation due to non-singleton actAs parties"
         )
         recordOutcome(
           span,
@@ -152,87 +325,79 @@ class TrafficEnforcementBackendImpl(
     }
   }
 
+  private def rejectNoAccount(span: SpanWrapper, cause: String)(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject = {
+    recordOutcome(
+      span,
+      TrafficEnforcementOutcome.Rejected,
+      Some(TrafficEnforcementOutcome.MultiPartySubmission),
+    )
+    TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(cause)
+  }
+
   private def validateBalance(
       accountId: String,
       trafficCost: Long,
       span: SpanWrapper,
   )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject, Unit] =
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] =
     if (!enforceCostOnSubmissions) {
       recordOutcome(
         span,
         TrafficEnforcementOutcome.Skipped,
         Some(TrafficEnforcementOutcome.EnforcementDisabled),
       )
-      EitherT.pure[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject](())
-    } else {
-      implicit val errorLoggingContext: ErrorLoggingContext =
-        ErrorLoggingContext.fromTracedLogger(logger)
-      for {
-        accountResponseO <- EitherT.right[TrafficEnforcementErrors.InsufficientBalance.Reject](
-          trafficServiceClient
-            .getAccount(GetAccountRequest(accountId))
-            .value
-            .flatMap {
-              case Right(response) => FutureUnlessShutdown.pure(Some(response))
-              case Left(grpcError)
-                  if TrafficEnforcementBackend.allowsSubmissionOnLookupFailure(
-                    allowSubmissionsOnDegradation,
-                    grpcError,
-                  ) =>
-                logger.warn(
-                  s"Traffic enforcement account lookup failed for account $accountId; degrading" +
-                    s" and allowing the submission to proceed without a balance check.\n$grpcError"
-                )
-                recordOutcome(
-                  span,
-                  TrafficEnforcementOutcome.Degraded,
-                  Some(TrafficEnforcementOutcome.LookupUnavailable),
-                )
-                span.recordException(grpcError.asRuntimeException)
-                FutureUnlessShutdown.pure(None)
-              case Left(grpcError) =>
-                recordOutcome(
-                  span,
-                  TrafficEnforcementOutcome.Failed,
-                  Some(TrafficEnforcementOutcome.LookupFailed),
-                )
-                // The span picks up the exception and the ERROR status from closeSpan as it propagates.
-                FutureUnlessShutdown.failed(
-                  RichTrafficServiceClient.normalizeTeaError(grpcError)
-                )
-            }
-        )
-        _ <- accountResponseO match {
-          case None =>
-            EitherT.pure[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject](
-              ()
-            )
-          case Some(accountResponse) =>
-            if (accountResponse.balance >= trafficCost) {
+      EitherT.pure(())
+    } else
+      EitherT(
+        trafficServiceClient
+          .getAccount(GetAccountRequest(accountId))
+          .value
+          .flatMap[Either[TrafficEnforcementErrors.TrafficEnforcementError, Unit]] {
+            case Right(account) if account.balance >= trafficCost =>
               recordOutcome(span, TrafficEnforcementOutcome.Accepted)
-              EitherT.pure[
-                FutureUnlessShutdown,
-                TrafficEnforcementErrors.InsufficientBalance.Reject,
-              ](())
-            } else {
+              FutureUnlessShutdown.pure(Right(()))
+            case Right(account) =>
               recordOutcome(
                 span,
                 TrafficEnforcementOutcome.Rejected,
                 Some(TrafficEnforcementOutcome.InsufficientBalance),
               )
-              EitherT.leftT[FutureUnlessShutdown, Unit](
-                TrafficEnforcementErrors.InsufficientBalance.Reject(
-                  accountId = accountId,
-                  balance = accountResponse.balance,
-                  trafficCost = trafficCost,
+              FutureUnlessShutdown.pure(
+                Left(
+                  TrafficEnforcementErrors.InsufficientBalance.Reject(
+                    accountId = accountId,
+                    balance = account.balance,
+                    trafficCost = trafficCost,
+                  )
                 )
               )
-            }
-        }
-      } yield ()
-    }
+            case Left(grpcError)
+                if TrafficEnforcementBackend.allowsSubmissionOnLookupFailure(
+                  allowSubmissionsOnDegradation,
+                  grpcError,
+                ) =>
+              degrade(
+                span,
+                grpcError,
+                TrafficEnforcementOutcome.LookupUnavailable,
+                s"Traffic enforcement account lookup failed for account $accountId; degrading" +
+                  " and allowing the submission to proceed without a balance check.",
+              )
+              FutureUnlessShutdown.pure(Right(()))
+            case Left(grpcError) =>
+              recordOutcome(
+                span,
+                TrafficEnforcementOutcome.Failed,
+                Some(TrafficEnforcementOutcome.LookupFailed),
+              )
+              // The span picks up the exception and the ERROR status from closeSpan as it propagates.
+              FutureUnlessShutdown.failed(RichTrafficServiceClient.normalizeTeaError(grpcError))
+          }
+      )
 
   private def recordOutcome(
       span: SpanWrapper,
@@ -250,7 +415,10 @@ class TrafficEnforcementBackendImpl(
 
 object TrafficEnforcementBackend {
 
-  private[command] val EnforcementSpanName: String = "TrafficEnforcementBackend.validateTraffic"
+  private[command] val RegisterSubmissionSpanName: String =
+    "TrafficEnforcementBackend.registerSubmission"
+  private[command] val CheckEstimatedCostSpanName: String =
+    "TrafficEnforcementBackend.checkEstimatedCost"
 
   /** Let the submission through only when the lookup could not produce an answer, never when the
     * traffic service produced one: a refusal is a deterministic answer, and a client cancellation
@@ -268,6 +436,25 @@ object TrafficEnforcementBackend {
       case _: GrpcError.GrpcRequestRefusedByServer => false
       case _: GrpcError.GrpcRequestRefusedAlreadyExists => false
     })
+
+  def registerIfEnabled(
+      backendO: Option[TrafficEnforcementBackend],
+      changeId: ChangeId,
+      submissionId: Option[Ref.SubmissionId],
+      accounting: SubmissionAccounting,
+      trafficCost: Long,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    backendO.fold(EitherT.rightT[FutureUnlessShutdown, RpcError](())) { backend =>
+      for {
+        info <- EitherT.fromEither[FutureUnlessShutdown](
+          SubmissionAccountingInfo.create(changeId, submissionId, accounting).leftWiden[RpcError]
+        )
+        _ <- backend.registerSubmission(info, trafficCost)(errorLoggingContext.traceContext)
+      } yield ()
+    }
 
   def apply(
       enforceCostOnSubmissions: Boolean,
@@ -304,18 +491,5 @@ object TrafficEnforcementBackend {
       processingTimeout,
       loggerFactory,
     )
-  }
-
-  implicit class DynamicDecorator(val backend: Eval[TrafficEnforcementBackend]) {
-    def dynamic: TrafficEnforcementBackend =
-      new TrafficEnforcementBackend {
-        override def validateTraffic(actAs: Seq[LfPartyId], trafficCost: Long)(implicit
-            traceContext: TraceContext
-        ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] =
-          backend.value.validateTraffic(actAs, trafficCost)
-
-        override def trafficServiceClient: RichTrafficServiceClient =
-          backend.value.trafficServiceClient
-      }
   }
 }

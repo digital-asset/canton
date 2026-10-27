@@ -260,6 +260,8 @@ class LedgerApiBenchTool(
   )(implicit ec: ExecutionContext): Future[Either[String, Unit]] =
     submissionConfigO match {
       case Some(submissionConfig: FooSubmissionConfig) =>
+        val generationRandomnessProvider = RandomnessProvider.Default
+        val submissionRandomnessProvider = generationRandomnessProvider.split()
         val generator: CommandGenerator = new FooCommandGenerator(
           config = submissionConfig,
           divulgeesToDivulgerKeyMap = Map.empty,
@@ -268,9 +270,11 @@ class LedgerApiBenchTool(
           partySelecting = new RandomPartySelecting(
             config = submissionConfig,
             allocatedParties = allocatedParties,
-            randomnessProvider = RandomnessProvider.Default,
+            generationRandomnessProvider = generationRandomnessProvider,
+            submissionRandomnessProvider = submissionRandomnessProvider,
           ),
-          randomnessProvider = RandomnessProvider.Default,
+          randomnessProvider = generationRandomnessProvider,
+          submissionRandomnessProvider = submissionRandomnessProvider,
         )
         for {
           metricsManager <- MetricsManager.create(
@@ -361,7 +365,7 @@ class LedgerApiBenchTool(
               names = names,
             )
             for {
-              _ <- submitter
+              lastOffsetO <- submitter
                 .generateAndSubmit(
                   generator = generator,
                   config = submissionConfig,
@@ -369,7 +373,7 @@ class LedgerApiBenchTool(
                   maxInFlightCommands = config.maxInFlightCommands,
                   submissionBatchSize = config.submissionBatchSize,
                 )
-            } yield ()
+            } yield lastOffsetO
         }
     } yield allocatedParties
   }

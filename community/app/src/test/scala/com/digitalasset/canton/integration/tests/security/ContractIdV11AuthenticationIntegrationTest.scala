@@ -102,7 +102,7 @@ sealed trait ContractIdV11AuthenticationIntegrationTest
               p,
               daId,
               testedProtocolVersion,
-              defaultProtocolLimits,
+              testedTransactionLimits,
               timeouts,
               loggerFactory,
             )

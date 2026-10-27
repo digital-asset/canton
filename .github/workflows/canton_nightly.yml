@@ -46,16 +46,6 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  package_sequencer_driver_api:
-    name: Package Sequencer Driver API
-    needs: [pick_runner, compile]
-    uses: ./.github/workflows/_package_sequencer_driver_api.yml
-    secrets: inherit
-    with:
-      is_nightly_workflow: true
-      is_manual: false
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
   package_kms_driver:
     name: Package KMS Driver
     needs: [pick_runner, compile]
@@ -190,13 +180,51 @@ jobs:
       runner: ${{ needs.pick_runner.outputs.runner }}
       protocol_version: '36'
 
+  build_and_publish_docker:
+    name: Build and Publish Docker
+    needs: [pick_runner, package_community, nightly_integration_test_36]
+    uses: ./.github/workflows/_build_and_publish_docker.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: true
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  publish_libraries:
+    name: Publish Libraries
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_publish_libraries.yml
+    secrets: inherit
+    permissions:
+      contents: read
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: true
+      is_manual: false
+
+  publish_release:
+    name: Publish Release
+    needs:
+      - pick_runner
+      - package_community
+      - build_scaladoc
+      - assembly_ledger_api_test_tool
+      - package_jsonapi
+      - package_kms_driver
+      - compile
+    uses: ./.github/workflows/_publish_release.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: true
+      is_manual: false
+
   notify:
     name: Notify on Failure
     needs:
       - pick_runner
       - compile
       - package_community
-      - package_sequencer_driver_api
       - package_kms_driver
       - build_scaladoc
       - build_docs_snippets
@@ -211,6 +239,9 @@ jobs:
       - assembly_ledger_api_test_tool
       - external_parties_test_36
       - nightly_integration_test_36
+      - build_and_publish_docker
+      - publish_libraries
+      - publish_release
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

@@ -9,6 +9,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TrafficEnforcementError
 import com.digitalasset.canton.tracing.TraceContext
 
+final case class PruneCounts(events: Int, correlations: Int, unchargedCompletions: Int)
+
 /** Persistence store for the TEA. Provides methods to update and retrieve traffic for accounts.
   */
 trait TeaTrafficStore {
@@ -56,19 +58,29 @@ trait TeaTrafficStore {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]]
 
-  /** Prune events at the given timestamp. This is used to keep the event table from growing
-    * indefinitely. This does not affect the account balance.
+  /** Insert a correlation. An existing key returns CorrelationConflict without overwriting it. */
+  def insertCorrelation(correlation: SubmissionCorrelation)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit]
+
+  def lookupCorrelation(key: CorrelationKey)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]]
+
+  /** Prune events, correlations and uncharged completions at the given timestamp in one
+    * transaction. This is used to keep the tables from growing indefinitely. This does not affect
+    * the account balance.
     *
     * @param beforeInclusive
-    *   timestamp to prune events before (inclusive)
+    *   timestamp to prune events, correlations and uncharged completions before (inclusive)
     * @return
-    *   the number of events pruned
+    *   the number of events, correlations and uncharged completions pruned
     */
-  def pruneEvents(
+  def prune(
       beforeInclusive: CantonTimestamp
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int]
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, PruneCounts]
 
   // Note: only used internally for testing, need to add pagination and / or streaming when exposed
   /** Return events, ordered by timestamp, for an account from the given timestamp forward
@@ -85,4 +97,12 @@ trait TeaTrafficStore {
   def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[DeltaEvent]]
+
+  // Note: only used internally for testing
+  /** Return uncharged completions with a timestamp from the given one forward (inclusive), ordered
+    * by offset.
+    */
+  def getUnchargedCompletions(fromInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[UnchargedCompletion]]
 }

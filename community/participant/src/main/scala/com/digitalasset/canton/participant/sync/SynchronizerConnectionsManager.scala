@@ -47,7 +47,6 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.FullAutomaticLsuRequest
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
-  SyncServiceBecamePassive,
   SyncServiceFailedSynchronizerConnection,
   SyncServiceSynchronizerDisabledUs,
   SyncServiceSynchronizerDisconnect,
@@ -1221,6 +1220,7 @@ private[sync] class SynchronizerConnectionsManager(
                 promiseUSFactory,
                 connectedSynchronizerMetrics,
                 parameters.cachingConfigs.sessionEncryptionKeyCache,
+                parameters.cachingConfigs.transparencyCheckCache,
                 synchronizerConnectionConfig,
                 onboardingClearanceScheduler,
                 participantId,
@@ -1349,10 +1349,6 @@ private[sync] class SynchronizerConnectionsManager(
             case Success(UnlessShutdown.Outcome(denied: CloseReason.PermissionDenied)) =>
               handleCloseDegradation(connectedSynchronizer, fatal = false)(
                 SyncServiceSynchronizerDisabledUs.Error(synchronizerAlias, denied.cause)
-              ).discard
-            case Success(UnlessShutdown.Outcome(CloseReason.BecamePassive)) =>
-              handleCloseDegradation(connectedSynchronizer, fatal = false)(
-                SyncServiceBecamePassive.Error(synchronizerAlias)
               ).discard
             case Success(UnlessShutdown.Outcome(error: CloseReason.UnrecoverableError)) =>
               if (isClosing)

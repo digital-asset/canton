@@ -102,7 +102,7 @@ object TestUtils extends FutureHelpers {
       if (haveAlreadyReachedTimestamp) {
         Succeeded
       } else {
-        // send time proofs until we see a successful deliver with
+        // send time proofs until we see a successful "deliver" event with
         // a sequencing time greater than or equal to the target time.
         logger.debug(s"Sending time proof to node $forNode")
         val sendCallback = SendCallback.future
@@ -110,6 +110,7 @@ object TestUtils extends FutureHelpers {
         sequencerClient
           .send(
             messageId = TimeProof.mkTimeProofRequestMessageId,
+            currentSnapshotApproximation = None,
             batch = Batch(Nil, BaseTest.testedProtocolVersion),
             callback = sendCallback,
           )(

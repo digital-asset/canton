@@ -33,14 +33,13 @@ trait DbConnectionAndDataSourceAroundEach
   implicit var connection: Connection = _
 
   private val dataSourceBackend =
-    StorageBackendFactory.of(dbType, loggerFactory).createDataSourceStorageBackend
+    StorageBackendFactory.dataSourceStorageBackend(dbType, loggerFactory)
   implicit var dataSource: DataSource = _
 
   override protected def beforeEach(): Unit = {
     super.beforeEach()
     dataSource = dataSourceBackend.createDataSource(
-      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl),
-      loggerFactory = loggerFactory,
+      dataSourceConfig = DataSourceStorageBackend.DataSourceConfig(jdbcUrl)
     )
     connection = retry(20, 1000) {
       val c = dataSource.getConnection

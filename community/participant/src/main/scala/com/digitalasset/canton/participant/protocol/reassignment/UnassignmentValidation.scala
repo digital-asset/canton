@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -165,16 +166,19 @@ private[reassignment] object UnassignmentValidation {
         fullTree: FullUnassignmentTree,
         sourceTopology: Source[TopologySnapshot],
     ): ValidationErrorOr[Option[ReassignmentValidationError]] =
-      validationErrorFromUnitEither(
-        ReassignmentValidation
-          .checkPackagesVetted(
-            stakeholders = fullTree.contracts.stakeholders,
-            contractIds = fullTree.contracts.contractIds.toSet,
-            packageIds = fullTree.contracts.sourcePackageIds.unwrap,
-            topologySnapshot = sourceTopology.unwrap,
-            synchronizerId = fullTree.sourceSynchronizer.unwrap,
-          )
-      )
+      if (fullTree.sourceSynchronizer.unwrap.protocolVersion > ProtocolVersion.v36)
+        validationErrorFromUnitEither(
+          ReassignmentValidation
+            .checkPackagesVetted(
+              stakeholders = fullTree.contracts.stakeholders,
+              contractIds = fullTree.contracts.contractIds.toSet,
+              packageIds = fullTree.contracts.sourcePackageIds.unwrap,
+              topologySnapshot = sourceTopology.unwrap,
+              synchronizerId = fullTree.sourceSynchronizer.unwrap,
+            )
+        )
+      else
+        EitherT.rightT(None)
   }
 
   final class ReassigningParticipantUnassignmentValidator(
@@ -184,16 +188,23 @@ private[reassignment] object UnassignmentValidation {
       val reassignmentMetrics: ReassignmentMetrics,
   )(implicit val executionContext: ExecutionContext, val traceContext: TraceContext) {
 
+    /** Returns the assignment exclusivity deadline up to protocol version 36, and None from
+      * protocol version 37.
+      */
     private def checkAssignmentExclusivity(
         fullTree: FullUnassignmentTree,
         targetTopology: Target[TopologySnapshot],
     ): ValidationErrorOr[Option[Target[CantonTimestamp]]] =
-      ProcessingSteps
-        .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
-        .map(Option(_))
-        .leftMap[ReassignmentProcessorError](
-          ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
-        )
+      if (
+        ReassignmentValidation.isAssignmentExclusivityEnforced(fullTree.targetSynchronizer.unwrap)
+      )
+        ProcessingSteps
+          .getAssignmentExclusivity(targetTopology, fullTree.targetTimestamp)
+          .map(Option(_))
+          .leftMap[ReassignmentProcessorError](
+            ReassignmentParametersError(fullTree.targetSynchronizer.unwrap, _)
+          )
+      else EitherT.rightT(None)
 
     // check the package of the template is vetted
     private def checkTargetPackagesVetted(
@@ -250,7 +261,7 @@ private[reassignment] object UnassignmentValidation {
         )
 
         contractSerializationErrors <- validationErrorFromUnitEither(
-          ReassignmentValidation.checkMaxSerializationVersion(
+          ReassignmentValidation.validateMaxSerializationVersion(
             parsedRequest.fullViewTree.reassignmentRef,
             parsedRequest.fullViewTree.targetSynchronizer,
             parsedRequest.fullViewTree.contracts,
@@ -322,6 +333,11 @@ private[reassignment] object UnassignmentValidation {
 
   }
 
+  /** @param assignmentExclusivity
+    *   before this time (measured on the target synchronizer), only the submitter of the
+    *   unassignment can initiate the assignment; None when the target synchronizer runs protocol
+    *   version 37 or higher, or when its topology is unknown
+    */
   private[reassignment] final case class ReassigningParticipantValidation(
       assignmentExclusivity: Option[Target[CantonTimestamp]],
       reassigningParticipantValidationResult: UnassignmentValidationResult.ReassigningParticipantValidationResult,

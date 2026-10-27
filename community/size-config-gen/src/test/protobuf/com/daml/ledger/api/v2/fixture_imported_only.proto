@@ -1,0 +1,12 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.daml.ledger.api.v2;
+
+// Mimics value.proto (ledger-api-value-proto): same package as the Ledger API protos, imported by
+// them, but not among the files to generate. Its messages must not get config classes.
+message FixtureImportedValue {
+  repeated string elements = 1;
+}

@@ -10,7 +10,7 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeDouble, NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -35,7 +35,6 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.collection.SeqUtil
 import com.digitalasset.canton.util.{
   ErrorUtil,
   FutureUnlessShutdownUtil,
@@ -90,6 +89,14 @@ class SequencerConnectionPoolImpl private[sequencing] (
   /** Tracks the configured connections, along with their validated status */
   private val trackedConnections: mutable.Map[InternalSequencerConnection, Boolean] =
     mutable.HashMap[InternalSequencerConnection, Boolean]()
+
+  /** Penalties of the sequencers, used to prefer the sequencers with the lowest penalties in
+    * connection selection.
+    */
+  private val penalties = new SequencerPenalties(loggerFactory)
+
+  @VisibleForTesting
+  override def connectionPenalties: Map[SequencerId, NonNegativeDouble] = penalties.snapshot
 
   /** Bootstrap information once the pool has been initialized */
   private val bootstrapCell = new SingleUseCell[BootstrapInfo]
@@ -150,6 +157,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     } else {
       logger.debug(s"Starting connection pool")
       setupInitializationTimeout()
+      schedulePenaltyDecay()
 
       updateTrackedConnections(
         toBeAdded = config.connections,
@@ -204,6 +212,34 @@ class SequencerConnectionPoolImpl private[sequencing] (
         initializationTimeout.asJavaApproximation,
       ),
       s"connection-pool-initialization-timeout",
+    )
+  }
+
+  /** Periodically decay the penalties of the sequencers in the pool. Take parameters from the
+    * current configuration, so that updates take effect from the next run.
+    */
+  private def schedulePenaltyDecay()(implicit traceContext: TraceContext): Unit = {
+    def decayPenalties(): Unit =
+      if (!isClosing) {
+        // Take the lock to ensure that `getConnections` sees a uniformly applied decay
+        lock.exclusive {
+          val penaltyConfig = config.sequencerConnectionPenaltyConfig
+          penalties.decay(
+            factor = penaltyConfig.decayFactor,
+            zeroThreshold = penaltyConfig.zeroThreshold,
+          )
+        }
+
+        schedulePenaltyDecay()
+      }
+
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      wallClock.scheduleAfterCancelledOnShutdown(
+        _ => decayPenalties(),
+        s"${getClass.getName}: penalty decay",
+        config.sequencerConnectionPenaltyConfig.decayInterval.duration,
+      ),
+      "connection-pool-penalty-decay",
     )
   }
 
@@ -279,6 +315,13 @@ class SequencerConnectionPoolImpl private[sequencing] (
       }
       // Newly created connections are not yet validated
       trackedConnections.addAll(newConnections.map(_ -> false))
+
+      // Clear the penalties of the sequencers that are no longer configured.
+      // It is not necessarily all the sequencers referenced in `removedConnections`, because a sequencer
+      // can have multiple connections.
+      val remainingSequencerIds = trackedConnections.keySet.flatMap(_.attributes.map(_.sequencerId))
+      val possiblyRemovedSequencerIds = removedConnections.flatMap(_.attributes.map(_.sequencerId))
+      penalties.remove(possiblyRemovedSequencerIds.diff(remainingSequencerIds))
 
       metrics.trackedConnections.updateValue(trackedConnections.size)
 
@@ -668,7 +711,16 @@ class SequencerConnectionPoolImpl private[sequencing] (
 
       val synchronizerCrypto = SynchronizerCrypto(crypto, staticParameters)
       connection
-        .buildUserConnection(authConfig, member, synchronizerCrypto, clock)
+        .buildUserConnection(
+          authConfig,
+          member,
+          synchronizerCrypto,
+          clock,
+          penaltyModifier = new SequencerPenaltyModifier {
+            override def increase(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
+              penalties.increase(sequencerId, amount)
+          },
+        )
         .map { userConnection =>
           pool
             .updateWith(sequencerId) {
@@ -750,7 +802,6 @@ class SequencerConnectionPoolImpl private[sequencing] (
       excluded: Set[SequencerId],
       acceptableO: Option[Set[SequencerId]],
   )(implicit traceContext: TraceContext): Set[SequencerConnection] =
-    // Always return connections randomly for now
     lock.exclusive {
       val allowedMsg =
         acceptableO.fold("")(acceptable => s" allowing only ${acceptable.map(_.uid.identifier)}")
@@ -759,14 +810,21 @@ class SequencerConnectionPoolImpl private[sequencing] (
             .map(_.uid.identifier)}$allowedMsg"
       )
 
-      // Pick up to `requestedNumber` allowed and non-excluded sequencer IDs from the pool
-      val randomSeqIds = SeqUtil.randomSubsetShuffle(
-        acceptableO.fold(pool.keySet)(_.intersect(pool.keySet)).diff(excluded).toIndexedSeq,
-        requestedNumber.unwrap,
-        random,
-      )
+      val penaltiesAreEnabled = config.sequencerConnectionPenaltyConfig.enabled
+      def penaltyOf(sequencerId: SequencerId): NonNegativeDouble =
+        if (penaltiesAreEnabled) penalties.get(sequencerId) else NonNegativeDouble.zero
 
-      val pickedConnections = randomSeqIds.map { seqId =>
+      // Pick up to `requestedNumber` allowed and non-excluded sequencer IDs from the pool, preferring the
+      // sequencers with the lowest penalties. Shuffling before the stable sort breaks ties randomly.
+      val candidates =
+        acceptableO.fold(pool.keySet)(_.intersect(pool.keySet)).diff(excluded).toIndexedSeq
+      val candidatePenalties = candidates.map(seqId => seqId -> penaltyOf(seqId)).toMap
+      val pickedSeqIds = random
+        .shuffle(candidates)
+        .sortBy(candidatePenalties)
+        .take(requestedNumber.unwrap)
+
+      val pickedConnections = pickedSeqIds.map { seqId =>
         val connections = pool(seqId) // seqIDs were picked from the pool so this cannot fail
 
         // Cheap round-robin: return the head connection and move it to the end
@@ -780,7 +838,21 @@ class SequencerConnectionPoolImpl private[sequencing] (
         head
       }.toSet
 
-      logger.debug(s"[$requester] returning ${pickedConnections.map(_.name)}")
+      val penaltiesMsg = {
+        val nonZeroPenalties = candidatePenalties.filter { case (_, penalty) =>
+          penalty > NonNegativeDouble.zero
+        }
+        if (nonZeroPenalties.nonEmpty) {
+          val penaltiesStr = nonZeroPenalties
+            .map { case (seqId, penalty) => f"${seqId.uid.identifier}=${penalty.value}%.3g" }
+            .mkString(", ")
+          s" (penalties: $penaltiesStr)"
+        } else {
+          ""
+        }
+      }
+
+      logger.debug(s"[$requester] returning ${pickedConnections.map(_.name)}$penaltiesMsg")
       pickedConnections
     }
 

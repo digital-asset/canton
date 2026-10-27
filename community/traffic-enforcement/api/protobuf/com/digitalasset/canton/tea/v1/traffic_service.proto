@@ -17,10 +17,15 @@ service TrafficService {
   // Permissioned only to Ledger API admin users.
   rpc UpdateAccount(UpdateAccountRequest) returns (UpdateAccountResponse);
 
-  // Prune events from the event log that are older than a given timestamp.
+  // Prune events from the event log, submission correlations, and uncharged completions that are older than a given timestamp.
+  // Submission correlations record the account each submission is charged to.
+  // Uncharged completions record completions with a positive cost that weren't charged to any account.
   // Permissioned only to Ledger API admin users.
+  // The timestamp must be at least the participant's max deduplication duration in the past
+  // (7 days by default), otherwise the request is rejected with TRAFFIC_UNSAFE_TO_PRUNE.
   // WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
-  rpc PruneEvents(PruneEventsRequest) returns (PruneEventsResponse);
+  // WARNING: If a submission's correlation is pruned before its completion arrives, the submission is NOT debited.
+  rpc Prune(PruneRequest) returns (PruneResponse);
 }
 
 message GetAccountRequest {
@@ -70,17 +75,27 @@ message UpdateAccountResponse {
   GetAccountResponse response = 1;
 }
 
-message PruneEventsRequest {
-  // The timestamp before which events should be pruned.
-  // Events with a timestamp less than or equal to this value will be pruned.
+message PruneRequest {
+  // The timestamp before which events, submission correlations, and uncharged completions should be pruned.
+  // Events, submission correlations, and uncharged completions with a timestamp less than or equal to this value will be pruned.
   //
   // Required
   google.protobuf.Timestamp before_or_at = 1;
 }
 
-message PruneEventsResponse {
+message PruneResponse {
   // The number of events that were pruned.
   //
   // Required
   int32 pruned_event_count = 1;
+
+  // The number of submission correlations that were pruned.
+  //
+  // Required
+  int32 pruned_correlation_count = 2;
+
+  // The number of uncharged completions that were pruned.
+  //
+  // Required
+  int32 pruned_uncharged_completion_count = 3;
 }

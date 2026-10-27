@@ -479,7 +479,7 @@ class UpgradeTest
       sexprToEval,
       Set(alice, bob),
       MachineLogger(),
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.DefaultForTesting,
     )
 
     val contract = TransactionBuilder
@@ -523,7 +523,7 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       packageResolution = packageResolution,
-      interpretationConfig = InterpretationConfig.Default,
+      interpretationConfig = InterpretationConfig.DefaultForTesting,
     )
   }
 

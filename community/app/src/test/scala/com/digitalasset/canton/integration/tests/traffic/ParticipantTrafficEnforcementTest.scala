@@ -13,39 +13,48 @@ import com.digitalasset.canton.console.{
   CommandFailure,
   ExternalLedgerApiClient,
   LocalParticipantReference,
+  ParticipantReference,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.examples.java.cycle.Cycle
+import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.ledgerapi.DbLockingSupport
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
-import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
+import com.digitalasset.canton.integration.util.{PartiesAllocator, TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
+import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.config.{
   TrafficAccountingConfig,
   TrafficEnforcementServerConfig,
 }
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
+  CorrelationConflict,
   InsufficientBalance,
   MultiPartySubmissionRejected,
   TrafficUpdateOutOfBound,
   TransientFailure,
+  UnsafeToPrune,
 }
+import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCreditIssuer
+import com.digitalasset.canton.tea.projection.{ActAsCategory, UnchargedReason}
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ExternalParty, PartyId}
 import com.digitalasset.canton.util.ShowUtil.*
 import io.circe.parser.decode
@@ -64,10 +73,11 @@ import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 import scala.jdk.DurationConverters.*
 
-sealed trait ParticipantTrafficEnforcementTest
+trait ParticipantTrafficEnforcementTest
     extends CommunityIntegrationTest
     with SharedEnvironment
-    with HasCycleUtils {
+    with HasCycleUtils
+    with TeaDbTestHelpers {
 
   protected val teaServerName = "tea-server"
 
@@ -83,7 +93,14 @@ sealed trait ParticipantTrafficEnforcementTest
     * add focused transforms on top for this.
     */
   protected def defaultTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.updateParticipantConfig("participant1")(
+    enableTrafficEnforcement("participant1"),
+    // Shorten network timeout so retries to the non-existent traffic service give up quickly
+    _.focus(_.parameters.timeouts.processing.network)
+      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
+  )
+
+  protected final def enableTrafficEnforcement(participantName: String): ConfigTransform =
+    ConfigTransforms.updateParticipantConfig(participantName)(
       _.focus(_.trafficAccounting)
         .replace(
           TrafficAccountingConfig(
@@ -92,53 +109,73 @@ sealed trait ParticipantTrafficEnforcementTest
             trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
           )
         )
-    ),
-    // Shorten network timeout so retries to the non-existent traffic service give up quickly
-    _.focus(_.parameters.timeouts.processing.network)
-      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
-  )
+        // TEA uses this as the pruning retention too; zero means tests can prune right up to now.
+        .focus(_.init.ledgerApi.maxDeduplicationDuration)
+        .replace(config.NonNegativeFiniteDuration.Zero)
+    )
 
   protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq.empty
 
   protected final def participantConfigTransforms: Seq[ConfigTransform] =
     defaultTrafficEnforcementConfigTransforms ++ extraTrafficEnforcementConfigTransforms
 
+  protected final def configTransforms: Seq[ConfigTransform] =
+    participantConfigTransforms ++ Seq(
+      ConfigTransforms.enableInteractiveSubmissionTransforms,
+      ConfigTransforms.useStaticTime,
+      ConfigTransforms.updateAllSequencerConfigs_(
+        _.focus(_.trafficConfig.pruningRetentionWindow)
+          .replace(config.NonNegativeFiniteDuration.ofSeconds(5))
+          .focus(_.trafficConfig.trafficPurchasedCacheSizePerMember)
+          .replace(PositiveInt.one)
+      ),
+    )
+
+  protected final def withPredictableTraffic(
+      definition: EnvironmentDefinition
+  ): EnvironmentDefinition =
+    definition.withTrafficControl(
+      TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+      trafficControlParameters = TrafficControlUtils.predictableTraffic,
+      topUpAllMembers = true,
+      disableCommitments = true,
+    )
+
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(participantConfigTransforms*)
-      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
-      .addConfigTransform(
-        ConfigTransforms.updateAllSequencerConfigs_(
-          _.focus(_.trafficConfig.pruningRetentionWindow)
-            .replace(config.NonNegativeFiniteDuration.ofSeconds(5))
-            .focus(_.trafficConfig.trafficPurchasedCacheSizePerMember)
-            .replace(PositiveInt.one)
-        )
-      )
-      .withSetup { implicit env =>
-        import env.*
-        participants.local.foreach { participant =>
-          participant.synchronizers.connect_local(sequencer1, alias = daName)
-          participant.dars.upload(CantonExamplesPath, synchronizerId = daId)
+    withPredictableTraffic(
+      EnvironmentDefinition.P2_S1M1
+        .addConfigTransforms(configTransforms*)
+        .withSetup { implicit env =>
+          import env.*
+          participants.local.foreach { participant =>
+            participant.synchronizers.connect_local(sequencer1, alias = daName)
+            participant.dars.upload(CantonExamplesPath, synchronizerId = daId)
+          }
+
+          aliceE = participant1.parties.testing.external.enable("Alice")
+          bobE = participant1.parties.testing.external.enable("Bob")
+          eveE = participant1.parties.testing.external.enable("Eve")
+
+          charlie = participant1.parties.enable("Charlie")
+          dan = participant1.parties.enable("Dan")
         }
-
-        aliceE = participant1.parties.testing.external.enable("Alice")
-        bobE = participant1.parties.testing.external.enable("Bob")
-        eveE = participant1.parties.testing.external.enable("Eve")
-
-        charlie = participant1.parties.enable("Charlie")
-        dan = participant1.parties.enable("Dan")
-      }
-      .withTrafficControl(
-        TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
-        trafficControlParameters = TrafficControlUtils.predictableTraffic,
-        topUpAllMembers = true,
-        disableCommitments = true,
-      )
+    )
 
   protected def assertUnimplemented(entry: LogEntry): Assertion =
     entry.message should include(Status.Code.UNIMPLEMENTED.toString)
+
+  protected def balance(participant: LocalParticipantReference, party: PartyId): Long =
+    participant.ledger_api.traffic.get_account(party.toProtoPrimitive).balance
+
+  /** TEA deletes the correlation in the same transaction that charges the completion. */
+  protected def awaitCharged(
+      participant: LocalParticipantReference,
+      commandId: String,
+      actAs: Set[PartyId],
+  ): Unit =
+    eventually() {
+      correlationsFromDb(participant, changeIdHash(commandId, actAs)) shouldBe empty
+    }
 }
 
 final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTrafficEnforcementTest {
@@ -167,7 +204,7 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
         )
 
         assertThrowsAndLogsCommandFailures(
-          participant1.ledger_api.traffic.prune_events(wallClock.now),
+          participant1.ledger_api.traffic.prune(wallClock.now),
           assertUnimplemented,
         )
       }
@@ -233,14 +270,31 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
 
         // Prune the first event
         val rsp = participant1.ledger_api.traffic
-          .prune_events(startTime)
+          .prune(startTime)
 
         rsp.prunedEventCount shouldBe 1
 
         val rsp2 = participant1.ledger_api.traffic
-          .prune_events(startTime)
+          .prune(startTime)
 
         rsp2.prunedEventCount shouldBe 0
+      }
+
+      "reject a prune inside the minimum pruning retention, with its own error code" in {
+        implicit env =>
+          import env.*
+
+          // The retention limit is zero in this test, so only a future value will fail.
+          val future = env.environment.simClock.value.now.plusSeconds(1)
+
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+            participant1.ledger_api.traffic.prune(future),
+            entries =>
+              inside(entries) { case Seq(clientEntry, consoleEntry) =>
+                clientEntry.warningMessage should include(UnsafeToPrune.id)
+                consoleEntry.shouldBeCantonErrorCode(UnsafeToPrune)
+              },
+          )
       }
 
       "reject an update_account with a delta that would take the balance out of bound, with its own error code" in {
@@ -273,16 +327,31 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
       "debit traffic from submitting party account" in { implicit env =>
         import env.*
 
-        val alice = aliceE.partyId.toProtoPrimitive
-        val aliceBalance = participant1.ledger_api.traffic.get_account(alice).balance
+        val aliceBalance = balance(participant1, aliceE.partyId)
 
         val iouCmd = IouSyntax.testIou(aliceE, aliceE, 10L).create().commands().asScala.toSeq
-        val transaction = participant1.ledger_api.javaapi.commands.submit(Seq(aliceE), iouCmd)
-        val cost = transaction.getPaidTrafficCost
+        val commandId = UUID.randomUUID().toString
+        val transaction = participant1.ledger_api.javaapi.commands
+          .submit(Seq(aliceE), iouCmd, commandId = commandId)
 
-        eventually() {
-          participant1.ledger_api.traffic.get_account(alice).balance shouldBe aliceBalance - cost
-        }
+        // aliceE is external, so this covers the interactive execute path.
+        awaitCharged(participant1, commandId, Set(aliceE.partyId))
+        balance(participant1, aliceE.partyId) shouldBe aliceBalance - transaction.getPaidTrafficCost
+
+        // Charlie is local, so this covers the classic path, with a generated submission id.
+        participant1.ledger_api.traffic
+          .update_account(charlie.toProtoPrimitive, balanceDelta = Some(1_000_000L))
+        val charlieBalance = balance(participant1, charlie)
+        val classicCommandId = UUID.randomUUID().toString
+        val classicTransaction = participant1.ledger_api.commands
+          .submit(
+            actAs = Seq(charlie),
+            commands = Seq(createCycleCommand(charlie, "traffic")),
+            commandId = classicCommandId,
+          )
+        awaitCharged(participant1, classicCommandId, Set(charlie))
+        balance(participant1, charlie) shouldBe
+          charlieBalance - classicTransaction.paidTrafficCost.value
       }
 
       "reject submission for submitting party with not enough account balance" in { implicit env =>
@@ -392,7 +461,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         val encodedAccount = URLEncoder.encode(accountId, StandardCharsets.UTF_8)
         val accountUrl = s"http://localhost:$port/v2/traffic/accounts/$encodedAccount"
         val accountsUrl = s"http://localhost:$port/v2/traffic/accounts"
-        val pruneUrl = s"http://localhost:$port/v2/traffic/events/prune"
+        val pruneUrl = s"http://localhost:$port/v2/traffic/prune"
 
         def balance(): Long =
           decode[GetAccountResponse](httpGet(accountUrl)).value.balance
@@ -409,10 +478,10 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         }
 
         def prune(beforeOrAt: CantonTimestamp): Int = {
-          val requestBody = PruneEventsRequest(
+          val requestBody = PruneRequest(
             beforeOrAt = Some(beforeOrAt.toProtoTimestamp)
           ).asJson.noSpaces
-          decode[PruneEventsResponse](
+          decode[PruneResponse](
             httpPost(pruneUrl, requestBody)
           ).value.prunedEventCount
         }
@@ -440,64 +509,99 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         import env.*
 
         val actAs = Seq(charlie, dan)
+        val commandId = UUID.randomUUID().toString
+        val submissionId = UUID.randomUUID().toString
 
         // Charlie and Dan can submit a multi-party transaction without having any traffic balance
-        loggerFactory.assertLogsSeq(SuppressionRule.Level(INFO))(
+        val transaction = loggerFactory.assertLogsSeq(SuppressionRule.Level(INFO))(
           participant1.ledger_api.commands
             .submit(
               actAs = actAs,
               commands = Seq(createCycleCommand(charlie, "traffic")),
+              commandId = commandId,
+              submissionId = submissionId,
+            ),
+          forAtLeast(1, _) { entry =>
+            entry.infoMessage should include(
+              "Skipping traffic enforcement validation due to non-singleton actAs parties:"
             )
-            .discard,
-          forAtLeast(1, _) {
-            _.infoMessage should include(
-              show"Skipping traffic enforcement validation due to non-singleton actAs parties: $actAs"
-            )
+            forEvery(actAs)(party => entry.infoMessage should include(show"$party"))
           },
         )
+
+        eventually() {
+          unchargedFromDb(participant1, changeIdHash(commandId, actAs.toSet)) shouldBe Seq(
+            (
+              submissionId,
+              transaction.paidTrafficCost.value,
+              UnchargedReason.NoAccountSelected,
+              ActAsCategory.MultipleActingParties,
+            )
+          )
+          correlationsFromDb(participant1, changeIdHash(commandId, actAs.toSet)) shouldBe empty
+        }
       }
 
-      "not enforce the balance check for the participant admin party" in { implicit env =>
-        import env.*
+      "skip the balance check for the admin party and reject a repeated submission id" in {
+        implicit env =>
+          import env.*
 
-        val adminParty = participant1.adminParty
+          val adminParty = participant1.adminParty
 
-        // The admin party should starts with no balance.
-        participant1.ledger_api.traffic
-          .get_account(adminParty.toProtoPrimitive)
-          .balance shouldBe 0L
-
-        // The submission succeeds even though the balance check would reject any other
-        // party with no balance.
-        val transaction = loggerFactory.assertLogsSeq(
-          SuppressionRule.forLogger[TrafficEnforcementBackend] && SuppressionRule.Level(DEBUG)
-        )(
-          participant1.ledger_api.javaapi.commands.submit(
-            Seq(adminParty),
-            Seq(createCycleCommandJava(adminParty, "traffic")),
-          ),
-          forAtLeast(1, _) {
-            _.debugMessage should include(
-              show"Skipping traffic enforcement validation for participant admin party: ${adminParty.toLf}"
+          def submitAsAdmin(commandId: String, submissionId: String) =
+            participant1.ledger_api.javaapi.commands.submit(
+              Seq(adminParty),
+              Seq(createCycleCommandJava(adminParty, "traffic")),
+              commandId = commandId,
+              submissionId = submissionId,
             )
-          },
-        )
-        val cost = transaction.getPaidTrafficCost
 
-        // The admin account is still debited through the completion stream.
-        eventually() {
+          // The admin party should start with no balance.
           participant1.ledger_api.traffic
             .get_account(adminParty.toProtoPrimitive)
-            .balance shouldBe 0L - cost
-        }
+            .balance shouldBe 0L
 
-        // Interactive preparation is not rejected either.
-        val preparedAdmin = participant1.ledger_api.interactive_submission.prepare(
-          actAs = Seq(adminParty),
-          commands = Seq(createCycleCommand(adminParty, "traffic-prepare")),
-          hashingSchemeVersion = testedApiHashingSchemeVersion,
-        )
-        preparedAdmin.getPreparedTransaction should not be null
+          // The submission succeeds even though the balance check would reject any other
+          // party with no balance.
+          val transaction = loggerFactory.assertLogsSeq(
+            SuppressionRule.forLogger[TrafficEnforcementBackend] && SuppressionRule.Level(DEBUG)
+          )(
+            submitAsAdmin(UUID.randomUUID().toString, UUID.randomUUID().toString),
+            forAtLeast(1, _) {
+              _.debugMessage should include(
+                show"Skipping traffic enforcement validation for participant admin party: ${adminParty.toLf}"
+              )
+            },
+          )
+          val cost = transaction.getPaidTrafficCost
+
+          // The admin account is still debited through the completion stream.
+          eventually() {
+            participant1.ledger_api.traffic
+              .get_account(adminParty.toProtoPrimitive)
+              .balance shouldBe 0L - cost
+          }
+
+          // Interactive preparation is not rejected either.
+          val preparedAdmin = participant1.ledger_api.interactive_submission.prepare(
+            actAs = Seq(adminParty),
+            commands = Seq(createCycleCommand(adminParty, "traffic-prepare")),
+            hashingSchemeVersion = testedApiHashingSchemeVersion,
+          )
+          preparedAdmin.getPreparedTransaction should not be null
+
+          val commandId = UUID.randomUUID().toString
+          val submissionId = UUID.randomUUID().toString
+          insertCorrelationIntoDb(
+            participant1,
+            changeIdHash(commandId, Set(adminParty)),
+            submissionId,
+            Some(adminParty.toProtoPrimitive),
+          )
+          assertThrowsAndLogsCommandFailures(
+            submitAsAdmin(commandId, submissionId),
+            _.shouldBeCantonErrorCode(CorrelationConflict),
+          )
       }
     }
 
@@ -531,7 +635,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           )
 
           loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-            participant1.ledger_api.traffic.prune_events(wallClock.now),
+            participant1.ledger_api.traffic.prune(wallClock.now),
             assertEntriesTeaUnavailable,
           )
 
@@ -591,6 +695,14 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
 
   "Participant" when {
     "traffic enforcement is enabled but enforce-cost-on-submissions=false" should {
+      "not upload the traffic credit package when top-up is disabled" in { implicit env =>
+        import env.*
+
+        participant1.packages
+          .list()
+          .map(_.packageId) should not contain TrafficCreditIssuer.PACKAGE_ID
+      }
+
       "do not enforce traffic on submissions (allow negative balances) but still debit traffic from submitting party account" in {
         implicit env =>
           import env.*
@@ -778,10 +890,7 @@ final class ParticipantTrafficEnforcementDegradationTest
       participant: LocalParticipantReference,
       accountId: String,
   ): Option[Long] = {
-    val storage: DbStorage = participant.underlying.value.storage match {
-      case dbStorage: DbStorage => dbStorage
-      case other => fail(s"expected DbStorage, got $other")
-    }
+    val storage = dbStorage(participant)
     import storage.api.*
     implicit val closeContext: CloseContext = CloseContext(storage)
     storage
@@ -815,32 +924,261 @@ final class ParticipantTrafficEnforcementDegradationTest
 
         // Charlie's balance is zero, so a lookup that did complete would reject this submission.
         val degradedMessage = "allowing the submission to proceed without a balance check"
+        val noCorrelationMessage = "No correlation found for completion"
+        val commandId = UUID.randomUUID().toString
+        val submissionId = UUID.randomUUID().toString
+        val charlieBalance = balanceFromDb(participant1, charlie.toProtoPrimitive)
 
-        val balanceTableLock = lockBalanceTable(participant1)
-        try {
-          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
-            participant1.ledger_api.javaapi.commands
-              .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "degraded")))
-              .getUpdateId should not be empty,
-            entries => {
-              forAtLeast(1, entries)(_.warningMessage should include(degradedMessage))
-              // Either timeout can win: the store failure is retried, or the client hits its deadline first.
-              forEvery(entries)(entry =>
-                entry.warningMessage should (include(degradedMessage) or
-                  include(TransientFailure.id) or
-                  include("Retry timeout has elapsed, giving up.") or
-                  include("DEADLINE_EXCEEDED"))
+        loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
+          {
+            val balanceTableLock = lockBalanceTable(participant1)
+            val transaction =
+              try
+                participant1.ledger_api.javaapi.commands.submit(
+                  Seq(charlie),
+                  Seq(createCycleCommandJava(charlie, "degraded")),
+                  commandId = commandId,
+                  submissionId = submissionId,
+                )
+              finally balanceTableLock.commitAndClose()
+
+            // TEA has no stored account for the degraded submission, so it doesn't charge it.
+            eventually() {
+              unchargedFromDb(participant1, changeIdHash(commandId, Set(charlie))) shouldBe Seq(
+                (
+                  submissionId,
+                  transaction.getPaidTrafficCost.longValue(),
+                  UnchargedReason.MissingCorrelation,
+                  ActAsCategory.SingleNonAdminActingParty,
+                )
               )
-            },
-          )
-        } finally {
-          balanceTableLock.commitAndClose()
-        }
+            }
+          },
+          entries => {
+            forAtLeast(1, entries)(_.warningMessage should include(degradedMessage))
+            forAtLeast(1, entries)(_.warningMessage should include(noCorrelationMessage))
+            // Either timeout can win: the store failure is retried, or the client hits its deadline first.
+            forEvery(entries)(entry =>
+              entry.warningMessage should (include(degradedMessage) or
+                include(noCorrelationMessage) or
+                include(TransientFailure.id) or
+                include("Retry timeout has elapsed, giving up.") or
+                include("DEADLINE_EXCEEDED"))
+            )
+          },
+        )
 
-        // The submission was still charged even though the balance check was bypassed.
-        eventually() {
-          balanceFromDb(participant1, charlie.toProtoPrimitive).value should be < 0L
+        balanceFromDb(participant1, charlie.toProtoPrimitive) shouldBe charlieBalance
+      }
+    }
+  }
+}
+
+final class ParticipantTrafficEnforcementReassignmentTest
+    extends ParticipantTrafficEnforcementTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+
+  private var bob: PartyId = _
+
+  private val exclusivityTimeout = config.NonNegativeFiniteDuration.ofSeconds(1)
+
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
+    enableTrafficEnforcement("participant2"),
+    ConfigTransforms.updateParticipantConfig("participant2")(
+      _.focus(_.parameters.reassignmentsConfig.automaticAssignmentDelay)
+        .replace(config.NonNegativeFiniteDuration.Zero)
+    ),
+  )
+
+  override def environmentDefinition: EnvironmentDefinition =
+    withPredictableTraffic(
+      EnvironmentDefinition.P2_S1M1_S1M1
+        .addConfigTransforms(configTransforms*)
+        .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
+        .withSetup { implicit env =>
+          import env.*
+          participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+          participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
+          participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
+          participants.all.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+
+          // Before protocol version 37, a zero exclusivity timeout disables automatic assignment.
+          Seq((sequencer1, daId), (sequencer2, acmeId)).foreach {
+            case (sequencer, synchronizerId) =>
+              sequencer.topology.synchronizer_parameters.propose_update(
+                synchronizerId,
+                _.update(assignmentExclusivityTimeout = exclusivityTimeout),
+              )
+          }
+
+          def hostedOn(participant: ParticipantReference) = {
+            val permissions = (
+              PositiveInt.one,
+              Set((participant.id, ParticipantPermission.Submission: ParticipantPermission)),
+            )
+            Map(daId -> permissions, acmeId -> permissions)
+          }
+
+          // The allocator returns each party once per synchronizer, in the order given.
+          val parties = PartiesAllocator(Set(participant1, participant2))(
+            Seq(("charlie", participant1), ("dan", participant1), ("bob", participant2)),
+            Map(
+              "charlie" -> hostedOn(participant1),
+              "dan" -> hostedOn(participant1),
+              "bob" -> hostedOn(participant2),
+            ),
+          ).map(_.partyId).distinct
+          inside(parties) { case Seq(newCharlie, newDan, newBob) =>
+            charlie = newCharlie
+            dan = newDan
+            bob = newBob
+          }
+
+          participant1.ledger_api.traffic
+            .update_account(charlie.toProtoPrimitive, balanceDelta = Some(1_000_000L))
         }
+    )
+
+  /** Creates an IOU on `da` with Dan as the other stakeholder, who has no balance. Waits for TEA to
+    * charge the creation before returning, so later balance reads see the charge.
+    */
+  private def createIouWithDan()(implicit env: TestConsoleEnvironment): LfContractId = {
+    import env.*
+    val commandId = UUID.randomUUID().toString
+    val transaction = participant1.ledger_api.javaapi.commands.submit(
+      Seq(charlie),
+      IouSyntax.testIou(charlie, dan).create().commands().asScala.toSeq,
+      synchronizerId = Some(daId),
+      commandId = commandId,
+    )
+    awaitCharged(participant1, commandId, Set(charlie))
+    val iou = JavaDecodeUtil.decodeAllCreated(Iou.COMPANION)(transaction).loneElement
+    LfContractId.assertFromString(iou.id.contractId)
+  }
+
+  "Participant" when {
+    "traffic enforcement is enabled" should {
+      "register client reassignments for the submitter and pass TEA rejections through" in {
+        implicit env =>
+          import env.*
+
+          val cid = createIouWithDan()
+          val charlieBalance = balance(participant1, charlie)
+
+          assertThrowsAndLogsCommandFailures(
+            participant1.ledger_api.commands.submit_unassign_async(dan, Seq(cid), daId, acmeId),
+            _.shouldBeCantonErrorCode(InsufficientBalance),
+          )
+
+          val conflictingCommandId = UUID.randomUUID().toString
+          val conflictingSubmissionId = UUID.randomUUID().toString
+          insertCorrelationIntoDb(
+            participant1,
+            changeIdHash(conflictingCommandId, Set(charlie)),
+            conflictingSubmissionId,
+            Some(charlie.toProtoPrimitive),
+          )
+          assertThrowsAndLogsCommandFailures(
+            participant1.ledger_api.commands.submit_unassign_async(
+              charlie,
+              Seq(cid),
+              daId,
+              acmeId,
+              commandId = conflictingCommandId,
+              submissionId = conflictingSubmissionId,
+            ),
+            _.shouldBeCantonErrorCode(CorrelationConflict),
+          )
+
+          val unassigned = participant1.ledger_api.commands.submit_unassign(
+            charlie,
+            Seq(cid),
+            daId,
+            acmeId,
+          )
+          val assigned = participant1.ledger_api.commands.submit_assign(
+            charlie,
+            unassigned.reassignmentId,
+            daId,
+            acmeId,
+          )
+
+          Seq(unassigned.reassignment.commandId, assigned.reassignment.commandId).foreach(
+            awaitCharged(participant1, _, Set(charlie))
+          )
+          balance(participant1, charlie) shouldBe charlieBalance -
+            unassigned.reassignment.paidTrafficCost.value -
+            assigned.reassignment.paidTrafficCost.value
+          balance(participant1, dan) shouldBe 0L
+      }
+
+      "register routing reassignments with the transaction's account, not the batch submitter" in {
+        implicit env =>
+          import env.*
+
+          val createCommandId = UUID.randomUUID().toString
+          val tx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(charlie),
+            Seq(createCycleCommandJava(charlie, "routing")),
+            synchronizerId = Some(acmeId),
+            commandId = createCommandId,
+          )
+          val cycle = JavaDecodeUtil.decodeAllCreated(Cycle.COMPANION)(tx).loneElement
+          awaitCharged(participant1, createCommandId, Set(charlie))
+          val charlieBalance = balance(participant1, charlie)
+
+          // Charlie is the only stakeholder, so routing picks Charlie as the batch submitter.
+          val commandId = UUID.randomUUID().toString
+          val submissionId = UUID.randomUUID().toString
+          participant1.ledger_api.javaapi.commands
+            .submit(
+              Seq(charlie, dan),
+              cycle.id.exerciseArchive().commands.asScala.toSeq,
+              synchronizerId = Some(daId),
+              commandId = commandId,
+              submissionId = submissionId,
+            )
+            .discard
+
+          // Routing reassignments use the same no-account marker as the transaction.
+          eventually() {
+            val rows =
+              unchargedFromDb(participant1, changeIdHash(commandId, Set(charlie))).sortBy(_._1)
+            rows.map { case (_, _, reason, category) => (reason, category) } shouldBe Seq.fill(2)(
+              (UnchargedReason.NoAccountSelected, ActAsCategory.SingleNonAdminActingParty)
+            )
+            inside(rows.map(_._1)) { case Seq(assignmentId, unassignmentId) =>
+              assignmentId should startWith(s"$submissionId-a")
+              unassignmentId shouldBe
+                s"$submissionId-u${assignmentId.stripPrefix(s"$submissionId-a")}"
+            }
+          }
+          balance(participant1, charlie) shouldBe charlieBalance
+      }
+
+      "charge an assignment that another participant completes to that participant's admin party" in {
+        implicit env =>
+          import env.*
+
+          val iou = IouSyntax.createIou(participant1, Some(daId))(charlie, bob)
+          val adminBalance = balance(participant2, participant2.adminParty)
+          val unassigned = participant1.ledger_api.commands.submit_unassign(
+            charlie,
+            Seq(LfContractId.assertFromString(iou.id.contractId)),
+            daId,
+            acmeId,
+          )
+          val assignmentChangeIdHash = changeIdHash(unassigned.reassignment.commandId, Set(bob))
+
+          environment.simClock.value.advance(exclusivityTimeout.asJava.multipliedBy(2))
+          participants.all.foreach(_.testing.fetch_synchronizer_times())
+
+          // Participant2 hosts Bob and isn't the initiator, so it assigns automatically.
+          eventually() {
+            balance(participant2, participant2.adminParty) should be < adminBalance
+            correlationsFromDb(participant2, assignmentChangeIdHash) shouldBe empty
+          }
+          correlationsFromDb(participant1, assignmentChangeIdHash) shouldBe empty
       }
     }
   }

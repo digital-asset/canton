@@ -24,7 +24,9 @@ def testcase_key(tc):
 def parse_junit_file(path, timings):
     try:
         root = ET.parse(path).getroot()
-    except ET.ParseError:
+    except (
+        ET.ParseError
+    ):  # silent-ok: an unreadable report adds no timings, merge_timings fails if none are usable
         return
 
     for tc in root.iter("testcase"):
@@ -33,7 +35,7 @@ def parse_junit_file(path, timings):
             continue
         try:
             duration = float(tc.attrib.get("time") or 0.0)
-        except ValueError:
+        except ValueError:  # silent-ok: a malformed time attribute only skews one test's weight
             duration = 0.0
         # sbt's JUnit listener writes -1ms (-0.001s) for test events whose
         # duration the framework did not report. Left as-is those sentinels
