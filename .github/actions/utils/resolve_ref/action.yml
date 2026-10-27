@@ -25,6 +25,9 @@ outputs:
   base_ref:
     description: GitHub base ref (set for pull_request)
     value: ${{ steps.resolve.outputs.base_ref }}
+  base_branch:
+    description: Branch whose caches to fall back to (base_ref for pull_request, else the release line from version.sbt if it exists, else main)
+    value: ${{ steps.resolve.outputs.base_branch }}
 
 runs:
   using: composite
@@ -44,6 +47,11 @@ runs:
         resolved_ref="$REF_NAME"
         ref_kind="$REF_TYPE"
         ref_group_key="${EVENT_NAME}-${REF_NAME}"
+        base_branch="main"
+        version=$(grep -oE '[0-9]+\.[0-9]+' version.sbt 2>/dev/null | head -1 || true)
+        if git rev-parse --verify --quiet "refs/remotes/origin/release-line-${version}" >/dev/null 2>&1; then
+          base_branch="release-line-${version}"
+        fi
 
         case "$EVENT_NAME" in
           pull_request)
@@ -54,6 +62,7 @@ runs:
             else
               ref_group_key="pr-${HEAD_REF}"
             fi
+            base_branch="$BASE_REF"
             ;;
           merge_group)
             ref_kind="merge_group"
@@ -78,4 +87,5 @@ runs:
           echo "event_name=${EVENT_NAME}"
           echo "head_ref=${HEAD_REF}"
           echo "base_ref=${BASE_REF}"
+          echo "base_branch=${base_branch}"
         } >> "$GITHUB_OUTPUT"

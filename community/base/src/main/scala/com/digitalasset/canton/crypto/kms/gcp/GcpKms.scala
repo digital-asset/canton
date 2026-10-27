@@ -181,6 +181,13 @@ class GcpKms(
       errorHandler(err, (errStr, retryable) => kmsErrorGen(errStr, retryable))
     )
 
+  // NOTE: GCP KMS supports Ed25519 only with software protection
+  private def protectionLevel(algorithm: CryptoKeyVersionAlgorithm): gcp.ProtectionLevel =
+    algorithm match {
+      case CryptoKeyVersionAlgorithm.EC_SIGN_ED25519 => gcp.ProtectionLevel.SOFTWARE
+      case _ => gcp.ProtectionLevel.HSM
+    }
+
   /** Creates a GCP KMS key based on a series of specifications and returns its key identifier.
     *
     * @param keySpec
@@ -220,7 +227,7 @@ class GcpKms(
                 gcp.CryptoKeyVersionTemplate
                   .newBuilder()
                   .setAlgorithm(keySpec)
-                  .setProtectionLevel(gcp.ProtectionLevel.HSM)
+                  .setProtectionLevel(protectionLevel(keySpec))
               )
               .build()
           kmsClient.createCryptoKeyCallable.futureCall(

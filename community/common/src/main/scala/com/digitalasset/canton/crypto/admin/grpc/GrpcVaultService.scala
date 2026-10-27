@@ -64,7 +64,7 @@ object BaseVaultRequest {
 
 class GrpcVaultService(
     crypto: Crypto,
-    enablePreviewFeatures: Boolean,
+    enableKeyDownload: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext, err: ErrorLoggingContext)
     extends v30.VaultServiceGrpc.VaultService
@@ -588,11 +588,11 @@ class GrpcVaultService(
     for {
       // TODO(i13613): Remove feature flag check in favor of exportable keys check
       _ <-
-        if (enablePreviewFeatures) FutureUnlessShutdown.unit
+        if (enableKeyDownload) FutureUnlessShutdown.unit
         else
           FutureUnlessShutdown.failed(
             Status.FAILED_PRECONDITION
-              .withDescription("Remote export of private keys only allowed when preview is enabled")
+              .withDescription("Remote export of private keys only allowed when explicitly enabled")
               .asRuntimeException()
           )
       cryptoPrivateStore <-

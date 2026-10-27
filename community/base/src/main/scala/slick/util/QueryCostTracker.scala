@@ -98,7 +98,10 @@ final class QueryCostTrackerImpl(
         .currentThread()
         .getStackTrace
         .find { e =>
-          QueryCostTrackerImpl.ignore.forall(pack => !e.getClassName.startsWith(pack))
+          val className = e.getClassName
+          QueryCostTrackerImpl.ignore.forall(pack =>
+            !className.startsWith(pack)
+          ) || QueryCostTrackerImpl.overrideIgnore.exists(pack => className.startsWith(pack))
         }
         .map(_.toString)
         .getOrElse(
@@ -310,16 +313,20 @@ object QueryCostTrackerImpl {
       "com.daml.metrics",
       "com.daml.executors",
       "com.digitalasset.canton.resource",
-      "com.digitalasset.canton.resource.DbStorageMulti",
       "com.digitalasset.canton.util.retry",
+      "com.digitalasset.canton.util.TryUtil",
       "com.digitalasset.canton.metrics",
       "com.daml.executors",
       "com.digitalasset.canton.store.db.DbBulkUpdateProcessor",
       "com.digitalasset.canton.lifecycle",
       "com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous",
-      LoggerUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
-      MonadUtil.getClass.getName.dropRight(1), // Drop Scala's trailing $
+      "org.apache.pekko", // SlickProjection, RestartWithBackoffSource
+      LoggerUtil.getClass.getName.stripSuffix("$"), // Drop Scala's trailing $
+      MonadUtil.getClass.getName.stripSuffix("$"), // Drop Scala's trailing $
     )
+
+  // in case we want to track a single class in a package that we generally want to ignore
+  private val overrideIgnore = Seq("com.digitalasset.canton.resource.DbLockPostgres")
 }
 
 object QueryCostTracker {
