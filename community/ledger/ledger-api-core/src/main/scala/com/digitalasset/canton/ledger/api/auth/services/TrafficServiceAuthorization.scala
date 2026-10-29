@@ -10,8 +10,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -30,15 +30,14 @@ final class TrafficServiceAuthorization(
 
   override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] =
     authorizer.rpc(service.getAccount)(
-      // TODO(#33681): In Canton 3.5, the account-id matches the act-as party.
-      RequiredClaim.ExecuteAs(request.accountId)
+      RequiredClaim.DebitTrafficFrom(request.accountId, acceptExecuteRights = true)
     )(request)
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
     authorizer.rpc(service.updateAccount)(RequiredClaim.Admin())(request)
 
-  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
-    authorizer.rpc(service.pruneEvents)(RequiredClaim.Admin())(request)
+  override def prune(request: PruneRequest): Future[PruneResponse] =
+    authorizer.rpc(service.prune)(RequiredClaim.Admin())(request)
 
   override def bindService(): ServerServiceDefinition =
     TrafficServiceGrpc.bindService(this, executionContext)

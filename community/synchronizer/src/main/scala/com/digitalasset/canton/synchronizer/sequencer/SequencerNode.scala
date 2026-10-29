@@ -45,12 +45,14 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencer.admin.v30.SequencerInitializationServiceGrpc
 import com.digitalasset.canton.sequencing.client.{
+  BftTopologyForInitDownloader,
   RequestSigner,
   SendTracker,
   SequencedEventValidatorFactory,
   SequencerClient,
   SequencerClientImplPekko,
 }
+import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.store.SequencedEventStore.SearchCriterion
 import com.digitalasset.canton.store.{
   IndexedPhysicalSynchronizer,
@@ -114,7 +116,7 @@ import com.digitalasset.canton.topology.transaction.{
   SynchronizerTrustCertificate,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MaxBytesToDecompress, SingleUseCell}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
@@ -312,16 +314,28 @@ class SequencerNodeBootstrap(
     ): FutureUnlessShutdown[Option[StageResult]] =
       synchronizerConfigurationStore.fetchConfiguration.toOption.flatMapF {
         case Some(existing) =>
-          createSynchronizerTopologyStore(existing.synchronizerId).map { topologyManager =>
-            Some(
-              StageResult(
-                existing.synchronizerParameters,
-                createSequencerFactory(existing.synchronizerParameters.protocolVersion),
-                topologyManager,
-                topologyAndSequencerSnapshot = None,
-              )
+          val pv = existing.synchronizerParameters.protocolVersion
+
+          for {
+            _ <-
+              if (pv.isSupported)
+                FutureUnlessShutdown.unit
+              else
+                FutureUnlessShutdown.failed(
+                  new IllegalStateException(
+                    s"Sequencer ${ReleaseVersion.current} does not support protocol version $pv"
+                  )
+                )
+            topologyStore <- createSynchronizerTopologyStore(existing.synchronizerId)
+          } yield Some(
+            StageResult(
+              existing.synchronizerParameters,
+              createSequencerFactory(pv),
+              topologyStore,
+              topologyAndSequencerSnapshot = None,
             )
-          }
+          )
+
         case None =>
           // create sequencer server such that we can expose a health endpoint until initialized
           initSequencerNodeServer()
@@ -495,14 +509,12 @@ class SequencerNodeBootstrap(
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
                   crypto.pureCrypto,
                   synchronizerTopologyStore,
-                  parameters.batchingConfig.topologyCacheAggregator,
+                  parameters.batchingConfig,
                   config.topology,
                   Some(crypto.staticSynchronizerParameters),
                   timeouts,
                   futureSupervisor = futureSupervisor,
                   loggerFactory,
-                  // only filter out completed proposals if this is a bootstrap from genesis.
-                  cleanupTopologySnapshot = sequencerSnapshot.isEmpty,
                 )
                 for {
                   _ <- topologySnapshotValidator.validateAndApplyInitialTopologySnapshot(
@@ -843,8 +855,22 @@ class SequencerNodeBootstrap(
             parameters.sequencerClient,
             synchronizerParamsLookup,
             parameters.processingTimeouts,
-            // Since the sequencer runtime trusts itself, there is no point in validating the events.
-            SequencedEventValidatorFactory.noValidation(psid, warn = false),
+            // The sequencer trusts its own events (already size-checked), so we skip validation.
+            // The decompression limit is just an unused fallback (see `validatePekko`).
+            SequencedEventValidatorFactory.noValidation(
+              psid,
+              implicit traceContext =>
+                if (psid.protocolVersion > ProtocolVersion.v37)
+                  synchronizerParamsLookup
+                    .getApproximateOrDefaultValue(warnOnUsingDefaults = false)
+                    .map(parameters =>
+                      DecompressionPolicy.Cumulative(
+                        MaxBytesToDecompress(parameters.maxRequestSize.value)
+                      )
+                    )
+                else FutureUnlessShutdown.pure(DecompressionPolicy.MaxValueUnsafe),
+              warn = false,
+            ),
             clock,
             RequestSigner(syncCryptoWithOptionalSessionKeys, loggerFactory),
             sequencedEventStore,
@@ -860,6 +886,7 @@ class SequencerNodeBootstrap(
             None,
             replayEnabled = false,
             syncCryptoWithOptionalSessionKeys,
+            new BftTopologyForInitDownloader(loggerFactory),
             parameters.loggingConfig,
             None,
             parameters.exitOnFatalFailures,

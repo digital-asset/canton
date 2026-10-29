@@ -1,7 +1,7 @@
 asyncapi: 2.6.0
 info:
   title: JSON Ledger API WebSocket endpoints
-  version: 3.7.0-SNAPSHOT
+  version: 3.8.0-SNAPSHOT
 channels:
   /v2/commands/completions:
     description: |-
@@ -604,13 +604,22 @@ components:
 
             - subsequent request must be executed on the same participant with the same version of canton,
             - subsequent request must have the same active_at_offset,
-            - subsequent request must have the same event_format
+            - subsequent request must have the same event_format,
+            - subsequent request must have the same include_incomplete_reassignments
             - and the participant must not have been pruned after the active_at_offset.
 
             If not specified, the whole active contracts snapshot will be returned.
 
             Optional: can be empty
           type: string
+        includeIncompleteReassignments:
+          description: |-
+            If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+            based on the specified event_format.
+            If this flag is set to false, Incomplete Reassignments will be omitted.
+
+            Optional
+          type: boolean
     EventFormat:
       title: EventFormat
       description: |-
@@ -733,8 +742,8 @@ components:
             The interface that a matching contract must implement.
             The ``interface_id`` needs to be valid: corresponding interface should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -774,8 +783,8 @@ components:
             A template for which the payload should be included in the response.
             The ``template_id`` needs to be valid: corresponding template should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -1276,7 +1285,8 @@ components:
           description: |-
             Assignment exclusivity
             Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-            Defined for reassigning participants.
+            Defined for reassigning participants, up to protocol version 36.
+            Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
             Optional
           type: string
@@ -1379,6 +1389,16 @@ components:
           description: |-
             Include topology events in streams.
             If unset no topology events are emitted in the stream.
+
+            Optional
+        includeTransactionsAndReassignments:
+          $ref: '#/components/schemas/TransactionFormat'
+          description: |-
+            Include both Daml transactions and (un)assignments in streams.
+            Shorthand for setting include_transactions to this format and include_reassignments
+            to its event_format.
+            The (un)assignments in the result take the shape TRANSACTION_SHAPE_ACS_DELTA.
+            If set, include_transactions and include_reassignments must be unset.
 
             Optional
     TransactionFormat:
@@ -2294,3 +2314,8 @@ components:
       description: Ledger API standard JWT token (websocket)
       name: Sec-WebSocket-Protocol
       in: header
+    httpApiKeyAuth1:
+      type: httpApiKey
+      description: Ledger API standard JWT token (websocket cookie)
+      name: jwt.token
+      in: cookie

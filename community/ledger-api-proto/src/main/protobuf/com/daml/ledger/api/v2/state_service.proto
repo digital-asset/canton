@@ -84,13 +84,21 @@ message GetActiveContractsRequest {
   //
   // - subsequent request must be executed on the same participant with the same version of canton,
   // - subsequent request must have the same active_at_offset,
-  // - subsequent request must have the same event_format
+  // - subsequent request must have the same event_format,
+  // - subsequent request must have the same include_incomplete_reassignments
   // - and the participant must not have been pruned after the active_at_offset.
   //
   // If not specified, the whole active contracts snapshot will be returned.
   //
   // Optional: can be empty
   optional bytes stream_continuation_token = 5;
+
+  // If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+  // based on the specified event_format.
+  // If this flag is set to false, Incomplete Reassignments will be omitted.
+  //
+  // Optional
+  bool include_incomplete_reassignments = 6;
 }
 
 message GetActiveContractsPageRequest {
@@ -122,13 +130,20 @@ message GetActiveContractsPageRequest {
   // The page token only works if subsequent requests:
   //
   // - are executed on the same participant,
-  // - use the same active_at_offset and event_format,
+  // - use the same active_at_offset, event_format and include_incomplete_reassignments,
   // - and the participant's store was not pruned to after the active_at_offset.
   //
   // If not specified, the first page of the active contracts snapshot will be returned.
   //
   // Optional: can be empty
   optional bytes page_token = 4;
+
+  // If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+  // based on the specified event_format.
+  // If this flag is set to false, Incomplete Reassignments will be omitted.
+  //
+  // Optional
+  bool include_incomplete_reassignments = 5;
 }
 message GetActiveContractsResponse {
   // The workflow ID used in command submission which corresponds to the contract_entry. Only set if

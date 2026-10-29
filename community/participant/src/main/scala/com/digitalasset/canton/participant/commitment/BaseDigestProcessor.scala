@@ -286,7 +286,7 @@ trait BaseDigestProcessor extends NamedLogging {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfPartyId, Set[LedgerParticipantId]]] =
     topologySnapshot
-      .activeParticipantsOfPartiesWithInfo(parties.toSeq)
+      .activeParticipantsOfPartiesWithInfoIgnoringFreeze(parties.toSeq)
       .map { partyIdToPartyInfoMap =>
         val onboardingCompleted = partyIdToPartyInfoMap.view
           .mapValues(info =>
@@ -544,31 +544,67 @@ object BaseDigestProcessor {
       create(partyHostings, changes, enableConsistencyChecks = true)
   }
 
-  /** When a party is being onboarded to a participant.
-    */
-  final case class PartyOnboardingToParticipant(
-      party: LfPartyId,
-      participant: LedgerParticipantId,
-  ) extends Classification
-
-  sealed trait PartyHostingChange extends Classification {
+  sealed trait PartyTopologyChange extends Classification with PrettyPrintingFromCompanion {
     def party: LfPartyId
     def participant: LedgerParticipantId
   }
+
+  /** When a party is being onboarded to a participant.
+    */
+  final case class PartyOnboardingToParticipant(
+      override val party: LfPartyId,
+      override val participant: LedgerParticipantId,
+  ) extends PartyTopologyChange {
+    override def prettyCompanion: PrettyPrintingCompanion[PartyOnboardingToParticipant] =
+      PartyOnboardingToParticipant
+  }
+
+  object PartyOnboardingToParticipant
+      extends PrettyPrintingCompanion[PartyOnboardingToParticipant] {
+    override protected val pretty: Pretty[PartyOnboardingToParticipant] =
+      prettyOfClass(
+        param("party", _.party),
+        param("participant", _.participant),
+      )
+  }
+
+  sealed trait PartyHostingChange extends PartyTopologyChange
 
   /** When a party has been added to a participant.
     */
   final case class PartyAddedToParticipant(
       override val party: LfPartyId,
       override val participant: LedgerParticipantId,
-  ) extends PartyHostingChange
+  ) extends PartyHostingChange {
+    override def prettyCompanion: PrettyPrintingCompanion[PartyAddedToParticipant] =
+      PartyAddedToParticipant
+  }
+
+  object PartyAddedToParticipant extends PrettyPrintingCompanion[PartyAddedToParticipant] {
+    override protected val pretty: Pretty[PartyAddedToParticipant] =
+      prettyOfClass(
+        param("party", _.party),
+        param("participant", _.participant),
+      )
+  }
 
   /** When a party has been removed from a participant.
     */
   final case class PartyRemovedFromParticipant(
       override val party: LfPartyId,
       override val participant: LedgerParticipantId,
-  ) extends PartyHostingChange
+  ) extends PartyHostingChange {
+    override def prettyCompanion: PrettyPrintingCompanion[PartyRemovedFromParticipant] =
+      PartyRemovedFromParticipant
+  }
+
+  object PartyRemovedFromParticipant extends PrettyPrintingCompanion[PartyRemovedFromParticipant] {
+    override protected val pretty: Pretty[PartyRemovedFromParticipant] =
+      prettyOfClass(
+        param("party", _.party),
+        param("participant", _.participant),
+      )
+  }
 
   /** When a checkpoint has been written, meaning that all digests up the offset (inclusive) have
     * been persisted.

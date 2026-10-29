@@ -36,13 +36,6 @@ final case class ExternalAuthorization(
       v30.ExternalPartyAuthorization(party.toProtoPrimitive, partySignatures.map(_.toProtoV30))
     }.toSeq
 
-  private[canton] def toProtoV31: v31.ExternalAuthorization =
-    v31.ExternalAuthorization(
-      authentications = authenticationsV30,
-      hashingSchemeVersion = hashingSchemeVersion.toProtoV31,
-      maxRecordTime = maxRecordTime.map(_.toProtoPrimitive),
-    )
-
   private[canton] def toProtoV32: v32.ExternalAuthorization =
     v32.ExternalAuthorization(
       authentications = authenticationsV30,
@@ -77,12 +70,9 @@ object ExternalAuthorization
   override def name: String = "ExternalAuthorization"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(protoCompanion =
-      v31.ExternalAuthorization
-    )(supportedProtoVersionPVV(_)(fromProtoV31), _.toProtoV31),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(protoCompanion =
       v32.ExternalAuthorization
-    )(supportedProtoVersionPVV(_)(fromProtoV32), _.toProtoV32),
+    )(supportedProtoVersionPVV(_)(fromProtoV32), _.toProtoV32)
   )
 
   private def fromProtoV30(
@@ -102,25 +92,6 @@ object ExternalAuthorization
           ProtoValidation.MaxCollectionSize,
         )((element, _) => Signature.fromProtoV30(element))
     } yield partyId -> partySignatures
-  }
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      proto: v31.ExternalAuthorization,
-  ): ParsingResult[ExternalAuthorization] = {
-    val v31.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
-    for {
-      signatures <- ProtoValidation
-        .validateLengthThen(
-          signaturesP,
-          "signatures",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => fromProtoV30(pvv, element))
-      hashingSchemeVersion <- HashingSchemeVersion.fromProtoV31(hashingSchemeVersionP)
-      maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-    } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, maxRecordTime)(rpv)
   }
 
   def fromProtoV32(

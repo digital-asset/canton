@@ -69,6 +69,8 @@ final case class UserRights(
     actAsAnyParty: Boolean,
     participantAdmin: Boolean,
     identityProviderAdmin: Boolean,
+    debitTrafficFrom: Set[String],
+    debitTrafficFromAnyAccount: Boolean,
 )
 object UserRights {
   def fromProtoV0(
@@ -87,6 +89,8 @@ object UserRights {
             actAsAnyParty = false,
             participantAdmin = false,
             identityProviderAdmin = false,
+            debitTrafficFrom = Set(),
+            debitTrafficFromAnyAccount = false,
           )
         ) {
           case (acc, Kind.Empty) => acc
@@ -102,6 +106,10 @@ object UserRights {
           case (acc, Kind.CanReadAsAnyParty(_)) => acc.copy(readAsAnyParty = true)
           case (acc, Kind.CanExecuteAsAnyParty(_)) => acc.copy(executeAsAnyParty = true)
           case (acc, Kind.CanActAsAnyParty(_)) => acc.copy(actAsAnyParty = true)
+          case (acc, Kind.CanDebitTrafficFrom(value)) =>
+            acc.copy(debitTrafficFrom = acc.debitTrafficFrom + value.accountId)
+          case (acc, Kind.CanDebitTrafficFromAnyAccount(_)) =>
+            acc.copy(debitTrafficFromAnyAccount = true)
         }
     )
 }

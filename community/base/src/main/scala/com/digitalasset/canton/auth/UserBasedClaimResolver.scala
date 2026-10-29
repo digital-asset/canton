@@ -176,5 +176,7 @@ object UserBasedClaimResolver {
     case UserRight.CanReadAsAnyParty => ClaimReadAsAnyParty
     case UserRight.CanExecuteAsAnyParty => ClaimExecuteAsAnyParty
     case UserRight.CanActAsAnyParty => ClaimActAsAnyParty
+    case UserRight.CanDebitTrafficFrom(a) => ClaimDebitTrafficFromAccount(a)
+    case UserRight.CanDebitTrafficFromAnyAccount => ClaimDebitTrafficFromAnyAccount
   }
 }

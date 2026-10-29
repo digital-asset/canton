@@ -36,6 +36,7 @@ import com.digitalasset.canton.serialization.{
   ProtoConverter,
 }
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.topology.transaction.KeyMapping
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil
@@ -330,7 +331,7 @@ object Signature
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v35,
+      ProtocolVersion.v36,
       supportedProtoVersion(v30.Signature)(fromProtoV30),
       _.toProtoV30,
     )
@@ -1514,7 +1515,7 @@ object SigningPublicKey
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v35,
+      ProtocolVersion.v36,
       supportedProtoVersion(v30.SigningPublicKey)(fromProtoV30),
       _.toProtoV30,
     )
@@ -1752,7 +1753,7 @@ final case class SigningPrivateKey private (
 object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v35,
+      ProtocolVersion.v36,
       supportedProtoVersion(v30.SigningPrivateKey)(fromProtoV30),
       _.toProtoV30,
     )
@@ -2414,6 +2415,7 @@ object SigningKeysWithThreshold {
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      maxKeys: PositiveInt,
       value: v30.SigningKeysWithThreshold,
   ): ParsingResult[SigningKeysWithThreshold] =
     for {
@@ -2422,7 +2424,7 @@ object SigningKeysWithThreshold {
           value.keys,
           "keys",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          KeyMapping.maxKeys(maxKeys),
         )
       keysNE <-
         ProtoConverter.parseRequiredNonEmpty(

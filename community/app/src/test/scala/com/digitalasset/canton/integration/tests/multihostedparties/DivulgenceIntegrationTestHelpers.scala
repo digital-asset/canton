@@ -137,6 +137,7 @@ object DivulgenceIntegrationTestHelpers {
           ),
           includeReassignments = reassignmentsFilter,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         ),
         completeAfter = PositiveInt.tryCreate(1000000),
         endOffsetInclusive = Some(participant.ledger_api.state.end()),

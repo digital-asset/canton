@@ -269,6 +269,7 @@ class CommandSubmissionServiceImplSpec
       synchronizerId = None,
       prefetchKeys = Seq.empty,
       tapsMaxPasses = None,
+      accountId = None,
     )
 
     val submitterInfo = SubmitterInfo(
@@ -280,6 +281,7 @@ class CommandSubmissionServiceImplSpec
       submissionId = None,
       externallySignedSubmission = None,
       transactionHash = None,
+      accountId = None,
     )
     val transactionMeta = TransactionMeta(
       ledgerEffectiveTime = Timestamp.Epoch,

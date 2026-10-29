@@ -6,6 +6,7 @@ package com.digitalasset.daml.lf
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.script.{IdeLedger, IdeLedgerRunner}
 import com.digitalasset.daml.lf.speedy.{Compiler, MachineLogger}
@@ -60,6 +61,7 @@ object IdeLedgerBridge {
       readAs: Set[Ref.Party],
       apiCommands: ImmArray[ApiCommand],
       seed: crypto.Hash,
+      interpretationConfig: InterpretationConfig,
       disclosures: Iterable[FatContractInstance] = Iterable.empty,
   )(implicit loggingContext: NamedLoggingContext): SubmitResult = {
     val compiledPackages = handle.compiledPackages
@@ -74,6 +76,7 @@ object IdeLedgerBridge {
       location = None,
       seed = seed,
       machineLogger = MachineLogger(),
+      interpretationConfig = interpretationConfig,
     )
 
     result.resolve() match {

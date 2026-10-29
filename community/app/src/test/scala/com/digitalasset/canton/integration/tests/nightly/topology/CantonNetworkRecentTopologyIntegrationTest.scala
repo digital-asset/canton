@@ -3,28 +3,34 @@
 
 package com.digitalasset.canton.integration.tests.nightly.topology
 
+import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.upgrade.CantonNetworkTopologyIntegrationTestBase
-import com.digitalasset.canton.integration.{EnvironmentDefinition, SharedEnvironment}
+import com.digitalasset.canton.integration.{
+  EnvironmentDefinition,
+  SharedEnvironment,
+  TestConsoleEnvironment,
+}
 import com.digitalasset.canton.logging.NodeLoggingUtil
 import com.digitalasset.canton.synchronizer.sequencer.OnboardingStateForSequencerV2
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.SequencedTime
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
-import com.digitalasset.canton.util.{FutureUtil, GrpcStreamingUtils}
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.util.FutureUtil
 import com.google.cloud.storage.Storage.BlobListOption
 import com.google.cloud.storage.StorageOptions
 import io.circe.parser as circeParser
+import monocle.macros.syntax.lens.*
 import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
 import org.apache.commons.io.FilenameUtils
+import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.time.{Minutes, Span}
 
 import java.io.{InputStream, PipedInputStream, PipedOutputStream}
-import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPInputStream
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
@@ -40,7 +46,7 @@ trait CantonNetworkRecentTopologyIntegrationTest
 
   // We need very high timeouts here as the mainnet snapshot especially is huge
   // and takes very long to validate
-  private val timeout = 2.hours
+  private val timeout = 3.hours
 
   /** Name of the GCP bucket that contains the CN topology snapshots */
   private val bucketName = "cn-topology-snapshots"
@@ -57,6 +63,11 @@ trait CantonNetworkRecentTopologyIntegrationTest
         import env.*
         participant1.start()
       }
+      .addConfigTransforms(
+        // We need to run this suite with a lot of extra memory to allow the snapshot to load
+        _.focus(_.parameters.startupMemoryCheckConfig.reportingLevel)
+          .replace(ReportingLevel.Ignore)
+      )
 
   /** Download the latest onboarding-state file from the GCP bucket for [[environmentName]].
     *
@@ -131,8 +142,8 @@ trait CantonNetworkRecentTopologyIntegrationTest
   }
 
   /** Try to download and parse the metadata file from the same snapshot folder. Returns the parsed
-    * [[PhysicalSynchronizerId]] if the file exists and contains valid JSON with a
-    * "physicalSynchronizerId" field, or [[None]] otherwise.
+    * [[PhysicalSynchronizerId]] if the file exists and contains valid JSON with a "psid" field, or
+    * throws an exception otherwise.
     */
   private def downloadAndParseMetadata(snapshotFolder: String): PhysicalSynchronizerId = {
     val storage = StorageOptions.getDefaultInstance.getService
@@ -165,60 +176,71 @@ trait CantonNetworkRecentTopologyIntegrationTest
       )
   }
 
-  private val snapshot = new AtomicReference[Option[GenericStoredTopologyTransactions]](None)
-  private var physicalSynchronizerId: PhysicalSynchronizerId = _
+  private var psid: PhysicalSynchronizerId = _
 
   "Canton node " can {
-    "successfully deserialize the topology snapshot" in { env =>
+    def snapshotSource()(implicit
+        env: TestConsoleEnvironment
+    ): (PhysicalSynchronizerId, Source[GenericStoredTopologyTransaction, NotUsed]) = {
       import env.*
 
       val (in, snapshotFolder) = downloadLatestOnboardingState()
-      physicalSynchronizerId = downloadAndParseMetadata(snapshotFolder)
-      val transactions =
-        try {
-          GrpcStreamingUtils
-            .parseDelimitedFromTrusted(in, OnboardingStateForSequencerV2)
-            .value
-            .flatMap(_.topologySnapshot)
-        } finally in.close()
-      logger.info(s"loaded ${transactions.size} transactions")
-      snapshot.set(Some(StoredTopologyTransactions(transactions)))
+      val physicalSynchronizerId = downloadAndParseMetadata(snapshotFolder)
+      val source = Source
+        .unfold(in)(stream =>
+          OnboardingStateForSequencerV2
+            .parseDelimitedFromTrusted(stream)
+            .map(
+              _.fold(
+                err => throw new IllegalArgumentException(err.message),
+                result => stream -> result.topologySnapshot,
+              )
+            )
+        )
+        .watchTermination() { case (_, doneF) =>
+          doneF.onComplete(_ => in.close())
+          NotUsed
+        }
+        .mapConcat(identity)
+      (physicalSynchronizerId, source)
     }
 
     "successfully validate the topology snapshot" in { implicit env =>
       // To avoid flooding the logs
       NodeLoggingUtil.setLevel(level = "INFO")
+      val (downloadedPsid, source) = snapshotSource()
+      psid = downloadedPsid
       // runValidation will fail if the validation fails. We discard the returned value because we don't need
       // it here and only assert that validation passed
       runValidation(
         // Index value is not important, it just needs to be an index that isn't used by default by the node
         topoStoreIdx = 11,
-        snapshot.get().value,
-        cleanupTopologyState = false,
+        source,
         timeout,
-        physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
+        psid = psid,
+        validateInitialTopologySnapshot = true,
       ).discard
     }
 
     "successfully insert the non-validated topology snapshot" in { implicit env =>
       // To avoid flooding the logs
       NodeLoggingUtil.setLevel(level = "INFO")
+      val (psid, source) = snapshotSource()
       // runValidation will fail if the validation fails. We discard the returned value because we don't need
       // it here and only assert that validation passed
       runValidation(
         // Index value is not important, it just needs to be an index that isn't used by default by the node
         topoStoreIdx = 12,
-        snapshot.get().value,
-        cleanupTopologyState = false,
+        source,
         timeout,
-        physicalSynchronizerIdOverride = Some(physicalSynchronizerId),
+        psid = psid,
         validateInitialTopologySnapshot = false,
       ).discard
     }
 
     "validated and non-validated topology store contents should match" in { implicit env =>
-      val store11 = getTopologyStore(11, physicalSynchronizerId)
-      val store12 = getTopologyStore(12, physicalSynchronizerId)
+      val store11 = getTopologyStore(11, psid)
+      val store12 = getTopologyStore(12, psid)
 
       val hashComputationPatience = Timeout(Span(30, Minutes))
 

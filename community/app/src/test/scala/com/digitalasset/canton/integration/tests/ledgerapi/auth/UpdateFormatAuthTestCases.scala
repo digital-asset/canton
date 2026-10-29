@@ -8,7 +8,115 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 
 trait UpdateFormatAuthTestCases {
   self: ReadOnlyServiceCallAuthTests =>
+
+  private def transactionsAndReassignmentsFormat(eventFormat: EventFormat): Option[UpdateFormat] =
+    Some(
+      UpdateFormat(
+        includeTransactions = None,
+        includeReassignments = None,
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Some(
+          TransactionFormat(
+            eventFormat = Some(eventFormat),
+            transactionShape = TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
+      )
+    )
+
+  private def transactionsAndReassignmentsFormatForParties(
+      parties: String*
+  ): Option[UpdateFormat] =
+    transactionsAndReassignmentsFormat(
+      EventFormat(
+        filtersByParty = parties.map(_ -> Filters(Nil)).toMap,
+        filtersForAnyParty = None,
+        verbose = false,
+      )
+    )
+
+  private def transactionsAndReassignmentsFormatPartyWildcard: Option[UpdateFormat] =
+    transactionsAndReassignmentsFormat(
+      EventFormat(
+        filtersByParty = Map.empty,
+        filtersForAnyParty = Some(Filters(Nil)),
+        verbose = false,
+      )
+    )
+
   serviceCallName should {
+    "allow calls with transactions-and-reassignments filters of the correct party" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that can read as the party of transactions-and-reassignments filters"
+      ) in { implicit env =>
+      import env.*
+      expectSuccess(
+        serviceCall(
+          canReadAsMainActor.copy(updateFormat =
+            transactionsAndReassignmentsFormatForParties(getMainActorId)
+          )
+        )
+      )
+    }
+
+    "deny calls with transactions-and-reassignments filters of the wrong party" taggedAs securityAsset
+      .setAttack(
+        attackPermissionDenied(threat =
+          "Present a JWT that cannot read for a party of transactions-and-reassignments filters"
+        )
+      ) in { implicit env =>
+      import env.*
+      expectPermissionDenied(
+        serviceCall(
+          canActAsRandomParty.copy(updateFormat =
+            transactionsAndReassignmentsFormatForParties(getMainActorId)
+          )
+        )
+      )
+    }
+
+    "deny calls with transactions-and-reassignments filters of the wrong party along with the correct" taggedAs securityAsset
+      .setAttack(
+        attackPermissionDenied(threat =
+          "Present a JWT that cannot read for one of the parties of transactions-and-reassignments filters"
+        )
+      ) in { implicit env =>
+      import env.*
+      expectPermissionDenied(
+        serviceCall(
+          canActAsMainActor.copy(updateFormat =
+            transactionsAndReassignmentsFormatForParties(getMainActorId, getRandomPartyId)
+          )
+        )
+      )
+    }
+
+    "deny calls with transactions-and-reassignments filters of party wildcard with a user that can act as main actor" taggedAs securityAsset
+      .setAttack(
+        attackPermissionDenied(threat =
+          "Present a JWT that cannot read as any party of transactions-and-reassignments filters"
+        )
+      ) in { implicit env =>
+      import env.*
+      expectPermissionDenied(
+        serviceCall(
+          canActAsMainActor.copy(updateFormat = transactionsAndReassignmentsFormatPartyWildcard)
+        )
+      )
+    }
+
+    "allow calls with transactions-and-reassignments filters of party wildcard with a can-read-as-any-party user" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that can read as any party of transactions-and-reassignments filters"
+      ) in { implicit env =>
+      import env.*
+      expectSuccess(
+        serviceCall(
+          canReadAsAnyParty.copy(updateFormat = transactionsAndReassignmentsFormatPartyWildcard)
+        )
+      )
+    }
+
     "allow calls with transaction filters of the correct party" taggedAs securityAsset
       .setAttack(
         attackPermissionDenied(threat =
@@ -52,14 +160,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of the wrong party" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read for the single party of topology filters"
-        )
+    "allow calls with topology filters of the wrong party" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read for the single party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(
@@ -72,14 +178,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of the wrong party along with the correct" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read for a party of topology filters"
-        )
+    "allow calls with topology filters of the wrong party along with the correct" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read for a party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(
@@ -92,14 +196,12 @@ trait UpdateFormatAuthTestCases {
       )
     }
 
-    "deny calls with topology filters of party wildcard with a user that can act as main actor" taggedAs securityAsset
-      .setAttack(
-        attackPermissionDenied(threat =
-          "Present a JWT that cannot read as any party of topology filters"
-        )
+    "allow calls with topology filters of party wildcard" taggedAs securityAsset
+      .setHappyCase(
+        "Present a JWT that cannot read as any party of topology filters"
       ) in { implicit env =>
       import env.*
-      expectPermissionDenied(
+      expectSuccess(
         serviceCall(
           canActAsMainActor.copy(updateFormat =
             updateFormat(
@@ -136,6 +238,7 @@ trait UpdateFormatAuthTestCases {
                 ),
                 includeReassignments = None,
                 includeTopologyEvents = None,
+                includeTransactionsAndReassignments = None,
               )
             )
           )
@@ -169,6 +272,7 @@ trait UpdateFormatAuthTestCases {
                 ),
                 includeReassignments = None,
                 includeTopologyEvents = None,
+                includeTransactionsAndReassignments = None,
               )
             )
           )
@@ -197,6 +301,7 @@ trait UpdateFormatAuthTestCases {
                   )
                 ),
                 includeTopologyEvents = None,
+                includeTransactionsAndReassignments = None,
               )
             )
           )

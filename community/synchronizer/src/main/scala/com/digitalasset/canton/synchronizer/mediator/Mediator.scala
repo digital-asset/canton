@@ -173,6 +173,7 @@ private[mediator] class Mediator(
       syncCrypto,
       mediatorId,
       parameters.verdictSenderParameters,
+      clock,
       loggerFactory,
     )
 
@@ -436,7 +437,7 @@ private[mediator] class Mediator(
         }
     }
 
-  override def closeAsync() =
+  override def closeAsync(): Seq[SyncCloseable] =
     Seq(
       SyncCloseable(
         "mediator",

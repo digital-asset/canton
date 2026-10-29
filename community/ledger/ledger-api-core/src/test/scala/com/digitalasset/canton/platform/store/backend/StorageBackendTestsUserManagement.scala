@@ -5,7 +5,14 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.jwt.JwksUrl
 import com.digitalasset.canton.platform.store.backend.localstore.UserManagementStorageBackend
-import com.digitalasset.canton.user.UserRight.{CanActAs, CanReadAs, ParticipantAdmin}
+import com.digitalasset.canton.tea.AccountId
+import com.digitalasset.canton.user.UserRight.{
+  CanActAs,
+  CanDebitTrafficFrom,
+  CanDebitTrafficFromAnyAccount,
+  CanReadAs,
+  ParticipantAdmin,
+}
 import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId, UserRight}
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.flatspec.AnyFlatSpec
@@ -29,6 +36,8 @@ private[backend] trait StorageBackendTestsUserManagement
   private val right1 = ParticipantAdmin
   private val right2 = CanActAs(Ref.Party.assertFromString("party_act_as_1"))
   private val right3 = CanReadAs(Ref.Party.assertFromString("party_read_as_1"))
+  private val debitA = CanDebitTrafficFrom(AccountId.tryCreate("acme/billing"))
+  private val debitB = CanDebitTrafficFrom(AccountId.tryCreate("acme/ops team"))
   private val zeroMicros: Long = 0
   private val idpId = IdentityProviderId.Id(Ref.LedgerString.assertFromString("idp1"))
   private val idpConfig = IdentityProviderConfig(
@@ -431,6 +440,20 @@ private[backend] trait StorageBackendTestsUserManagement
     assertThrows[SQLException](
       executeSql(tested.addUserRight(internalId, actAsRight, grantedAt = zeroMicros))
     )
+    // Debit rights outside party syntax, and two for different accounts
+    executeSql(tested.addUserRight(internalId, debitA, grantedAt = zeroMicros))
+    executeSql(tested.addUserRight(internalId, debitB, grantedAt = zeroMicros))
+    executeSql(
+      tested.addUserRight(internalId, CanDebitTrafficFromAnyAccount, grantedAt = zeroMicros)
+    )
+    assertThrows[SQLException](
+      executeSql(tested.addUserRight(internalId, debitA, grantedAt = zeroMicros))
+    )
+    assertThrows[SQLException](
+      executeSql(
+        tested.addUserRight(internalId, CanDebitTrafficFromAnyAccount, grantedAt = zeroMicros)
+      )
+    )
   }
 
   it should "handle removing absent rights" in {
@@ -451,17 +474,32 @@ private[backend] trait StorageBackendTestsUserManagement
     executeSql(tested.addUserRight(internalId, right1, grantedAt = zeroMicros))
     executeSql(tested.addUserRight(internalId, right2, grantedAt = zeroMicros))
     executeSql(tested.addUserRight(internalId, right3, grantedAt = zeroMicros))
+    executeSql(tested.addUserRight(internalId, debitA, grantedAt = zeroMicros))
+    executeSql(tested.addUserRight(internalId, debitB, grantedAt = zeroMicros))
+    executeSql(
+      tested.addUserRight(internalId, CanDebitTrafficFromAnyAccount, grantedAt = zeroMicros)
+    )
     val rights2 = executeSql(tested.getUserRights(internalId))
     val deleteRight2 = executeSql(tested.deleteUserRight(internalId, right2))
     val rights3 = executeSql(tested.getUserRights(internalId))
     val deleteRight3 = executeSql(tested.deleteUserRight(internalId, right3))
     val rights4 = executeSql(tested.getUserRights(internalId))
+    val deleteDebitA = executeSql(tested.deleteUserRight(internalId, debitA))
+    val deleteDebitAny =
+      executeSql(tested.deleteUserRight(internalId, CanDebitTrafficFromAnyAccount))
+    val rights5 = executeSql(tested.getUserRights(internalId))
     rights1 shouldBe empty
-    rights2.map(_.apiRight) should contain theSameElementsAs Seq(right1, right2, right3)
+    rights2.map(_.apiRight) should contain theSameElementsAs
+      Seq(right1, right2, right3, debitA, debitB, CanDebitTrafficFromAnyAccount)
     deleteRight2 shouldBe true
-    rights3.map(_.apiRight) should contain theSameElementsAs Seq(right1, right3)
+    rights3.map(_.apiRight) should contain theSameElementsAs
+      Seq(right1, right3, debitA, debitB, CanDebitTrafficFromAnyAccount)
     deleteRight3 shouldBe true
-    rights4.map(_.apiRight) should contain theSameElementsAs Seq(right1)
+    rights4.map(_.apiRight) should contain theSameElementsAs
+      Seq(right1, debitA, debitB, CanDebitTrafficFromAnyAccount)
+    deleteDebitA shouldBe true
+    deleteDebitAny shouldBe true
+    rights5.map(_.apiRight) should contain theSameElementsAs Seq(right1, debitB)
   }
 
   it should "add and delete a single right (userRightExists, addUserRight, deleteUserRight, getUserRights)" in {

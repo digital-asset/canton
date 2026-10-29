@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{LocalParticipantReference, LocalSequencerReference}
+import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.UnassignmentData
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -16,6 +16,7 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
@@ -41,7 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
-import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
+import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
@@ -82,6 +83,7 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       // We want to trigger time out
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
@@ -91,17 +93,8 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
         import env.*
 
         // Disable automatic assignment so that we really control it
-        def disableAutomaticAssignment(
-            sequencer: LocalSequencerReference
-        ): Unit =
-          sequencer.topology.synchronizer_parameters
-            .propose_update(
-              sequencer.synchronizer_id,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-
-        disableAutomaticAssignment(sequencer1)
-        disableAutomaticAssignment(sequencer2)
+        AutomaticAssignment.disable(Seq(sequencer1), sequencer1.synchronizer_id)
+        AutomaticAssignment.disable(Seq(sequencer2), sequencer2.synchronizer_id)
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)

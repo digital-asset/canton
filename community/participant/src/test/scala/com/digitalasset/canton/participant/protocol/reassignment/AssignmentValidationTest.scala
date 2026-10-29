@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
@@ -272,14 +272,16 @@ final class AssignmentValidationTest
         .futureValueUS
         .value
 
-      result.isSuccessful.futureValueUS shouldBe false
-      result.reassigningParticipantValidationResult.errors should contain(
-        TargetTimestampAfterAssignmentRequest(
-          unassignmentDataFuture.reassignmentId,
-          futureTargetTimestamp.unwrap,
-          CantonTimestamp.Epoch.immediateSuccessor,
+      if (testedProtocolVersion <= ProtocolVersion.v36) {
+        result.isSuccessful.futureValueUS shouldBe false
+        result.reassigningParticipantValidationResult.errors should contain(
+          TargetTimestampAfterAssignmentRequest(
+            unassignmentDataFuture.reassignmentId,
+            futureTargetTimestamp.unwrap,
+            CantonTimestamp.Epoch.immediateSuccessor,
+          )
         )
-      )
+      } else result.isSuccessful.futureValueUS shouldBe true
     }
 
     "complain about inconsistent reassignment counters" in {
@@ -430,12 +432,63 @@ final class AssignmentValidationTest
         )
       )
 
-      validate(
-        otherParty
-      ).value.reassigningParticipantValidationResult.errors.loneElement shouldBe a[
+      val reassigningParticipantErrors =
+        validate(otherParty).value.reassigningParticipantValidationResult.errors
+      if (testedProtocolVersion <= ProtocolVersion.v36)
+        reassigningParticipantErrors.loneElement shouldBe a[
+          NonInitiatorSubmitsBeforeExclusivityTimeout
+        ]
+      else reassigningParticipantErrors shouldBe empty
+
+    }
+
+    "only enforce the assignment exclusivity timeout up to protocol version 36" in {
+      def checkExclusivityTimeout(
+          protocolVersion: ProtocolVersion,
+          submitter: LfPartyId,
+          requestTimestamp: CantonTimestamp = CantonTimestamp.Epoch.immediateSuccessor,
+      ): Option[ReassignmentValidationError] =
+        AssignmentValidation
+          .checkExclusivityTimeout(
+            TestReassignmentCoordination(
+              Set(),
+              CantonTimestamp.Epoch,
+              Some(cryptoSnapshot),
+              Some(None),
+              loggerFactory,
+            ),
+            Target(
+              PhysicalSynchronizerId(
+                targetSynchronizer.unwrap.logical,
+                NonNegativeInt.zero,
+                protocolVersion,
+              )
+            ),
+            Target(defaultStaticSynchronizerParameters),
+            unassignmentData,
+            requestTimestamp = requestTimestamp,
+            submitter = submitter,
+            unassignmentData.reassignmentId,
+          )
+          .value
+          .futureValueUS
+          .value
+
+      checkExclusivityTimeout(ProtocolVersion.v36, observer).value shouldBe a[
         NonInitiatorSubmitsBeforeExclusivityTimeout
       ]
+      checkExclusivityTimeout(ProtocolVersion.v36, signatory) shouldBe None
+      checkExclusivityTimeout(ProtocolVersion.v37, observer) shouldBe None
 
+      // the target timestamp of the unassignment is not before the assignment request
+      checkExclusivityTimeout(
+        ProtocolVersion.v36,
+        signatory,
+        CantonTimestamp.Epoch,
+      ).value shouldBe a[
+        TargetTimestampAfterAssignmentRequest
+      ]
+      checkExclusivityTimeout(ProtocolVersion.v37, signatory, CantonTimestamp.Epoch) shouldBe None
     }
 
     "create a common validation failure if the contract fails to validate against the target package" in {
@@ -469,7 +522,9 @@ final class AssignmentValidationTest
       result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
     }
 
-    "create a common validation failure if the contract serialization version is not supported by the target synchronizer" onlyRunWithOrLessThan ProtocolVersion.latest in {
+    "create a common validation failure if the contract serialization version is not supported by the target synchronizer" onlyRunWhen (
+      testedProtocolVersion > ProtocolVersion.v36 && testedProtocolVersion < ProtocolVersion.dev
+    ) in {
       val devContract =
         ExampleContractFactory.modify(contract, version = Some(LfSerializationVersion.VDev))
 
@@ -496,7 +551,7 @@ final class AssignmentValidationTest
       result.isSuccessful.futureValueUS shouldBe false
     }
 
-    "create a common validation failure if the target package is unvetted in the target topology" in {
+    "create a common validation failure if the target package is unvetted in the target topology" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
 
       val unvettedPackageId = LfPackageId.assertFromString("unvetted-package-id")
 

@@ -26,6 +26,7 @@ import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithIni
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -512,7 +513,7 @@ class PartyReplicationTopologyWorkflow(
                       case HostingParticipant(
                             `targetParticipantId`,
                             permission,
-                            HostingParticipant.HostingState.Onboarding,
+                            HostingState.Onboarding,
                           ) =>
                         HostingParticipant(targetParticipantId, permission, onboarding = false)
                       case otherParticipant => otherParticipant

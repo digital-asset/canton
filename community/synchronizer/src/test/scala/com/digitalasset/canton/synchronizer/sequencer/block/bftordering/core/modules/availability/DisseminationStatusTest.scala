@@ -40,137 +40,190 @@ class DisseminationStatusTest
 
   import DisseminationStatusTest.*
 
-  "The nodes to send a batch" when {
+  "The nodes to send a batch" should {
 
-    "the dissemination is complete" should {
-
-      "be the recipients if not sent to anybody yet, then empty" in {
-        val membership = createMembership(Node0, Node1, Node2)
-        val disseminationCompletion =
-          createDisseminationCompletion(
-            ABatchId,
-            membership,
-            acks = Set(Node0, Node1),
-            AnEpochNumber,
-            SomeStats,
-          )
-
-        disseminationCompletion.sendBatchTo() shouldBe SendBatchTo(Set(Node1, Node2))
-
-        disseminationCompletion
-          .copy(sentToLast = Set(Node1).map(TimestampedSend(_, Instant.now)))
-          .sendBatchTo()
-          .all shouldBe empty
+    "be the recipients minus the acks if not-yet-sent" in {
+      val membership = createMembership(Node0, Node1, Node2)
+      Table(
+        "dissemination status",
+        createDisseminationProgress(
+          ABatchId,
+          membership,
+          acks = Set(Node0, Node1),
+          AnEpochNumber,
+          SomeStats,
+        ),
+        createDisseminationCompletion(
+          ABatchId,
+          membership,
+          acks = Set(Node0, Node1),
+          AnEpochNumber,
+          SomeStats,
+        ),
+      ).forEvery { disseminationStatus =>
+        disseminationStatus.sendBatchTo() shouldBe SendBatchTo(Set(Node2))
       }
+      val disseminationInProgress =
+        createDisseminationProgress(
+          ABatchId,
+          membership,
+          acks = Set(Node0, Node1),
+          AnEpochNumber,
+          SomeStats,
+        )
+
+      disseminationInProgress.sendBatchTo() shouldBe SendBatchTo(Set(Node2))
     }
 
-    "the dissemination is in progress" should {
-
-      "be the recipients minus the acks if not-yet-sent" in {
-        val membership = createMembership(Node0, Node1, Node2)
-        val disseminationInProgress =
-          createDisseminationProgress(
-            ABatchId,
-            membership,
-            acks = Set(Node0, Node1),
-            AnEpochNumber,
-            SomeStats,
-          )
-
-        disseminationInProgress.sendBatchTo() shouldBe SendBatchTo(Set(Node2))
-      }
-
-      "be the recipients, minus" +
-        "ourselves, minus" +
-        "the acks, minus " +
-        "the nodes already sent to, and " +
-        "the other nodes from which acks were lost that are still in the topology" in {
-          val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
-          val disseminationInProgress =
-            createDisseminationProgress(
-              ABatchId,
-              membership,
-              acks = Set(Node0, Node2),
-              AnEpochNumber,
-              SomeStats,
-            ).addSends(Instant.now, additionalSends = Set(Node1, Node2))
-              .asInProgress
-              .getOrElse(fail("should be in progress"))
-
-          disseminationInProgress.sendBatchTo() shouldBe SendBatchTo(
-            EightNodes.diff(Set(Node0, Node1, Node2))
-          )
-
-          disseminationInProgress
-            .copy(
-              acks = Set(AvailabilityAck(Node0, noSignature)),
-              previousAcks = Some(
-                Set(AvailabilityAck(Node2, noSignature), AvailabilityAck(node(300), noSignature))
-              ),
-            )
-            .sendBatchTo() shouldBe
-            SendBatchTo(
-              firstDissemination = Set(Node3, node(4), node(5), node(6), node(7)),
-              dueToLostAcks = Set(Node2),
-            )
-        }
-
-      "remember nodes already sent to across completion and regression" in {
+    "be the recipients, minus" +
+      "ourselves, minus" +
+      "the acks, minus " +
+      "the nodes already sent to, and " +
+      "the other nodes from which acks were lost that are still in the topology" in {
         val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
         val disseminationInProgress =
           createDisseminationProgress(
             ABatchId,
             membership,
-            acks = Set(Node0),
+            acks = Set(Node0, Node2),
             AnEpochNumber,
             SomeStats,
-          ).addSends(Instant.now, additionalSends = Set(Node3))
+          ).addSends(Instant.now, additionalSends = Set(Node1, Node2))
+            .asInProgress
+            .getOrElse(fail("should be in progress"))
 
         disseminationInProgress.sendBatchTo() shouldBe SendBatchTo(
-          EightNodes.diff(Set(Node0, Node3))
+          EightNodes.diff(Set(Node0, Node1, Node2))
         )
 
-        val completed =
-          disseminationInProgress
-            .addAck(AvailabilityAck(Node1, noSignature))
-            .addAck(AvailabilityAck(Node2, noSignature))
+        disseminationInProgress
+          .copy(
+            acks = Set(AvailabilityAck(Node0, noSignature)),
+            previousAcks = Some(
+              Set(AvailabilityAck(Node2, noSignature), AvailabilityAck(node(300), noSignature))
+            ),
+          )
+          .sendBatchTo() shouldBe
+          SendBatchTo(
+            firstDissemination = Set(Node3, node(4), node(5), node(6), node(7)),
+            dueToLostAcks = Set(Node2),
+          )
 
-        completed shouldBe a[DisseminationStatus.Complete]
-
-        val newMembership = createMembership(Node0, EightNodes.diff(Set(Node0, Node1)).toSeq*)
-        val inProgress = completed.changeMembership(newMembership)
-
-        inProgress shouldBe a[DisseminationStatus.InProgress]
-        inProgress.sendBatchTo() shouldBe SendBatchTo(
-          EightNodes.diff(Set(Node0, Node1, Node2, Node3))
-        )
-      }
-
-      "include re-disseminations" in {
-        val membership = createMembership(Node0, (FiveNodes - Node0).toSeq*)
-        val firstSentAt = Instant.now.minus(1, java.time.temporal.ChronoUnit.HOURS)
-        val disseminationInProgress =
-          createDisseminationProgress(
+        val disseminationComplete =
+          createDisseminationCompletion(
             ABatchId,
             membership,
-            acks = Set(Node0),
+            acks = Set(Node0, Node1, Node2, Node3),
             AnEpochNumber,
             SomeStats,
-          ).addSends(firstSentAt, additionalSends = Set(Node1))
+          ).addSends(Instant.now, additionalSends = Set(Node1, Node2, Node3))
+            .asComplete
+            .getOrElse(fail("should be complete"))
 
-        val patienceAndCurrentTime = PatienceAndCurrentTime(Duration.ofSeconds(5), Instant.now)
-        disseminationInProgress.sendBatchTo(
-          withRedissemination = Some(patienceAndCurrentTime)
-        ) shouldBe SendBatchTo(
-          firstDissemination = FiveNodes.diff(Set(Node0, Node1)),
-          redisseminate = Some(
-            Redissemination(
-              patienceAndCurrentTime,
-              lastSentTo = Set(TimestampedSend(Node1, firstSentAt)),
-            )
-          ),
+        disseminationComplete.sendBatchTo() shouldBe SendBatchTo(
+          EightNodes.diff(Set(Node0, Node1, Node2, Node3))
         )
+
+        disseminationComplete
+          .copy(
+            tracedProofOfAvailability = Traced(
+              ProofOfAvailability(
+                ABatchId,
+                Seq(
+                  AvailabilityAck(Node0, noSignature),
+                  AvailabilityAck(Node1, noSignature),
+                  AvailabilityAck(Node3, noSignature),
+                ),
+                AnEpochNumber,
+              )
+            ),
+            previousAcks = Some(
+              Set(AvailabilityAck(Node2, noSignature), AvailabilityAck(node(300), noSignature))
+            ),
+          )
+          .sendBatchTo() shouldBe
+          SendBatchTo(
+            firstDissemination = Set(node(4), node(5), node(6), node(7)),
+            dueToLostAcks = Set(Node2),
+          )
       }
+
+    "remember nodes already sent to across completion and regression" in {
+      val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
+      val disseminationInProgress =
+        createDisseminationProgress(
+          ABatchId,
+          membership,
+          acks = Set(Node0),
+          AnEpochNumber,
+          SomeStats,
+        ).addSends(Instant.now, additionalSends = Set(Node3))
+
+      disseminationInProgress.sendBatchTo() shouldBe SendBatchTo(
+        EightNodes.diff(Set(Node0, Node3))
+      )
+
+      val completed =
+        disseminationInProgress
+          .addAck(AvailabilityAck(Node1, noSignature))
+          .addAck(AvailabilityAck(Node2, noSignature))
+
+      completed shouldBe a[DisseminationStatus.Complete]
+
+      val newMembership = createMembership(Node0, EightNodes.diff(Set(Node0, Node1)).toSeq*)
+      val inProgress = completed.changeMembership(newMembership)
+
+      inProgress shouldBe a[DisseminationStatus.InProgress]
+      inProgress.sendBatchTo() shouldBe SendBatchTo(
+        EightNodes.diff(Set(Node0, Node1, Node2, Node3))
+      )
+    }
+
+    "include re-disseminations" in {
+      val membership = createMembership(Node0, (FiveNodes - Node0).toSeq*)
+      val firstSentAt = Instant.now.minus(1, java.time.temporal.ChronoUnit.HOURS)
+      val disseminationInProgress =
+        createDisseminationProgress(
+          ABatchId,
+          membership,
+          acks = Set(Node0),
+          AnEpochNumber,
+          SomeStats,
+        ).addSends(firstSentAt, additionalSends = Set(Node1))
+
+      val patienceAndCurrentTime = PatienceAndCurrentTime(Duration.ofSeconds(5), Instant.now)
+      disseminationInProgress.sendBatchTo(
+        withRedissemination = Some(patienceAndCurrentTime)
+      ) shouldBe SendBatchTo(
+        firstDissemination = FiveNodes.diff(Set(Node0, Node1)),
+        redisseminate = Some(
+          Redissemination(
+            patienceAndCurrentTime,
+            lastSentTo = Set(TimestampedSend(Node1, firstSentAt)),
+          )
+        ),
+      )
+
+      val disseminationComplete =
+        createDisseminationCompletion(
+          ABatchId,
+          membership,
+          acks = Set(Node0, Node1),
+          AnEpochNumber,
+          SomeStats,
+        ).addSends(firstSentAt, additionalSends = Set(Node2))
+
+      disseminationComplete.sendBatchTo(
+        withRedissemination = Some(patienceAndCurrentTime)
+      ) shouldBe SendBatchTo(
+        firstDissemination = FiveNodes.diff(Set(Node0, Node1, Node2)),
+        redisseminate = Some(
+          Redissemination(
+            patienceAndCurrentTime,
+            lastSentTo = Set(TimestampedSend(Node2, firstSentAt)),
+          )
+        ),
+      )
     }
   }
 

@@ -55,7 +55,7 @@ object AcsDigestTrace
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v35,
+        ProtocolVersion.v36,
         supportedProtoVersion(fromProtoV30),
         _.toProtoV30,
       )

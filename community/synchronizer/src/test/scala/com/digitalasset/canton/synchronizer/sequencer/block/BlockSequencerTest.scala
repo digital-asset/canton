@@ -272,7 +272,7 @@ final class BlockSequencerTest
       ???
     override def acknowledge(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(implicit
         traceContext: TraceContext
-    ): Future[Unit] = ???
+    ): EitherT[Future, SequencerDeliverError, Unit] = ???
 
     override def firstBlockHeight: Long = ???
 

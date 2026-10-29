@@ -5,13 +5,14 @@ package com.digitalasset.canton.topology.transaction
 
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
-import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 
 object TopologyTransactionSignature {
@@ -98,8 +99,13 @@ object MultiTransactionSignature {
     resultBuilder.finish()
   }
 
+  /** @param maxSignatures
+    *   bounds the total number of signatures for multi hash and single hash topology transactions
+    */
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      maxSignatures: ValidationParam[PositiveInt],
+      maxTransactionHashesPerMultiSignature: PositiveInt,
       multiTransactionSignaturesP: v30.MultiTransactionSignatures,
       transactionHash: TxHash,
   ): ParsingResult[NonEmpty[Seq[MultiTransactionSignature]]] = {
@@ -111,7 +117,9 @@ object MultiTransactionSignature {
         transactionHashesP,
         "transaction_hashes",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(
+          ProtocolVersion.nextValidationBoundPV -> maxTransactionHashesPerMultiSignature
+        ),
       )
       transactionHashes <- ProtoConverter.parseRequiredNonEmpty(
         Hash.fromProtoPrimitive,
@@ -122,7 +130,7 @@ object MultiTransactionSignature {
         signaturesP,
         "signatures",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        maxSignatures,
       )
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,

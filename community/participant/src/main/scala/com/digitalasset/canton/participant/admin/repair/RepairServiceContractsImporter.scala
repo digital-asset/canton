@@ -40,6 +40,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.platform.indexer.IndexerState.ShutdownInProgress
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.SynchronizerId
@@ -80,6 +81,9 @@ final class RepairServiceContractsImporter(
   private type MissingAdd = (LfContractId, ReassignmentCounter, TimeOfChange)
 
   override protected def timeouts: ProcessingTimeout = nodeParameters.processingTimeouts
+
+  private val eventMode: RepairLedgerApiEventMode =
+    RepairLedgerApiEventMode.fromParameters(nodeParameters)
 
   /** Decide whether contract `repairContract` requires persistence based on its current storage
     * state.
@@ -216,14 +220,12 @@ final class RepairServiceContractsImporter(
 
     logger.info(s"Adding contracts to synchronizer $synchronizerId with parameters: $parameters")
 
-    def toFuture[T](resET: EitherT[FutureUnlessShutdown, String, T]): Future[T] = resET.value
-      .flatMap(
-        _.fold(
-          err => FutureUnlessShutdown.failed[T](ImportAcsError.Error(err).asGrpcError),
-          res => FutureUnlessShutdown.pure(res),
-        )
+    def toFutureForIndexer[T](resET: EitherT[FutureUnlessShutdown, String, T]): Future[T] =
+      EitherTUtil.toFuture(
+        resET
+          .failOnShutdownTo(ShutdownInProgress)
+          .leftMap(err => ImportAcsError.Error(err).asGrpcError)
       )
-      .failOnShutdownToAbortException("addContracts")
 
     val workflowProvider =
       Iterator
@@ -251,9 +253,11 @@ final class RepairServiceContractsImporter(
         contracts.grouped(batchSize).zipWithIndex
 
       val doneF = for {
-        synchronizer <- toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer))
+        synchronizer <- toFutureForIndexer(
+          helpers.readSynchronizerData(synchronizerId, repairIndexer)
+        )
         // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
-        _ <- toFuture(
+        _ <- toFutureForIndexer(
           helpers.verifyRepairPreconditions(
             synchronizer,
             forceRepairWhenTopologyTransactionAtLedgerEnd,
@@ -262,7 +266,7 @@ final class RepairServiceContractsImporter(
         // 2. Execute the stream only after the Active Contract Store is clean
         _ <- indexedContractBatches
           .mapAsync(parallelism) { data =>
-            toFuture(
+            toFutureForIndexer(
               validateAndPersistContracts(
                 synchronizer = synchronizer,
                 contractImportMode = contractImportMode,
@@ -276,22 +280,12 @@ final class RepairServiceContractsImporter(
           }
           // Publish events to the indexer
           .mapAsync(1) { contractsToAddWithInternalContractIds =>
-            if (nodeParameters.enableAllLedgerApiReassignments) {
-              publishAssignedEvents(
-                synchronizerId,
-                synchronizer.currentRecordTime,
-                contractsToAddWithInternalContractIds,
-                workflowProvider,
-                repairIndexer,
-              )
-            } else {
-              writeContractsAddedEvents(
-                synchronizerId,
-                contractsToAddWithInternalContractIds,
-                workflowProvider,
-                repairIndexer,
-              ).failOnShutdownToAbortException("addContracts")
-            }
+            publishAddedEvents(
+              synchronizerId,
+              contractsToAddWithInternalContractIds,
+              workflowProvider,
+              repairIndexer,
+            )
           }
           .toMat(Sink.ignore)(Keep.right)
           .run()
@@ -371,19 +365,6 @@ final class RepairServiceContractsImporter(
       contractsUnfiltered <- selectRepresentativePackageIds(contractsUnchecked)
         .toEitherT[FutureUnlessShutdown]
 
-      contractsWithUnexpectedReassignmentCounter =
-        if (nodeParameters.enableAllLedgerApiReassignments) {
-          Nil
-        } else {
-          contractsUnfiltered.filter(_.reassignmentCounter != ReassignmentCounter.Genesis)
-        }
-
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        contractsWithUnexpectedReassignmentCounter.isEmpty,
-        s"Contracts with a non-zero reassignment counter found with disabled multi-synchronizer support: ${contractsWithUnexpectedReassignmentCounter
-            .map(c => (c.contractId, c.reassignmentCounter))}",
-      )
-
       contracts = contractsUnfiltered.filter(
         _.synchronizerId == synchronizer.psid.logical
       )
@@ -438,15 +419,24 @@ final class RepairServiceContractsImporter(
 
       _ <- EitherT.fromEither[FutureUnlessShutdown](addContractsCheck(filteredContracts))
 
+      // Group per create time and per Ledger API representation (Created vs Assigned events),
+      // so that every group results in exactly one homogeneous update.
       contractsByCreationTime = filteredContracts
-        .groupBy(_.contract.inst.createdAt)
+        .groupBy(c =>
+          (c.contract.inst.createdAt, eventMode.useReassignmentEvent(c.reassignmentCounter))
+        )
         .toList
-        .sortBy { case (ledgerCreateTime, _) => ledgerCreateTime.time }
+        .sortBy { case ((ledgerCreateTime, useReassignmentEvent), _) =>
+          (ledgerCreateTime.time, useReassignmentEvent)
+        }
+        .map { case ((ledgerCreateTime, _), contractsOfGroup) =>
+          (ledgerCreateTime, contractsOfGroup)
+        }
 
       /*
       Repair counters need to be strictly increasing but gaps are allowed.
       - monotonicity is guaranteed by pekko ordering guarantee
-      - gaps can happen because of the grouping per create time
+      - gaps can happen because of the grouping per create time and representation
        */
       timesOfRepair = Iterator
         .from(idx.toInt * batchSize, 1)
@@ -621,36 +611,49 @@ final class RepairServiceContractsImporter(
     )
   }
 
-  private def writeContractsAddedEvents(
+  private def publishAddedEvents(
       synchronizerId: SynchronizerId,
       contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
       workflowIds: Iterator[Option[LfWorkflowId]],
       repairIndexer: FutureQueue[RepairUpdate],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown.outcomeF(MonadUtil.sequentialTraverse_(contractsAdded) {
-      case (timeOfChange, (timestamp, contractsToAdd)) =>
-        // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
-        repairIndexer
-          .offer(
-            prepareAddedEvents(
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    MonadUtil.sequentialTraverse_(contractsAdded) {
+      case (timeOfRepair, (ledgerCreateTime, contractsToAdd)) =>
+        // Groups are homogeneous with respect to the Ledger API representation (see grouping in
+        // `validateAndPersistContracts`)
+        val useReassignmentEvent = contractsToAdd.exists { case (contractToAdd, _) =>
+          eventMode.useReassignmentEvent(contractToAdd.reassignmentCounter)
+        }
+        val updateO: Option[RepairUpdate] =
+          if (useReassignmentEvent)
+            prepareAssignedEvent(
               synchronizerId = synchronizerId,
-              recordTime = timeOfChange.timestamp,
-              repairCounter = timeOfChange.repairCounter,
-              ledgerCreateTime = timestamp,
+              recordTime = timeOfRepair.timestamp,
+              repairCounter = timeOfRepair.repairCounter,
               contractsAdded = contractsToAdd,
               workflowIdProvider = () => workflowIds.next(),
             )
-          )
-          .map(_ => ())
-    })
+          else
+            Some(
+              prepareAddedEvents(
+                synchronizerId = synchronizerId,
+                recordTime = timeOfRepair.timestamp,
+                repairCounter = timeOfRepair.repairCounter,
+                ledgerCreateTime = ledgerCreateTime,
+                contractsAdded = contractsToAdd,
+                workflowIdProvider = () => workflowIds.next(),
+              )
+            )
+        // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
+        updateO.fold(Future.unit)(repairIndexer.offer(_).map(_ => ()))
+    }
 
   /** Build assignment events to be offered to the indexer to signal imported contracts. Assigned
     * event allows to preserve reassignment counters and shall be used until we have a dedicated
     * `add` event in the indexer.
     * @return
     *   - None if `contractsAdded` is empty
-    *   - Some(Left) if contract authentication data cannot be computed
-    *   - Some(Right) otherwise
+    *   - Some otherwise
     */
   private def prepareAssignedEvent(
       synchronizerId: SynchronizerId,
@@ -705,26 +708,6 @@ final class RepairServiceContractsImporter(
       )
     }
   }
-
-  private def publishAssignedEvents(
-      synchronizerId: SynchronizerId,
-      recordTime: CantonTimestamp,
-      contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
-      workflowIds: Iterator[Option[LfWorkflowId]],
-      repairIndexer: FutureQueue[RepairUpdate],
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    MonadUtil
-      .sequentialTraverse_(
-        contractsAdded.flatMap { case (timeOfChange, (timestamp, contractsToAdd)) =>
-          prepareAssignedEvent(
-            synchronizerId,
-            recordTime,
-            timeOfChange.repairCounter,
-            contractsToAdd,
-            () => workflowIds.next(),
-          )
-        }
-      )(repairIndexer.offer)
 
   private def packageKnown(
       lfPackageId: LfPackageId

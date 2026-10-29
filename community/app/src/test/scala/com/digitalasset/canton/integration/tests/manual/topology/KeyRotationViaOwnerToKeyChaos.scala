@@ -27,7 +27,9 @@ private[topology] class KeyRotationViaOwnerToKeyChaos(val logger: TracedLogger)
       globalReservations: Reservations,
   ): Future[Unit] = {
     import env.*
-    participants.local.parTraverse_(participant => Future(keyRotationViaOwnerToKey(participant)))
+    participants.local
+      .filter(canUseNode)
+      .parTraverse_(participant => Future(keyRotationViaOwnerToKey(participant)))
   }
   def keyRotationViaOwnerToKey(node: ParticipantReference)(implicit
       loggingContext: ErrorLoggingContext,
@@ -37,17 +39,20 @@ private[topology] class KeyRotationViaOwnerToKeyChaos(val logger: TracedLogger)
     whenNodeReadyAndActive(node, KeyRotationChaos.idleTime) {
       withOperation_("keyRotationOwnerToKey")(s"rotating key for node ${node.name}") {
 
-        val currentKey = getCurrentKey(node, KeyPurpose.Signing)
-
         val newKey =
           node.keys.secret.generate_signing_key(usage = SigningKeyUsage.ProtocolOnly)
 
-        node.topology.owner_to_key_mappings.rotate_key(
-          node.id.member,
-          currentKey,
-          newKey,
-          None,
-        )
+        KeyRotationChaos.exclusively(node) {
+          val currentKey =
+            getCurrentKey(node, KeyPurpose.Signing, SigningKeyUsage.ProtocolOnly, daId)
+
+          node.topology.owner_to_key_mappings.rotate_key(
+            node.id.member,
+            currentKey,
+            newKey,
+            None,
+          )
+        }
 
         node.health.ping(node.id, timeout = 60.seconds)
       }

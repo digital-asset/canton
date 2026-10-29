@@ -12,7 +12,6 @@ import com.daml.ledger.api.v2.transaction.Transaction as ApiTransaction
 import com.daml.ledger.api.v2.transaction_filter.*
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.javaapi.data.codegen.ContractTypeCompanion
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.UpdateWrapper
@@ -23,6 +22,7 @@ import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.TestSubmissionService.*
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  LedgerApiSizeLimitsConfig,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.ledger.participant.state.*
@@ -43,6 +43,8 @@ import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.canton.version.InterpretationConfig as CantonInterpretationConfig
+import com.digitalasset.canton.{BaseTest, LfPackageId}
 import com.digitalasset.daml.lf.command.ApiCommands
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
@@ -475,7 +477,8 @@ object TestSubmissionService {
     // enabled, `Engine.checkAllowedDeps` reads the allowed versions from the interpretation
     // config, not the engine config, so a stable-only config would reject a dev package.
     val effectiveInterpretationConfig = interpretationConfig.getOrElse(
-      if (enableLfDev) InterpretationConfig.Dev else InterpretationConfig.Stable
+      if (enableLfDev) InterpretationConfig.Dev
+      else CantonInterpretationConfig.forProtocolVersion(BaseTest.testedProtocolVersion)
     )
 
     def participantNode: ParticipantNode = participant.underlying.value
@@ -662,7 +665,7 @@ object TestSubmissionService {
     def apiCommands()(implicit errorLogger: ErrorLoggingContext): ApiCommands = {
       val apiCommands = new CommandsValidator(
         validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-      )
+      )(sizeLimitsConfig = LedgerApiSizeLimitsConfig())
         .validateInnerCommands(commands)
         .valueOr(throw _)
         .to(ImmArray)
@@ -686,6 +689,7 @@ object TestSubmissionService {
         SubmissionId.fromString(submissionId).toOption,
         externallySignedSubmission = None,
         transactionHash = None,
+        accountId = None,
       )
     }
 
@@ -746,6 +750,7 @@ object TestSubmissionService {
       ),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
   }
 

@@ -211,11 +211,11 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
+  PruneRequest as TeaPruneRequest,
+  PruneResponse as TeaPruneResponse,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
@@ -225,6 +225,7 @@ import com.digitalasset.canton.user.{
   IdentityProviderConfig as ApiIdentityProviderConfig,
 }
 import com.digitalasset.canton.util.BinaryFileUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   GrpcServiceInvocationMethod,
   LfPackageId,
@@ -293,6 +294,7 @@ object LedgerApiCommands {
         otherConfirmingParticipantIds: Seq[ParticipantId],
         confirmationThreshold: NonNegativeInt,
         observingParticipantIds: Seq[ParticipantId],
+        protocolVersion: Option[ProtocolVersion],
     ) extends BaseCommand[
           GenerateExternalPartyTopologyRequest,
           GenerateExternalPartyTopologyResponse,
@@ -324,6 +326,7 @@ object LedgerApiCommands {
               otherConfirmingParticipantIds.map(_.uid.toProtoPrimitive),
             confirmationThreshold = confirmationThreshold.value,
             observingParticipantUids = observingParticipantIds.map(_.uid.toProtoPrimitive),
+            protocolVersion = protocolVersion.map(_.toProtoPrimitive),
           )
         )
 
@@ -903,6 +906,8 @@ object LedgerApiCommands {
       def readAsAnyParty: Boolean
       def executeAsAnyParty: Boolean
       def actAsAnyParty: Boolean
+      def debitTrafficFrom: Set[String]
+      def debitTrafficFromAnyAccount: Boolean
 
       protected def getRights: Seq[UserRight] =
         actAs.toSeq.map(x => UserRight.defaultInstance.withCanActAs(UserRight.CanActAs(x))) ++
@@ -931,6 +936,16 @@ object LedgerApiCommands {
              Seq(
                UserRight.defaultInstance.withCanActAsAnyParty(UserRight.CanActAsAnyParty())
              )
+           else Seq()) ++
+          debitTrafficFrom.toSeq
+            .map(UserRight.CanDebitTrafficFrom.apply)
+            .map(UserRight.defaultInstance.withCanDebitTrafficFrom) ++
+          (if (debitTrafficFromAnyAccount)
+             Seq(
+               UserRight.defaultInstance.withCanDebitTrafficFromAnyAccount(
+                 UserRight.CanDebitTrafficFromAnyAccount()
+               )
+             )
            else Seq())
     }
 
@@ -949,6 +964,8 @@ object LedgerApiCommands {
         executeAs: Set[LfPartyId],
         executeAsAnyParty: Boolean,
         actAsAnyParty: Boolean,
+        debitTrafficFrom: Set[String],
+        debitTrafficFromAnyAccount: Boolean,
     ) extends BaseCommand[CreateUserRequest, CreateUserResponse, LedgerApiUser]
         with HasRights {
 
@@ -1157,6 +1174,8 @@ object LedgerApiCommands {
           readAsAnyParty: Boolean,
           executeAsAnyParty: Boolean,
           actAsAnyParty: Boolean,
+          debitTrafficFrom: Set[String],
+          debitTrafficFromAnyAccount: Boolean,
       ) extends BaseCommand[GrantUserRightsRequest, GrantUserRightsResponse, UserRights]
           with HasRights {
 
@@ -1192,6 +1211,8 @@ object LedgerApiCommands {
           readAsAnyParty: Boolean,
           executeAsAnyParty: Boolean,
           actAsAnyParty: Boolean,
+          debitTrafficFrom: Set[String],
+          debitTrafficFromAnyAccount: Boolean,
       ) extends BaseCommand[RevokeUserRightsRequest, RevokeUserRightsResponse, UserRights]
           with HasRights {
 
@@ -1396,7 +1417,10 @@ object LedgerApiCommands {
   object UpdateService {
 
     sealed trait UpdateWrapper {
+      def commandId: Option[String]
       def updateId: String
+      def paidTrafficCost: Option[Long]
+
       def isUnassignment = this match {
         case _: UnassignedWrapper => true
         case _ => false
@@ -1413,12 +1437,18 @@ object LedgerApiCommands {
     }
     final case class TransactionWrapper(transaction: Transaction) extends UpdateWrapper {
       override def updateId: String = transaction.updateId
+      override def commandId: Option[String] = Some(transaction.commandId)
+
+      override def paidTrafficCost: Option[Long] = transaction.paidTrafficCost
 
       override def synchronizerId: String = transaction.synchronizerId
     }
     final case class TopologyTransactionWrapper(topologyTransaction: TopologyTransaction)
         extends UpdateWrapper {
       override def updateId: String = topologyTransaction.updateId
+      override def commandId: Option[String] = None
+
+      override def paidTrafficCost: Option[Long] = None
 
       override def synchronizerId: String = topologyTransaction.synchronizerId
 
@@ -1429,6 +1459,9 @@ object LedgerApiCommands {
     }
     sealed trait ReassignmentWrapper extends UpdateWrapper {
       override def updateId: String = reassignment.updateId
+      override def commandId: Option[String] = Some(reassignment.commandId)
+
+      override def paidTrafficCost: Option[Long] = reassignment.paidTrafficCost
 
       def reassignment: Reassignment
     }
@@ -1729,6 +1762,7 @@ object LedgerApiCommands {
     def userId: String
     def packageIdSelectionPreference: Seq[LfPackageId]
     def tapsMaxPasses: Option[Int]
+    def accountId: String
 
     protected def mkCommand: Commands = Commands(
       workflowId = workflowId,
@@ -1757,6 +1791,7 @@ object LedgerApiCommands {
       packageIdSelectionPreference = packageIdSelectionPreference.map(_.toString),
       prefetchContractKeys = Nil,
       tapsMaxPasses = tapsMaxPasses,
+      accountId = accountId,
     )
 
   }
@@ -1796,6 +1831,7 @@ object LedgerApiCommands {
         override val userId: String,
         override val packageIdSelectionPreference: Seq[LfPackageId],
         override val tapsMaxPasses: Option[Int],
+        override val accountId: String,
     ) extends SubmitCommand
         with BaseCommand[SubmitRequest, SubmitResponse, Unit] {
       override protected def createRequest(): Either[String, SubmitRequest] =
@@ -1825,6 +1861,7 @@ object LedgerApiCommands {
         reassignmentId: String,
         source: SynchronizerId,
         target: SynchronizerId,
+        accountId: String,
     ) extends BaseCommand[SubmitReassignmentRequest, SubmitReassignmentResponse, Unit] {
       override protected def createRequest(): Either[String, SubmitReassignmentRequest] = Right(
         SubmitReassignmentRequest(
@@ -1846,6 +1883,7 @@ object LedgerApiCommands {
                 )
               ),
               submissionId = submissionId,
+              accountId = accountId,
             )
           )
         )
@@ -1870,8 +1908,11 @@ object LedgerApiCommands {
         submitter: LfPartyId,
         submissionId: String,
         contractIds: Seq[LfContractId],
+        overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId],
+        overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId],
         source: SynchronizerId,
         target: SynchronizerId,
+        accountId: String,
     ) extends BaseCommand[SubmitReassignmentRequest, SubmitReassignmentResponse, Unit] {
       override protected def createRequest(): Either[String, SubmitReassignmentRequest] = Right(
         SubmitReassignmentRequest(
@@ -1880,19 +1921,24 @@ object LedgerApiCommands {
               workflowId = workflowId,
               userId = userId,
               commandId = commandId,
-              submitter = submitter.toString,
+              submitter = submitter,
               commands = contractIds.map(contractId =>
                 ReassignmentCommand(
                   ReassignmentCommand.Command.UnassignCommand(
                     UnassignCommand(
-                      contractId = contractId.coid.toString,
+                      contractId = contractId.coid,
                       source = source.toProtoPrimitive,
                       target = target.toProtoPrimitive,
+                      overrideSourceValidationPackageId =
+                        overrideSourceValidationPackageIds.get(contractId),
+                      overrideTargetValidationPackageId =
+                        overrideTargetValidationPackageIds.get(contractId),
                     )
                   )
                 )
               ),
               submissionId = submissionId,
+              accountId = accountId,
             )
           )
         )
@@ -1934,6 +1980,7 @@ object LedgerApiCommands {
         costEstimationHints: Option[CostEstimationHints],
         tapsMaxPasses: Option[Int],
         hashingSchemeVersion: HashingSchemeVersion,
+        accountId: String,
     ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
@@ -1961,6 +2008,7 @@ object LedgerApiCommands {
             estimateTrafficCost = costEstimationHints,
             tapsMaxPasses = tapsMaxPasses,
             hashingSchemeVersion = Some(hashingSchemeVersion),
+            accountId = accountId,
           )
         )
 
@@ -1987,6 +2035,7 @@ object LedgerApiCommands {
         minLedgerTimeAbs: Option[Instant],
         deduplicationPeriod: Option[DeduplicationPeriod],
         hashingSchemeVersion: HashingSchemeVersion,
+        accountId: String,
     ) extends BaseCommand[
           ExecuteSubmissionRequest,
           ExecuteSubmissionResponse,
@@ -2031,6 +2080,7 @@ object LedgerApiCommands {
             deduplicationPeriod = serializeDeduplicationPeriod(deduplicationPeriod),
             hashingSchemeVersion = hashingSchemeVersion,
             minLedgerTime = None,
+            accountId = accountId,
           )
         )
 
@@ -2057,6 +2107,7 @@ object LedgerApiCommands {
         deduplicationPeriod: Option[DeduplicationPeriod],
         hashingSchemeVersion: HashingSchemeVersion,
         optTimeout: Option[config.NonNegativeDuration],
+        accountId: String,
     ) extends BaseCommand[
           ExecuteSubmissionAndWaitRequest,
           ExecuteSubmissionAndWaitResponse,
@@ -2072,6 +2123,7 @@ object LedgerApiCommands {
           deduplicationPeriod = deduplicationPeriod,
           hashingSchemeVersion = hashingSchemeVersion,
           minLedgerTimeAbs = minLedgerTimeAbs,
+          accountId = accountId,
         ).createRequestInternal()
           .map(_.transformInto[ExecuteSubmissionAndWaitRequest])
 
@@ -2102,6 +2154,7 @@ object LedgerApiCommands {
         includeCreatedEventBlob: Boolean,
         customEventFormat: Option[EventFormat],
         optTimeout: Option[config.NonNegativeDuration],
+        accountId: String,
     ) extends BaseCommand[
           ExecuteSubmissionAndWaitForTransactionRequest,
           ExecuteSubmissionAndWaitForTransactionResponse,
@@ -2144,6 +2197,7 @@ object LedgerApiCommands {
           deduplicationPeriod = deduplicationPeriod,
           hashingSchemeVersion = hashingSchemeVersion,
           minLedgerTimeAbs = minLedgerTimeAbs,
+          accountId = accountId,
         ).createRequestInternal()
           .map(
             _.into[ExecuteSubmissionAndWaitForTransactionRequest]
@@ -2226,6 +2280,7 @@ object LedgerApiCommands {
         override val tapsMaxPasses: Option[Int],
         optTimeout: Option[NonNegativeDuration],
         customEventFormat: Option[EventFormat],
+        override val accountId: String,
     ) extends SubmitCommand
         with BaseCommand[
           SubmitAndWaitForTransactionRequest,
@@ -2299,6 +2354,7 @@ object LedgerApiCommands {
         source: SynchronizerId,
         target: SynchronizerId,
         eventFormat: Option[EventFormat],
+        accountId: String,
     ) extends BaseCommand[
           SubmitAndWaitForReassignmentRequest,
           SubmitAndWaitForReassignmentResponse,
@@ -2325,6 +2381,7 @@ object LedgerApiCommands {
                   )
                 ),
                 submissionId = submissionId,
+                accountId = accountId,
               )
             ),
             eventFormat = eventFormat,
@@ -2355,6 +2412,9 @@ object LedgerApiCommands {
         source: SynchronizerId,
         target: SynchronizerId,
         eventFormat: Option[EventFormat],
+        overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId],
+        overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId],
+        accountId: String,
     ) extends BaseCommand[
           SubmitAndWaitForReassignmentRequest,
           SubmitAndWaitForReassignmentResponse,
@@ -2376,11 +2436,16 @@ object LedgerApiCommands {
                         contractId = contractId.coid.toString,
                         source = source.toProtoPrimitive,
                         target = target.toProtoPrimitive,
+                        overrideSourceValidationPackageId =
+                          overrideSourceValidationPackageIds.get(contractId),
+                        overrideTargetValidationPackageId =
+                          overrideTargetValidationPackageIds.get(contractId),
                       )
                     )
                   )
                 ),
                 submissionId = submissionId,
+                accountId = accountId,
               )
             ),
             eventFormat = eventFormat,
@@ -2492,6 +2557,7 @@ object LedgerApiCommands {
         verbose: Boolean = true,
         timeout: FiniteDuration,
         includeCreatedEventBlob: Boolean = false,
+        includeIncompleteReassignments: Boolean,
     )(override implicit val loggingContext: ErrorLoggingContext)
         extends BaseCommand[GetActiveContractsRequest, AutoCloseable, AutoCloseable]
         with SubscribeBase[
@@ -2528,6 +2594,7 @@ object LedgerApiCommands {
             activeAtOffset = activeAtOffset,
             eventFormat = Some(EventFormat(parties.map((_, filter)).toMap, None, verbose)),
             streamContinuationToken = None,
+            includeIncompleteReassignments = includeIncompleteReassignments,
           )
         )
       }
@@ -2800,20 +2867,20 @@ object LedgerApiCommands {
         service.updateAccount(request)
     }
 
-    final case class PruneEvents(
+    final case class Prune(
         beforeInclusive: CantonTimestamp
     ) extends BaseCommand[
-          PruneEventsRequest,
-          PruneEventsResponse,
+          TeaPruneRequest,
+          TeaPruneResponse,
         ] {
-      override protected def createRequest(): Either[String, PruneEventsRequest] =
-        Right(PruneEventsRequest(beforeInclusive.toProtoTimestamp.some))
+      override protected def createRequest(): Either[String, TeaPruneRequest] =
+        Right(TeaPruneRequest(beforeInclusive.toProtoTimestamp.some))
 
       override protected def submitRequest(
           service: TrafficServiceStub,
-          request: PruneEventsRequest,
-      ): Future[PruneEventsResponse] =
-        service.pruneEvents(request)
+          request: TeaPruneRequest,
+      ): Future[TeaPruneResponse] =
+        service.prune(request)
     }
   }
 }

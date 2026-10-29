@@ -1,0 +1,8 @@
+// The participant uploads the canton-traffic-credit DAR from its classpath on startup
+utils.retry_until_true {
+  participant1.packages.list(filterName = "canton-traffic-credit").nonEmpty
+}
+println("Traffic credit DAR was loaded automatically.")
+// TODO(i7023) remove stop again
+nodes.local.stop()
+sys.exit(0)

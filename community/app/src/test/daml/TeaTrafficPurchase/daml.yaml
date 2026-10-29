@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
+build-options:
+- --target=2.2
+name: TeaTrafficPurchase
+data-dependencies:
+- ../../../../traffic-enforcement/component/src/main/resources/dar/canton-traffic-credit-1.0.0.dar
+source: daml
+version: 1.0.0
+dependencies:
+- daml-prim
+- daml-stdlib

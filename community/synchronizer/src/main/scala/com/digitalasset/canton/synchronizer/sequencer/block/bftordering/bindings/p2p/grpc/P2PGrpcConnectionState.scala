@@ -80,8 +80,17 @@ final class P2PGrpcConnectionState(
   ): Boolean =
     connections.flatMap(_._1).contains(p2pEndpointId)
 
-  override def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean =
-    stateRef.get().p2pEndpointIdToNetworkRef.get(p2pEndpointId).exists(_.isOutgoingConnection)
+  override def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean = {
+    val state = stateRef.get()
+    import state.*
+    // Report the active transport's direction. Without a sender, treat an existing ref as an
+    //  outgoing attempt, including during teardown when a ref can temporarily outlive its sender.
+    p2pEndpointIdToBftNodeId
+      .get(p2pEndpointId)
+      .flatMap(bftNodeIdToPeerSender.get)
+      .map(_.isOutgoingConnection)
+      .getOrElse(p2pEndpointIdToNetworkRef.contains(p2pEndpointId))
+  }
 
   override def isConnected(p2pAddressId: P2PAddress.Id)(implicit
       traceContext: TraceContext
@@ -100,7 +109,7 @@ final class P2PGrpcConnectionState(
     stateRef.get().p2pEndpointIdToBftNodeId.get(p2pEndpointId)
 
   override def getNetworkRef(bftNodeId: BftNodeId): Option[P2PNetworkRef[BftOrderingMessage]] =
-    stateRef.get().bftNodeIdToNetworkRef.get(bftNodeId).map(_.networkRef)
+    stateRef.get().bftNodeIdToNetworkRef.get(bftNodeId)
 
   def getSender(
       p2pAddressId: P2PAddress.Id
@@ -121,13 +130,8 @@ final class P2PGrpcConnectionState(
   // - A P2P endpoint ID is associated with a BFT node ID as soon as the association is known.
   // - Associating a P2P endpoint ID to this BFT node ID returns an error (self-association is
   //   rejected).
-  // TODO(#34191)
-  // - Re-associating a P2P endpoint ID to a different BFT node ID is currently permitted: the
-  //   impersonation check that would return an error (`P2PEndpointIdAlreadyAssociated`) is
-  //   disabled (see #34192), so the mapping is silently updated. The transport auth interceptors
-  //   are thus the only line of defense currently active against endpoint-level impersonation.
-  // - All P2P endpoint IDs for a BFT node ID point to the same network reference to which the BFT node ID also points,
-  //   replacing and closing duplicates as they are identified.
+  // - All P2P endpoint IDs for a BFT node ID point to the same network reference to which
+  //   the BFT node ID also points, replacing and closing duplicates as they are identified.
   // - No new sender is associated with a BFT node ID if one is already associated with it.
   // - No new network ref is associated with a P2P endpoint ID if one is already associated with it.
   // - No new network ref is associated with a BFT node ID if one is already associated with it.
@@ -220,11 +224,9 @@ final class P2PGrpcConnectionState(
       createNetworkRef: () => P2PNetworkRef[BftOrderingMessage]
   )(implicit traceContext: TraceContext): Unit = {
     // The network ref (and thus its connection actor) is created eagerly, on this (the caller's,
-    //  i.e. the P2P network output module actor) thread, and *before* the entry holding it is
-    //  published to `stateRef`. This is crucial: it ensures the entry never becomes visible in the
-    //  committed state without its network ref, so a concurrent shutdown or consolidation always
-    //  observes the ref and can close it, rather than racing with a still-pending creation and
-    //  leaking an untracked, unclosable connection actor.
+    //  i.e. the P2P network output module actor) thread, and *before* it is published to `stateRef`.
+    //  This ensures a concurrent shutdown or consolidation always observes the ref and can close it,
+    //  rather than racing with a still-pending creation and leaking an untracked connection actor.
     //
     //  Creation uses a two-phase start: the ref is created parked and inert (its connection actor
     //  does not initialize nor touch any address-based connection state), and only the winning ref
@@ -237,17 +239,15 @@ final class P2PGrpcConnectionState(
     //  `created` branch of the state transition), so `createNetworkRef` is never called when a ref
     //  already exists.
     val createdNetworkRef = new SingleUseCell[P2PNetworkRef[BftOrderingMessage]]
-    def makeEntry(isOutgoingConnection: Boolean): P2PNetworkRefEntry = {
-      val networkRef = createdNetworkRef.getOrElse {
+    def getOrCreateNetworkRef(): P2PNetworkRef[BftOrderingMessage] =
+      createdNetworkRef.getOrElse {
         val ref = createNetworkRef()
         createdNetworkRef.putIfAbsent(ref).getOrElse(ref)
       }
-      new P2PNetworkRefEntry(networkRef, isOutgoingConnection)
-    }
 
     val (prevState, newState, created) =
       AtomicUtil.updateAndGetComputed(stateRef)(
-        _.addNetworkRefIfMissing(p2pAddressId, makeEntry)
+        _.addNetworkRefIfMissing(p2pAddressId, () => getOrCreateNetworkRef())
       )
 
     if (!created) {
@@ -394,28 +394,6 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
       param("state", _.stateRef.get()),
     )
 
-  private final class P2PNetworkRefEntry(
-      // The network ref (and thus its connection actor) is created eagerly and before the entry is
-      //  installed into the connection state (see `P2PGrpcConnectionState.addNetworkRefIfMissing`),
-      //  so that the entry is never visible in the committed state without its ref. Any reader,
-      //  shutdown, consolidation or pretty-printing can thus safely read it from any thread.
-      val networkRef: P2PNetworkRef[BftOrderingMessage],
-      val isOutgoingConnection: Boolean,
-  ) extends PrettyPrintingFromCompanion {
-
-    override def prettyCompanion: PrettyPrintingCompanion[P2PNetworkRefEntry] =
-      P2PNetworkRefEntry
-  }
-
-  private object P2PNetworkRefEntry extends PrettyPrintingCompanion[P2PNetworkRefEntry] {
-
-    override protected val pretty: Pretty[P2PNetworkRefEntry] =
-      prettyOfClass(
-        param("networkRef", _.networkRef.toString.unquoted),
-        param("isOutgoingConnection", _.isOutgoingConnection),
-      )
-  }
-
   private final case class State(
       // Node IDs and senders are in a 1:1 relationship, so we use a bidirectional mapping.
       bftNodeIdToPeerSender: Map[BftNodeId, PeerSender] = Map.empty,
@@ -426,18 +404,17 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
 
       // Node IDs and network refs are kept in a 1:1 relationship, but we never look up by network ref,
       //  so a single map is sufficient.
-      bftNodeIdToNetworkRef: Map[BftNodeId, P2PNetworkRefEntry] = Map.empty,
+      bftNodeIdToNetworkRef: Map[BftNodeId, P2PNetworkRef[BftOrderingMessage]] = Map.empty,
 
       // For outgoing connections, a network ref is initially associated to an endpoint ID
       //  but is later be associated to a BFT node ID when authentication completes, or
       //  if an outgoing connection turns out to be a duplicate of an existing one
       //  for the same BFT node ID.
-      p2pEndpointIdToNetworkRef: Map[P2PEndpoint.Id, P2PNetworkRefEntry] = Map.empty,
+      p2pEndpointIdToNetworkRef: Map[P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage]] = Map.empty,
   ) extends PrettyPrintingFromCompanion {
 
     override def prettyCompanion: PrettyPrintingCompanion[State] = State
 
-    // TODO(#34191) and restructure to avoid local mutability
     // Returns the new state with the endpoint associated to the node,
     //  the state transition with logs, potentially an error if the association is not allowed
     //  and the network refs to close, if any duplicates were replaced.
@@ -466,12 +443,11 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
           p2pEndpointIdToBftNodeId
             .updatedWith(p2pEndpointId) {
               // The self-association check must come before handling an existing association:
-              //  since re-association is currently allowed (see the disabled impersonation check
-              //  below), an endpoint previously associated with a peer that later resolves to this
-              //  node would otherwise be silently re-associated to this node, and the connection
-              //  wouldn't be shut down as a self-connection.
+              //  since re-association is allowed, an endpoint previously associated with a peer
+              //  that later resolves to this node would otherwise be silently re-associated to
+              //  this node, and the connection wouldn't be shut down as a self-connection.
               //
-              //  Any existing association is left untouched, i.e., the association is purely refused.
+              //  Any existing association is left untouched, i.e., the association is refused.
               case previousBftNodeIdO if bftNodeId == thisNode =>
                 result = Left(
                   P2PConnectionState.Error
@@ -490,19 +466,6 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                   annotation =
                     s"Endpoint $p2pEndpointId already associated with $previousBftNodeId, no change"
                 } else {
-//                  result = Left(
-//                    P2PConnectionState.Error
-//                      .P2PEndpointIdAlreadyAssociated(
-//                        p2pEndpointId,
-//                        previousBftNodeId,
-//                        bftNodeId,
-//                      )
-//                  )
-//                  annotation = "Possible impersonation attempt: " +
-//                    s"endpoint $p2pEndpointId is already associated with $previousBftNodeId, " +
-//                    s"not associating it to $bftNodeId; if this is a legitimate change, " +
-//                    "the previous association must be removed first"
-//                  logLevel = Level.WARN
                   annotation =
                     s"Endpoint $p2pEndpointId was previously associated with $previousBftNodeId, changing to $bftNodeId"
                   logLevel = Level.INFO
@@ -641,7 +604,7 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                         s"No connection nor network ref found for $p2pEndpointId"
                       ),
                     )
-                } { e =>
+                } { networkRef =>
                   if (clearNetworkRefAssociations) {
                     val updatedState =
                       copy(p2pEndpointIdToNetworkRef =
@@ -649,17 +612,17 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                       )
                     updatedState ->
                       ResultWithLogs(
-                        (this, updatedState, None, Some(e.networkRef), Seq(p2pEndpointId)),
+                        (this, updatedState, None, Some(networkRef), Seq(p2pEndpointId)),
                         Level.DEBUG -> (() =>
-                          s"Network ref ${objId(e.networkRef)} unassociated from $p2pEndpointId (as requested)"
+                          s"Network ref ${objId(networkRef)} unassociated from $p2pEndpointId (as requested)"
                         ),
                       )
                   } else {
                     this ->
                       ResultWithLogs(
-                        (this, this, None, Some(e.networkRef), Seq(p2pEndpointId)),
+                        (this, this, None, Some(networkRef), Seq(p2pEndpointId)),
                         Level.DEBUG -> (() =>
-                          s"Network ref ${objId(e.networkRef)} not unassociated from $p2pEndpointId (as requested)"
+                          s"Network ref ${objId(networkRef)} not unassociated from $p2pEndpointId (as requested)"
                         ),
                       )
                   }
@@ -708,12 +671,11 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
 
     // Associates a new network ref to the node ID if one does not exist already,
     //  returning the new state, the state transition and a boolean indicating
-    //  whether a new network ref was associated. `makeEntry` builds the entry to install (holding
-    //  an already-created network ref) given whether the connection is outgoing; it is only called
-    //  when a new ref is actually needed.
+    //  whether a new network ref was associated. `getOrCreateNetworkRef` is only called when a new
+    //  ref is actually needed.
     def addNetworkRefIfMissing(
         p2pAddressId: P2PAddress.Id,
-        makeEntry: Boolean => P2PNetworkRefEntry,
+        getOrCreateNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
     ): (State, (State, State, Boolean)) =
       p2pAddressId match {
         case Left(p2pEndpointId) =>
@@ -730,7 +692,7 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                       p2pEndpointIdToNetworkRef
                         .updated(
                           p2pEndpointId,
-                          makeEntry(true),
+                          getOrCreateNetworkRef(),
                         )
                     )
                   updatedState ->
@@ -745,20 +707,17 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                 }
             ) { bftNodeId =>
               // If the endpoint ID is associated with a BFT node ID, add the network ref
-              //  for the BFT node ID; this is an outgoing connection because the `Left` case
-              //  is only used for outgoing connections.
+              //  for the BFT node ID.
               addNetworkRefForBftNodeIdIfMissing(
                 bftNodeId,
-                makeEntry,
-                isOutgoingConnection = true,
+                getOrCreateNetworkRef,
               )
             }
 
         case Right(bftNodeId) =>
           addNetworkRefForBftNodeIdIfMissing(
             bftNodeId,
-            makeEntry,
-            isOutgoingConnection = false,
+            getOrCreateNetworkRef,
           )
       }
 
@@ -766,7 +725,7 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
     //  returning the new state, the state transition and a boolean indicating
     //  whether a new network ref was associated.
     //
-    // Consistently with `consolidateNetworkRefs`, also propagates the entry
+    // Consistently with `consolidateNetworkRefs`, also propagates the ref
     //  to the associated endpoints; this is necessary (and not already done
     //  by `consolidateNetworkRefs`) when a new network ref is created for
     //  a BFT node ID whose endpoints are already associated (e.g., on retry
@@ -775,21 +734,19 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
     //  happen when the association already exists.
     private def addNetworkRefForBftNodeIdIfMissing(
         bftNodeId: BftNodeId,
-        makeEntry: Boolean => P2PNetworkRefEntry,
-        isOutgoingConnection: Boolean,
+        getOrCreateNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
     ): (State, (State, State, Boolean)) =
       bftNodeIdToNetworkRef
         .get(bftNodeId)
         .fold {
-          val networkRefEntry =
-            makeEntry(isOutgoingConnection)
+          val networkRef = getOrCreateNetworkRef()
           val associatedEndpointIds =
             p2pEndpointIdToBftNodeId.filter(_._2 == bftNodeId).keys
           val updatedState =
             copy(
-              bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.updated(bftNodeId, networkRefEntry),
+              bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.updated(bftNodeId, networkRef),
               p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef ++
-                associatedEndpointIds.map(_ -> networkRefEntry),
+                associatedEndpointIds.map(_ -> networkRef),
             )
           updatedState -> (
             this,
@@ -822,13 +779,13 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
           )
 
       maybeExistingNetworkRefAssociatedToNodeIdOrElseEndpoint
-        .map { selectedNetworkRefEntry =>
+        .map { selectedNetworkRef =>
           val newState =
             copy(bftNodeIdToNetworkRef =
               bftNodeIdToNetworkRef
-                .updated(bftNodeId, selectedNetworkRefEntry)
+                .updated(bftNodeId, selectedNetworkRef)
             ) // No-op if there was already a network ref associated to the node ID
-          newState.updateEndpointsNetworkRef(p2pEndpointIds, selectedNetworkRefEntry)
+          newState.updateEndpointsNetworkRef(p2pEndpointIds, selectedNetworkRef)
         }
         .getOrElse(this -> Seq.empty)
     }
@@ -837,20 +794,20 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
     //  and the network refs to close, if any duplicates were replaced.
     private def updateEndpointsNetworkRef(
         p2pEndpointIds: Iterable[P2PEndpoint.Id],
-        selectedNetworkRefEntry: P2PNetworkRefEntry,
+        selectedNetworkRef: P2PNetworkRef[BftOrderingMessage],
     ): (State, Iterable[(P2PEndpoint.Id, P2PNetworkRef[BftOrderingMessage])]) = {
       val updatedState =
         copy(p2pEndpointIdToNetworkRef =
           p2pEndpointIdToNetworkRef ++
             p2pEndpointIds.map { p2pEndpointId =>
-              p2pEndpointId -> selectedNetworkRefEntry
+              p2pEndpointId -> selectedNetworkRef
             }
         )
 
       val previousAssociatedRefs =
         p2pEndpointIds.flatMap(p2pEndpointId =>
-          p2pEndpointIdToNetworkRef.get(p2pEndpointId).map { networkRefEntry =>
-            p2pEndpointId -> networkRefEntry.networkRef
+          p2pEndpointIdToNetworkRef.get(p2pEndpointId).map { networkRef =>
+            p2pEndpointId -> networkRef
           }
         )
 
@@ -858,7 +815,7 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
         // Duplicated refs to close
         (for ((p2pEndpointId, networkRef) <- previousAssociatedRefs) yield {
           Option.when(
-            networkRef != selectedNetworkRefEntry.networkRef
+            networkRef != selectedNetworkRef
           )(p2pEndpointId -> networkRef)
         }).flatten
     }
@@ -965,7 +922,7 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
               (this, Option.empty[P2PNetworkRef[BftOrderingMessage]]),
               Level.DEBUG -> (() => s"No network ref found for $bftNodeId"),
             )
-          } { e =>
+          } { networkRef =>
             val updatedState =
               copy(
                 bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.removed(bftNodeId),
@@ -977,9 +934,9 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                 },
               )
             ResultWithLogs(
-              (updatedState, Option.when(closeNetworkRef)(e.networkRef)),
+              (updatedState, Option.when(closeNetworkRef)(networkRef)),
               Level.DEBUG -> (() =>
-                s"Removed network ref ${objId(e.networkRef)} for $bftNodeId and cleaned up its associations"
+                s"Removed network ref ${objId(networkRef)} for $bftNodeId and cleaned up its associations"
               ),
             )
           }
@@ -1114,11 +1071,16 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
         ),
         param(
           "bftNodeIdToNetworkRef",
-          _.bftNodeIdToNetworkRef.map { case (bftNodeId, networkRefEntry) =>
-            bftNodeId.doubleQuoted -> networkRefEntry
+          _.bftNodeIdToNetworkRef.map { case (bftNodeId, networkRef) =>
+            bftNodeId.doubleQuoted -> networkRef.toString.unquoted
           },
         ),
-        param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
+        param(
+          "p2pEndpointIdToNetworkRef",
+          _.p2pEndpointIdToNetworkRef.map { case (endpointId, networkRef) =>
+            endpointId -> networkRef.toString.unquoted
+          },
+        ),
       )
   }
 }

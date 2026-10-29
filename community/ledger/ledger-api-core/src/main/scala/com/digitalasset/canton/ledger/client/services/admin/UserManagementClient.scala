@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.admin as admin_proto
 import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.ledger.api.v2.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.digitalasset.canton.ledger.client.LedgerClient
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta, User, UserRight}
 import com.digitalasset.daml.lf.data.Ref
@@ -207,6 +208,14 @@ object UserManagementClient {
       proto.Right(proto.Right.Kind.CanExecuteAsAnyParty(proto.Right.CanExecuteAsAnyParty()))
     case UserRight.CanActAsAnyParty =>
       proto.Right(proto.Right.Kind.CanActAsAnyParty(proto.Right.CanActAsAnyParty()))
+    case UserRight.CanDebitTrafficFrom(accountId) =>
+      proto.Right(
+        proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom(accountId.unwrap))
+      )
+    case UserRight.CanDebitTrafficFromAnyAccount =>
+      proto.Right(
+        proto.Right.Kind.CanDebitTrafficFromAnyAccount(proto.Right.CanDebitTrafficFromAnyAccount())
+      )
   }
 
   private val fromProtoRight: proto.Right => Option[UserRight] = {
@@ -227,6 +236,10 @@ object UserManagementClient {
       Some(UserRight.CanExecuteAsAnyParty)
     case proto.Right(proto.Right.Kind.CanActAsAnyParty(_)) =>
       Some(UserRight.CanActAsAnyParty)
+    case proto.Right(proto.Right.Kind.CanDebitTrafficFrom(x)) =>
+      Some(UserRight.CanDebitTrafficFrom(AccountId.tryCreate(x.accountId)))
+    case proto.Right(proto.Right.Kind.CanDebitTrafficFromAnyAccount(_)) =>
+      Some(UserRight.CanDebitTrafficFromAnyAccount)
     case proto.Right(proto.Right.Kind.Empty) =>
       None // The server sent a right of a kind that this client doesn't know about.
   }

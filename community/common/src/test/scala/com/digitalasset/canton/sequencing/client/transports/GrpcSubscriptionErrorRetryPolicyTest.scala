@@ -43,6 +43,6 @@ class GrpcSubscriptionErrorRetryPolicyTest extends AnyWordSpec with BaseTest {
   def shouldRetry(grpcError: GrpcError): Boolean = {
     val rule = new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
 
-    rule.retryOnError(GrpcSubscriptionError(grpcError), receivedItems = false)
+    rule.retryOnError(GrpcSubscriptionError(grpcError))
   }
 }

@@ -18,6 +18,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.{CommonMockMetrics, TransactionViewMetrics}
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
@@ -34,12 +35,12 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TestContractHasher
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.CantonOnly
 import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder
+import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -48,6 +49,7 @@ import scala.concurrent.Future
 final class NextGenTransactionTreeFactoryTest
     extends AsyncWordSpec
     with BaseTest
+    with BeforeAndAfterEach
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
@@ -55,6 +57,8 @@ final class NextGenTransactionTreeFactoryTest
     TransactionViewDecompositionFactory.RollbackState.empty.enterRollback
   private val rollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
   private val rolledBackContext = rollbackContextFactory.fromRollbackState(rolledBackState)
+  private val transactionViewMetrics: TransactionViewMetrics =
+    CommonMockMetrics.transactionViewMetrics
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id =>
     EitherT.fromEither[FutureUnlessShutdown](
@@ -141,6 +145,12 @@ final class NextGenTransactionTreeFactoryTest
   private val testedContractIdVersions: Seq[CantonContractIdVersion] =
     CantonContractIdVersion.all
 
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+
+    transactionViewMetrics.treeDepth.updateValue(0)
+  }
+
   forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
@@ -156,6 +166,7 @@ final class NextGenTransactionTreeFactoryTest
           factory.cryptoOps,
           TestContractHasher.Async,
           loggerFactory,
+          transactionViewMetrics,
         )
 
       def createTransactionTree(
@@ -164,13 +175,13 @@ final class NextGenTransactionTreeFactoryTest
           contractInstanceOfId: ContractInstanceOfId,
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
-          maxTreeDepth: PositiveInt = defaultProtocolLimits.maxTransactionTreeDepth,
-          maxActAs: PositiveInt = defaultProtocolLimits.maxActAs,
+          maxTreeDepth: PositiveInt = testedTransactionLimits.maxTransactionTreeDepth,
+          maxActAs: PositiveInt = testedTransactionLimits.maxActAs,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
         val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
 
         val protocolLimits =
-          defaultProtocolLimits.copy(maxTransactionTreeDepth = maxTreeDepth, maxActAs = maxActAs)
+          testedTransactionLimits.copy(maxTransactionTreeDepth = maxTreeDepth, maxActAs = maxActAs)
 
         treeFactory
           .createTransactionTree(
@@ -195,9 +206,10 @@ final class NextGenTransactionTreeFactoryTest
           forEvery(factory.standardHappyCases) { example =>
             lazy val treeFactory = createTransactionTreeFactory()
 
-            val maxParseDepth = example.rootViews
+            val largestParseDepth = example.rootViews
               .map(_.parseDepth)
               .maxOption
+            val maxParseDepth = largestParseDepth
               .filter(_ > 0)
               .fold(PositiveInt.one)(PositiveInt.tryCreate)
 
@@ -207,11 +219,14 @@ final class NextGenTransactionTreeFactoryTest
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
                 maxTreeDepth = maxParseDepth,
-              ).value.flatMap(_ should equal(Right(example.transactionTree)))
+              ).value.flatMap { v =>
+                v should equal(Right(example.transactionTree))
+                transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth.getOrElse(0)
+              }
             }
 
             PositiveInt.create(maxParseDepth.value - 1).foreach { maxDepthMinusOne =>
-              s"reject a transaction with view depth greater than $maxDepthMinusOne for: $example" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+              s"reject a transaction with view depth greater than $maxDepthMinusOne for: $example" in {
                 createTransactionTree(
                   treeFactory,
                   example.wellFormedUnsuffixedTransaction,
@@ -220,6 +235,8 @@ final class NextGenTransactionTreeFactoryTest
                 ).value.flatMap(e =>
                   inside(e) { case Left(TransactionViewLimitError(message)) =>
                     message shouldBe s"The parse depth of the transaction view exceeded $maxDepthMinusOne"
+                    transactionViewMetrics.treeDepth.getValue shouldBe largestParseDepth
+                      .getOrElse(0)
                   }
                 )
               }
@@ -227,7 +244,7 @@ final class NextGenTransactionTreeFactoryTest
 
           }
 
-          "record external call results from same-view exercise nodes with view-local occurrence indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "record external call results from same-view exercise nodes with view-local occurrence indexes" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting
             val rootExerciseNodeId = LfNodeId(1)
@@ -276,7 +293,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record repeated identical external call results on one exercise node with increasing call indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "record repeated identical external call results on one exercise node with increasing call indexes" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting
             val nodeId = LfNodeId(5)
@@ -307,7 +324,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record external call results from child views only once" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "record external call results from child views only once" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.ViewInterleavings
             val externalCallNodeId = LfNodeId(2)
@@ -333,7 +350,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "preserve distinct same-result external call occurrences across parent and child views" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "preserve distinct same-result external call occurrences across parent and child views" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.TransientContracts
             val childExternalCallNodeId = LfNodeId(3)
@@ -374,7 +391,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "reject a transaction recording conflicting outputs for the same external call" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "reject a transaction recording conflicting outputs for the same external call" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.TransientContracts
             val childExternalCallNodeId = LfNodeId(3)
@@ -403,7 +420,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record external call checking parties from signatories and actors" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "record external call checking parties from signatories and actors" in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.SingleExerciseWithNonstakeholderActor(factory.deriveNodeSeed(0))
 
@@ -424,7 +441,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "reconstruct non-root same-view external call records with view-local exercise indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "reconstruct non-root same-view external call records with view-local exercise indexes" in {
             val submittingTreeFactory = createTransactionTreeFactory()
             val validatingTreeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting
@@ -513,7 +530,7 @@ final class NextGenTransactionTreeFactoryTest
               )
           }
 
-          "reject the input if its size exceeds the limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+          "reject the input if its size exceeds the limit" in {
             val example = factory.standardHappyCases.headOption.value
             val invariantViolation =
               InvariantViolation(Some("act_as"), "size of 3 exceeds limit of 2")

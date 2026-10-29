@@ -15,7 +15,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.LfInterpretationConfig
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
-import com.digitalasset.canton.version.InterpretationConfig
+import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion}
 import com.digitalasset.daml.lf.crypto.Hash
 
 import scala.concurrent.ExecutionContext
@@ -48,6 +48,24 @@ trait CommandExecutor {
 }
 
 object CommandExecutor {
+
+  /** The interpretation config to use for a submission, before the routing synchronizer is known:
+    * the one of the highest protocol version among the candidate synchronizers (restricted to
+    * `synchronizerId` if specified). Without candidate synchronizers, routing fails anyway; fall
+    * back to the latest stable protocol version.
+    */
+  def deriveInterpretationConfig(
+      synchronizerId: Option[SynchronizerId],
+      candidateSynchronizers: Set[PhysicalSynchronizerId],
+  ): LfInterpretationConfig = {
+    val protocolVersion = synchronizerId
+      .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
+      .map(_.protocolVersion)
+      .maxOption
+      .getOrElse(ProtocolVersion.latest)
+    InterpretationConfig.forProtocolVersion(protocolVersion)
+  }
+
   def apply(
       syncService: SyncService,
       commandInterpreter: CommandInterpreter,
@@ -83,17 +101,6 @@ private[execution] class DefaultCommandExecutor(
 ) extends NamedLogging
     with CommandExecutor {
 
-  private def deriveInterpretationConfig(
-      synchronizerId: Option[SynchronizerId],
-      candidateSynchronizers: Set[PhysicalSynchronizerId],
-  ): LfInterpretationConfig =
-    synchronizerId
-      .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
-      .map(_.protocolVersion)
-      .maxOption
-      .map(pv => InterpretationConfig.forProtocolVersion(pv))
-      .getOrElse(LfInterpretationConfig.Default)
-
   override def execute(
       commands: Commands,
       submissionSeed: Hash,
@@ -109,7 +116,7 @@ private[execution] class DefaultCommandExecutor(
       )
     }
 
-    val interpretConfig: LfInterpretationConfig = deriveInterpretationConfig(
+    val interpretConfig: LfInterpretationConfig = CommandExecutor.deriveInterpretationConfig(
       commands.synchronizerId,
       routingSynchronizerState.topologySnapshots.keySet,
     )

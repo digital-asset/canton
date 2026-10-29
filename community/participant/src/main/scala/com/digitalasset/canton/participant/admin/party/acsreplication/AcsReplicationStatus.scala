@@ -411,20 +411,46 @@ object AcsReplicationStatus
       override protected val pretty: Pretty[NotProposed.type] = prettyOfObject[NotProposed.type]
     }
 
-    case object Proposed extends AgreementStatus {
-      override def toProtoV30: v30.AcsReplicationStatus.AgreementStatus.Proposed =
-        v30.AcsReplicationStatus.AgreementStatus.Proposed(
-          v30.AcsReplicationStatus.AgreementProposed()
+    case object ProposalSent extends AgreementStatus {
+
+      override def toProtoV30: v30.AcsReplicationStatus.AgreementStatus.ProposalSent =
+        v30.AcsReplicationStatus.AgreementStatus.ProposalSent(
+          v30.AcsReplicationStatus.AgreementProposalSent()
         )
 
       override val isEmpty: Boolean = true
 
-      override def prettyCompanion: PrettyPrintingCompanion[Proposed.this.type] =
-        ProposedPrettyPrintingCompanion
+      override def prettyCompanion: PrettyPrintingCompanion[ProposalSent.this.type] =
+        ProposalSentPrettyPrintingCompanion
     }
 
-    private object ProposedPrettyPrintingCompanion extends PrettyPrintingCompanion[Proposed.type] {
-      override protected val pretty: Pretty[Proposed.type] = prettyOfObject[Proposed.type]
+    private object ProposalSentPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[ProposalSent.type] {
+      override protected val pretty: Pretty[ProposalSent.type] = prettyOfObject[ProposalSent.type]
+    }
+
+    final case class Proposed(
+        // daml proposal contract id to be archived upon acceptance or rejection
+        damlProposalContractId: LfContractId
+    ) extends AgreementStatus {
+      override def toProtoV30: v30.AcsReplicationStatus.AgreementStatus.Proposed =
+        v30.AcsReplicationStatus.AgreementStatus.Proposed(
+          v30.AcsReplicationStatus.AgreementProposed(damlProposalContractId.coid)
+        )
+
+      override val isEmpty: Boolean = true
+
+      override def prettyCompanion: PrettyPrintingCompanion[Proposed] =
+        Proposed
+    }
+
+    object Proposed extends PrettyPrintingCompanion[Proposed] {
+      override protected val pretty: Pretty[Proposed] = {
+        import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+        prettyOfClass(
+          param("contract id", _.damlProposalContractId)
+        )
+      }
     }
 
     final case class Exists(
@@ -481,8 +507,12 @@ object AcsReplicationStatus
       proto match {
         case v30.AcsReplicationStatus.AgreementStatus.NotProposed(_) =>
           Right(AgreementStatus.NotProposed)
-        case v30.AcsReplicationStatus.AgreementStatus.Proposed(_) =>
-          Right(AgreementStatus.Proposed)
+        case v30.AcsReplicationStatus.AgreementStatus.ProposalSent(_) =>
+          Right(AgreementStatus.ProposalSent)
+        case v30.AcsReplicationStatus.AgreementStatus.Proposed(proposed) =>
+          for {
+            contractId <- ProtoConverter.parseLfContractId(proposed.contractId)
+          } yield AgreementStatus.Proposed(contractId)
         case v30.AcsReplicationStatus.AgreementStatus.Exists(exists) =>
           for {
             contractId <- ProtoConverter.parseLfContractId(exists.contractId)

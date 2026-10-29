@@ -10,8 +10,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
@@ -71,7 +71,7 @@ final class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.HardcodedDefault,
-          SynchronizerLimits.defaultFor(testedProtocolVersion),
+          testedSynchronizerLimits,
         )
         .value
       decompressed.timestamp shouldBe event.timestamp
@@ -85,10 +85,45 @@ final class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one)),
-          SynchronizerLimits.defaultFor(testedProtocolVersion),
+          testedSynchronizerLimits,
         )
         .left
         .value shouldBe a[DecompressionFailed]
+    }
+  }
+
+  "noValidation" should {
+    def noValidationValidator(policy: DecompressionPolicy) =
+      SequencedEventValidator.noValidation(
+        DefaultTestIdentities.physicalSynchronizerId,
+        SequencedEventValidator.DecompressionPolicyProvider.fixed(policy),
+        warn = false,
+      )(
+        NamedLoggingContext(loggerFactory, traceContext),
+        parallelExecutionContext,
+      )
+
+    "decompress events within the bound" in { fixture =>
+      import fixture.*
+      val event = createEvent().futureValueUS
+      noValidationValidator(DecompressionPolicy.HardcodedDefault)
+        .validate(None, toCompressed(event), DefaultTestIdentities.sequencerId)
+        .valueOrFail("event within the bound")
+        .failOnShutdown
+        .futureValue
+        .timestamp shouldBe event.timestamp
+    }
+
+    "reject events whose decompression exceeds the bound" in { fixture =>
+      import fixture.*
+      val event = createEvent().futureValueUS
+      noValidationValidator(
+        DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one))
+      )
+        .validate(None, toCompressed(event), DefaultTestIdentities.sequencerId)
+        .leftOrFail("oversized event")
+        .failOnShutdown
+        .futureValue shouldBe a[DecompressionFailed]
     }
   }
 

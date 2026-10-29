@@ -1,0 +1,87 @@
+name: Run Propose Script
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      script_argument:
+        description: Argument passed to release/propose.sh
+        required: true
+        type: string
+    secrets:
+      GHA_CANTON_DA:
+        required: false
+        description: GitHub token with write access to digital-asset/canton
+      GHA_CANTON_DACH_NY:
+        required: false
+        description: GitHub token with write access to DACH-NY/canton
+
+jobs:
+  run_propose_script:
+    name: Run Propose Script
+    if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      CIRCLE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      REPO_GITHUB_TOKEN: >-
+        ${{
+          case(
+            github.repository == 'DACH-NY/canton', secrets.GHA_CANTON_DACH_NY,
+            github.repository == 'digital-asset/canton', secrets.GHA_CANTON_DA,
+            ''
+          )
+        }}
+
+    steps:
+      - name: Validate repo GitHub token
+        shell: bash
+        env:
+          REPO_GITHUB_TOKEN: ${{ env.REPO_GITHUB_TOKEN }}
+        run: |
+          if [[ -z "${REPO_GITHUB_TOKEN}" ]]; then
+            echo "::error::Missing GitHub token for ${GITHUB_REPOSITORY}. Set GHA_CANTON_DACH_NY or GHA_CANTON_DA before running this workflow."
+            exit 1
+          fi
+
+      - name: Set SBT heap for release propose
+        shell: bash
+        run: |
+          export SBT_OPTS="${SBT_OPTS:-} -Xmx${EXECUTOR_JVM_HEAP_SIZE}"
+          echo "SBT_OPTS=${SBT_OPTS}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore compile and sbt caches
+        if: ${{ inputs.script_argument != 'finish_release_process' }}
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Authorize git
+        uses: ./.github/actions/git/authorize_git
+        with:
+          github_token: ${{ env.REPO_GITHUB_TOKEN }}
+
+      - name: Invoke propose.sh script for release step
+        timeout-minutes: 90
+        uses: ./.github/actions/nix/nix_run
+        env:
+          GITHUB_TOKEN: ${{ env.REPO_GITHUB_TOKEN }}
+          SCRIPT_ARGUMENT: ${{ inputs.script_argument }}
+        with:
+          command: ./release/propose.sh "$SCRIPT_ARGUMENT"
+
+      - name: Reset origin URL
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
+        shell: bash
+        run: |
+          git remote set-url origin "${{ github.server_url }}/${{ github.repository }}.git"

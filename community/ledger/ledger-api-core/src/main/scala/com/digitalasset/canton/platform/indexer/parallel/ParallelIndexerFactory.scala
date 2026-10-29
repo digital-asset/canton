@@ -99,8 +99,7 @@ object ParallelIndexerFactory {
             // this DataSource will be used to spawn the main connection where we keep the Indexer Main Lock
             // The life-cycle of such connections matches the life-cycle of a protectedExecution
             dataSource = dataSourceStorageBackend.createDataSource(
-              dbConfig.dataSourceConfig,
-              loggerFactory,
+              dbConfig.dataSourceConfig
             )
           } yield HaCoordinator.databaseLockBasedHaCoordinator(
             mainConnectionFactory = () => {
@@ -147,7 +146,6 @@ object ParallelIndexerFactory {
                       dataSource = dataSourceStorageBackend.createDataSource(
                         dataSourceConfig = dbConfig.dataSourceConfig,
                         connectionInitHook = Some(connectionInitializer.initialize),
-                        loggerFactory = loggerFactory,
                       ),
                       serverRole = ServerRole.Indexer,
                       connectionPoolSize = dbConfig.connectionPool.connectionPoolSize,

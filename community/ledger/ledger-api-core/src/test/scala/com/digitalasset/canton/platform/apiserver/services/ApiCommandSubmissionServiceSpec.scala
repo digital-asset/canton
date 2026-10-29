@@ -12,6 +12,7 @@ import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequ
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  LedgerApiSizeLimitsConfig,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -132,7 +133,7 @@ class ApiCommandSubmissionServiceSpec
       commandSubmissionService = commandSubmissionService,
       commandsValidator = new CommandsValidator(
         validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-      ),
+      )(sizeLimitsConfig = LedgerApiSizeLimitsConfig()),
       submissionSyncService = null,
       currentLedgerTime = () => Instant.EPOCH,
       currentUtcTime = () => Instant.EPOCH,

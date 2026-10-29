@@ -12,11 +12,16 @@ is_nightly_workflow="${IS_NIGHTLY_WORKFLOW:-$1}"
 is_manual="${IS_MANUAL:-$2}"
 
 suffix=""
+release_tag="${CIRCLE_TAG:-}"
 
-if [ -n "$CIRCLE_TAG" ]; then
-  validate_version_tag "$CIRCLE_TAG"
+if [ -z "$release_tag" ] && [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
+  release_tag="${GITHUB_REF_NAME}"
+fi
 
-  suffix="${CIRCLE_TAG:1}" # strips the initial v
+if [ -n "$release_tag" ]; then
+  validate_version_tag "$release_tag"
+
+  suffix="${release_tag:1}" # strips the initial v
 else
   # determine suffix (either as date for nightly/manual builds or keep current version for main)
   if [[ "$is_nightly_workflow" == "true" || "$is_manual" == "true" ]]; then

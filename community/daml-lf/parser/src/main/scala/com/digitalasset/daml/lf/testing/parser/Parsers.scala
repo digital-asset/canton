@@ -12,12 +12,14 @@ private[parser] object Parsers extends scala.util.parsing.combinator.Parsers {
 
   type Elem = Token
 
-  case class Reader[A](l: Seq[(Position, A)]) extends util.parsing.input.Reader[A] {
+  // `end` is the position reported when all the tokens have been consumed
+  case class Reader[A](l: Seq[(Position, A)], end: Position = NoPosition)
+      extends util.parsing.input.Reader[A] {
     override def first: A = l.head._2
 
-    override def rest: Reader[A] = Reader(l.tail)
+    override def rest: Reader[A] = Reader(l.tail, end)
 
-    override def pos: Position = l.headOption.map(_._1).getOrElse(NoPosition)
+    override def pos: Position = l.headOption.map(_._1).getOrElse(end)
 
     override def atEnd: Boolean = l.isEmpty
 
@@ -64,7 +66,7 @@ private[parser] object Parsers extends scala.util.parsing.combinator.Parsers {
     rep1sep(id, `.`) ^^ (s => Ref.DottedName.assertFromSegments(s))
 
   def parseAll[A](p: Parser[A], s: String): A =
-    phrase(p)(Reader(Lexer.lex(s))) match {
+    phrase(p)(Reader(Lexer.lex(s), Lexer.endPosition(s))) match {
       case Success(l, _) => l
       case e: NoSuccess => throw ParsingError(e.msg, e.next.pos)
     }

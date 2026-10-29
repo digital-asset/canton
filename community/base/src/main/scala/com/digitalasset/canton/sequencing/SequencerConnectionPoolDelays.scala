@@ -77,7 +77,7 @@ object SequencerConnectionPoolDelays
       )
       maxRestartDelay <- ProtoConverter.parseRequired(
         NonNegativeFiniteDuration.fromProtoPrimitive("max_restart_delay"),
-        "min_restart_delay",
+        "max_restart_delay",
         maxRestartDelayP,
       )
       subscriptionRequestDelay <- ProtoConverter.parseRequired(

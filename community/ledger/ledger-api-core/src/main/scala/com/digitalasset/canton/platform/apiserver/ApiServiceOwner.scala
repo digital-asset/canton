@@ -14,6 +14,7 @@ import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.auth.*
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.localstore.api.PartyRecordStore
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
@@ -109,6 +110,7 @@ object ApiServiceOwner {
       packageServiceConfig: PackageServiceConfig = ApiServiceOwner.DefaultPackageServiceConfig,
       updateServiceConfig: UpdateServiceConfig,
       stateServiceConfig: StateServiceConfig,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
       loggerFactory: NamedLoggerFactory,
       contractAuthenticator: ContractAuthenticatorFn,
       dynParamGetter: DynamicSynchronizerParameterGetter,
@@ -237,7 +239,12 @@ object ApiServiceOwner {
         trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,
         maxPruningBatchOffsetSize = maxPruningBatchOffsetSize,
-      )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
+      )(
+        materializer = materializer,
+        esf = executionSequencerFactory,
+        tracer = tracer,
+        sizeLimitsConfig = sizeLimitsConfig,
+      ).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(
         apiServices = apiServicesOwner,

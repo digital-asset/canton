@@ -36,6 +36,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.{
   ExternalPartyOnboardingDetails,
   ParticipantId,
@@ -91,6 +92,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       submissionId: Option[Ref.SubmissionId],
       workflowId: Option[Ref.WorkflowId],
       reassignmentCommands: Seq[ReassignmentCommand],
+      accountId: Option[AccountId],
   )(implicit
       traceContext: TraceContext
   ): Future[SubmissionResult] =
@@ -104,6 +106,7 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
         submissionId,
         workflowId,
         reassignmentCommands,
+        accountId,
       ),
     )
 

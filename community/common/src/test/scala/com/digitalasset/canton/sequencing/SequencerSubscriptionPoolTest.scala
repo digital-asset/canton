@@ -31,7 +31,7 @@ class SequencerSubscriptionPoolTest
         subscriptionPool.start()
 
         clue("normal start") {
-          listener.shouldStabilizeOn(ComponentHealthState.Ok())
+          listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           subscriptionPool.nbSubscriptions shouldBe (trustThreshold + livenessMargin).toNonNegative
         }
         val initialPool = subscriptionPool.subscriptions.toSeq
@@ -60,7 +60,7 @@ class SequencerSubscriptionPoolTest
       ) { (subscriptionPool, listener) =>
         subscriptionPool.start()
 
-        listener.shouldStabilizeOn(ComponentHealthState.Ok())
+        listener.shouldStabilizeOnState(ComponentHealthState.Ok())
         subscriptionPool.nbSubscriptions shouldBe (trustThreshold + livenessMargin).toNonNegative
 
         clue("Increase liveness margin") {
@@ -102,7 +102,7 @@ class SequencerSubscriptionPoolTest
         subscriptionPool.start()
 
         clue("normal start") {
-          listener.shouldStabilizeOn(ComponentHealthState.Ok())
+          listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           subscriptionPool.nbSubscriptions shouldBe (trustThreshold + livenessMargin).toNonNegative
         }
         val initialPool = subscriptionPool.subscriptions.toSeq
@@ -125,7 +125,7 @@ class SequencerSubscriptionPoolTest
         clue("Remove 1 more to go below the active threshold") {
           initialPool(3).connection.fatal(reason = "test")
 
-          listener.shouldStabilizeOn(
+          listener.shouldStabilizeOnState(
             ComponentHealthState.degraded(
               "below liveness margin: 6 subscription(s) available, trust threshold = 5, liveness margin = 2"
             )
@@ -137,7 +137,13 @@ class SequencerSubscriptionPoolTest
           initialPool.slice(4, 6).foreach(_.connection.fatal(reason = "test"))
 
           // Subscription pool gets closed because the threshold is no longer reachable
-          listener.shouldStabilizeOn(ComponentHealthState.failed("Component is closed"))
+          listener.shouldStabilizeOnAssertion {
+            case fatal: ComponentHealthState.Fatal =>
+              fatal.state.description.value should include(
+                "Trust threshold of 5 is no longer reachable"
+              )
+            case other => fail(s"bad state: $other")
+          }
           // It does not make sense to check for the number of remaining subscriptions in the pool at this point
           // since the pool has been closed.
         }

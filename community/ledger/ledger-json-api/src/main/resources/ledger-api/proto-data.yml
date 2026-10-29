@@ -909,6 +909,14 @@ fileComments:
               The actual party id will be constructed from this hint and a fingerprint of the public key
 
               Required
+            protocol_version: |-
+              The protocol version to create the topology transactions for, so that clients that only read topology
+              transactions of an older protocol version can read them, e.g. 36 on a synchronizer with protocol version 37.
+              Must be the synchronizer's protocol version or a lower one whose topology transactions the synchronizer admits:
+              from protocol version 37 on, a synchronizer admits those of protocol version 36.
+              Defaults to the synchronizer's protocol version.
+
+              Optional
       GenerateExternalPartyTopologyResponse:
         message:
           comments: Response message with topology transactions and the multi-hash
@@ -925,8 +933,8 @@ fileComments:
             topology_transactions: |-
               The serialized topology transactions which need to be signed and submitted as part of the allocate party process
               Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
-              as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
-              supported by the synchronizer.
+              as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` for the requested
+              protocol version, or for the synchronizer's protocol version if none is requested.
 
               Required: must be non-empty
             multi_hash: |-
@@ -4189,7 +4197,8 @@ fileComments:
             assignment_exclusivity: |-
               Assignment exclusivity
               Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-              Defined for reassigning participants.
+              Defined for reassigning participants, up to protocol version 36.
+              Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
               Optional
             reassignment_id: |-

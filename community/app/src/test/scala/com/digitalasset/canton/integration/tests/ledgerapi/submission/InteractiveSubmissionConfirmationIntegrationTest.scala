@@ -365,6 +365,7 @@ final class InteractiveSubmissionConfirmationIntegrationTest
             prepared.getPreparedTransaction,
             HashingSchemeVersion.V2,
             tentativeLedgerEffectiveTime = LfTimestamp.now(),
+            accountId = None,
           )
         )(executionContext, LoggingContextWithTrace.ForTesting, implicitly[ErrorLoggingContext])
         .futureValue

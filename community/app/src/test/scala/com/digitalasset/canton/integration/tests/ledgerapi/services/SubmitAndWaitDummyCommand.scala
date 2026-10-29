@@ -40,10 +40,15 @@ trait SubmitAndWaitDummyCommandHelpers extends TestCommands {
       userId: String,
       party: String,
       commandId: Option[String] = None,
+      accountId: String = "",
   ): SubmitAndWaitRequest =
     SubmitAndWaitRequest(
       dummyCommands(commandId.getOrElse(s"$serviceCallName-${UUID.randomUUID}"), party = party)
-        .update(_.commands.userId := userId, _.commands.actAs := Seq(party))
+        .update(
+          _.commands.userId := userId,
+          _.commands.actAs := Seq(party),
+          _.commands.accountId := accountId,
+        )
         .commands
     )
 
@@ -51,9 +56,10 @@ trait SubmitAndWaitDummyCommandHelpers extends TestCommands {
       userId: String,
       party: String,
       commandId: Option[String] = None,
+      accountId: String = "",
   ): SubmitAndWaitForTransactionRequest =
     SubmitAndWaitForTransactionRequest(
-      commands = dummySubmitAndWaitRequest(userId, party, commandId).commands,
+      commands = dummySubmitAndWaitRequest(userId, party, commandId, accountId).commands,
       transactionFormat = Some(
         TransactionFormat(
           eventFormat = Some(
@@ -76,9 +82,10 @@ trait SubmitAndWaitDummyCommandHelpers extends TestCommands {
       userId: String,
       party: String,
       commandId: Option[String] = None,
+      accountId: String = "",
   )(implicit ec: ExecutionContext): Future[Empty] =
     service(token)
-      .submitAndWait(dummySubmitAndWaitRequest(userId, party = party, commandId = commandId))
+      .submitAndWait(dummySubmitAndWaitRequest(userId, party, commandId, accountId))
       .map(_ => Empty())
 
   protected def submitAndWaitForTransaction(
@@ -86,10 +93,11 @@ trait SubmitAndWaitDummyCommandHelpers extends TestCommands {
       userId: String,
       party: String,
       commandId: Option[String] = None,
+      accountId: String = "",
   )(implicit ec: ExecutionContext): Future[Empty] =
     service(token)
       .submitAndWaitForTransaction(
-        dummySubmitAndWaitForTransactionRequest(userId, party = party, commandId = commandId)
+        dummySubmitAndWaitForTransactionRequest(userId, party, commandId, accountId)
       )
       .map(_ => Empty())
 

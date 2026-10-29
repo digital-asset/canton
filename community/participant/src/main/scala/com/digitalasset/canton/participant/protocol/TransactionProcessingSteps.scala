@@ -78,9 +78,11 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
 }
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.util.DAMLe.{ContractEnricher, TransactionEnricher}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.platform.store.cache.OnlyForTestingTransactionInMemoryStore
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.ContractIdAbsolutizationDataV1
@@ -91,7 +93,6 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 }
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.InvalidContractIdInView
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
@@ -118,6 +119,7 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.rpc.status.Status as RpcStatus
 import monocle.PLens
@@ -221,6 +223,7 @@ class TransactionProcessingSteps(
       transactionMeta,
       wfTransaction,
       disclosedContracts,
+      _,
     ) = submissionParam
 
     val now = clock.now
@@ -484,14 +487,6 @@ class TransactionProcessingSteps(
         case Success(Outcome(Right(preparedBatch))) => Success(Outcome(Right(preparedBatch)))
         case Success(Outcome(Left(rejectionCause))) => mkError(rejectionCause)
         case Success(AbortedDueToShutdown) => Success(AbortedDueToShutdown)
-        case Failure(PassiveInstanceException(_reason)) =>
-          val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
-            SyncServiceInjectionError.PassiveReplica.Error(
-              userId = submitterInfo.userId,
-              commandId = submitterInfo.commandId,
-            )
-          )
-          mkError(rejectionCause)
         case Failure(exception) =>
           val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
             SyncServiceInjectionError.InjectionFailure.Failure(exception)
@@ -618,6 +613,7 @@ class TransactionProcessingSteps(
       ViewMessageDecrypter(
         participantId,
         sessionKeyStore,
+        withTransparencyChecks = staticSynchronizerParameters.enableTransparencyChecks,
         protocolVersion,
         futureSupervisor,
         loggerFactory,
@@ -810,6 +806,29 @@ class TransactionProcessingSteps(
     def checkReplayedTransaction: Option[String] =
       Option.when(!freshOwnTimelyTx)("View %s belongs to a replayed transaction")
 
+    def activationsDeactivationsOrder(
+        tx: LfVersionedTransaction
+    ): Map[LfContractId, Seq[ChangeType]] = {
+      def append(acc: Map[LfContractId, Seq[ChangeType]], cid: LfContractId, ct: ChangeType) =
+        acc.updated(cid, acc.getOrElse(cid, Vector.empty) :+ ct)
+
+      tx.foldInExecutionOrder(Map.empty[LfContractId, Seq[ChangeType]])(
+        exerciseBegin = (acc, _, exe) =>
+          (
+            if (exe.consuming) append(acc, exe.targetCoid, ChangeType.Deactivation) else acc,
+            ChildrenRecursion.DoRecurse,
+          ),
+        // Nothing under a rollback node takes effect on the ledger.
+        rollbackBegin = (acc, _, _) => (acc, ChildrenRecursion.DoNotRecurse),
+        leaf = {
+          case (acc, _, create: LfNodeCreate) => append(acc, create.coid, ChangeType.Activation)
+          case (acc, _, _) => acc
+        },
+        exerciseEnd = (acc, _, _) => acc,
+        rollbackEnd = (acc, _, _) => acc,
+      )
+    }
+
     def doParallelChecks(): FutureUnlessShutdown[ParallelChecksResult] = {
       val ledgerTime = parsedRequest.ledgerTime
 
@@ -911,6 +930,15 @@ class TransactionProcessingSteps(
             }
         )
 
+        operationsFO = conformanceResultET.value.map {
+          case Right(mcResult) =>
+            Some(activationsDeactivationsOrder(mcResult.suffixedTransaction.unwrap))
+          case Left(error) =>
+            error.validSubTransactionO.map(transaction =>
+              activationsDeactivationsOrder(transaction.unwrap)
+            )
+        }
+
         // The external-call check re-validates recorded external-call results against the
         // extension service. Like the model conformance check, it is kicked off here and only
         // awaited when the confirmation responses are created, so that its network I/O runs
@@ -955,6 +983,7 @@ class TransactionProcessingSteps(
         externalCallCheckResultF,
         timeValidationE,
         replayCheckResult,
+        operationsFO,
       )
     }
 
@@ -1039,6 +1068,7 @@ class TransactionProcessingSteps(
           parallelChecksResult.authenticationValidatorResult.externalHash,
         crashAfterFailedValidation = participantNodeParameters.crashAfterFailedValidation,
         hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
+        activationsDeactivationsOrderFO = parallelChecksResult.activationsDeactivationsOrderFO,
       )
     }
 
@@ -1262,11 +1292,13 @@ class TransactionProcessingSteps(
       modelConformanceResult: ModelConformanceChecker.Result,
   )(implicit
       traceContext: TraceContext
-  ): CommitAndStoreContractsAndPublishEvent = {
+  ): FutureUnlessShutdown[CommitAndStoreContractsAndPublishEvent] = {
     val txValidationResult = pendingRequestData.transactionValidationResult
-    val commitSet = txValidationResult.commitSet(pendingRequestData.requestId)
+    val commitSetF = txValidationResult.commitSet(pendingRequestData.requestId)
 
-    computeCommitAndContractsAndEvent(
+    for {
+      commitSet <- commitSetF
+    } yield computeCommitAndContractsAndEvent(
       requestTime = pendingRequestData.requestTime,
       updateId = txValidationResult.updateId,
       workflowIdO = txValidationResult.workflowIdO,
@@ -1387,6 +1419,9 @@ class TransactionProcessingSteps(
 
       createdContracts = usedAndCreated.contracts.created
 
+      activationsDeactivationsOrderO <- EitherT
+        .right(pendingRequestData.transactionValidationResult.activationsDeactivationsOrderFO)
+
       commitSet = CommitSet.createForTransaction(
         activenessResult = pendingRequestData.transactionValidationResult.activenessResult,
         requestId = pendingRequestData.requestId,
@@ -1395,6 +1430,7 @@ class TransactionProcessingSteps(
         createdContracts = createdContracts,
         crashAfterFailedValidation = participantNodeParameters.crashAfterFailedValidation,
         hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
+        activationsDeactivationsOrderO,
       )
 
       commitAndContractsAndEvent = computeCommitAndContractsAndEvent(
@@ -1507,7 +1543,7 @@ class TransactionProcessingSteps(
             rejectedWithModelConformanceError(error)
         },
         modelConformanceResult =>
-          EitherT.pure(
+          EitherT.right(
             getCommitSetAndContractsToBeStoredAndEventApproveConform(
               pendingRequestData,
               completionInfoO,
@@ -1626,6 +1662,7 @@ object TransactionProcessingSteps {
       transactionMeta: TransactionMeta,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
+      accounting: SubmissionAccounting,
   )
 
   final case class ParsedTransactionRequest(
@@ -1694,6 +1731,9 @@ object TransactionProcessingSteps {
       externalCallCheckResultF: FutureUnlessShutdown[Map[ViewPosition, ExternalCallCheck.Result]],
       timeValidationResultE: Either[TimeCheckFailure, Unit],
       replayCheckResult: Option[String],
+      activationsDeactivationsOrderFO: FutureUnlessShutdown[
+        Option[Map[LfContractId, Seq[ChangeType]]]
+      ],
   ) {
     val authenticationResult: Map[ViewPosition, AuthenticationError] =
       authenticationValidatorResult.viewAuthenticationErrors

@@ -87,6 +87,7 @@ generate_grpc_service() {
 # Generate gRPC client code and proto classes for python
 echo "Generating python code from protobuf definitions"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/admin/object_meta.proto"
+generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/size_config_options.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/commands.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/completion.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/crypto.proto"

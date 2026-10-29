@@ -73,7 +73,12 @@ import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{
+  ProtoVersion,
+  ProtocolVersion,
+  ProtocolVersionValidation,
+  RepresentativeProtocolVersion,
+}
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -525,6 +530,49 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     } yield signedTx
   }
 
+  /** Signs the given topology transaction as is and adds it to the topology state. Unlike
+    * [[proposeAndAuthorize]], it does not rebuild the transaction, so the transaction keeps the
+    * protocol version that it was created for, and with it its hash.
+    *
+    * @param protocolVersion
+    *   The protocol version of the
+    *   [[com.digitalasset.canton.topology.transaction.SignedTopologyTransaction]] that wraps the
+    *   transaction, i.e. the store's.
+    * @param expectFullAuthorization
+    *   Whether the transaction must be fully signed and authorized by keys on this node.
+    * @return
+    *   The signed transaction or an error code of why the addition failed.
+    */
+  def authorizeTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](
+      transaction: TopologyTransaction[Op, M],
+      signingKeys: Seq[Fingerprint],
+      namespacesToSignFor: Seq[Namespace],
+      protocolVersion: ProtocolVersion,
+      expectFullAuthorization: Boolean,
+      forceChanges: ForceFlags,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SignedTopologyTransaction[Op, M]] =
+    for {
+      existingTransaction <- findExistingTransaction(transaction.mapping)
+      _ <- determineSerial(
+        transaction.operation,
+        transaction.mapping,
+        Some(transaction.serial),
+        existingTransaction,
+      )
+      signedTx <- signTransaction(
+        transaction,
+        signingKeys,
+        namespacesToSignFor,
+        isProposal = !expectFullAuthorization,
+        protocolVersion,
+        existingTransaction,
+        forceChanges,
+      )
+      _ <- add(Seq(signedTx), forceChanges, expectFullAuthorization)
+    } yield signedTx
+
   /** Authorizes an existing topology transaction by signing it and adding it to the topology state.
     * If {@code expectFullAuthorization} is {@code true} and the topology transaction cannot be
     * fully authorized with keys from this node, returns with an error and the existing topology
@@ -606,50 +654,21 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       existingTransaction: Option[GenericSignedTopologyTransaction],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TopologyManagerError, TopologyTransaction[Op, M]] = {
-    val existingTransactionTuple =
-      existingTransaction.map(t => (t.operation, t.mapping, t.serial, t.signatures))
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, TopologyTransaction[Op, M]] =
     for {
-      theSerial <- ((existingTransactionTuple, serial) match {
-        case (None, None) =>
-          // auto-select 1
-          EitherT.rightT(PositiveInt.one)
-        case (None, Some(proposed)) =>
-          // didn't find an existing transaction, therefore the proposed serial must be 1
-          EitherT.cond[FutureUnlessShutdown][TopologyManagerError, PositiveInt](
-            proposed == PositiveInt.one,
-            PositiveInt.one,
-            TopologyManagerError.SerialMismatch
-              .Failure(actual = Some(proposed), expected = Some(PositiveInt.one)),
-          )
-        // The stored mapping and the proposed mapping are the same. This likely only adds an additional signature.
-        // If not, then duplicates will be filtered out down the line.
-        case (Some((`op`, `mapping`, existingSerial, _)), None) =>
-          // auto-select existing
-          EitherT.rightT(existingSerial)
-        case (Some((`op`, `mapping`, existingSerial, signatures)), Some(proposed)) =>
-          EitherT.cond[FutureUnlessShutdown](
-            existingSerial == proposed,
-            existingSerial,
-            TopologyManagerError.MappingAlreadyExists
-              .Failure(mapping, signatures.map(_.authorizingLongTermKey)),
-          )
-
-        case (Some((_, _, existingSerial, _)), None) =>
-          // auto-select existing+1
-          EitherT.fromEither(existingSerial.nextSerial)
-        case (Some((_, _, existingSerial, _)), Some(proposed)) =>
-          // check that the proposed serial matches existing+1
-          for {
-            next <- EitherT.fromEither(existingSerial.nextSerial(errorLoggingContext))
-            _ <- EitherT.cond[FutureUnlessShutdown](
-              next == proposed,
-              next,
-              TopologyManagerError.SerialMismatch
-                .Failure(actual = Some(proposed), expected = Some(next)): TopologyManagerError,
-            )
-          } yield next
-      }): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt]
+      theSerial <- determineSerial(op, mapping, serial, existingTransaction)
+      protoVersion <- EitherT.fromEither[FutureUnlessShutdown](
+        TopologyTransaction
+          .protoVersionFor(protocolVersion)
+          .leftMap[TopologyManagerError](TopologyManagerError.InternalError.Unexpected(_))
+      )
+      // A mapping that the protocol version cannot express is a client error, e.g. a Nominated
+      // participant on protocol version 36
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        mapping
+          .canBeSerializedTo(protoVersion)
+          .leftMap[TopologyManagerError](TopologyManagerError.InvalidTopologyMapping.Reject(_))
+      )
       transaction <- EitherT.fromEither[FutureUnlessShutdown](
         TopologyTransaction
           .create(op, theSerial, mapping, protocolVersion)
@@ -658,6 +677,57 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
           )
       )
     } yield transaction
+
+  private def determineSerial(
+      op: TopologyChangeOp,
+      mapping: TopologyMapping,
+      serial: Option[PositiveInt],
+      existingTransaction: Option[GenericSignedTopologyTransaction],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt] = {
+    val existingTransactionTuple =
+      existingTransaction.map(t => (t.operation, t.mapping, t.serial, t.signatures))
+    (existingTransactionTuple, serial) match {
+      case (None, None) =>
+        // auto-select 1
+        EitherT.rightT(PositiveInt.one)
+      case (None, Some(proposed)) =>
+        // didn't find an existing transaction, therefore the proposed serial must be 1
+        EitherT.cond[FutureUnlessShutdown][TopologyManagerError, PositiveInt](
+          proposed == PositiveInt.one,
+          PositiveInt.one,
+          TopologyManagerError.SerialMismatch
+            .Failure(actual = Some(proposed), expected = Some(PositiveInt.one)),
+        )
+      // The stored mapping and the proposed mapping are the same. This likely only adds an additional signature.
+      // If not, then duplicates will be filtered out down the line.
+      case (Some((`op`, `mapping`, existingSerial, _)), None) =>
+        // auto-select existing
+        EitherT.rightT(existingSerial)
+      case (Some((`op`, `mapping`, existingSerial, signatures)), Some(proposed)) =>
+        EitherT.cond[FutureUnlessShutdown](
+          existingSerial == proposed,
+          existingSerial,
+          TopologyManagerError.MappingAlreadyExists
+            .Failure(mapping, signatures.map(_.authorizingLongTermKey)),
+        )
+
+      case (Some((_, _, existingSerial, _)), None) =>
+        // auto-select existing+1
+        EitherT.fromEither(existingSerial.nextSerial)
+      case (Some((_, _, existingSerial, _)), Some(proposed)) =>
+        // check that the proposed serial matches existing+1
+        for {
+          next <- EitherT.fromEither(existingSerial.nextSerial(errorLoggingContext))
+          _ <- EitherT.cond[FutureUnlessShutdown](
+            next == proposed,
+            next,
+            TopologyManagerError.SerialMismatch
+              .Failure(actual = Some(proposed), expected = Some(next)): TopologyManagerError,
+          )
+        } yield next
+    }
   }
 
   private def signTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](
@@ -991,6 +1061,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         signingKeysWithThresholdO,
         forceChanges,
         transaction.transaction.operation,
+        transaction.transaction.representativeProtocolVersion,
       )
 
     case upgradeAnnouncement: LsuAnnouncement =>
@@ -1151,33 +1222,11 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       signingKeysWithThresholdO: Option[SigningKeysWithThreshold],
       forceChanges: ForceFlags,
       operation: TopologyChangeOp,
+      transactionVersion: RepresentativeProtocolVersion[TopologyTransaction.type],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
-    val currentThresholdAndHostingParticipants
-        : FutureUnlessShutdown[(Option[PositiveInt], Seq[HostingParticipant])] =
-      store
-        .findPositiveTransactions(
-          asOf = CantonTimestamp.MaxValue,
-          asOfInclusive = false,
-          isProposal = false,
-          types = Seq(PartyToParticipant.code),
-          filterUid = Some(NonEmpty(Seq, partyId.uid)),
-          filterNamespace = None,
-        )
-        .map {
-          _.collectOfMapping[PartyToParticipant].collectLatestByUniqueKey.toTopologyState
-            .collectFirst {
-              case PartyToParticipant(
-                    _,
-                    currentThreshold,
-                    currentHostingParticipants,
-                    _,
-                  ) =>
-                Some(currentThreshold) -> currentHostingParticipants
-            }
-            .getOrElse(None -> Nil)
-        }
+    val currentMappingF = findCurrentPartyToParticipant(partyId)
 
     for {
       _ <- signingKeysWithThresholdO.traverse_ { case SigningKeysWithThreshold(keys, threshold) =>
@@ -1189,11 +1238,14 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         forceChanges: ForceFlags,
       )
 
-      currentThresholdAndHostingParticipants <- EitherT.right(
-        currentThresholdAndHostingParticipants
+      currentMappingO <- EitherT.right(currentMappingF)
+      currentThresholdO = currentMappingO.map(_.threshold)
+      currentHostingParticipants = currentMappingO.fold(Seq.empty[HostingParticipant])(
+        _.participants
       )
-      currentThresholdO = currentThresholdAndHostingParticipants._1
-      currentHostingParticipants = currentThresholdAndHostingParticipants._2
+      _ <- currentMappingO.traverse_(
+        checkHostingStatesAreExpressible(_, transactionVersion, forceChanges)
+      )
 
       removed = operation match {
         case TopologyChangeOp.Replace =>
@@ -1239,6 +1291,79 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 
     } yield ()
   }
+
+  private def findCurrentPartyToParticipant(partyId: PartyId)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[PartyToParticipant]] =
+    store
+      .findPositiveTransactions(
+        asOf = CantonTimestamp.MaxValue,
+        asOfInclusive = false,
+        isProposal = false,
+        types = Seq(PartyToParticipant.code),
+        filterUid = Some(NonEmpty(Seq, partyId.uid)),
+        filterNamespace = None,
+      )
+      .map {
+        _.collectOfMapping[PartyToParticipant].collectLatestByUniqueKey.toTopologyState
+          .collectFirst { case current: PartyToParticipant => current }
+      }
+
+  /** Rejects a party-to-participant mapping that a client sent as `v30` while the current mapping
+    * has hosting states that `v30` cannot express, unless forced. The node creates the transaction
+    * for the store's protocol version, which can express them, so the check on the transaction
+    * would not notice that the client cannot see these states, e.g. that its mapping removes a
+    * Nominated participant.
+    */
+  def checkV30MappingCanExpressHostingStates(
+      mapping: TopologyMapping,
+      forceChanges: ForceFlags,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+    mapping match {
+      case ptp: PartyToParticipant =>
+        for {
+          currentO <- EitherT.right(findCurrentPartyToParticipant(ptp.partyId))
+          notExpressible = currentO.fold(Seq.empty[HostingParticipant])(
+            _.participantsNotSerializableTo(ProtoVersion(30))
+          )
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyManagerError](
+            notExpressible.isEmpty ||
+              forceChanges.permits(ForceFlag.AllowV30PartyToParticipantAfterHostingStates),
+            TopologyManagerError.HostingStatesNotExpressible.V30Mapping(ptp.partyId, notExpressible),
+          )
+        } yield ()
+      case _ => EitherTUtil.unitUS
+    }
+
+  // A transaction that replaces a party-to-participant mapping must express the mapping's hosting
+  // states. Otherwise it changes them implicitly: a topology transaction of protocol version 36
+  // turns a listed Nominated or Freezing participant into an Onboarding or Active one.
+  private def checkHostingStatesAreExpressible(
+      current: PartyToParticipant,
+      transactionVersion: RepresentativeProtocolVersion[TopologyTransaction.type],
+      forceChanges: ForceFlags,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+    for {
+      protoVersion <- EitherT.fromEither[FutureUnlessShutdown](
+        TopologyTransaction
+          .protoVersionFor(transactionVersion)
+          .leftMap(TopologyManagerError.InternalError.Unexpected(_): TopologyManagerError)
+      )
+      notExpressible = current.participantsNotSerializableTo(protoVersion)
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyManagerError](
+        notExpressible.isEmpty ||
+          forceChanges.permits(ForceFlag.AllowV30PartyToParticipantAfterHostingStates),
+        TopologyManagerError.HostingStatesNotExpressible.Reject(
+          current.partyId,
+          transactionVersion.representative,
+          notExpressible,
+        ),
+      )
+    } yield ()
 
   /** notify observers about new transactions about to be stored */
   private def notifyObservers(

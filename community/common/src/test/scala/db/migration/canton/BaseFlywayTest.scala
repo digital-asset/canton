@@ -27,7 +27,7 @@ trait BaseFlywayTest
     with HasExecutionContext
     with BeforeAndAfterAll {
 
-  protected def migrationLocations: Seq[String]
+  protected def dbConfig: DbConfig
   protected def driverClassName: String
   protected def jdbcUrl: String
   protected def dbUser: String
@@ -42,10 +42,17 @@ trait BaseFlywayTest
   protected def withConnection[A](f: Connection => A): A =
     ResourceUtil.withResource(openConnection())(f)
 
-  /** Builds a Flyway instance migrating up to `target` (or to the latest version if `None`). */
+  /** Builds a Flyway instance migrating up to `target` (or to the latest version if `None`).
+    * Repeatable migrations are only applied when migrating to the latest version.
+    */
   protected def flyway(targetVersion: Option[String]): Flyway = {
     val configuration = Flyway.configure
-      .locations(migrationLocations*)
+      .locations(
+        dbConfig.buildMigrationsPaths(
+          devVersionSupport = false,
+          includeRepeatableMigrations = targetVersion.isEmpty,
+        )*
+      )
       .dataSource(jdbcUrl, dbUser, dbPassword)
       .placeholders(
         Map(
@@ -105,8 +112,7 @@ trait BaseFlywayTestH2 extends BaseFlywayTest {
     s"jdbc:h2:mem:$dbName;MODE=PostgreSQL;LOCK_TIMEOUT=10000;DB_CLOSE_DELAY=-1"
   override protected val dbUser = ""
   override protected val dbPassword = ""
-  override protected val migrationLocations =
-    Seq(DbConfig.h2MigrationsPathStable, DbConfig.h2DefaultTableSettingsPath)
+  override protected val dbConfig: DbConfig = DbConfig.H2(DbConfig.H2.defaultConfig)
 
   // Keep one connection open so the in-memory database survives between Flyway runs.
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
@@ -141,8 +147,7 @@ trait BaseFlywayTestPostgres extends BaseFlywayTest {
     s"jdbc:postgresql://${setup.basicConfig.host}:${setup.basicConfig.port}/${setup.basicConfig.dbName}"
   override protected lazy val dbUser = setup.basicConfig.username
   override protected lazy val dbPassword = setup.basicConfig.password
-  override protected val migrationLocations =
-    Seq(DbConfig.postgresMigrationsPathStable, DbConfig.postgresDefaultTableSettingsPath)
+  override protected val dbConfig: DbConfig = DbConfig.Postgres(DbConfig.Postgres.defaultConfig)
 
   override def afterAll(): Unit =
     try super.afterAll()

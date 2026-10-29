@@ -105,7 +105,7 @@ final class MediatorRuntime(
       // the future returned by startup will not be complete, because any topology transactions pushed to the
       // synchronizer aren't actually processed until after the runtime is up and ... running
       _ <- synchronizerOutbox.startup()
-      _ <- EitherT.right(FutureUnlessShutdown.outcomeF(pruningScheduler.start()))
+      _ <- EitherT.right(pruningScheduler.start())
     } yield ()
 
   override protected def onClosed(): Unit =

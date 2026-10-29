@@ -170,6 +170,7 @@ class JsonListLimitTest
         activeAtOffset = endOffset,
         eventFormat = Some(partyTransactions(party)),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
       .asJson
 

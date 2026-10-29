@@ -42,9 +42,6 @@ trait MalformedRequestResponseSendFailureIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
 
-  // TODO(#35929) Enable again when we fix the flakiness of this test
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   "successfully mark requests as clean even if sending responses fail for a malformed request" in {
     implicit env =>
       import env.*
@@ -65,7 +62,7 @@ trait MalformedRequestResponseSendFailureIntegrationTest
         participant2,
         daId,
         testedProtocolVersion,
-        defaultProtocolLimits,
+        testedTransactionLimits,
         timeouts,
         loggerFactory,
         testSubmissionServiceOverrideO = Some(

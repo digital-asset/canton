@@ -5,6 +5,7 @@ package com.digitalasset.canton.performance.scenarios
 
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
+  SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   StaticSynchronizerParameters,
@@ -122,6 +123,7 @@ class SynchronizerConfiguration(
             SubmissionRequestAmplification.NoAmplification,
             SequencerConnectionPoolDelays.default,
             SubscriptionLivenessLimits.default,
+            SequencerConnectionPenaltyConfig.default,
           )
           .getOrElse(sys.error("Failed to create sequencer connection"))
       } else {

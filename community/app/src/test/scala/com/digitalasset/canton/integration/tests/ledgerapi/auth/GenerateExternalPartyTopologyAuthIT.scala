@@ -42,6 +42,7 @@ final class GenerateExternalPartyTopologyAuthIT extends PublicServiceCallAuthTes
           otherConfirmingParticipantUids = Seq(),
           confirmationThreshold = 1,
           observingParticipantUids = Seq(),
+          protocolVersion = None,
         )
       )
 

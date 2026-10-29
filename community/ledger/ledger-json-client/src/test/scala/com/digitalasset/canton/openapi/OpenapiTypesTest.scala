@@ -9,8 +9,8 @@ import com.digitalasset.canton.http.json.v2 as json
 import com.digitalasset.canton.openapi.json.{JSON, model as openapi}
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
-  PruneEventsRequest,
-  PruneEventsResponse,
+  PruneRequest,
+  PruneResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -309,6 +309,24 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.CanActAsAnyParty,
         ](
           openapi.CanActAsAnyParty.fromJson
+        ),
+        Mapping[
+          v2.admin.user_management_service.Right.CanDebitTrafficFrom,
+          openapi.CanDebitTrafficFrom1,
+        ](
+          openapi.CanDebitTrafficFrom1.fromJson
+        ),
+        Mapping[
+          v2.admin.user_management_service.Right.Kind.CanDebitTrafficFrom,
+          openapi.CanDebitTrafficFrom,
+        ](
+          openapi.CanDebitTrafficFrom.fromJson
+        ),
+        Mapping[
+          v2.admin.user_management_service.Right.Kind.CanDebitTrafficFromAnyAccount,
+          openapi.CanDebitTrafficFromAnyAccount,
+        ](
+          openapi.CanDebitTrafficFromAnyAccount.fromJson
         ),
         Mapping[v2.admin.user_management_service.Right.CanExecuteAs, openapi.CanExecuteAs1](
           openapi.CanExecuteAs1.fromJson
@@ -1103,16 +1121,16 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.UpdateAccountResponse.fromJson
         ),
         Mapping[
-          PruneEventsRequest,
-          openapi.PruneEventsRequest,
+          PruneRequest,
+          openapi.PruneRequest,
         ](
-          openapi.PruneEventsRequest.fromJson
+          openapi.PruneRequest.fromJson
         ),
         Mapping[
-          PruneEventsResponse,
-          openapi.PruneEventsResponse,
+          PruneResponse,
+          openapi.PruneResponse,
         ](
-          openapi.PruneEventsResponse.fromJson
+          openapi.PruneResponse.fromJson
         ),
         Mapping[
           v2.state_service.ConvertRecordTimeToOffsetResponse,

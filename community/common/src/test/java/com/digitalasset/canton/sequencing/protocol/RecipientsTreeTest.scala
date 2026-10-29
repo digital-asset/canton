@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
@@ -65,12 +64,13 @@ class RecipientsTreeTest extends AnyWordSpec with BaseTest {
 
   "serialization and deserialization" should {
     "preserve the same thing" in {
-
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
-
       val serialized = t5.toProtoV30
       val deserialized =
-        RecipientsTree.fromProtoV30(testedProtocolVersionValidation, synchronizerLimits, serialized)
+        RecipientsTree.fromProtoV30(
+          testedProtocolVersionValidation,
+          testedSynchronizerLimits,
+          serialized,
+        )
 
       deserialized shouldBe Right(t5)
     }

@@ -12,7 +12,6 @@ import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.MultiPartySubmission
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.StorageConfig
 import com.digitalasset.canton.console.{
   CommandFailure,
   LocalSequencerReference,
@@ -22,11 +21,7 @@ import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.examples.java.cycle as C
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.CommandDeduplicationIntegrationTest.DelayPromises
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
@@ -783,20 +778,6 @@ trait CommandDeduplicationTestHelpers { this: BaseTest & HasProgrammableSequence
 }
 
 class CommandDeduplicationIntegrationTestInMemory extends CommandDeduplicationIntegrationTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[StorageConfig.Memory](
-      loggerFactory,
-      sequencerGroups = MultiSynchronizer(
-        Seq(Set("sequencer1"), Set("sequencer2"))
-          .map(_.map(InstanceName.tryCreate))
-      ),
-    )
-  )
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
-}
-
-class CommandDeduplicationBftOrderingIntegrationTestInMemory
-    extends CommandDeduplicationIntegrationTest {
 
   registerPlugin(
     new UseBftSequencer(

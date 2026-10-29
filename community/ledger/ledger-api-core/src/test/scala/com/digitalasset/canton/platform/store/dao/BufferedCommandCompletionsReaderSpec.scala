@@ -88,6 +88,8 @@ class BufferedCommandCompletionsReaderSpec
     TransactionLogUpdate.TransactionRejected(
       offset = offset(idx),
       completionStreamResponse = completionResponse(userId, actAs, hash.map(_.unwrap)),
+      synchronizerId = someSynchronizerId.toProtoPrimitive,
+      recordTime = Timestamp.Epoch,
     )(TraceContext.empty)
 
   /** The completion carried by a buffered accepted transaction, as the reader surfaces it. */

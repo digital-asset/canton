@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# if you edit the model using vs code, set the explicit SDK version here and comment the override-components section below
+#sdk-version: 3.7.1-snapshot.20261015.44.0.v4c1ea5fc
 override-components:
   damlc:
     version: $DAML_VERSION
@@ -9,9 +11,9 @@ override-components:
   codegen:
     version: $DAML_VERSION
 build-options:
-- --target=2.1
+- --target=2.4
 name: PerformanceTest
-source: PerformanceTest.daml
+source: .
 version: 1.0.0
 dependencies:
 - daml-prim

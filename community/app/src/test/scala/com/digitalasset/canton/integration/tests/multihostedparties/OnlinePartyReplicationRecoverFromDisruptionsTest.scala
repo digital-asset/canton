@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.participant.admin.data.AcsReplicationStatus.AcsReplicationError.Disconnected
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
 import com.digitalasset.canton.time.PositiveSeconds
@@ -152,9 +153,24 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
 
           sleepLongEnoughForDisruptionToBeNoticed()
 
+          clue("Assert ACS replication status while replication is in progress") {
+            val spStatus = sourceParticipant.parties.get_acs_replication_status(addPartyRequestId)
+            val tpStatus = targetParticipant.parties.get_acs_replication_status(addPartyRequestId)
+
+            spStatus.ptpTopologyTransaction.value shouldEqual tpStatus.ptpTopologyTransaction.value
+            spStatus.replicationProgress.value shouldEqual tpStatus.replicationProgress.value
+            // The sequencer channel is closed because the sequencer was stopped
+            val expectedError = Disconnected("Channel endpoint has been disconnected")
+            spStatus.errorO.value shouldBe expectedError
+            tpStatus.errorO.value shouldBe expectedError
+            spStatus.hasCompleted shouldBe false
+            tpStatus.hasCompleted shouldBe false
+          }
+
           clue("Restart sequencer")(
             sequencer1.start()
           )
+
           hasDisruptionBeenFixed = true
 
           logger.info("OnPR should eventually be able to finish now that the sequencer is back up")

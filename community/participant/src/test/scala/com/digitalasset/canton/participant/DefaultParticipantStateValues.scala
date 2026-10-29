@@ -38,6 +38,7 @@ object DefaultParticipantStateValues {
       submissionId,
       externallySignedSubmission = None,
       transactionHash = None,
+      accountId = None,
     )
 
   def completionInfo(

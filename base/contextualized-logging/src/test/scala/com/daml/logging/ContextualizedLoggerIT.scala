@@ -11,7 +11,6 @@ import ch.qos.logback.core.OutputStreamAppender
 import ch.qos.logback.core.encoder.Encoder
 import com.daml.logging.LoggingContext.{newLoggingContext, withEnrichedLoggingContext}
 import io.circe.Decoder
-import io.circe.generic.extras.Configuration
 import net.logstash.logback.encoder.LogstashEncoder
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -29,11 +28,7 @@ private final case class Entry(
     c: Option[String],
 )
 private object Entry {
-  import io.circe.generic.extras.semiauto.*
-
-  implicit val config: Configuration = Configuration.default
-
-  implicit def decodeEntry: Decoder[Entry] = deriveConfiguredDecoder
+  implicit def decodeEntry: Decoder[Entry] = io.circe.generic.semiauto.deriveDecoder
 }
 
 final class ContextualizedLoggerIT extends AnyFlatSpec with Matchers {
@@ -61,9 +56,7 @@ final class ContextualizedLoggerIT extends AnyFlatSpec with Matchers {
     }
 
   it should "write the expected JSON file" in {
-
-    import io.circe.generic.auto.*
-    import io.circe.parser.*
+    import io.circe.parser.decode
 
     val log = ContextualizedLoggerIT.run(new LogstashEncoder)(testCase)
 

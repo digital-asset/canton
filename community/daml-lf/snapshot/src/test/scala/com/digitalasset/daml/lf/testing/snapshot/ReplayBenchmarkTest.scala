@@ -69,7 +69,7 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
           prefetchKeys = Seq.empty,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(Result.lookupHandler()) shouldBe a[Right[?, ?]]
 

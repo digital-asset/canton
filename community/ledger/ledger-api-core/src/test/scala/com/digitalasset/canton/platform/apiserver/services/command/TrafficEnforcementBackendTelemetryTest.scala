@@ -6,9 +6,12 @@ package com.digitalasset.canton.platform.apiserver.services.command
 import cats.data.EitherT
 import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.error.LedgerApiErrors
+import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.networking.grpc.GrpcError
@@ -19,10 +22,16 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementMetrics,
 }
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
-import com.digitalasset.canton.tea.v1.{GetAccountRequest, GetAccountResponse}
+import com.digitalasset.canton.tea.v1.{
+  GetAccountRequest,
+  GetAccountResponse,
+  RegisterSubmissionRequest,
+  RegisterSubmissionResponse,
+}
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
-import io.grpc.Status
+import com.digitalasset.daml.lf.data.Ref
+import io.grpc.{Status, StatusRuntimeException}
 import io.opentelemetry.api.common.AttributeKey.stringKey
 import io.opentelemetry.api.trace.{StatusCode, Tracer}
 import io.opentelemetry.sdk.trace.data.SpanData
@@ -31,7 +40,6 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterEach}
 
-import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
 
 class TrafficEnforcementBackendTelemetryTest
@@ -47,23 +55,42 @@ class TrafficEnforcementBackendTelemetryTest
   private val bob = LfPartyId.assertFromString("Bob")
   private val trafficCost = 10L
 
-  private val SpanName = TrafficEnforcementBackend.EnforcementSpanName
   private val OutcomeKey = stringKey("canton.traffic_enforcement_outcome")
   private val ReasonKey = stringKey("canton.traffic_enforcement_reason")
   private val SuccessStatus = "success"
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
-  private val transientFailureError = GrpcError(
-    request = "get-account",
-    serverName = "traffic-service",
-    e = TrafficEnforcementErrors.TransientFailure
-      .Reject(new RuntimeException("db down"))
-      .asGrpcError,
+  private val changeId = ChangeId(
+    Ref.UserId.assertFromString("user"),
+    Ref.CommandId.assertFromString("command"),
+    Set(alice),
+  )
+  private val submissionId = Ref.SubmissionId.assertFromString("submission")
+
+  private def registrationError(e: StatusRuntimeException): GrpcError =
+    GrpcError("register-submission", "traffic-service", e)
+
+  private val transientFailureError = registrationError(
+    TrafficEnforcementErrors.TransientFailure.Reject(new RuntimeException("db down")).asGrpcError
   )
 
+  private val insufficientBalanceError = registrationError(
+    TrafficEnforcementErrors.InsufficientBalance
+      .Reject(accountId = alice, balance = trafficCost - 1, trafficCost = trafficCost)
+      .asGrpcError
+  )
+
+  private val correlationConflictError = registrationError(
+    TrafficEnforcementErrors.CorrelationConflict
+      .Reject(changeId.hash.toHexString, submissionId)
+      .asGrpcError
+  )
+
+  private val unavailableError = registrationError(Status.UNAVAILABLE.asRuntimeException())
+
   private val undecodableServerError = GrpcError.GrpcServerError(
-    request = "get-account",
+    request = "register-submission",
     serverName = "traffic-service",
     status = Status.UNKNOWN,
     optTrailers = None,
@@ -71,10 +98,10 @@ class TrafficEnforcementBackendTelemetryTest
   )
 
   private val refusedByServerError =
-    GrpcError("get-account", "traffic-service", Status.PERMISSION_DENIED.asRuntimeException())
+    registrationError(Status.PERMISSION_DENIED.asRuntimeException())
 
   private val clientError = GrpcError.GrpcClientError(
-    request = "get-account",
+    request = "register-submission",
     serverName = "traffic-service",
     status = Status.PERMISSION_DENIED,
     optTrailers = None,
@@ -146,17 +173,30 @@ class TrafficEnforcementBackendTelemetryTest
     )
   }
 
-  private def stubLookup(
-      client: RichTrafficServiceClient,
-      result: Either[GrpcError, GetAccountResponse],
-  ): Unit =
-    when(client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext]))
-      .thenReturn(EitherT.fromEither[FutureUnlessShutdown](result))
+  private def info(actAs: Set[LfPartyId]): SubmissionAccountingInfo =
+    SubmissionAccountingInfo(
+      changeId.copy(actAs = actAs),
+      submissionId,
+      SubmissionAccounting.forSubmitter(None, actAs, adminParty),
+    )
+
+  private def stubLookup(client: RichTrafficServiceClient, response: GetAccountResponse): Unit =
+    when(client.getAccount(any[GetAccountRequest])(any[TraceContext]))
+      .thenReturn(EitherT.rightT[FutureUnlessShutdown, GrpcError](response))
       .discard
+
+  private def stubRegistration(
+      client: RichTrafficServiceClient,
+      result: Either[GrpcError, RegisterSubmissionResponse],
+  ): Unit =
+    when(
+      client.registerSubmission(any[RegisterSubmissionRequest])(any[TraceContext])
+    ).thenReturn(EitherT.fromEither[FutureUnlessShutdown](result)).discard
 
   private def verifyDecision(row: DecisionRow): Assertion = {
     val client = mock[RichTrafficServiceClient]
-    row.lookupResult.foreach(stubLookup(client, _))
+    row.registerResult.foreach(stubRegistration(client, _))
+    row.estimateLookup.foreach(stubLookup(client, _))
     val backend = newBackend(
       trafficServiceClient = client,
       enforceCostOnSubmissions = row.enforceCostOnSubmissions,
@@ -164,33 +204,33 @@ class TrafficEnforcementBackendTelemetryTest
       allowSubmissionsOnDegradation = row.allowSubmissionsOnDegradation,
     )
 
-    def invoke(): Assertion = row.expectedResult match {
-      case Allowed =>
-        backend.validateTraffic(row.actAs, trafficCost).futureValueUS shouldBe Right(())
-      case RejectedWith(errorCodeId) =>
+    def call(): Either[RpcError, Unit] =
+      if (row.estimateLookup.isDefined)
         backend
-          .validateTraffic(row.actAs, trafficCost)
+          .checkEstimatedCost(
+            SubmissionAccounting.forSubmitter(None, row.actAs, adminParty),
+            trafficCost,
+          )
           .futureValueUS
-          .left
-          .value
-          .code
-          .id shouldBe errorCodeId
-      case ThrowsException =>
-        a[Exception] should be thrownBy backend
-          .validateTraffic(row.actAs, trafficCost)
-          .futureValueUS
+      else backend.registerSubmission(info(row.actAs), trafficCost).futureValueUS
+
+    def invoke(): Assertion = row.expectedResult match {
+      case Allowed => call() shouldBe Right(())
+      case RejectedWith(errorCodeId) => call().left.value.code.id shouldBe errorCodeId
     }
 
     row.expectedLog.fold(invoke())(assertion => loggerFactory.assertLogs(invoke(), assertion))
 
-    // A row without a stubbed lookup decides without asking the traffic service.
-    if (row.lookupResult.isEmpty) verifyZeroInteractions(client)
+    // A row without a stubbed call decides without asking the traffic service.
+    if (row.registerResult.isEmpty && row.estimateLookup.isEmpty) verifyZeroInteractions(client)
 
     val span = singleReportedSpan()
-    span.getName shouldBe SpanName
+    span.getName shouldBe row.expectedSpanName
     span.getAttributes.get(OutcomeKey) shouldBe row.expectedOutcome
     Option(span.getAttributes.get(ReasonKey)) shouldBe row.expectedReason
-    span.getStatus.getStatusCode shouldBe row.expectedSpanStatus
+    // TEA errors come back as a Left, so the span itself never fails.
+    span.getStatus.getStatusCode shouldBe StatusCode.UNSET
+    span.getEvents.asScala.map(_.getName) shouldBe row.expectedSpanEvents
 
     // Size, not just the marker: a second recordOutcome under other labels has to fail here.
     decisionMarkers should have size 1
@@ -203,14 +243,16 @@ class TrafficEnforcementBackendTelemetryTest
     ) should have size 1
   }
 
+  private val registered = Some(Right(RegisterSubmissionResponse()))
+
   /** The same `recordOutcome` call feeds the span and metrics, so each scenario asserts both to
     * catch any drift.
     */
   private val decisionRows = Seq(
     DecisionRow(
       description = "record an accepted outcome with no reason, on sufficient balance",
-      actAs = Seq(alice),
-      lookupResult = Some(Right(GetAccountResponse(accountId = alice, balance = trafficCost))),
+      actAs = Set(alice),
+      registerResult = registered,
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Accepted,
       expectedReason = None,
@@ -218,8 +260,8 @@ class TrafficEnforcementBackendTelemetryTest
     ),
     DecisionRow(
       description = "record a rejected/insufficient_balance outcome, without failing the span",
-      actAs = Seq(alice),
-      lookupResult = Some(Right(GetAccountResponse(accountId = alice, balance = trafficCost - 1))),
+      actAs = Set(alice),
+      registerResult = Some(Left(insufficientBalanceError)),
       expectedResult = RejectedWith(TrafficEnforcementErrors.InsufficientBalance.code.id),
       expectedOutcome = TrafficEnforcementOutcome.Rejected,
       expectedReason = Some(TrafficEnforcementOutcome.InsufficientBalance),
@@ -227,35 +269,61 @@ class TrafficEnforcementBackendTelemetryTest
     ),
     DecisionRow(
       description =
-        "record a rejected/multi_party_submission outcome, without looking up an account",
-      actAs = Seq(alice, bob),
+        "record a rejected/correlation_conflict outcome for a marker, even when degradation is on",
+      actAs = Set(alice, bob),
+      rejectMultiPartySubmissions = false,
+      allowSubmissionsOnDegradation = true,
+      registerResult = Some(Left(correlationConflictError)),
+      expectedResult = RejectedWith(TrafficEnforcementErrors.CorrelationConflict.code.id),
+      expectedOutcome = TrafficEnforcementOutcome.Rejected,
+      expectedReason = Some(TrafficEnforcementOutcome.CorrelationConflict),
+      expectedTimerStatus = TrafficEnforcementErrors.CorrelationConflict.code.id,
+    ),
+    DecisionRow(
+      description =
+        "record a rejected/multi_party_submission outcome, without contacting the traffic service",
+      actAs = Set(alice, bob),
       expectedResult = RejectedWith(TrafficEnforcementErrors.MultiPartySubmissionRejected.code.id),
       expectedOutcome = TrafficEnforcementOutcome.Rejected,
       expectedReason = Some(TrafficEnforcementOutcome.MultiPartySubmission),
       expectedTimerStatus = TrafficEnforcementErrors.MultiPartySubmissionRejected.code.id,
     ),
     DecisionRow(
-      description = "record a skipped/admin_party outcome, without looking up an account",
-      actAs = Seq(adminParty),
+      description = "record a skipped/admin_party outcome",
+      actAs = Set(adminParty),
+      registerResult = registered,
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Skipped,
       expectedReason = Some(TrafficEnforcementOutcome.AdminParty),
       expectedTimerStatus = SuccessStatus,
     ),
     DecisionRow(
-      description = "record a skipped/non_singleton_act_as outcome, without looking up an account",
-      actAs = Seq(alice, bob),
+      description = "record a skipped/non_singleton_act_as outcome",
+      actAs = Set(alice, bob),
       rejectMultiPartySubmissions = false,
+      registerResult = registered,
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Skipped,
       expectedReason = Some(TrafficEnforcementOutcome.NonSingletonActAs),
       expectedTimerStatus = SuccessStatus,
     ),
     DecisionRow(
-      description = "record a skipped/enforcement_disabled outcome, without looking up an account",
-      actAs = Seq(alice),
+      description = "record a degraded/marker_write_failed outcome, even when degradation is off",
+      actAs = Set(alice, bob),
+      rejectMultiPartySubmissions = false,
+      registerResult = Some(Left(unavailableError)),
+      expectedResult = Allowed,
+      expectedOutcome = TrafficEnforcementOutcome.Degraded,
+      expectedReason = Some(TrafficEnforcementOutcome.MarkerWriteFailed),
+      expectedTimerStatus = SuccessStatus,
+      expectedLog = Some(_.warningMessage should include("no-account marker")),
+    ),
+    DecisionRow(
+      description = "record a skipped/enforcement_disabled outcome",
+      actAs = Set(alice),
       enforceCostOnSubmissions = false,
       rejectMultiPartySubmissions = false,
+      registerResult = registered,
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Skipped,
       expectedReason = Some(TrafficEnforcementOutcome.EnforcementDisabled),
@@ -263,9 +331,9 @@ class TrafficEnforcementBackendTelemetryTest
     ),
     DecisionRow(
       description = "record a degraded/lookup_unavailable outcome on a decoded transient failure",
-      actAs = Seq(alice),
+      actAs = Set(alice),
       allowSubmissionsOnDegradation = true,
-      lookupResult = Some(Left(transientFailureError)),
+      registerResult = Some(Left(transientFailureError)),
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Degraded,
       expectedReason = Some(TrafficEnforcementOutcome.LookupUnavailable),
@@ -274,9 +342,9 @@ class TrafficEnforcementBackendTelemetryTest
     ),
     DecisionRow(
       description = "record a degraded/lookup_unavailable outcome on an undecodable server error",
-      actAs = Seq(alice),
+      actAs = Set(alice),
       allowSubmissionsOnDegradation = true,
-      lookupResult = Some(Left(undecodableServerError)),
+      registerResult = Some(Left(undecodableServerError)),
       expectedResult = Allowed,
       expectedOutcome = TrafficEnforcementOutcome.Degraded,
       expectedReason = Some(TrafficEnforcementOutcome.LookupUnavailable),
@@ -284,11 +352,12 @@ class TrafficEnforcementBackendTelemetryTest
       expectedLog = Some(_.warningMessage should include("degrading")),
     ),
     DecisionRow(
-      description = "record a failed/lookup_failed outcome and fail the span on a redacted refusal",
-      actAs = Seq(alice),
+      description = "record a failed/lookup_failed outcome and a redacted Left on a refusal",
+      actAs = Set(alice),
       allowSubmissionsOnDegradation = true,
-      lookupResult = Some(Left(refusedByServerError)),
-      expectedResult = ThrowsException,
+      registerResult = Some(Left(refusedByServerError)),
+      // A redacted status decodes without its error id.
+      expectedResult = RejectedWith("NA"),
       expectedOutcome = TrafficEnforcementOutcome.Failed,
       expectedReason = Some(TrafficEnforcementOutcome.LookupFailed),
       expectedTimerStatus = TrafficEnforcementOutcome.Failed,
@@ -297,15 +366,25 @@ class TrafficEnforcementBackendTelemetryTest
         Some(_.errorMessage should include("Error in submitting request to traffic service")),
     ),
     DecisionRow(
-      description =
-        "record a failed/lookup_failed outcome and fail the span on a passed-through client error",
-      actAs = Seq(alice),
+      description = "record a failed/lookup_failed outcome on an undecodable client error",
+      actAs = Set(alice),
       allowSubmissionsOnDegradation = true,
-      lookupResult = Some(Left(clientError)),
-      expectedResult = ThrowsException,
+      registerResult = Some(Left(clientError)),
+      expectedResult = RejectedWith(LedgerApiErrors.InternalError.id),
       expectedOutcome = TrafficEnforcementOutcome.Failed,
       expectedReason = Some(TrafficEnforcementOutcome.LookupFailed),
       expectedTimerStatus = TrafficEnforcementOutcome.Failed,
+      expectedLog =
+        Some(_.errorMessage should include("Error in submitting request to traffic service")),
+    ),
+    DecisionRow(
+      description = "record an accepted outcome for an estimated cost check",
+      actAs = Set(alice),
+      estimateLookup = Some(GetAccountResponse(accountId = alice, balance = trafficCost)),
+      expectedResult = Allowed,
+      expectedOutcome = TrafficEnforcementOutcome.Accepted,
+      expectedReason = None,
+      expectedTimerStatus = SuccessStatus,
     ),
   )
 
@@ -313,32 +392,15 @@ class TrafficEnforcementBackendTelemetryTest
 
     decisionRows.foreach(row => row.description in verifyDecision(row))
 
-    "attach the lookup failure to the degraded span as span data, not as a span failure" in {
+    "run the registration under a trace context that is a child of the enforcement span" in {
       val client = mock[RichTrafficServiceClient]
-      stubLookup(client, Left(transientFailureError))
-      val backend = newBackend(trafficServiceClient = client, allowSubmissionsOnDegradation = true)
-
-      loggerFactory.assertLogs(
-        backend.validateTraffic(actAs = Seq(alice), trafficCost = trafficCost).futureValueUS,
-        _.warningMessage should include("degrading"),
-      )
-
-      val span = singleReportedSpan()
-      span.getStatus.getStatusCode shouldBe StatusCode.UNSET
-      span.getEvents.asScala.toList.loneElement.getName shouldBe "exception"
-    }
-
-    "run the account lookup under a trace context that is a child of the enforcement span" in {
-      val client = mock[RichTrafficServiceClient]
-      stubLookup(client, Right(GetAccountResponse(accountId = alice, balance = trafficCost)))
+      stubRegistration(client, Right(RegisterSubmissionResponse()))
       val backend = newBackend(trafficServiceClient = client)
 
-      backend
-        .validateTraffic(actAs = Seq(alice), trafficCost = trafficCost)
-        .futureValueUS shouldBe Right(())
+      backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(())
 
       val traceContextCaptor = ArgCaptor[TraceContext]
-      verify(client).getAccount(any[GetAccountRequest])(traceContextCaptor, any[ExecutionContext])
+      verify(client).registerSubmission(any[RegisterSubmissionRequest])(traceContextCaptor)
 
       val span = singleReportedSpan()
       traceContextCaptor.value.spanId shouldBe Some(span.getSpanId)
@@ -347,20 +409,16 @@ class TrafficEnforcementBackendTelemetryTest
     "record one latency sample per enforcement check" in {
       val client = mock[RichTrafficServiceClient]
       when(
-        client.getAccount(any[GetAccountRequest])(any[TraceContext], any[ExecutionContext])
-      ).thenAnswer { (_: GetAccountRequest) =>
+        client.registerSubmission(any[RegisterSubmissionRequest])(any[TraceContext])
+      ).thenAnswer { (_: RegisterSubmissionRequest) =>
         Threading.sleep(scala.util.Random.nextLong(10) + 1)
-        EitherT.rightT[FutureUnlessShutdown, GrpcError](
-          GetAccountResponse(accountId = alice, balance = trafficCost)
-        )
+        EitherT.rightT[FutureUnlessShutdown, GrpcError](RegisterSubmissionResponse())
       }.discard
       val backend = newBackend(trafficServiceClient = client)
 
       val times = 5
       (1 to times).foreach { _ =>
-        backend
-          .validateTraffic(actAs = Seq(alice), trafficCost = trafficCost)
-          .futureValueUS shouldBe Right(())
+        backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(())
       }
 
       val values = enforcementCheckDurations.recordedValues(
@@ -377,22 +435,30 @@ object TrafficEnforcementBackendTelemetryTest {
   private sealed trait ExpectedResult
   private case object Allowed extends ExpectedResult
   private final case class RejectedWith(errorCodeId: String) extends ExpectedResult
-  private case object ThrowsException extends ExpectedResult
 
   private final case class DecisionRow(
       description: String,
-      actAs: Seq[LfPartyId],
+      actAs: Set[LfPartyId],
       enforceCostOnSubmissions: Boolean = true,
       rejectMultiPartySubmissions: Boolean = true,
       allowSubmissionsOnDegradation: Boolean = false,
-      lookupResult: Option[Either[GrpcError, GetAccountResponse]] = None,
+      registerResult: Option[Either[GrpcError, RegisterSubmissionResponse]] = None,
+      estimateLookup: Option[GetAccountResponse] = None,
       expectedResult: ExpectedResult,
       expectedOutcome: String,
       expectedReason: Option[String],
       expectedTimerStatus: String,
       expectedLog: Option[LogEntry => Assertion] = None,
   ) {
-    def expectedSpanStatus: StatusCode =
-      if (expectedResult == ThrowsException) StatusCode.ERROR else StatusCode.UNSET
+    def expectedSpanName: String =
+      if (estimateLookup.isDefined) TrafficEnforcementBackend.CheckEstimatedCostSpanName
+      else TrafficEnforcementBackend.RegisterSubmissionSpanName
+
+    def expectedSpanEvents: Seq[String] =
+      if (
+        expectedOutcome == TrafficEnforcementOutcome.Degraded ||
+        expectedOutcome == TrafficEnforcementOutcome.Failed
+      ) Seq("exception")
+      else Seq.empty
   }
 }

@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.api.MockMessages.*
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  LedgerApiSizeLimitsConfig,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
@@ -174,7 +175,7 @@ object ApiCommandServiceSpec {
 
   private val commandsValidator = new CommandsValidator(
     validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-  )
+  )(sizeLimitsConfig = LedgerApiSizeLimitsConfig())
 
   def createMockCommandService: CommandService & AutoCloseable = {
     import org.mockito.ArgumentMatchersSugar.*

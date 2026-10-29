@@ -394,6 +394,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     val updatedSequencers = updateAllSequencerConfigs_(
@@ -403,6 +405,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     val updatedMediators = updateAllMediatorConfigs_(
@@ -410,6 +414,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     updatedSequencers compose updatedMediators compose updatedParticipants
@@ -1048,6 +1054,17 @@ object ConfigTransforms {
         )
       )
     } else identity
+
+  /** Disable automatic assignments via the participant configuration if the testedProtocolVersion
+    * is at least ProtocolVersion.v37. Up to ProtocolVersion.v36, use
+    * [[com.digitalasset.canton.integration.util.AutomaticAssignment.disable]].
+    */
+  def disableAutomaticAssignment: ConfigTransform =
+    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) identity
+    else
+      updateAllParticipantConfigs_(
+        _.focus(_.parameters.reassignmentsConfig.enableAutomaticAssignment).replace(false)
+      )
 
   val disableOnboardingTopologyValidation: ConfigTransform =
     updateAllMediatorConfigs_(

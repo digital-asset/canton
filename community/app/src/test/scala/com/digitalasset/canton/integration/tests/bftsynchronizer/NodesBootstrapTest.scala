@@ -67,11 +67,6 @@ trait NodesBootstrapTest extends CommunityIntegrationTest with SharedEnvironment
   }
 }
 
-// Default meaning in-memory
-//class NodesBootstrapTestDefault extends NodesBootstrapTest {
-//  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
-//}
-
 class NodesBootstrapTestPostgres extends NodesBootstrapTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

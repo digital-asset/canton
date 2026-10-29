@@ -262,7 +262,7 @@ object LedgerApiServer {
       ledgerApiContractStore = ledgerApiIndexer.contractStore,
       lfValueTranslation = ledgerApiIndexService.lfValueTranslation,
       loggerFactory = loggerFactory,
-    )
+    )(executionContext = executionContext, sizeLimitsConfig = serverConfig.sizeLimits)
     val externalCallHandler = ExtensionServiceExternalCallHandler.create(extensionServiceManagerO)
     val interceptors = List(
       new GrpcRequestLoggingInterceptor(
@@ -404,6 +404,7 @@ object LedgerApiServer {
         packageServiceConfig = serverConfig.packageService,
         updateServiceConfig = serverConfig.updateService,
         stateServiceConfig = serverConfig.stateService,
+        sizeLimitsConfig = serverConfig.sizeLimits,
         tls = serverConfig.tls,
         address = Some(serverConfig.address),
         maxInboundMessageSize = serverConfig.maxInboundMessageSize.unwrap,

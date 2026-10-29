@@ -13,14 +13,16 @@ import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.sequencing.ProcessingSerializedEvent
+import com.digitalasset.canton.sequencing.SequencerAggregator.SequencerAggregatorError
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.UnrecoverableError
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
-  ApplicationHandlerPassive,
+  ApplicationHandlerException,
   ApplicationHandlerShutdown,
+  EventAggregationError,
+  EventValidationError,
 }
 import com.digitalasset.canton.sequencing.client.pool.InternalSequencerConnection.SequencerConnectionState
-import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.{
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
@@ -29,6 +31,7 @@ import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPoolI
   ConfigWithThreshold,
   SubscriptionStartProvider,
 }
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionWrapper.ClosingReasonHandler
 import com.digitalasset.canton.sequencing.client.{
   SequencerClient,
   SequencerClientSubscriptionError,
@@ -242,7 +245,6 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
       member,
       preSubscriptionEventO,
       subscriptionHandlerFactory,
-      parent = this,
     )
   }
 
@@ -268,81 +270,24 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   private val completed = new AtomicBoolean(false)
   private def completeWithReason(
       reason: Try[SequencerClient.CloseReason],
-      updateHealth: (SequencerSubscriptionPoolHealth, String) => Unit,
+      updateHealth: (SequencerSubscriptionPoolHealth, String) => Unit = (_, _) => (),
   )(implicit traceContext: TraceContext): Unit =
     if (!completed.getAndSet(true)) {
-      updateHealth(health, reason.toString)
+      updateHealth(
+        health,
+        reason match {
+          case Success(error) => error.toString
+          case Failure(exc) => exc.getMessage
+        },
+      )
       logger.debug(s"Completing sequencer subscription pool with reason: $reason")
       closeReasonPromise.tryComplete(reason).discard
     }
 
-  private def closeWithSubscriptionReason(manager: SubscriptionManager)(
-      subscriptionCloseReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
-  )(implicit traceContext: TraceContext): Unit = {
-    def isThresholdStillReachable(
-        ignoreCurrent: Boolean
-    ): Either[SequencerConnectionPoolError.ThresholdUnreachableError, Unit] = lock.exclusive {
-      val ignored: Set[Connection.ConnectionConfig] =
-        if (ignoreCurrent) Set(manager.connection.config) else Set.empty
-      val trustThreshold = currentConfigWithThreshold.trustThreshold
-      val result = pool.isThresholdStillReachable(trustThreshold, ignored)
-      logger.debug(s"isThresholdStillReachable(ignored = $ignored) = $result")
-      result
-    }
-
-    def complete(
-        reason: Try[SequencerClient.CloseReason]
-    )(implicit traceContext: TraceContext): Unit = {
-      completeWithReason(reason, _.fatalOccurred(_))
-      LifeCycle.close(this)(logger)
-    }
-
-    subscriptionCloseReason match {
-      case Success(SubscriptionCloseReason.TokenExpiration) =>
-        removeSubscriptionsFromPool(manager)
-
-      case Success(SubscriptionCloseReason.HandlerException(ex)) =>
-        complete(Success(SequencerClient.CloseReason.UnrecoverableException(ex)))
-
-      case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(_reason))) =>
-        complete(Success(SequencerClient.CloseReason.BecamePassive))
-
-      case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerShutdown)) =>
-        complete(Success(SequencerClient.CloseReason.ClientShutdown))
-
-      case Success(SubscriptionCloseReason.HandlerError(err)) =>
-        complete(
-          Success(SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err"))
-        )
-
-      case Success(permissionDenied: SubscriptionCloseReason.PermissionDeniedError) =>
-        if (isThresholdStillReachable(ignoreCurrent = true).isLeft)
-          complete(Success(SequencerClient.CloseReason.PermissionDenied(s"$permissionDenied")))
-
-      case Success(subscriptionError: SubscriptionCloseReason.SubscriptionError) =>
-        if (isThresholdStillReachable(ignoreCurrent = true).isLeft)
-          complete(
-            Success(
-              SequencerClient.CloseReason.UnrecoverableError(
-                s"subscription implementation failed: $subscriptionError"
-              )
-            )
-          )
-
-      case Success(SubscriptionCloseReason.Closed) =>
-        if (isThresholdStillReachable(ignoreCurrent = false).isLeft)
-          complete(Success(SequencerClient.CloseReason.ClientShutdown))
-
-      case Success(SubscriptionCloseReason.Shutdown) =>
-        complete(Success(SequencerClient.CloseReason.ClientShutdown))
-
-      case Failure(throwable) => complete(Failure(throwable))
-    }
-  }
-
   private class SubscriptionManager(val subscriptionWrapper: SequencerSubscriptionWrapper)
       extends NamedLogging
-      with AutoCloseable {
+      with AutoCloseable
+      with ClosingReasonHandler {
     val connection: SequencerConnection = subscriptionWrapper.connection
 
     protected override val loggerFactory: NamedLoggerFactory =
@@ -368,10 +313,10 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
     def register()(implicit traceContext: TraceContext): Unit = {
       connection.health.registerOnHealthChange(connectionListener).discard[Boolean]
-      subscriptionWrapper.closeReason.onComplete(closeWithSubscriptionReason(this))
+      subscriptionWrapper.setClosingReasonHandler(this)
     }
 
-    def close(): Unit = {
+    override def close(): Unit = {
       // If the connection comes back, the listener will be a different instance,
       // so we need to unregister to prevent the listeners to accumulate
       connection.health.unregisterOnHealthChange(connectionListener).discard[Boolean]
@@ -379,6 +324,159 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     }
 
     override def toString: String = s"SubscriptionManager for $subscriptionWrapper"
+
+    override def handleClosingReason(
+        closingReason: Try[SubscriptionCloseReason[SequencerClientSubscriptionError]]
+    )(implicit traceContext: TraceContext): Unit = {
+      def complete(reason: Try[SequencerClient.CloseReason]): Unit = {
+        completeWithReason(reason, updateHealth = _.fatalOccurred(_))
+        LifeCycle.close(SequencerSubscriptionPoolImpl.this)(logger)
+      }
+
+      // Notes:
+      // * Removing the subscription from the pool ensures that it will be closed and the subscription pool will
+      //   request new connections if needed.
+      // * Completing the subscription pool currently leads to the closing of the sequencer client, the subscription
+      //   pool, and therefore of all the subscription and connections.
+      //   Fatally closing the connection in this situation is done solely for the purpose of having an appropriate
+      //   error message associated to the closing of the connection.
+
+      closingReason match {
+        case Success(SubscriptionCloseReason.Closed) =>
+          logger.debug("Sequencer subscription was closed")
+          removeSubscriptionsFromPool(this)
+
+        case Success(SubscriptionCloseReason.Shutdown) =>
+          logger.info("Sequencer subscription was shutdown")
+          removeSubscriptionsFromPool(this)
+
+        case _ if SequencerSubscriptionPoolImpl.this.isClosing =>
+          logger.info("Closing sequencer subscription due to an ongoing shutdown")
+          removeSubscriptionsFromPool(this)
+
+        case error @ Success(subscriptionError: SubscriptionCloseReason.SubscriptionError) =>
+          val canRetry =
+            connection.subscriptionRetryPolicy.retryOnError(subscriptionError)
+          if (canRetry) {
+            logger.debug(s"Closing sequencer subscription due to error: $subscriptionError.")
+            connection.fail(closingReason.toString)
+          } else {
+            logger.warn(s"Permanently closing sequencer subscription due to error: $error")
+            connection.fatal(closingReason.toString)
+          }
+
+        case Success(_: SubscriptionCloseReason.PermissionDeniedError) =>
+          logger.warn("Permanently closing sequencer subscription due to permission denied")
+          connection.fatal(closingReason.toString)
+
+        case Success(SubscriptionCloseReason.TokenExpiration) =>
+          logger.debug(
+            "Sequencer subscription was closed by the server due to a token expiration"
+          )
+          removeSubscriptionsFromPool(this)
+
+        case Success(SubscriptionCloseReason.SubscriptionIsSilent) =>
+          logger.info("Closing sequencer subscription due to inactivity")
+          removeSubscriptionsFromPool(this)
+
+        case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerShutdown)) =>
+          logger.info(
+            "Closing sequencer subscription due to the application handler shutting down"
+          )
+          complete(Success(SequencerClient.CloseReason.ClientShutdown))
+
+        case Success(
+              SubscriptionCloseReason.HandlerError(exception: ApplicationHandlerException)
+            ) =>
+          logger.error(
+            s"Permanently closing sequencer subscription due to application handler exception (this indicates a bug): $exception"
+          )
+          connection.fatal(closingReason.toString)
+          complete(
+            Success(
+              SequencerClient.CloseReason.UnrecoverableError(
+                s"application handler returned error: $exception"
+              )
+            )
+          )
+
+        case Success(SubscriptionCloseReason.HandlerError(EventAggregationError(error))) =>
+          error match {
+            case _: SequencerAggregatorError.BogusEvent =>
+              // Only happens with the new aggregator
+              logger.warn(s"Closing sequencer subscription due to aggregation error: $error")
+              connection.fail(closingReason.toString)
+
+            case _: SequencerAggregatorError.ThresholdUnreachable =>
+              // Only happens with the new aggregator
+
+              // Simple approach: we close the connection to the synchronizer.
+              //
+              // A more sophisticated approach would be to check whether the liveness margin was set according to the
+              // recommendations of `trust threshold - 1`.
+              // If e.g. `trust threshold = 3` and `liveness margin = 1`, it is possible that we receive 2 messages from
+              // malicious sequencers, followed by 2 by honest sequencers. We cannot reach a threshold, but the trust
+              // assumption of at most `trust threshold - 1` Byzantine nodes was not violated. In this case we could just
+              // close all subscriptions and obtain new ones, with the hope that the situation resolves.
+              // TODO(i33532): Implement this new approach.
+              logger.error(
+                s"Permanently closing sequencer subscription due to aggregation error: $error"
+              )
+              connection.fatal(closingReason.toString)
+              complete(
+                Success(
+                  SequencerClient.CloseReason.UnrecoverableError(s"event aggregation error: $error")
+                )
+              )
+
+            case _: SequencerAggregatorError.NotTheSameContentHash =>
+              // Only happens with the old aggregator
+              logger.error(
+                s"Permanently closing sequencer subscription due to aggregation error: $error"
+              )
+              connection.fatal(closingReason.toString)
+              complete(
+                Success(
+                  SequencerClient.CloseReason.UnrecoverableError(s"event aggregation error: $error")
+                )
+              )
+          }
+
+        case Success(SubscriptionCloseReason.HandlerError(error: EventValidationError)) =>
+          logger.warn(
+            s"Permanently closing sequencer subscription due to event validation error: $error"
+          )
+          connection.fatal(closingReason.toString)
+          complete(
+            Success(
+              SequencerClient.CloseReason.UnrecoverableError(s"event validation error: $error")
+            )
+          )
+
+        case Success(SubscriptionCloseReason.HandlerException(throwable)) =>
+          logger.error(
+            s"Permanently closing sequencer subscription due to handler exception: $throwable"
+          )
+          connection.fatal(closingReason.toString)
+
+        case Failure(throwable) =>
+          val canRetry =
+            connection.subscriptionRetryPolicy.retryOnException(throwable, logger)
+          if (canRetry) {
+            logger.warn(
+              s"Closing sequencer subscription due to exception: $throwable.",
+              throwable,
+            )
+            connection.fail(closingReason.toString)
+          } else {
+            logger.error(
+              s"Permanently closing sequencer subscription due to exception",
+              throwable,
+            )
+            connection.fatal(closingReason.toString)
+          }
+      }
+    }
   }
 
   private def updateHealth()(implicit traceContext: TraceContext): Unit = {
@@ -386,24 +484,29 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
     trackedSubscriptions.size match {
       case nb if nb >= currentConfig.activeThreshold.unwrap => health.resolveUnhealthy()
+
       case nb if nb >= currentConfig.trustThreshold.unwrap =>
         health.degradationOccurred(
           s"below liveness margin: $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}," +
             s" liveness margin = ${currentConfig.livenessMargin}"
         )
+
+      case _ if isClosing => health.failureOccurred("closing")
+
       case nb =>
-        if (!isClosing) {
-          pool
-            .isThresholdStillReachable(currentConfig.trustThreshold, Set.empty)
-            .fold(
-              error =>
-                completeWithReason(Success(UnrecoverableError(error.toString)), _.fatalOccurred(_)),
-              _ =>
-                health.failureOccurred(
-                  s"only $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}"
-                ),
-            )
-        } else health.failureOccurred("closing")
+        pool
+          .isThresholdStillReachable(currentConfig.trustThreshold, Set.empty)
+          .fold(
+            error =>
+              completeWithReason(
+                Success(UnrecoverableError(error.toString)),
+                updateHealth = _.fatalOccurred(_),
+              ),
+            _ =>
+              health.failureOccurred(
+                s"only $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}"
+              ),
+          )
     }
   }
 
@@ -417,6 +520,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   override def onClosed(): Unit = {
     val instances = lock.exclusive(trackedSubscriptions.toSeq)
     LifeCycle.close(instances)(logger)
+    completeWithReason(Success(SequencerClient.CloseReason.ClientShutdown))(TraceContext.empty)
     super.onClosed()
   }
 
@@ -441,8 +545,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   ): Unit =
     lock.exclusive {
       managers.foreach { manager =>
-        logger.debug(s"Removing ${manager.connection.name} from the subscription pool")
         if (trackedSubscriptions.remove(manager)) {
+          logger.debug(s"Removed ${manager.connection.name} from the subscription pool")
           manager.close()
           metrics
             .subscriptionHealth(mc.withExtraLabels("connection" -> manager.connection.config.name))

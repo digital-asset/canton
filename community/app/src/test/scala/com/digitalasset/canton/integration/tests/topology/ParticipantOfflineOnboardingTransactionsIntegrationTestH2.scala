@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.topology
 
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.integration.plugins.{UseH2, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -23,7 +22,7 @@ final class ParticipantOfflineOnboardingTransactionsIntegrationTestH2
     with TopologyTransactionReSignHelpers
     with SharedEnvironment {
   registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition = EnvironmentDefinition.P1_S1M1
 

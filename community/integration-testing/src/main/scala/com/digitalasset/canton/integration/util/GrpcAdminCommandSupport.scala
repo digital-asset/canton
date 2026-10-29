@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.daml.ledger.api.v2 as proto
 import com.daml.ledger.api.v2.command_submission_service.CommandSubmissionServiceGrpc.CommandSubmissionServiceStub
 import com.daml.ledger.api.v2.state_service.StateServiceGrpc.StateServiceStub
+import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.UpdateServiceStub
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.console.{
   ConsoleCommandResult,
@@ -106,6 +107,12 @@ private[integration] object GrpcServices {
   object StateService {
     val stub: Channel => StateServiceStub = proto.state_service.StateServiceGrpc.stub
     val getActiveContracts = stub.streamingCommand(_.getActiveContracts)
+    val getActiveContractsPage = stub.syncCommand(_.getActiveContractsPage)
     val getConnectedSynchronizers = stub.syncCommand(_.getConnectedSynchronizers)
+  }
+
+  object UpdateService {
+    val stub: Channel => UpdateServiceStub = proto.update_service.UpdateServiceGrpc.stub
+    val getUpdates = stub.streamingCommand(_.getUpdates)
   }
 }

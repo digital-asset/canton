@@ -224,13 +224,13 @@ class UsePostgres(
       operationName = "drop-postgres-databases",
     )
 
-    val dropDbTask = storage.update_(
+    def startDropDbFUS(): FutureUnlessShutdown[Unit] = storage.update_(
       DBIO.seq(dbNames.flatMap(PostgresTestDatabase.dropStatements)*),
       functionFullName,
     )
 
     retryPolicy
-      .unlessShutdown(dropDbTask, AllExceptionRetryPolicy)
+      .unlessShutdown(startDropDbFUS(), AllExceptionRetryPolicy)
       .recover { case NonFatal(e) =>
         logger.warn(s"Dropping database failed after all retries", e)
         logOpenQueries(storage).discard

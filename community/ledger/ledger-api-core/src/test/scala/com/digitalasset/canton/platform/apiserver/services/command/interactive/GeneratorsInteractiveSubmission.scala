@@ -209,6 +209,7 @@ final class GeneratorsInteractiveSubmission(
     submissionIdO,
     externallySignedSubmission = None,
     transactionHash = None,
+    accountId = None,
   )
 
   private def transactionMetaGen(transaction: VersionedTransaction): Gen[TransactionMeta] = for {

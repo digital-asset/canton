@@ -23,6 +23,8 @@ class SubmitReassignmentRequestSpec
     )
   ) { request =>
     val commands = SubmitReassignmentRequest.fromProto(request)
+    // Guard against fromProto not preserving a field
+    SubmitReassignmentRequest.toProto(commands) shouldEqual request
     SubmitReassignmentRequest.fromProto(
       SubmitReassignmentRequest.toProto(commands)
     ) shouldEqual commands

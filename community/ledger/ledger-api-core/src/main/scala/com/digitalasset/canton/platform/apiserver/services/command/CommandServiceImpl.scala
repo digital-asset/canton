@@ -125,6 +125,7 @@ private[apiserver] final class CommandServiceImpl private[services] (
                   includeTransactions = None,
                   includeReassignments = request.eventFormat,
                   includeTopologyEvents = None,
+                  includeTransactionsAndReassignments = None,
                 )
               ),
             )
@@ -366,6 +367,7 @@ private[apiserver] object CommandServiceImpl {
           includeTransactions = transactionFormat,
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
       ),
     )

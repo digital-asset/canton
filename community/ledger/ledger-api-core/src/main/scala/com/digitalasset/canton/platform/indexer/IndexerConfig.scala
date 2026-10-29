@@ -22,7 +22,8 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
   *   - enableCompressionNonConsumingExercise: switches on compression for non-consuming exercises
   */
 final case class IndexerConfig(
-    batchingParallelism: NonNegativeInt = NonNegativeInt.tryCreate(DefaultBatchingParallelism),
+    batchingParallelism: NonNegativeInt =
+      NonNegativeInt.tryCreate(4), // TODO(i36465): Remove this deprecated config
     enableCompression: Boolean = DefaultEnableCompression,
     enableCompressionConsumingExercise: Boolean = DefaultEnableCompression,
     enableCompressionNonConsumingExercise: Boolean = DefaultEnableCompression,
@@ -34,7 +35,9 @@ final case class IndexerConfig(
     restartDelay: config.NonNegativeFiniteDuration =
       config.NonNegativeFiniteDuration.ofSeconds(DefaultRestartDelay.toSeconds),
     useWeightedBatching: Boolean = false, // TODO(i35563): Remove this deprecated flag
-    submissionBatchSize: Long = DefaultSubmissionBatchSize,
+    submissionBatchSize: Int = DefaultSubmissionBatchSize,
+    ingestingMaxBatchSize: Int = DefaultIngestingMaxBatchSize,
+    ingestingMinBatchSize: Int = DefaultIngestingMinBatchSize,
     submissionBatchInsertionSize: Long = 5000L, // TODO(i35563): Remove this deprecated flag
     maxOutputBatchedBufferSize: Int = DefaultMaxOutputBatchedBufferSize,
     maxTailerBatchSize: Int = DefaultMaxTailerBatchSize,
@@ -115,16 +118,17 @@ object IndexerConfig {
   val DefaultMaxInputBufferSize: Int = 50
   val DefaultInputMappingParallelism: Int = 16
   val DefaultDbPrepareParallelism: Int = 4
-  val DefaultBatchingParallelism: Int = 4
   val DefaultIngestionParallelism: Int = 16
-  val DefaultSubmissionBatchSize: Long = 50L
+  val DefaultSubmissionBatchSize: Int = 50
+  val DefaultIngestingMaxBatchSize: Int = 5000
+  val DefaultIngestingMinBatchSize: Int = 100
   val DefaultEnableCompression: Boolean = false
   val DefaultMaxOutputBatchedBufferSize: Int = 16
   val DefaultMaxTailerBatchSize: Int = 10
   val DefaultPostProcessingParallelism: Int = 8
   val DefaultQueueMaxBlockedOffer: Int = 1000
   val DefaultQueueBufferSize: Int = 50
-  val DefaultQueueUncommittedWarnThreshold: Int = 14000
+  val DefaultQueueUncommittedWarnThreshold: Int = 100000
   val DefaultQueueRecoveryRetryMinWaitMillis: Int = 50
   val DefaultQueueRecoveryRetryMaxWaitMillis: Int = 5000
   val DefaultQueueRecoveryRetryAttemptWarnThreshold: Int = 50

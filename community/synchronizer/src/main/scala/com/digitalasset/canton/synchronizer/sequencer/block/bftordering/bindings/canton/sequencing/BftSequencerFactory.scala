@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager
@@ -40,6 +40,7 @@ import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContextExecutor
+import scala.util.Try
 
 class BftSequencerFactory(
     config: BftBlockOrdererConfig,
@@ -85,27 +86,33 @@ class BftSequencerFactory(
       ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
-  ): BlockOrderer = {
+  ): UnlessShutdown[BlockOrderer] = {
     val initialHeight = initialBlockHeight.getOrElse(0L)
-    new BftBlockOrderer(
-      config,
-      publicApi,
-      storage,
-      cryptoApi,
-      sequencerId,
-      clock,
-      authenticationServices,
-      nodeParameters,
-      initialHeight,
-      orderingTimeFixMode,
-      sequencerSnapshot.flatMap(_.additional),
-      nodeParameters.exitOnFatalFailures,
-      metrics.bftOrdering,
-      executorServiceMetrics,
-      synchronizerLoggerFactory,
-      nodeParameters.loggingConfig.queryCost,
-      ec,
-    )
+    UnlessShutdown
+      .recoverFromAbortException(
+        Try(
+          new BftBlockOrderer(
+            config,
+            publicApi,
+            storage,
+            cryptoApi,
+            sequencerId,
+            clock,
+            authenticationServices,
+            nodeParameters,
+            initialHeight,
+            orderingTimeFixMode,
+            sequencerSnapshot.flatMap(_.additional),
+            nodeParameters.exitOnFatalFailures,
+            metrics.bftOrdering,
+            executorServiceMetrics,
+            synchronizerLoggerFactory,
+            nodeParameters.loggingConfig.queryCost,
+            ec,
+          )
+        )
+      )
+      .fold(throw _, Predef.identity)
   }
 
   override protected final def createBlockSequencer(

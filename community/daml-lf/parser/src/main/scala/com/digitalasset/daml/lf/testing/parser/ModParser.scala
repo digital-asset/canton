@@ -73,7 +73,7 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
     }
 
   lazy val mod: Parser[Module] =
-    Id("module") ~! dottedName ~ `{` ~ rep(definition <~ `;`) <~ `}` ^^ {
+    Id("module") ~! dottedName ~ `{` ~ rep(definition <~! `;`) <~ `}` ^^ {
       case _ ~ modName ~ _ ~ defs =>
         val (definitions, templates, exceptions, interfaces) = split(defs)
         Module.build(modName, definitions, templates, exceptions, interfaces, FeatureFlags.default)
@@ -171,13 +171,13 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
     }
 
   private lazy val templateDefinition: Parser[TemplDef] =
-    (Id("template") ~ `(` ~> id ~ `:` ~ dottedName ~ `)` ~ `=` ~ `{` ~
+    (Id("template") ~>! `(` ~> id ~ `:` ~ dottedName ~ `)` ~ `=` ~ `{` ~
       (Id("precondition") ~> expr <~ `;`) ~
       (Id("signatories") ~> expr <~ `;`) ~
       (Id("observers") ~> expr <~ `;`) ~
       rep(templateChoice <~ `;`) ~
       rep(implements <~ `;`) ~
-      opt(Id("key") ~> templateKey <~ `;`) <~
+      opt(Id("key") ~>! templateKey <~ `;`) <~
       `}`) ^^ {
       case x ~ _ ~ tycon ~ _ ~ _ ~ _ ~
           precon ~
@@ -201,7 +201,7 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
     }
 
   private lazy val exceptionDefinition: Parser[ExcepDef] =
-    Id("exception") ~> dottedName ~ `=` ~ `{` ~ (Id("message") ~> expr) <~ `}` ^^ {
+    Id("exception") ~>! dottedName ~ `=` ~ `{` ~ (Id("message") ~> expr) <~ `}` ^^ {
       case tycon ~ _ ~ _ ~ message => ExcepDef(tycon, DefException(message))
     }
 
@@ -212,7 +212,7 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
     `(` ~> id <~ `)`
 
   private lazy val templateChoice: Parser[TemplateChoice] =
-    Id("choice") ~> tags(templateChoiceTags) ~ id ~ selfBinder ~ choiceParam ~
+    Id("choice") ~>! tags(templateChoiceTags) ~ id ~ selfBinder ~ choiceParam ~
       (`:` ~> typ) ~
       (`,` ~> Id("controllers") ~> expr) ~
       opt(`,` ~> Id("observers") ~> expr) ~
@@ -233,7 +233,7 @@ private[parser] class ModParser[P](parameters: ParserParameters[P]) {
       }
 
   private val interfaceDefinition: Parser[IfaceDef] =
-    Id("interface") ~ `(` ~> id ~ `:` ~ dottedName ~ `)` ~ `=` ~ `{` ~
+    Id("interface") ~>! `(` ~> id ~ `:` ~ dottedName ~ `)` ~ `=` ~ `{` ~
       (interfaceView <~ `;`) ~
       rep(interfaceRequires <~ `;`) ~
       rep(interfaceMethod <~ `;`) ~

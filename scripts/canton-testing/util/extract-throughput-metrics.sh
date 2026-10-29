@@ -30,7 +30,7 @@ load-metrics() {
 
 	if [[ "$prefix" == *TX* && "${KNOWN_MISSING_TX_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
-	elif [[ "$prefix" == *SEQUENCER* && "${KNOWN_MISSING_SEQUENCER_METRICS:-false}" == "true" ]]; then
+	elif [[ "$prefix" == *SEQUENCER_BLOCK* && "${KNOWN_MISSING_SEQUENCER_BLOCK_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
 	elif [[ "$prefix" == *MEDIATOR* && "${KNOWN_MISSING_MEDIATOR_METRICS:-false}" == "true" ]]; then
 		is_known_missing_metrics="true"
@@ -62,12 +62,22 @@ load-metrics() {
 # Setting up metrics file locations and the regex filters for extracting the proper lines out
 TX_LOAD_METRICS_FILE="${TX_LOAD_METRICS_FILE:-"participant1.daml.participant.console.tx-nodes-emitted.csv"}"
 TX_LOAD_METRICS_FILTER_PATTERN="${TX_LOAD_METRICS_FILTER_PATTERN:-"measurement=canton\.transactions-emitted"}"
+
 UPDATES_LOAD_METRICS_FILE="${UPDATES_LOAD_METRICS_FILE:-"participant1.daml.participant.api.indexer.events.csv"}"
-UPDATES_LOAD_METRICS_FILTER_PATTERN="${UPDATES_LOAD_METRICS_FILTER_PATTERN:-"PerformanceTest"}"
+# Only accepted PerformanceTest transactions. CsvReporter sorts the attribute keys, so status always comes before user_id.
+UPDATES_LOAD_METRICS_FILTER_PATTERN="${UPDATES_LOAD_METRICS_FILTER_PATTERN:-"status=accepted.*PerformanceTest"}"
+
 PARTICIPANT_EVENTS_METRICS_FILE="${PARTICIPANT_EVENTS_METRICS_FILE:-"participant1.synchronizer.daml.sequencer-client.handler.sequencer-events.csv"}"
 MEDIATOR_EVENTS_METRICS_FILE="${MEDIATOR_EVENTS_METRICS_FILE:-"mediator.daml.sequencer-client.handler.sequencer-events.csv"}"
+
 FAILED_TRADER1_METRICS_FILE="${FAILED_TRADER1_METRICS_FILE:-"canton.performance.failed.csv"}"
 FAILED_TRADER1_METRICS_FILTER_PATTERN="${FAILED_TRADER1_METRICS_FILTER_PATTERN:-"role=(participant1-trader1|0Trad)"}"
+
+SEQUENCER_BLOCK_EVENTS_FILE="${SEQUENCER_BLOCK_EVENTS_FILE:-"sequencer1.daml.sequencer.block.events.csv"}"
+SEQUENCER_BLOCK_EVENTS_FILTER="${SEQUENCER_BLOCK_EVENTS_FILTER:-"component=sequencer"}"
+
+SEQUENCER_BLOCK_BYTES_FILE="${SEQUENCER_BLOCK_BYTES_FILE:-"sequencer1.daml.sequencer.block.event-bytes.csv"}"
+SEQUENCER_BLOCK_BYTES_FILTER="${SEQUENCER_BLOCK_BYTES_FILTER:-"component=sequencer"}"
 
 # Note: the third parameter, is a regex string
 load-metrics $TX_LOAD_METRICS_FILE TX "$TX_LOAD_METRICS_FILTER_PATTERN"
@@ -75,6 +85,8 @@ load-metrics "$UPDATES_LOAD_METRICS_FILE" "UPDATES" "$UPDATES_LOAD_METRICS_FILTE
 load-metrics "$PARTICIPANT_EVENTS_METRICS_FILE" PARTICIPANT_EVENTS
 load-metrics "$MEDIATOR_EVENTS_METRICS_FILE" MEDIATOR_EVENTS
 load-metrics "$FAILED_TRADER1_METRICS_FILE" FAILED_TRADER1 $FAILED_TRADER1_METRICS_FILTER_PATTERN
+load-metrics "$SEQUENCER_BLOCK_EVENTS_FILE" "SEQUENCER_BLOCK_EVENTS" "$SEQUENCER_BLOCK_EVENTS_FILTER"
+load-metrics "$SEQUENCER_BLOCK_BYTES_FILE" "SEQUENCER_BLOCK_BYTES" "$SEQUENCER_BLOCK_BYTES_FILTER"
 
 # Starting point for general throughput measurements
 # shellcheck disable=SC2034
@@ -93,10 +105,12 @@ fi
 
 ### Compute throughput
 
-TX_THROUGHPUT="$(rate "$TX_EARLY_TO_LATE_COUNT" "$TX_EARLY_TO_LATE_TIME")"
-UPDATES_THROUGHPUT="$(rate "$UPDATES_EARLY_TO_LATE_COUNT" "$UPDATES_EARLY_TO_LATE_TIME")"
-PARTICIPANT_EVENTS_THROUGHPUT="$(rate "$PARTICIPANT_EVENTS_EARLY_TO_LATE_COUNT" "$PARTICIPANT_EVENTS_EARLY_TO_LATE_TIME")"
-MEDIATOR_EVENTS_THROUGHPUT="$(rate "$MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT" "$MEDIATOR_EVENTS_EARLY_TO_LATE_TIME")"
+TX_THROUGHPUT="${TX_RATE:-0.00}"
+UPDATES_THROUGHPUT="${UPDATES_RATE:-0.00}"
+PARTICIPANT_EVENTS_THROUGHPUT="${PARTICIPANT_EVENTS_RATE:-0.00}"
+MEDIATOR_EVENTS_THROUGHPUT="${MEDIATOR_EVENTS_RATE:-0.00}"
+BLOCK_EVENTS_THROUGHPUT="${SEQUENCER_BLOCK_EVENTS_RATE:-0.00}"
+BLOCK_BYTES_THROUGHPUT="${SEQUENCER_BLOCK_BYTES_RATE:-0.00}"
 
 ### Create datadog report
 
@@ -105,16 +119,28 @@ $DATADOG_METRIC_PREFIX.throughput.transactions.avg=$TX_THROUGHPUT
 $DATADOG_METRIC_PREFIX.throughput.updates.avg=$UPDATES_THROUGHPUT
 $DATADOG_METRIC_PREFIX.throughput.participant-events.avg=$PARTICIPANT_EVENTS_THROUGHPUT
 $DATADOG_METRIC_PREFIX.throughput.mediator-events.avg=$MEDIATOR_EVENTS_THROUGHPUT
+$DATADOG_METRIC_PREFIX.throughput.sequencer-block-events.avg=$BLOCK_EVENTS_THROUGHPUT
+$DATADOG_METRIC_PREFIX.throughput.sequencer-block-event-bytes.avg=$BLOCK_BYTES_THROUGHPUT
 EOI
 
-### Create slack report
+if [[ -n "${BLOCK_EVENTS_THROUGHPUT:-}" && "${KNOWN_MISSING_SEQUENCER_BLOCK_METRICS:=false}" != "true" ]]; then
+	if [[ -n "${SEQUENCER_BLOCK_BYTES_RATE:-}" && -n "${SEQUENCER_BLOCK_BYTES_LATE_COUNT:-}" ]]; then
+		SEQUENCER_LINE="• Sequencer block events: *$BLOCK_EVENTS_THROUGHPUT events/s* / *$(print-bytes "$SEQUENCER_BLOCK_BYTES_RATE")* ($SEQUENCER_BLOCK_EVENTS_EARLY_TO_LATE_COUNT events / $(print-bytes "$SEQUENCER_BLOCK_BYTES_EARLY_TO_LATE_COUNT") in $SEQUENCER_BLOCK_EVENTS_EARLY_TO_LATE_TIME s)"
+	else
+		SEQUENCER_LINE="• Sequencer block events: *$BLOCK_EVENTS_THROUGHPUT events/s* ($SEQUENCER_BLOCK_EVENTS_EARLY_TO_LATE_COUNT events in $SEQUENCER_BLOCK_EVENTS_EARLY_TO_LATE_TIME s)"
+	fi
+else
+	SEQUENCER_LINE=""
+fi
 
+### Create slack report
 cat >> "$SLACK_METRICS_FILE" <<EOI
 *Throughput*
 • Transaction service: *$TX_THROUGHPUT root nodes/s* ($TX_EARLY_TO_LATE_COUNT tx root nodes in $TX_EARLY_TO_LATE_TIME s)
 • Read service: *$UPDATES_THROUGHPUT updates/s* ($UPDATES_EARLY_TO_LATE_COUNT updates in $UPDATES_EARLY_TO_LATE_TIME s)
 • Participant sequencer client: *$PARTICIPANT_EVENTS_THROUGHPUT events/s* ($PARTICIPANT_EVENTS_EARLY_TO_LATE_COUNT events in $PARTICIPANT_EVENTS_EARLY_TO_LATE_TIME s)
-• Mediator sequencer client: *$MEDIATOR_EVENTS_THROUGHPUT events/s* ($MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT events in $MEDIATOR_EVENTS_EARLY_TO_LATE_TIME s)
+• Mediator sequencer client: *$MEDIATOR_EVENTS_THROUGHPUT events/s* ($MEDIATOR_EVENTS_EARLY_TO_LATE_COUNT events in $MEDIATOR_EVENTS_EARLY_TO_LATE_TIME s)${SEQUENCER_LINE:+
+$SEQUENCER_LINE}
 • Failed commands (trader1): *$FAILED_TRADER1_EARLY_TO_LATE_COUNT*
 
 EOI

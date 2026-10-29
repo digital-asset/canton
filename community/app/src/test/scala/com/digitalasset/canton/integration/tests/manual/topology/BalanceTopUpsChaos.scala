@@ -35,6 +35,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Random
 
@@ -148,7 +149,8 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
             import cats.syntax.either.*
 
             // If the command fails, it is likely due to either TRAFFIC_CONTROL_TOP_UP_SUBMISSION_FAILED (submission
-            // timed out) or TRAFFIC_CONTROL_SERIAL_TOO_LOW (top-up already effective due to delay).
+            // timed out or aggregation already delivered) or TRAFFIC_CONTROL_SERIAL_TOO_LOW (top-up already
+            // effective due to delay).
             // In either case, we can safely ignore.
             // We catch the CommandFailure exception here instead of having "[chaos testing][send top-up]" in the
             // acceptable log entries, which might be too broad.
@@ -269,23 +271,32 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     // Wait for the pending tasks to complete
     pendingTasks.future.futureValue
 
-    // Ensure our extra participants are connected to the synchronizer so the final validation applies to them
-    // Increase the patience as it seems the default 5 seconds might be too short.
+    // Ensure our extra participants are running and connected to the synchronizer so the final
+    // validation applies to them. A participant can be running but disconnected, e.g., if
+    // connecting failed in `startParticipant`. Starting a participant alone can take ~10 seconds,
+    // so be generous with the patience.
     val extraPatience = PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))
     reservations.exclusiveParticipants
       .map(lp)
-      .filter(!_.health.is_running())
       .parTraverse_ { p =>
-        logOperationStep("top-up finalization")(s"start and connect participant ${p.name}")
         Future {
-          p.start()
-          // connect without synchronizing the topology, otherwise we might try to access
-          // the health endpoint of a not yet fully started
-          p.synchronizers.connect(
-            daName,
-            sequencer1.sequencerConnection.endpoints.head1.toURI(false).toString,
-            synchronize = None,
-          )
+          if (!p.health.is_running()) {
+            logOperationStep("top-up finalization")(s"start participant ${p.name}")
+            p.start()
+          }
+          if (!p.synchronizers.is_connected(daName)) {
+            logOperationStep("top-up finalization")(s"connect participant ${p.name}")
+            // connect without synchronizing the topology, otherwise we might try to access
+            // the health endpoint of a not yet fully started participant.
+            if (p.synchronizers.is_registered(daName))
+              p.synchronizers.reconnect(daName, synchronize = None).discard
+            else
+              p.synchronizers.connect(
+                daName,
+                sequencer1.sequencerConnection.endpoints.head1.toURI(false).toString,
+                synchronize = None,
+              )
+          }
         }
       }
       .futureValue(extraPatience, Position.here)
@@ -311,6 +322,14 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
   override def additionalSetupPhase()(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
 
+    // The proposals below are synchronized with the bounded command timeout, which is longer
+    // than the default patience of `futureValue`. Add a margin so that a timeout of the proposal
+    // itself is reported.
+    val proposalPatience = PatienceConfig(
+      timeout = Span((commandTimeouts.bounded.asFiniteApproximation + 10.seconds).toMillis, Millis),
+      interval = Span(20, Millis),
+    )
+
     // Start all extra local sequencers
     sequencers.local.filter(!_.is_running).foreach { localSequencer =>
       localSequencer.start()
@@ -333,6 +352,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
             existingSequencer = currentSequencers.head1,
             synchronizerOwners = synchronizerOwners,
           )
+          sequencer.health.wait_for_initialized()
         }
 
         val allSequencers = currentSequencers ++ sequencersToOnboard
@@ -345,16 +365,18 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
         }
 
         // Update the sequencer topology
-        synchronizerOwners.forgetNE.toSeq.parTraverse { owner =>
-          Future {
-            owner.topology.sequencers.propose(
-              synchronizerId = daId,
-              threshold = PositiveInt.tryCreate(threshold),
-              active = allSequencers.map(_.id),
-              mustFullyAuthorize = true,
-            )
+        synchronizerOwners.forgetNE.toSeq
+          .parTraverse { owner =>
+            Future {
+              owner.topology.sequencers.propose(
+                synchronizerId = daId,
+                threshold = PositiveInt.tryCreate(threshold),
+                active = allSequencers.map(_.id),
+                mustFullyAuthorize = true,
+              )
+            }
           }
-        }.futureValue
+          .futureValue(proposalPatience, Position.here)
         utils.retry_until_true {
           sequencer1.topology.sequencers.list(daId).flatMap(_.item.active).toSet == allSequencers
             .map(_.id)
@@ -368,14 +390,16 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     val (newSynchronizerSequencers, newThreshold) = getSynchronizerSequencers(daId, sequencer1)
     activeSequencers.set(ActiveSequencers(newSynchronizerSequencers, newThreshold))
 
-    synchronizerOwners.forgetNE.toSeq.parTraverse { owner =>
-      Future {
-        owner.topology.synchronizer_parameters.propose_update(
-          synchronizerId = daId,
-          _.update(trafficControl = Some(trafficControlParameters)),
-        )
+    synchronizerOwners.forgetNE.toSeq
+      .parTraverse { owner =>
+        Future {
+          owner.topology.synchronizer_parameters.propose_update(
+            synchronizerId = daId,
+            _.update(trafficControl = Some(trafficControlParameters)),
+          )
+        }
       }
-    }.futureValue
+      .futureValue(proposalPatience, Position.here)
   }
 
   override def runTopologyChanges()(implicit
@@ -436,13 +460,15 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
       candidates.headOption.foreach { participantToStart =>
         withOperation_("start participant")(s"${participantToStart.name}") {
           participantToStart.start()
+          // Track the participant as started before connecting, so that it can still be stopped
+          // (and started again) if connecting fails.
+          startedParticipants
+            .updateAndGet(current => random.shuffle(participantToStart +: current))
+            .discard
           participantToStart.synchronizers.connect(sequencer1, daName)
 
           balanceUpdaters
             .updateAndGet(current => current + new BalanceUpdater(participantToStart.id))
-            .discard
-          startedParticipants
-            .updateAndGet(current => random.shuffle(participantToStart +: current))
             .discard
         }
       }
@@ -486,16 +512,23 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
 
     val candidates = random.shuffle(startedParticipants.get.take(2))
 
+    // Concurrent topology changes (e.g., of the mediator group) can make a single ping time out,
+    // so a failed ping is only logged. The final pings of the test check that all participants
+    // are reachable.
+    def ping(
+        from: LocalParticipantReference,
+        to: LocalParticipantReference,
+        description: String,
+    ): Unit =
+      withOperation_("ping")(description) {
+        if (from.health.maybe_ping(to).isEmpty)
+          logOperationStep("ping")(s"$description did not complete in time")
+      }
+
     Future {
       candidates match {
-        case Seq(p1, p2) =>
-          withOperation_("ping")(s"${p1.name} -> ${p2.name}") {
-            p1.health.ping(p2)
-          }
-        case Seq(p) =>
-          withOperation_("ping")(s"${p.name} -> itself") {
-            p.health.ping(p)
-          }
+        case Seq(p1, p2) => ping(p1, p2, s"${p1.name} -> ${p2.name}")
+        case Seq(p) => ping(p, p, s"${p.name} -> itself")
         case _ =>
       }
     }
@@ -550,5 +583,8 @@ object BalanceTopUpsChaos extends TopologyOperationsCompanion {
     // If a sequencer is "late to the party" when submitting a top-up balance, it can happen that it
     // has already been processed by enough sequencers and is effective
     "TRAFFIC_CONTROL_SERIAL_TOO_LOW",
+    // Same as above, but the late sequencer refuses the submission before sequencing, because the
+    // aggregation of the top-up has already been delivered
+    "is already marked as delivered",
   )
 }

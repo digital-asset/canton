@@ -397,6 +397,11 @@ object JsUserManagementCodecs {
     deriveRelaxedCodec
   implicit val canActAsAnyPartyRWRW: Codec[user_management_service.Right.CanActAsAnyParty] =
     deriveRelaxedCodec
+  implicit val canDebitTrafficFromRW: Codec[user_management_service.Right.CanDebitTrafficFrom] =
+    deriveRelaxedCodec
+  implicit val canDebitTrafficFromAnyAccountRW
+      : Codec[user_management_service.Right.CanDebitTrafficFromAnyAccount] =
+    deriveRelaxedCodec
   implicit val kindCanActAsRWRW: Codec[user_management_service.Right.Kind.CanActAs] =
     deriveRelaxedCodec
   implicit val kindCanReadAsRWRW: Codec[user_management_service.Right.Kind.CanReadAs] =
@@ -410,6 +415,12 @@ object JsUserManagementCodecs {
       : Codec[user_management_service.Right.Kind.CanExecuteAsAnyParty] =
     deriveRelaxedCodec
   implicit val kindCanActAsAnyPartyRW: Codec[user_management_service.Right.Kind.CanActAsAnyParty] =
+    deriveRelaxedCodec
+  implicit val kindCanDebitTrafficFromRW
+      : Codec[user_management_service.Right.Kind.CanDebitTrafficFrom] =
+    deriveRelaxedCodec
+  implicit val kindCanDebitTrafficFromAnyAccountRW
+      : Codec[user_management_service.Right.Kind.CanDebitTrafficFromAnyAccount] =
     deriveRelaxedCodec
   implicit val kindParticipantAdminRWRW
       : Codec[user_management_service.Right.Kind.ParticipantAdmin] =

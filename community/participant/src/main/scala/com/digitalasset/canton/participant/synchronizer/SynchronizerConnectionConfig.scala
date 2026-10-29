@@ -54,6 +54,9 @@ import monocle.syntax.all.*
   * @param initializeFromTrustedSynchronizer
   *   if false will automatically generate a SynchronizerTrustCertificate when connecting to a new
   *   synchronizer.
+  * @param disableAuthorizedStoreDispatching
+  *   if true, the transactions of the authorized store are not pushed to this synchronizer. Set
+  *   when the operator provides the onboarding transactions at registration.
   */
 final case class SynchronizerConnectionConfig(
     synchronizerAlias: SynchronizerAlias,
@@ -66,6 +69,8 @@ final case class SynchronizerConnectionConfig(
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
     timeTracker: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
     initializeFromTrustedSynchronizer: Boolean = false,
+    // TODO(#34022): remove once the authorized store is removed
+    disableAuthorizedStoreDispatching: Boolean = false,
 ) extends HasVersionedWrapper[SynchronizerConnectionConfig]
     with PrettyPrintingFromCompanion {
 
@@ -79,6 +84,8 @@ final case class SynchronizerConnectionConfig(
     *     connections with the same sequencer alias. The SequencerConnections' sequencerId fields
     *     may be set in either or none of the two configs, but if it's set in both, it must be the
     *     same sequencer id.
+    *   - the field `disableAuthorizedStoreDispatching` is true in the merged configuration if it is
+    *     true in either config.
     * @return
     *   either the merged configuration if the other configuration is subsumed by this
     *   configuration, or an error
@@ -96,6 +103,7 @@ final case class SynchronizerConnectionConfig(
               `sequencerConnections`.submissionRequestAmplification,
               `sequencerConnections`.sequencerConnectionPoolDelays,
               `sequencerConnections`.subscriptionLivenessLimits,
+              `sequencerConnections`.`sequencerConnectionPenaltyConfig`,
             ),
             `manualConnect`,
             otherSynchronizerId,
@@ -104,6 +112,7 @@ final case class SynchronizerConnectionConfig(
             `maxRetryDelay`,
             `timeTracker`,
             `initializeFromTrustedSynchronizer`,
+            otherDisableAuthorizedStoreDispatching,
           ) =>
         val unknownAliases =
           otherAliasToConnection.keySet.diff(sequencerConnections.aliasToConnection.keySet)
@@ -160,10 +169,13 @@ final case class SynchronizerConnectionConfig(
             sequencerConnections.submissionRequestAmplification,
             sequencerConnections.sequencerConnectionPoolDelays,
             sequencerConnections.subscriptionLivenessLimits,
+            sequencerConnections.sequencerConnectionPenaltyConfig,
           )
         } yield this.copy(
           psid = updatedSynchronizerId,
           sequencerConnections = updatedSequencerConnections,
+          disableAuthorizedStoreDispatching =
+            disableAuthorizedStoreDispatching || otherDisableAuthorizedStoreDispatching,
         )
       case _ =>
         Left("the new synchronizer config does not subsume the existing synchronizer config")
@@ -194,6 +206,7 @@ final case class SynchronizerConnectionConfig(
       maxRetryDelay = maxRetryDelay.map(_.toProtoPrimitive),
       timeTracker = timeTracker.toProtoV30.some,
       initializeFromTrustedSynchronizer = initializeFromTrustedSynchronizer,
+      disableAuthorizedStoreDispatching = disableAuthorizedStoreDispatching,
     )
 }
 
@@ -203,7 +216,7 @@ object SynchronizerConnectionConfig
     with PrettyPrintingCompanion[SynchronizerConnectionConfig] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v35,
+      ProtocolVersion.v36,
       supportedProtoVersion(v30.SynchronizerConnectionConfig)(fromProtoV30),
       _.toProtoV30,
     )
@@ -223,6 +236,7 @@ object SynchronizerConnectionConfig
       maxRetryDelayP,
       timeTrackerP,
       initializeFromTrustedSynchronizer,
+      disableAuthorizedStoreDispatching,
     ) =
       synchronizerConnectionConfigP
     for {
@@ -256,6 +270,7 @@ object SynchronizerConnectionConfig
       maxRetryDelay,
       timeTracker,
       initializeFromTrustedSynchronizer,
+      disableAuthorizedStoreDispatching,
     )
   }
 
@@ -272,6 +287,11 @@ object SynchronizerConnectionConfig
       paramIfNotDefault(
         "initializeFromTrustedSynchronizer",
         _.initializeFromTrustedSynchronizer,
+        false,
+      ),
+      paramIfNotDefault(
+        "disableAuthorizedStoreDispatching",
+        _.disableAuthorizedStoreDispatching,
         false,
       ),
     )

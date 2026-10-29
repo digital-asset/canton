@@ -39,6 +39,7 @@ import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
 import sttp.tapir.server.ServerEndpoint.Full
 
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, TimeoutException}
@@ -121,7 +122,8 @@ trait Endpoints extends NamedLogging {
       ],
       service: CallerContext => TracedInput[HI] => Flow[I, O, Any],
   )(implicit
-      authInterceptor: AuthInterceptor
+      authInterceptor: AuthInterceptor,
+      wsConfig: WebsocketConfig,
   ): Full[CallerContext, CallerContext, HI, CustomError, Flow[
     I,
     Either[JsCantonError, O],
@@ -130,7 +132,7 @@ trait Endpoints extends NamedLogging {
     endpoint
       // .in(header(wsSubprotocol))  We send wsSubprotocol header, but we do not enforce it
       .out(header(wsSubprotocol))
-      .serverSecurityLogic(validateJwtToken(endpoint))
+      .serverSecurityLogic(validateWebsocketCaller(endpoint))
       .serverLogicSuccess { jwt => i =>
         val errorHandlingService =
           service(jwt)(
@@ -259,6 +261,33 @@ trait Endpoints extends NamedLogging {
             .transform(handleErrorResponse(caller.traceContext()))
         }
       )
+
+  /** Security logic of websocket endpoints. Websockets additionally accept the JWT from the
+    * [[Endpoints.jwtCookieName]] cookie, which browsers attach to handshakes started by any web
+    * site. To prevent cross-site websocket hijacking, a cookie-authenticated handshake is only
+    * accepted when its `Origin` is in [[WebsocketConfig.cookieAuthAllowedOrigins]]. When no origins
+    * are allowed, the cookie is ignored and the request is treated as carrying no token.
+    */
+  private def validateWebsocketCaller(endpointInfo: EndpointMetaOps)(caller: CallerContext)(implicit
+      authInterceptor: AuthInterceptor,
+      wsConfig: WebsocketConfig,
+  ): Future[Either[CustomError, CallerContext]] =
+    caller.cookieAuth match {
+      case None => validateJwtToken(endpointInfo)(caller)
+      case Some(cookieAuth) =>
+        checkCookieAuthOrigin(wsConfig.cookieAuthAllowedOrigins, cookieAuth.origin) match {
+          case CookieAuthDecision.Allowed => validateJwtToken(endpointInfo)(caller)
+          case CookieAuthDecision.Disabled =>
+            validateJwtToken(endpointInfo)(caller.copy(jwt = None, cookieAuth = None))
+          case CookieAuthDecision.Rejected(reason) =>
+            implicit val traceContext: TraceContext = caller.traceContext()
+            val rejection = JsonApiErrors.CookieAuthOriginNotAllowed.Reject(reason)
+            requestLogger.logAuthError(caller.call, rejection.asGrpcError)
+            Future.successful(
+              Left((StatusCode.Forbidden, JsCantonError.fromErrorCode(rejection)))
+            )
+        }
+    }
 
   private def validateJwtToken(endpointInfo: EndpointMetaOps)(caller: CallerContext)(implicit
       authInterceptor: AuthInterceptor
@@ -424,17 +453,62 @@ object Endpoints {
       call: CallMetadata,
       claimSet: Option[ClaimSet] = None,
       optTraceContext: Option[TraceContext] = None,
+      // set when `jwt` was taken from the `jwtCookieName` cookie (websocket endpoints only)
+      cookieAuth: Option[CookieAuth] = None,
   ) {
     def token(): Option[String] = jwt.map(_.token)
 
     def traceContext(): TraceContext = optTraceContext.getOrElse(TraceContext.empty)
   }
 
+  final case class CookieAuth(origin: Option[String])
+
+  sealed trait CookieAuthDecision extends Product with Serializable
+  object CookieAuthDecision {
+
+    /** No origins are allowed, hence the cookie must be ignored. */
+    case object Disabled extends CookieAuthDecision
+    case object Allowed extends CookieAuthDecision
+    final case class Rejected(reason: String) extends CookieAuthDecision
+  }
+
+  /** Decides whether a cookie-authenticated request from `origin` may proceed given the configured
+    * `allowedOrigins`. Origins are compared after trimming, removing a trailing slash and
+    * lowercasing (scheme and host are case-insensitive). A missing `Origin` header or the opaque
+    * `null` origin is always rejected, as browsers always send a proper `Origin` on websocket
+    * handshakes. A `*` entry allows any (non-null) origin.
+    */
+  private[v2] def checkCookieAuthOrigin(
+      allowedOrigins: Seq[String],
+      origin: Option[String],
+  ): CookieAuthDecision = {
+    val allowed = allowedOrigins.map(normalizeOrigin).filter(_.nonEmpty)
+    if (allowed.isEmpty) CookieAuthDecision.Disabled
+    else
+      origin.map(normalizeOrigin) match {
+        case None | Some("") => CookieAuthDecision.Rejected("the Origin header is missing")
+        case Some("null") => CookieAuthDecision.Rejected("the opaque 'null' Origin is not allowed")
+        case Some(requestOrigin) if allowed.contains("*") || allowed.contains(requestOrigin) =>
+          CookieAuthDecision.Allowed
+        case Some(requestOrigin) =>
+          CookieAuthDecision.Rejected(s"Origin '$requestOrigin' is not an allowed origin")
+      }
+  }
+
+  private def normalizeOrigin(origin: String): String =
+    origin.trim.stripSuffix("/").toLowerCase(Locale.ROOT)
+
   // TODO (i28204) remove this class - it was once a wrapper over Input and TraceContext - but TraceContext is now part of  Caller
   final case class TracedInput[A](in: A)
 
   val wsSubprotocol: Header =
     sttp.model.Header("Sec-WebSocket-Protocol", "daml.ws.auth")
+
+  /** Name of the cookie that browser clients may use to pass the JWT instead of using the
+    * `Sec-WebSocket-Protocol` workaround. It is only read by websocket endpoints (see
+    * [[baseWebsocketEndpoint]]).
+    */
+  val jwtCookieName: String = "jwt.token"
 
   // RFC 6455 clients send comma-space separated subprotocol values (e.g.
   // "daml.ws.auth, jwt.token.<TOKEN>"), so each element must be trimmed before
@@ -502,6 +576,37 @@ object Endpoints {
 
   lazy val v2Endpoint: Endpoint[CallerContext, Unit, (StatusCode, JsCantonError), Unit, Any] =
     baseEndpoint
+      .errorOut(statusCode.and(jsonBody[JsCantonError]))
+      .in("v2")
+
+  /** Base for websocket endpoints. In addition to the inputs of [[baseEndpoint]], the JWT may be
+    * provided in the [[jwtCookieName]] cookie, which is consulted only when neither the
+    * `Authorization` nor the `Sec-WebSocket-Protocol` header carries a token. A token taken from
+    * the cookie is marked in [[CallerContext.cookieAuth]] together with the request's `Origin`, so
+    * that the security logic can enforce [[WebsocketConfig.cookieAuthAllowedOrigins]].
+    */
+  lazy val baseWebsocketEndpoint: Endpoint[CallerContext, Unit, Unit, Unit, Any] =
+    baseEndpoint
+      .securityIn(
+        auth
+          .apiKey(cookie[Option[String]](jwtCookieName))
+          .map(_.map(Jwt.apply))(_.map(_.token))
+          .description("Ledger API standard JWT token (websocket cookie)")
+      )
+      .securityIn(extractFromRequest(_.header(sttp.model.HeaderNames.Origin)))
+      .mapSecurityIn {
+        case (cc, Some(cookieJwt), origin) if cc.jwt.isEmpty =>
+          cc.copy(jwt = Some(cookieJwt), cookieAuth = Some(CookieAuth(origin)))
+        case (cc, _, _) => cc
+      } {
+        case cc @ CallerContext(jwt, _, _, _, Some(cookieAuth)) =>
+          (cc.copy(jwt = None, cookieAuth = None), jwt, cookieAuth.origin)
+        case cc => (cc, None, None)
+      }
+
+  lazy val v2WebsocketEndpoint
+      : Endpoint[CallerContext, Unit, (StatusCode, JsCantonError), Unit, Any] =
+    baseWebsocketEndpoint
       .errorOut(statusCode.and(jsonBody[JsCantonError]))
       .in("v2")
 

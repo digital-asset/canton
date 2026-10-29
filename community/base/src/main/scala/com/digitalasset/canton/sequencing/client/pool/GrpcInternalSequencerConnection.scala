@@ -362,6 +362,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
       member: Member,
       crypto: SynchronizerCrypto,
       clock: Clock,
+      penaltyModifier: SequencerPenaltyModifier,
   ): Either[SequencerConnectionError, GrpcSequencerConnection] =
     connection.channel
       .toRight(
@@ -395,6 +396,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
           name = s"sequencer-${connection.name}",
           authenticatedStub,
           clientAuth,
+          penaltyModifier,
           timeouts,
           loggerFactory,
         )

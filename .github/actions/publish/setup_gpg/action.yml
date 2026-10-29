@@ -1,0 +1,21 @@
+name: Setup GPG
+description: Import the GPG signing key for Maven Central publishing
+
+inputs:
+  gpg_code_signing:
+    description: Base64-encoded GPG private key
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Import signing key
+      uses: ./.github/actions/nix/nix_script_run
+      env:
+        GPG_CODE_SIGNING: ${{ inputs.gpg_code_signing }}
+      with:
+        command: |
+          key=$(mktemp)
+          printf '%s' "$GPG_CODE_SIGNING" | base64 --decode > "$key"
+          gpg --no-tty --quiet --import "$key"
+          rm -f "$key"

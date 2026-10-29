@@ -78,7 +78,7 @@ for protoFile in $(find "$LAPI_PROTO_DIR" -name "*.proto"); do
         else
           verifyEmptyCommentLineBeforeAnnotation
         fi
-      elif [[ "$line" =~ ^(optional[[:space:]]+)?[[:alnum:]]+[[:space:]]+[[:alnum:]_]+[[:space:]]+=[[:space:]]+[[:digit:]]+\; ]]; then
+      elif [[ "$line" =~ ^(optional[[:space:]]+)?[[:alnum:]]+[[:space:]]+[[:alnum:]_]+[[:space:]]+=[[:space:]]+[[:digit:]]+([[:space:]]*\[.*\])?\; ]]; then
         if [[ ! "$previousLine" =~ ^//[[:space:]]Required$|^//[[:space:]]Optional$ ]] then
           failWithError "field definition is not preceded with '// Required' / '// Optional' annotation"
         else

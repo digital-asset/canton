@@ -14,7 +14,8 @@ final class PrepareSubmissionAuthIT
     extends ReadOnlyServiceCallAuthTests
     with SubmitDummyPreparedSubmission
     with ExecuteAsAuthTests
-    with ActAsAnyPartyAuthTests {
+    with ActAsAnyPartyAuthTests
+    with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -23,5 +24,10 @@ final class PrepareSubmissionAuthIT
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
   ): Future[Any] =
-    prepareSubmission(context.token, getMainActorId, context.userId)
+    serviceCallWithAccountId(context, accountId = "")
+
+  override def serviceCallWithAccountId(context: ServiceCallContext, accountId: String)(implicit
+      env: TestConsoleEnvironment
+  ): Future[Any] =
+    prepareSubmission(context.token, getMainActorId, context.userId, accountId)
 }

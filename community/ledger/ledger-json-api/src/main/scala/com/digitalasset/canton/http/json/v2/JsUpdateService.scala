@@ -156,8 +156,9 @@ object JsUpdateService extends DocumentationEndpoints {
   import JsSchema.JsServicesCommonCodecs.*
 
   private lazy val updates = v2Endpoint.in(sttp.tapir.stringToPath("updates"))
+  private lazy val updatesWebsocket = v2WebsocketEndpoint.in(sttp.tapir.stringToPath("updates"))
 
-  val getUpdatesEndpoint = updates.get
+  val getUpdatesEndpoint = updatesWebsocket.get
     .out(
       webSocketBody[
         update_service.GetUpdatesRequest,

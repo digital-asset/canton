@@ -129,7 +129,11 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
         .via(matcher.pipeline)
         .toMat(Sink.ignore)(Keep.both)
       val (killSwitch, doneF) =
-        PekkoUtil.runSupervised(graph, s"ReceivedAcsCommitmentMatcher-$synchronizerId")
+        PekkoUtil.runSupervised(
+          graph,
+          s"ReceivedAcsCommitmentMatcher-$synchronizerId",
+          reportExceptionAtInfo = RunningDigestProcessorImpl.logExpectedStreamExceptionsAtInfo,
+        )
       metricsForSynchronizer.matcherHealth.updateValue(CommitmentMetrics.HealthValues.Started)
       (
         killSwitch,

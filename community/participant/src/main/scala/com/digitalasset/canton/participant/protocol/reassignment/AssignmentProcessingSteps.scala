@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -35,6 +36,7 @@ import com.digitalasset.canton.participant.protocol.{EngineController, Processin
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -49,7 +51,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
@@ -68,6 +70,7 @@ private[reassignment] class AssignmentProcessingSteps(
     clock: Clock,
     val protocolVersion: Target[ProtocolVersion],
     reassignmentMetrics: ReassignmentMetrics,
+    participantNodeParameters: ParticipantNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -276,6 +279,7 @@ private[reassignment] class AssignmentProcessingSteps(
     val SubmissionParam(
       submitterMetadata,
       reassignmentId,
+      _,
     ) = submissionParam
     val topologySnapshot = Target(recentSnapshot.ipsSnapshot)
     val submitter = submitterMetadata.submitter
@@ -391,10 +395,12 @@ private[reassignment] class AssignmentProcessingSteps(
   ] = {
     val message = envelope.protocolMessage
 
-    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullAssignmentTree] =
+    def deserializeTree(bytes: ByteString): Either[DeserializationError, FullAssignmentTree] = {
+      val targetPVV = protocolVersion.map(ProtocolVersionValidation.PV(_))
       FullAssignmentTree
-        .fromByteString(snapshot.pureCrypto, protocolVersion)(bytes)
+        .fromByteString(snapshot.pureCrypto, targetPVV)(bytes)
         .leftMap(e => DefaultDeserializationError(e.toString))
+    }
 
     EncryptedViewMessage
       .decryptFor(
@@ -629,6 +635,10 @@ private[reassignment] class AssignmentProcessingSteps(
         case (_: Verdict.Approve, Some(rejection)) =>
           rejected(ErrorDetails.fromLocalError(rejection))
         case (_: Verdict.Approve, _) =>
+          assignmentValidationResult.alarmIfActivenessCheckFailed(
+            requestId,
+            participantNodeParameters.crashAfterFailedValidation,
+          )
           val contractsToBeStored = assignmentValidationResult.contracts.contracts.map(_.contract)
 
           for {
@@ -744,6 +754,7 @@ object AssignmentProcessingSteps {
   final case class SubmissionParam(
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
+      accounting: SubmissionAccounting,
   ) {
     val submitterLf: LfPartyId = submitterMetadata.submitter
   }

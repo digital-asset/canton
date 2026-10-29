@@ -570,6 +570,12 @@ private[apiserver] final class ApiUserManagementService(
       case proto.Right(_: proto.Right.Kind.CanActAsAnyParty) =>
         Right(UserRight.CanActAsAnyParty)
 
+      case proto.Right(proto.Right.Kind.CanDebitTrafficFrom(r)) =>
+        requireAccountId(r.accountId, "account_id").map(UserRight.CanDebitTrafficFrom(_))
+
+      case proto.Right(_: proto.Right.Kind.CanDebitTrafficFromAnyAccount) =>
+        Right(UserRight.CanDebitTrafficFromAnyAccount)
+
       case proto.Right(proto.Right.Kind.Empty) =>
         Left(
           RequestValidationErrors.InvalidArgument
@@ -629,6 +635,14 @@ object ApiUserManagementService {
       proto.Right(proto.Right.Kind.CanExecuteAsAnyParty(proto.Right.CanExecuteAsAnyParty()))
     case UserRight.CanActAsAnyParty =>
       proto.Right(proto.Right.Kind.CanActAsAnyParty(proto.Right.CanActAsAnyParty()))
+    case UserRight.CanDebitTrafficFrom(accountId) =>
+      proto.Right(
+        proto.Right.Kind.CanDebitTrafficFrom(proto.Right.CanDebitTrafficFrom(accountId.unwrap))
+      )
+    case UserRight.CanDebitTrafficFromAnyAccount =>
+      proto.Right(
+        proto.Right.Kind.CanDebitTrafficFromAnyAccount(proto.Right.CanDebitTrafficFromAnyAccount())
+      )
   }
 
   def encodeNextPageToken(token: Option[Ref.UserId]): String =

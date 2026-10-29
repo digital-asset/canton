@@ -278,7 +278,7 @@ class TopologyComponentFactory(
     new InitialTopologySnapshotValidator(
       crypto.pureCrypto,
       topologyStore,
-      batching.topologyCacheAggregator,
+      batching,
       topology,
       Some(crypto.staticSynchronizerParameters),
       timeouts,

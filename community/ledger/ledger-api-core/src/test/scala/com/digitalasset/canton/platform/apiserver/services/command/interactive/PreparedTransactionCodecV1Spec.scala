@@ -18,6 +18,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
   PreparedTransactionDecoder,
   PreparedTransactionEncoder,
 }
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.{DefaultTestIdentities, GeneratorsTopology, Synchronizer}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{
@@ -107,6 +108,7 @@ class PreparedTransactionCodecV1Spec
         // transactionHash is computed later from the verified signature during execution
         // (see EnrichedTransactionData / ExternalTransactionProcessor); unknown at this point.
         transactionHash = None,
+        accountId = None,
       ),
       transactionMeta = TransactionMeta(
         ledgerEffectiveTime = LfTimestamp.Epoch,
@@ -521,6 +523,7 @@ class PreparedTransactionCodecV1Spec
         prepareTransactionData
           .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
           .value
+      val accountId = AccountId.tryCreate("acme/billing")
 
       val result = for {
         encoded <- encoder.encode(prepareTransactionData)
@@ -533,6 +536,7 @@ class PreparedTransactionCodecV1Spec
             encoded,
             hashVersion,
             tentativeLedgerEffectiveTime = LfTimestamp.now(),
+            accountId = Some(accountId),
           )
         )
         tampered = encoded.copy(transaction =
@@ -568,6 +572,7 @@ class PreparedTransactionCodecV1Spec
             tampered,
             hashVersion,
             tentativeLedgerEffectiveTime = LfTimestamp.now(),
+            accountId = None,
           )
         )
       } yield {
@@ -580,6 +585,7 @@ class PreparedTransactionCodecV1Spec
         }
         encodedExerciseNodes should have size 1
         encodedExerciseNodes.head.externalCallResults shouldBe Seq(protoExternalCallResult)
+        executeTransactionData.impoverish.submitterInfo.accountId shouldBe Some(accountId)
         executeTransactionData
           .computeHash(hashVersion, physicalSynchronizerId.protocolVersion)
           .value shouldBe prepareHash

@@ -1,0 +1,21 @@
+name: Publish to GitHub releases
+description: Publish release artifacts to GitHub Releases
+
+inputs:
+  private_github_token:
+    required: true
+    description: GitHub token with write access to DACH-NY/canton
+  public_github_token:
+    required: true
+    description: GitHub token with write access to digital-asset/canton
+
+runs:
+  using: composite
+  steps:
+    - name: Publish to GitHub releases
+      uses: ./.github/actions/nix/nix_run
+      env:
+        PRIVATE_GITHUB_TOKEN: ${{ inputs.private_github_token }}
+        PUBLIC_GITHUB_TOKEN: ${{ inputs.public_github_token }}
+      with:
+        command: scripts/ci/publish-to-github.sh

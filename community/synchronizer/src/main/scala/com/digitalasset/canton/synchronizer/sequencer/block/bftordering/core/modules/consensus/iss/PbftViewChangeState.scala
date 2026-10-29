@@ -9,7 +9,6 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.ViewChangeMessageValidator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -46,7 +45,6 @@ class PbftViewChangeState(
     override val loggerFactory: NamedLoggerFactory,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, mc: MetricsContext)
     extends NamedLogging {
-  private val messageValidator = new ViewChangeMessageValidator(membership, blockNumbers)
   private val viewChangeMap = mutable.HashMap[BftNodeId, SignedMessage[ViewChange]]()
   private var viewChangeFromSelfWasFromRehydration = false
   private var viewChangeMessageSetForNewView: Option[Seq[SignedMessage[ViewChange]]] = None
@@ -207,19 +205,9 @@ class PbftViewChangeState(
       case Some(_) =>
         logger.info(s"View change from ${vc.from} already exists; ignoring new vote")
       case None =>
-        messageValidator.validateViewChangeMessage(vc.message) match {
-          case Right(()) =>
-            viewChangeMap.put(vc.from, vc).discard
-            stateChanged = true
-          case Left(error) =>
-            emitNonCompliance(metrics)(
-              vc.from,
-              metrics.security.noncompliant.labels.violationType.values.ConsensusInvalidMessage,
-            )
-            logger.warn(
-              s"Invalid view change message from '${vc.from}', ignoring vote. Reason: $error"
-            )
-        }
+        // We have already validated the view change message before adding it to the state, so we don't validate it again here
+        viewChangeMap.put(vc.from, vc).discard
+        stateChanged = true
     }
     stateChanged
   }
@@ -241,19 +229,9 @@ class PbftViewChangeState(
           s"from ${nv.from}"
       )
     } else {
-      messageValidator.validateNewViewMessage(nv.message) match {
-        case Right(()) =>
-          newView = Some(nv)
-          stateChange = true
-        case Left(error) =>
-          emitNonCompliance(metrics)(
-            nv.from,
-            metrics.security.noncompliant.labels.violationType.values.ConsensusInvalidMessage,
-          )
-          logger.warn(
-            s"Invalid new view message from ${nv.from}, ignoring it. Reason: $error"
-          )
-      }
+      // We have already validated the new view message before adding it to the state, so we don't validate it again here
+      newView = Some(nv)
+      stateChange = true
     }
     stateChange
   }

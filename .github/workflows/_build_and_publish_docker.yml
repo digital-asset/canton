@@ -1,0 +1,72 @@
+name: Build and Publish Docker
+on:
+  workflow_call:
+    inputs:
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow run
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow run
+        required: false
+        type: boolean
+        default: false
+      community_release_artifact_name:
+        description: Artifact containing the packaged Canton release tarball
+        required: false
+        type: string
+        default: package-community-release.tar.gz
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      GAC_JSON:
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build_and_publish_docker:
+    name: Build and Publish Docker
+    timeout-minutes: 60
+    runs-on: ${{ inputs.runner }}
+    env:
+      OCI_REGISTRY: europe-docker.pkg.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download packaged Canton release artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.community_release_artifact_name }}
+          path: /tmp/workspace
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Build and publish docker base image
+        uses: ./.github/actions/docker/build_and_publish_docker_base_image
+        with:
+          gac_json: ${{ secrets.GAC_JSON }}
+          oci_registry: ${{ env.OCI_REGISTRY }}
+          nightly_release: ${{ inputs.is_nightly_workflow }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Upload docker ping test logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-ping-ci-artifacts
+          path: docker/canton/tests/ping/ci-artifacts
+          if-no-files-found: ignore

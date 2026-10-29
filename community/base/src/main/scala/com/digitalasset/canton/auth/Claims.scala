@@ -5,6 +5,7 @@ package com.digitalasset.canton.auth
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.LfLedgerString
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.daml.lf.data.Ref
 
 import java.time.{Duration, Instant}
@@ -70,6 +71,12 @@ final case class ClaimReadAsParty(name: Ref.Party) extends Claim
   * Does NOT authorize to issue commands.
   */
 case object ClaimReadAsAnyParty extends Claim
+
+/** Authorized to debit traffic from any account. Does not imply any party claim. */
+case object ClaimDebitTrafficFromAnyAccount extends Claim
+
+/** Authorized to debit traffic from the given account. Does not imply any party claim. */
+final case class ClaimDebitTrafficFromAccount(accountId: AccountId) extends Claim
 
 sealed trait ClaimSet
 
@@ -224,6 +231,26 @@ object ClaimSet {
         (),
         AuthorizationError.MissingExecuteClaim(party),
       )
+
+    /** Returns true if the set of claims authorizes the user to debit traffic from the given
+      * account, unless the claims expired. With `acceptExecuteRights`, the right to execute as a
+      * party with the same id also authorizes it.
+      */
+    def canDebitTrafficFrom(
+        accountId: String,
+        acceptExecuteRights: Boolean,
+    ): Either[AuthorizationError, Unit] = {
+      val hasDebitClaim = claims.exists {
+        case ClaimDebitTrafficFromAnyAccount => true
+        case ClaimDebitTrafficFromAccount(a) if a.unwrap == accountId => true
+        case _ => false
+      }
+      Either.cond(
+        hasDebitClaim || (acceptExecuteRights && canExecuteAs(accountId).isRight),
+        (),
+        AuthorizationError.MissingDebitClaim(accountId),
+      )
+    }
 
     /** Returns true if the set of claims authorizes the user to execute interactive commands as any
       * party, unless the claims expired.

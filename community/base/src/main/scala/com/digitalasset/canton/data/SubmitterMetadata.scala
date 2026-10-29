@@ -18,6 +18,7 @@ import com.digitalasset.canton.validation.{
   ProtoUnvalidatedSeq,
   ProtoUnvalidatedString,
   ProtoValidation,
+  ValidationParam,
 }
 import com.digitalasset.canton.version.*
 import com.digitalasset.daml.lf.data.Ref
@@ -59,18 +60,6 @@ final case class SubmitterMetadata private (
 
   @transient override protected lazy val companionObj: SubmitterMetadata.type = SubmitterMetadata
 
-  protected def toProtoV31: v31.SubmitterMetadata = v31.SubmitterMetadata(
-    actAs = actAs.toSeq.map(_.toProtoUnvalidated),
-    userId = userId.toProtoPrimitive,
-    commandId = commandId.toProtoPrimitive,
-    submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
-    salt = Some(salt.toProtoV30),
-    submissionId = submissionId.getOrElse("").toProtoUnvalidated,
-    dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
-    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-    externalAuthorization = externalAuthorization.map(_.toProtoV31),
-  )
-
   protected def toProtoV32: v32.SubmitterMetadata = v32.SubmitterMetadata(
     actAs = actAs.toSeq.map(_.toProtoUnvalidated),
     userId = userId.toProtoPrimitive,
@@ -111,14 +100,10 @@ object SubmitterMetadata
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SubmitterMetadata)(
-      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
-      _.toProtoV31,
-    ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SubmitterMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
-    ),
+    )
   )
 
   def apply(
@@ -165,8 +150,11 @@ object SubmitterMetadata
       _ <- ProtoValidation
         .validateCondition(
           protocolVersionValidation,
-          submitterActAs.sizeIs <= maxActAs.value,
-          InvariantViolation("act_as", s"size of ${submitterActAs.size} exceeds limit of $maxActAs"),
+          ValidationParam(ProtocolVersion.v36 -> maxActAs),
+        )(
+          max => submitterActAs.sizeIs <= max.value,
+          max =>
+            InvariantViolation("act_as", s"size of ${submitterActAs.size} exceeds limit of $max"),
         )
         .leftMap(_.message)
       actAsNes <- NonEmpty.from(submitterActAs.toSet).toRight("The actAs set must not be empty.")
@@ -183,46 +171,6 @@ object SubmitterMetadata
       hashOps,
       protocolVersion,
     )
-  }
-
-  private def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      context: SubmitterMetadataDeserializationContext,
-      metaDataP: v31.SubmitterMetadata,
-  )(
-      bytes: ByteString
-  ): ParsingResult[SubmitterMetadata] = {
-    val SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits) = context
-    val v31.SubmitterMetadata(
-      saltOP,
-      actAsP,
-      userIdP,
-      commandIdP,
-      submittingParticipantUidP,
-      submissionIdP,
-      dedupPeriodOP,
-      maxSequencingTimeOP,
-      externalAuthorizationOP,
-    ) = metaDataP
-
-    for {
-      externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV31(pvv, _)
-      )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-      result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(
-        saltOP,
-        actAsP,
-        userIdP,
-        commandIdP,
-        submittingParticipantUidP,
-        submissionIdP,
-        dedupPeriodOP,
-        maxSequencingTimeOP,
-        externalAuthorizationO,
-        rpv,
-      )
-    } yield result
   }
 
   private def fromProtoV32(
@@ -293,9 +241,12 @@ object SubmitterMetadata
 
       maxActAs = synchronizerLimits.transactionProtocolLimits.maxActAs
       actAs <- ProtoValidation
-        .validateThen(actAsP, "act_as", pvv, maxActAs.value)(
-          ProtoConverter.parseLfPartyId
-        )
+        .validateThen(
+          actAsP,
+          "act_as",
+          pvv,
+          ValidationParam(ProtocolVersion.v36 -> maxActAs),
+        )(ProtoConverter.parseLfPartyId)
       userId <- ProtoValidation.validateThen(userIdP, "userId", pvv)((s, _) =>
         UserId
           .fromProtoPrimitive(s)

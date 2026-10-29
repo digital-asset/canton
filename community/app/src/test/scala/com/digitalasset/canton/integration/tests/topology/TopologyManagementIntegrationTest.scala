@@ -25,6 +25,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{PartiesAllocator, PartyToParticipantDeclarative}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.sequencing.protocol.{Recipients, TopologyBroadcastAddress}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.ForceFlag.{
   AllowInsufficientParticipantPermissionForSignatoryParty,
@@ -48,6 +49,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.digitalasset.nonempty.NonEmpty
@@ -547,7 +549,11 @@ final class TopologyManagementIntegrationTest
       )
 
       PartyToKeyMapping
-        .fromProtoV30(testedProtocolVersionValidation, ptkProto)
+        .fromProtoV30(
+          testedProtocolVersionValidation,
+          testedTopologyLimits,
+          ptkProto,
+        )
         .isRight shouldBe true
     }
 
@@ -574,7 +580,11 @@ final class TopologyManagementIntegrationTest
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptkMappingDeserialized = deserialized.mapping.select[PartyToKeyMapping].value
       ptkMappingDeserialized.signingKeys.forgetNE should have size 1
       ptkMappingDeserialized.signingKeys.forgetNE.toSeq should contain theSameElementsAs Seq(
@@ -629,7 +639,11 @@ final class TopologyManagementIntegrationTest
       )
 
       val deserialized: TopologyTransaction[TopologyChangeOp, TopologyMapping] =
-        TopologyTransaction.fromByteString(testedProtocolVersion, originalByteString).value
+        TopologyTransaction
+          .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+            originalByteString
+          )
+          .value
       val ptpMappingDeserialized = deserialized.mapping.select[PartyToParticipant].value
       val hosting = ptpMappingDeserialized.participants
       hosting should have size 1
@@ -1965,7 +1979,10 @@ final class TopologyManagementIntegrationTest
 
   "correctly absorb additional signatures" in { implicit env =>
     import env.*
-    // this test was used to reproduce and fix https://github.com/DACH-NY/canton-network-internal/issues/2116
+    // Regression coverage originating from https://github.com/DACH-NY/canton-network-internal/issues/2116.
+    //  After participant1 observes the authorized mapping, broadcast a one-signature proposal for
+    //  the same transaction and verify that both authorized history entries retain both signatures.
+    //  This exercises duplicate delivery after authorization, not concurrent authorization processing.
     val storeId = daId
     val party = PartyId.tryCreate("AdditionalSiggy", participant1.id.namespace)
 
@@ -1987,15 +2004,25 @@ final class TopologyManagementIntegrationTest
     val tx =
       participant2.topology.transactions.authorize(sequencer1.synchronizer_id, proposal.txHash)
 
-    // now send the same tx but as a proposal with only one signature
-    val tx2 = tx.copy(isProposal = true, signatures = NonEmpty.from(tx.signatures.drop(1)).value)
-
-    logger.debug("Load transaction again")
-    participant2.topology.transactions.load(Seq(tx2), storeId)
-
     eventually() {
       participant1.ledger_api.parties.list().map(_.party) should contain(party)
     }
+
+    // now send the same tx but as a proposal with only one signature
+    val tx2 = tx.copy(isProposal = true, signatures = NonEmpty.from(tx.signatures.drop(1)).value)
+    logger.debug("Load transaction again bypassing topology manager and outbox deduplication")
+    MaliciousParticipantNode(
+      participant2,
+      daId,
+      testedProtocolVersion,
+      testedTransactionLimits,
+      timeouts,
+      loggerFactory,
+    ).submitTopologyTransactionRequest(
+      tx2,
+      recipients = Recipients.cc(TopologyBroadcastAddress.recipient),
+    ).futureValueUS
+      .value
 
     eventually() {
       val actualTx = participant2.topology.party_to_participant_mappings

@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
@@ -150,9 +149,8 @@ trait ParameterStorageBackend {
     * This method is NOT safe to call concurrently.
     */
   def initializeParameters(
-      params: ParameterStorageBackend.IdentityParams,
-      loggerFactory: NamedLoggerFactory,
-  )(connection: Connection): Unit
+      params: ParameterStorageBackend.IdentityParams
+  )(connection: Connection)(implicit traceContext: TraceContext): Unit
 
   /** Returns the ledger identity parameters, or None if the database hasn't been initialized yet.
     */
@@ -182,14 +180,14 @@ trait ParameterStorageBackend {
   /** Clears all ACHS data (both the state row and the filter data table). */
   def clearAchsStateAndData()(implicit
       connection: Connection,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
   ): Unit
 
   /** WARNING: This should be executed outside a transaction!
     */
   def vacuumAndReindexAchsTables()(implicit
       connection: Connection,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
   ): Unit
 }
 
@@ -569,11 +567,11 @@ trait EventStorageBackend {
 
   def lockExclusivelyPruningProcessingTable(
       pruningDbLockMeta: DbLockMeta
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit
+  )(implicit connection: Connection, traceContext: TraceContext): Unit
 
   def lockExclusivelyContractPruningProcessingTable(
       contractPruningDbLockMeta: DbLockMeta
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Unit
+  )(implicit connection: Connection, traceContext: TraceContext): Unit
 
   /** @return
     *   the missing internal contract IDs
@@ -581,7 +579,7 @@ trait EventStorageBackend {
   def readLockInternalContractIds(
       internalContractIds: Set[Long],
       dbLockMeta: DbLockMeta,
-  )(implicit connection: Connection, errorLoggingContext: ErrorLoggingContext): Set[Long]
+  )(implicit connection: Connection, traceContext: TraceContext): Set[Long]
 
   def writeLockInternalContractIds(whereInternalContractIdExprs: CompositeSql)(
       connection: Connection
@@ -930,7 +928,6 @@ object EventStorageBackend {
 trait DataSourceStorageBackend {
   def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
-      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit] = None,
   ): DataSource
 

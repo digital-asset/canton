@@ -53,7 +53,6 @@ class LedgerApiStore(
     ledgerApiDbSupport.storageBackendFactory.createEventStorageBackend(
       ledgerEndCache,
       stringInterningView,
-      loggerFactory,
     )
   private val stringInterningStorageBackend =
     ledgerApiDbSupport.storageBackendFactory.createStringInterningStorageBackend
@@ -286,6 +285,7 @@ object LedgerApiStore {
       ledgerParticipantId: LedgerParticipantId,
       ledgerApiDatabaseConnectionTimeout: config.NonNegativeFiniteDuration,
       ledgerApiPostgresDataSourceConfig: PostgresDataSourceConfig,
+      disableMergeAndHashJoins: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       metrics: LedgerApiServerMetrics,
@@ -338,6 +338,7 @@ object LedgerApiStore {
             serverRole = ServerRole.ApiServer,
             metrics = metrics,
             dbConfig = dbConfig,
+            disableMergeAndHashJoins = disableMergeAndHashJoins,
             loggerFactory = loggerFactory,
           )
       }

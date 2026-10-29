@@ -97,6 +97,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                 ),
                 includeReassignments = None,
                 includeTopologyEvents = None,
+                includeTransactionsAndReassignments = None,
               )
             )
           )
@@ -130,6 +131,7 @@ final class GetEventsByContractIdRequestAuthIT extends ReadOnlyServiceCallAuthTe
                 ),
                 includeReassignments = None,
                 includeTopologyEvents = None,
+                includeTransactionsAndReassignments = None,
               )
             )
           )

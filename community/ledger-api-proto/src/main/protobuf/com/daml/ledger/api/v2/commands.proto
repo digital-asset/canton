@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.daml.ledger.api.v2;
 
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "com/daml/ledger/api/v2/value.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -36,7 +37,7 @@ message CreateCommand {
   // The arguments required for creating a contract from this template.
   //
   // Required
-  Record create_arguments = 2;
+  Record create_arguments = 2 [(size_limit) = true];
 }
 
 // Exercise a choice on an existing contract.
@@ -64,7 +65,7 @@ message ExerciseCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // Exercise a choice on an existing contract specified by its key.
@@ -79,7 +80,7 @@ message ExerciseByKeyCommand {
   // The key of the contract the client wants to exercise upon.
   //
   // Required
-  Value contract_key = 2;
+  Value contract_key = 2 [(size_limit) = true];
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``)
@@ -90,7 +91,7 @@ message ExerciseByKeyCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // Create a contract and exercise a choice on it in the same transaction.
@@ -105,7 +106,7 @@ message CreateAndExerciseCommand {
   // The arguments required for creating a contract from this template.
   //
   // Required
-  Record create_arguments = 2;
+  Record create_arguments = 2 [(size_limit) = true];
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``).
@@ -116,7 +117,7 @@ message CreateAndExerciseCommand {
   // The argument for this choice.
   //
   // Required
-  Value choice_argument = 4;
+  Value choice_argument = 4 [(size_limit) = true];
 }
 
 // An additional contract that is used to resolve
@@ -271,6 +272,18 @@ message Commands {
   //
   // Optional
   optional uint32 taps_max_passes = 16;
+
+  // The account to charge for this submission when traffic accounting is enabled.
+  // Must have one or more non-empty segments separated by ``/``, with at most 255 characters total.
+  // Segments allow UserIdString characters plus spaces, so every valid party id is also valid.
+  // If empty, use the only acting party's account. With multiple acting parties, charge no account
+  // or reject the submission, depending on the participant configuration.
+  // With Ledger API authorization enabled, the user needs ``CanDebitTrafficFrom(account_id)``,
+  // ``CanDebitTrafficFromAnyAccount``, or an act-as or execute-as right for a party with the same id.
+  // ``CanActAsAnyParty`` and ``CanExecuteAsAnyParty`` allow any account, even if it isn't a party.
+  //
+  // Optional
+  string account_id = 17;
 }
 
 // Preload contracts
@@ -285,7 +298,7 @@ message PrefetchContractKey {
   // The key of the contract the client wants to prefetch.
   //
   // Required
-  Value contract_key = 2;
+  Value contract_key = 2 [(size_limit) = true];
 
   // The number of contracts to prefetch for this key, if available.
   // This is in addition to disclosed contracts.

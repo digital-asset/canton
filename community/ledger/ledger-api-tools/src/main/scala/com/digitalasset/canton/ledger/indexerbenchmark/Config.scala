@@ -83,7 +83,7 @@ object Config {
           )
         )
         .discard
-      opt[Long]("indexer-submission-batch-size")
+      opt[Int]("indexer-submission-batch-size")
         .text("Sets the value of IndexerConfig.submissionBatchSize.")
         .action((value, config) =>
           config.copy(indexerConfig = config.indexerConfig.copy(submissionBatchSize = value))

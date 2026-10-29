@@ -27,7 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
-class AutomaticReassignmentBatchingIntegrationTest
+final class AutomaticReassignmentBatchingIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasProgrammableSequencer {
@@ -77,12 +77,41 @@ class AutomaticReassignmentBatchingIntegrationTest
         getProgrammableSequencer(seqName).setPolicy_(CountConfirmationResponses.name)(policy)
       }
 
+      val ledgerEndBeforeExercise = participant1.ledger_api.state.end()
+
       // Submit transaction to make contracts on synchronizer 1 be reassigned to synchronizer 2
       participant1.ledger_api.javaapi.commands.submit(
         actAs = Seq(party1),
         commands = aggregate.id.exerciseCountAll().commands.asScala.toSeq,
         synchronizerId = Some(synchronizer2Id),
       )
+
+      // We should be able to correlate automatic reassignments with the command via the submission id
+      withClue("correlation via submission id") {
+        val completions = participant1.ledger_api.completions.list(
+          partyId = party1,
+          atLeastNumCompletions = 3, // unassign, assign, archival
+          beginOffsetExclusive = ledgerEndBeforeExercise,
+        )
+
+        // If `id` contains a `-`, forget the last `-` and what comes after
+        def truncateSubmissionId(id: String): String =
+          if (id.length == 36)
+            id
+          // only truncate when the submission id is the one of the unassigned/assigned
+          // (i.e., longer than the automatically generated uuid)
+          else {
+            val i = id.lastIndexOf("-")
+            id.substring(0, i)
+          }
+
+        val truncatedCompletions = completions.map(_.submissionId).map(truncateSubmissionId)
+
+        completions should have size 3
+        truncatedCompletions.toSet should have size 1 // all share the same prefix
+
+        completions.map(_.submissionId).toSet should have size 3 // every submission id is unique
+      }
 
       confResp(sequencer1.name).count shouldBe 1 // 1 for unassign (rather than batch size of 3)
       confResp(sequencer2.name).count shouldBe (1 + 1) // 1 for assign + 1 for transaction itself

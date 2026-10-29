@@ -42,7 +42,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
 
-class SynchronizerOnboardingOutboxTest
+final class SynchronizerOnboardingOutboxTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutionContext
@@ -64,9 +64,12 @@ class SynchronizerOnboardingOutboxTest
 
   private lazy val synchronizer = SynchronizerAlias.tryCreate("da")
 
-  // A synchronizer running a protocol version whose topology proto (v31) differs from the one of
-  // v34/v35 (v30), so that re-signing is actually exercised.
+  // A synchronizer with protocol version 36 doesn't admit topology transactions of protocol
+  // version 37, so onboarding must re-sign the stored ones. The reverse needs no re-signing,
+  // because protocol version 37 admits those of 36.
+  private lazy val storePv = ProtocolVersion.v37
   private lazy val synchronizerPv = ProtocolVersion.v36
+
   private lazy val synchronizerStaticParameters =
     BaseTest.defaultStaticSynchronizerParametersWith(protocolVersion = synchronizerPv)
   private lazy val synchronizerPsid =
@@ -102,14 +105,14 @@ class SynchronizerOnboardingOutboxTest
   private lazy val otkMapping =
     OwnerToKeyMapping.tryCreate(participant, NonEmpty(Seq, signingKey, encryptionKey))
   private lazy val stcMapping =
-    SynchronizerTrustCertificate(participant, DefaultTestIdentities.synchronizerId, Seq.empty)
+    SynchronizerTrustCertificate(participant, DefaultTestIdentities.synchronizerId, Set.empty)
   private lazy val onboardingMappings = Seq(nsdMapping, otkMapping, stcMapping)
 
   private lazy val namespaceDelegation = sign(nsdMapping)
   private lazy val ownerToKeyMapping = sign(otkMapping)
   private lazy val trustCertificate = sign(stcMapping)
 
-  private lazy val storeTxsV35 = onboardingMappings.map(signAt(_, ProtocolVersion.v35))
+  private lazy val storeOnboardingTransactions = onboardingMappings.map(signAt(_, storePv))
 
   private def mkStore() = new InMemoryTopologyStore(
     TopologyStoreId.AuthorizedStore,
@@ -223,25 +226,27 @@ class SynchronizerOnboardingOutboxTest
       client.recorded.get() shouldBe Some(provided)
     }
 
-    // TODO(i32231): enable this test.
-    "re-sign store onboarding transactions for the synchronizer's protocol version" ignore {
-      // sanity: stored transactions are not yet in the synchronizer's protocol version
-      forEvery(storeTxsV35)(_.transaction.isEquivalentTo(synchronizerPv) shouldBe false)
+    "re-sign store onboarding transactions for the synchronizer's protocol version" in {
+      // sanity: the stored transactions are not admissible on the synchronizer
+      forEvery(storeOnboardingTransactions)(
+        _.transaction.isAdmissibleFor(synchronizerPv) shouldBe false
+      )
 
-      val (result, client) = onboardFromStore(synchronizerPsid, synchronizerCrypto, storeTxsV35)
+      val (result, client) =
+        onboardFromStore(synchronizerPsid, synchronizerCrypto, storeOnboardingTransactions)
       result.valueOrFail("onboarding failed") shouldBe true
       val dispatched = client.recorded.get().value
       dispatched should have size 3
       forEvery(dispatched)(_.transaction.isEquivalentTo(synchronizerPv) shouldBe true)
     }
 
-    // TODO(i32231): enable this test.
-    "fail to re-sign store onboarding transactions when the signing key is unavailable" ignore {
+    "fail to re-sign store onboarding transactions when the signing key is unavailable" in {
       val unavailableKeyCrypto = SynchronizerCrypto(
         SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory),
         synchronizerStaticParameters,
       )
-      val (result, client) = onboardFromStore(synchronizerPsid, unavailableKeyCrypto, storeTxsV35)
+      val (result, client) =
+        onboardFromStore(synchronizerPsid, unavailableKeyCrypto, storeOnboardingTransactions)
       result.left.value shouldBe a[
         SynchronizerRegistryError.TopologyConversionError.Error
       ]

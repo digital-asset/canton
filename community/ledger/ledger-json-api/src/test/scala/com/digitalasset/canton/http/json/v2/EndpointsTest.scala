@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.http.json.v2
 
+import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class EndpointsTest extends AnyWordSpec with Matchers {
+class EndpointsTest extends AnyWordSpec with Matchers with Inside {
 
   "extractWsJwtToken" should {
 
@@ -50,6 +51,58 @@ class EndpointsTest extends AnyWordSpec with Matchers {
       Endpoints.extractWsJwtToken(
         Some("daml.ws.auth, jwt.token.first, jwt.token.second")
       ) shouldBe Some(Endpoints.Jwt("first"))
+    }
+  }
+
+  "checkCookieAuthOrigin" should {
+    import Endpoints.CookieAuthDecision.*
+    val allowed = Seq("https://app.example.com", "http://localhost:3000/")
+
+    "be disabled when no origins are allowed" in {
+      Endpoints.checkCookieAuthOrigin(Seq.empty, Some("https://app.example.com")) shouldBe Disabled
+      Endpoints.checkCookieAuthOrigin(
+        Seq(" ", ""),
+        Some("https://app.example.com"),
+      ) shouldBe Disabled
+    }
+
+    "allow an exactly matching origin" in {
+      Endpoints.checkCookieAuthOrigin(allowed, Some("https://app.example.com")) shouldBe Allowed
+    }
+
+    "compare origins case-insensitively and ignore a trailing slash" in {
+      Endpoints.checkCookieAuthOrigin(allowed, Some("HTTPS://App.Example.com/")) shouldBe Allowed
+      Endpoints.checkCookieAuthOrigin(allowed, Some("http://localhost:3000")) shouldBe Allowed
+    }
+
+    "reject an origin that is not allowed" in {
+      inside(Endpoints.checkCookieAuthOrigin(allowed, Some("https://evil.example.com"))) {
+        case Rejected(reason) => reason should include("evil.example.com")
+      }
+    }
+
+    "reject a different port or scheme" in {
+      Endpoints.checkCookieAuthOrigin(allowed, Some("https://app.example.com:8443")) shouldBe a[
+        Rejected
+      ]
+      Endpoints.checkCookieAuthOrigin(allowed, Some("http://app.example.com")) shouldBe a[Rejected]
+    }
+
+    "reject a missing Origin header" in {
+      Endpoints.checkCookieAuthOrigin(allowed, None) shouldBe a[Rejected]
+      Endpoints.checkCookieAuthOrigin(allowed, Some("")) shouldBe a[Rejected]
+    }
+
+    "reject the opaque null origin, even when any origin is allowed" in {
+      Endpoints.checkCookieAuthOrigin(allowed, Some("null")) shouldBe a[Rejected]
+      Endpoints.checkCookieAuthOrigin(Seq("*"), Some("null")) shouldBe a[Rejected]
+    }
+
+    "allow any origin with a wildcard entry" in {
+      Endpoints.checkCookieAuthOrigin(
+        Seq("*"),
+        Some("https://anything.example.com"),
+      ) shouldBe Allowed
     }
   }
 }

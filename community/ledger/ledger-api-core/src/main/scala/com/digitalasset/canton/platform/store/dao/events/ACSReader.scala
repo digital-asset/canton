@@ -119,6 +119,7 @@ class ACSReader(
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -129,7 +130,7 @@ class ACSReader(
       tracing.Event("contract", Map((SpanAttribute.Offset, activeAtLong.toString)))
     Spans.addEventToSpan(event, span)
     logger.debug(
-      s"getActiveContracts($activeAtOffset, $filteringConstraints, $eventProjectionProperties)"
+      s"getActiveContracts($activeAtOffset, $filteringConstraints, $eventProjectionProperties, includeIncompleteReassignments=$includeIncompleteReassignments)"
     )
     doStreamActiveContracts(
       filteringConstraints,
@@ -137,6 +138,7 @@ class ACSReader(
       eventProjectionProperties,
       rangeInfo,
       configOverrides,
+      includeIncompleteReassignments,
     )
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -147,6 +149,7 @@ class ACSReader(
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
       configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
+      includeIncompleteReassignments: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -681,11 +684,13 @@ class ACSReader(
       case _ => activeContractsStream(startSequentialIdInclusive = 1L)
     }
 
-    activeContracts.foldConcat(0L)((count, _) => count + 1L) { (count: Long) =>
-      val rest = rangeInfo.limit.map(l => Math.max(0, l - count))
-      if (rest.contains(0L)) Source.empty
-      else incompleteReassignments(rest)
-    }
+    if (includeIncompleteReassignments)
+      activeContracts.foldConcat(0L)((count, _) => count + 1L) { (count: Long) =>
+        val rest = rangeInfo.limit.map(l => Math.max(0, l - count))
+        if (rest.contains(0L)) Source.empty
+        else incompleteReassignments(rest)
+      }
+    else activeContracts
   }
 
   private def toApiResponseActiveContract(

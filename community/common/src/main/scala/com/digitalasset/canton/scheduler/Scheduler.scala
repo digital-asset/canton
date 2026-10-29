@@ -4,10 +4,9 @@
 package com.digitalasset.canton.scheduler
 
 import cats.data.EitherT
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.tracing.TraceContext
-
-import scala.concurrent.Future
 
 /** Trait for an individual scheduler
   */
@@ -24,23 +23,25 @@ trait PruningScheduler extends Scheduler {
     */
   def updateRetention(retention: PositiveSeconds)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit]
+  ): EitherT[FutureUnlessShutdown, String, Unit]
 
   def setSchedule(schedule: PruningSchedule)(implicit
       traceContext: TraceContext
-  ): Future[Unit]
+  ): FutureUnlessShutdown[Unit]
 
   def getSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[PruningSchedule]]
+  ): FutureUnlessShutdown[Option[PruningSchedule]]
 
-  def clearSchedule()(implicit traceContext: TraceContext): Future[Unit]
+  def clearSchedule()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   def updateMaxDuration(maxDuration: PositiveSeconds)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Unit]
+  ): EitherT[FutureUnlessShutdown, String, Unit]
 
-  def updateCron(cron: Cron)(implicit traceContext: TraceContext): EitherT[Future, String, Unit]
+  def updateCron(cron: Cron)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit]
 }
 
 /** Trait to start and stop individual or multiple schedulers
@@ -48,13 +49,13 @@ trait PruningScheduler extends Scheduler {
 trait StartStoppable {
 
   /** Start scheduler(s). */
-  def start()(implicit traceContext: TraceContext): Future[Unit]
+  def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   /** Stop scheduler(s). */
   def stop()(implicit traceContext: TraceContext): Unit
 
   /** Convenience method for restart */
-  def restart()(implicit traceContext: TraceContext): Future[Unit] = {
+  def restart()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     stop()
     start()
   }

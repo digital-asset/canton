@@ -46,6 +46,7 @@ import com.digitalasset.canton.protocol.{
   LfVersionedTransaction,
 }
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   ExternalPartyOnboardingDetails,
@@ -186,6 +187,7 @@ object ApiPackageManagementServiceSpec {
         submissionId: Option[SubmissionId],
         workflowId: Option[WorkflowId],
         reassignmentCommands: Seq[ReassignmentCommand],
+        accountId: Option[AccountId],
     )(implicit traceContext: TraceContext): Future[SubmissionResult] =
       throw new UnsupportedOperationException()
 

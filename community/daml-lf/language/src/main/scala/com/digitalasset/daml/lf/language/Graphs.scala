@@ -17,30 +17,40 @@ object Graphs {
   // If the `graph` is a directed acyclic graph returns a list of its vertices in topological order as `Right`
   // otherwise returns a cycle as `Left`.
   def topoSort[X](graph: Graph[X]): Either[Cycle[X], List[X]] = {
-
-    var white = graph.keySet
-    var black = graph.values.foldLeft(InsertOrdSet.empty[X])(_ | _.filterNot(white))
-    def gray(x: X): Boolean = !white(x) && !black(x)
-
-    def visitSet(xs: Set[X]): Option[X] = xs.foldLeft(Option.empty[X])(_ orElse visit(_))
-
-    def visit(x: X): Option[X] =
-      if (black(x))
-        None
-      else if (!white(x))
-        Some(x)
-      else { white -= x; visitSet(graph(x)) } orElse { black += x; None }
-
-    def buildCycle(curr: X, start: X, list: List[X] = List.empty): Cycle[X] = {
-      val next = graph(curr).find(gray).getOrElse(throw new UnknownError)
-      if (next == start)
-        Cycle(curr :: list)
-      else
-        buildCycle(next, start, curr :: list)
+    @tailrec
+    def loop(
+        stack: List[(X, List[X])],
+        white: Set[X],
+        black: InsertOrdSet[X],
+    ): Either[Cycle[X], List[X]] = stack match {
+      case (x, children) :: tail =>
+        children match {
+          case y :: ys =>
+            val rest = (x, ys) :: tail
+            if (black(y)) {
+              loop(rest, white, black)
+            } else if (white(y)) {
+              loop((y, graph(y).toList) :: rest, white - y, black)
+            } else {
+              Left(Cycle((y :: stack.map(_._1).takeWhile(_ != y)).reverse))
+            }
+          case Nil =>
+            loop(tail, white, black + x)
+        }
+      case Nil =>
+        white.headOption match {
+          case None =>
+            Right(black.toList)
+          case Some(x) =>
+            loop(List(x -> graph(x).toList), white - x, black)
+        }
     }
 
-    visitSet(graph.keySet).fold[Either[Cycle[X], List[X]]](Right(black.toList))(x =>
-      Left(buildCycle(x, x))
+    val white = graph.keySet
+    loop(
+      stack = Nil,
+      white = white,
+      black = graph.values.flatten.filterNot(white).to(InsertOrdSet),
     )
   }
 

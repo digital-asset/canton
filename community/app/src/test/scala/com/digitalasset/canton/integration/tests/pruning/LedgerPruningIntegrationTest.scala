@@ -11,7 +11,6 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SH
 import com.daml.metrics.DatabaseMetrics
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BigDecimalImplicits.*
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,12 +18,13 @@ import com.digitalasset.canton.examples.java.cycle
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.ParticipantSimpleStreamHelper
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.participant.admin.data.{
@@ -120,15 +120,26 @@ abstract class LedgerPruningIntegrationTest
         )
       }
 
+  /** Advances the sim clock and waits until the sequencer has observed the new time. We do that on
+    * this test every time before submitting a ping to make sure it will reflect the new time
+    */
+  protected def advanceClock(clock: SimClock, duration: JDuration)(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    clock.advance(duration)
+    TestUtils.waitForTargetTimeOnSynchronizerNode(clock.now, logger)(sequencer1)
+  }
+
   protected def pruneAtCurrentLedgerEnd(
       clock: SimClock,
       participant: LocalParticipantReference,
       pingCommand: => Duration,
-  ): Unit = {
+  )(implicit env: TestConsoleEnvironment): Unit = {
     val desiredPruningOffsetHex = participant.ledger_api.state.end()
 
     eventually(logElapsed = Some(s"$functionFullName($desiredPruningOffsetHex at ${clock.now})")) {
-      clock.advance(pruningTimeout)
+      advanceClock(clock, pruningTimeout)
       pingCommand
       participant.health.ping(participant.id)
       val safeOffset = participant.pruning
@@ -297,34 +308,6 @@ abstract class LedgerPruningIntegrationTest
       size.failOnShutdown
     }
 
-    // Helper function used to snapshot set of transaction ids. As this call takes a long time to complete
-    // working with Set of transactions rather than Seq (which can be done by incrementally calling
-    // "ledger_completions" with offset-increments, but that would make the test insanely slow (several minutes)
-    def collectLedgerApiEvents(
-        participant: LocalParticipantReference,
-        p1Id: PartyId,
-        p2Id: PartyId,
-        startAfter: Long = 0L,
-    ): Set[String] = {
-      val maxEvents = participant.ledger_api.state.end()
-      for {
-        party <- Set(p1Id, p2Id)
-        user <- Set(
-          "admin-ping"
-        ) // Skipping to speed up test: LedgerApiCommands.userId)
-        updateId <- participant.ledger_api.completions
-          .list(
-            party, // This call is not cheap, so avoiding to call it repeatedly with all userId's for complete ledger picture
-            maxEvents.toInt,
-            startAfter,
-            user,
-          )
-          .map(_.updateId)
-          .filter(_.nonEmpty)
-          .toSet[String]
-      } yield updateId
-    }
-
     // Helper function to invoke pruning and assert that pruning is observable via ledger api and canton stores.
     def pruneAndCheck(
         participant: LocalParticipantReference,
@@ -361,6 +344,22 @@ abstract class LedgerPruningIntegrationTest
 
     val p1Id = participant1.id.adminParty
     val p2Id = participant2.id.adminParty
+
+    // Snapshot of the update ids visible to the admin parties. Bounded by the current ledger end,
+    // so that the stream completes instead of waiting for a timeout.
+    def collectUpdateIds(
+        participant: LocalParticipantReference,
+        beginOffsetExclusive: Long = 0L,
+    ): Set[String] =
+      participant.ledger_api.updates
+        .transactions(
+          partyIds = Set(p1Id, p2Id),
+          completeAfter = PositiveInt.MaxValue,
+          beginOffsetExclusive = beginOffsetExclusive,
+          endOffsetInclusive = Some(participant.ledger_api.state.end()),
+        )
+        .map(_.updateId)
+        .toSet
 
     // wait until all unrelated active contracts are archived
     eventually(logElapsed = Some("Await all contracts archived")) {
@@ -412,30 +411,17 @@ abstract class LedgerPruningIntegrationTest
         .recordTime
     )
 
-    // Pruning will only delete data prior to successful ACS commitment ticks.
-    // We should wait until we're sure to have seen one after the transaction, i.e. for the duration of an
-    // AcsCommitment reconciliation interval so that we have non-flaky counts to check after pruning.
-    // To avoid slowing tests down massively, use a sim clock and advance the time
-    clock.advance(reconciliationInterval.plusSeconds(1))
-
-    val pruningWaitStart = clock.now.toInstant
-    val prePrunedPrefix = collectLedgerApiEvents(participant2, p1Id, p2Id)
+    val prePrunedPrefix = collectUpdateIds(participant2)
 
     val Seq(p1PruningOffset, p2PruningOffset) =
       Seq(participant1, participant2).map(_.ledger_api.state.end())
 
-    // Wait for the mediatorReactionTimeout + confirmationResponseTimeout so that events before pruneBefore are not
-    // needed to regenerate ephemeral state upon crash recovery
-    // Also wait for the max dedup duration
-    val synchronizerParameters =
-      sequencer1.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(daId)
-
-    val decisionTime = pruningWaitStart plus
-      synchronizerParameters.confirmationResponseTimeout.asJavaApproximation plus
-      synchronizerParameters.mediatorReactionTimeout.asJavaApproximation
-
-    val timeout = JDuration.between(pruningWaitStart, decisionTime)
-    clock.advance(Ordering[JDuration].max(timeout, maxDedupDuration))
+    // Pruning will only delete data prior to successful ACS commitment ticks, so wait for a
+    // reconciliation interval to have non-flaky counts after pruning. Also wait for the
+    // confirmationResponseTimeout + mediatorReactionTimeout, so that events before the pruning offset
+    // are not needed to regenerate ephemeral state upon crash recovery, and for the max dedup duration.
+    // pruningTimeout covers all of these; the sim clock keeps this fast.
+    advanceClock(clock, pruningTimeout)
 
     createCycleContract(participant1, p1Id, "created after pruning, remains active after pruning")
     createCycleContract(participant2, p2Id, "created after pruning, remains active after pruning")
@@ -479,7 +465,7 @@ abstract class LedgerPruningIntegrationTest
       ).size shouldBe 2 withClue s"\nactive contracts found: ${acsContracts(p = participant2, templateIdO = Some(cycle.Cycle.TEMPLATE_ID.getEntityName))}"
     }
 
-    val prePrunedSuffix = collectLedgerApiEvents(participant2, p1Id, p2Id) -- prePrunedPrefix
+    val prePrunedSuffix = collectUpdateIds(participant2) -- prePrunedPrefix
 
     // Make sure that participants' ledger api servers survive a reset and catch up again.
     val p1LedgerEnd = participant1.ledger_api.state.end()
@@ -502,13 +488,8 @@ abstract class LedgerPruningIntegrationTest
     )
 
     // The prefix of the post-prune ledger should match the suffix of the pre-pruned ledger.
-    val prunedPrefix =
-      collectLedgerApiEvents(
-        participant2,
-        p1Id,
-        p2Id,
-        p2PruningOffset, // ledger api only allows reading completions after pruning offset
-      )
+    // ledger api only allows reading updates after the pruning offset
+    val prunedPrefix = collectUpdateIds(participant2, p2PruningOffset)
     prePrunedSuffix shouldBe prunedPrefix
 
     // check that ledger api continues to work using reset servers by sending bong (concurrent ping)
@@ -525,15 +506,15 @@ abstract class LedgerPruningIntegrationTest
     val wait = reconciliationInterval
     val waitX2 = wait.multipliedBy(2)
 
-    clock.advance(waitX2)
+    advanceClock(clock, waitX2)
     participant1.health.ping(participant2)
     clock.advance(wait)
 
     pruneAtCurrentLedgerEnd(clock, participant1, participant1.health.ping(participant2))
 
-    clock.advance(waitX2)
+    advanceClock(clock, waitX2)
     participant1.health.ping(participant2)
-    clock.advance(waitX2)
+    clock.advance(wait)
 
     pruneAtCurrentLedgerEnd(clock, participant1, participant1.health.ping(participant2))
   }
@@ -870,20 +851,8 @@ object LedgerPruningIntegrationTest extends OptionValues {
   }
 }
 
-//class LedgerPruningIntegrationTestDefault extends LedgerPruningIntegrationTest
-
 class LedgerPruningIntegrationTestPostgres extends LedgerPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
-  )
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
-
-//class LedgerPruningIntegrationTestH2 extends LedgerPruningIntegrationTest {
-//  registerPlugin(new UseH2(loggerFactory))
-//  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory)
-//  )
-//  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
-//}

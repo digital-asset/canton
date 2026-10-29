@@ -1282,9 +1282,6 @@ class AcsCommitmentProcessor private (
       // Unfortunately, we can't do anything anymore to reliably prevent corruption of the running snapshot in the DB,
       // as the data may already be corrupted by now.
       failureMessage = s"Producing ACS commitments failed.",
-      // If the failure is due to the DB instance transitioning to pasive, then failing to produce commitments is
-      // expected, and we shouldn't log it as an error.
-      logPassiveInstanceAtInfo = true,
     )
   }
 
@@ -1350,7 +1347,6 @@ class AcsCommitmentProcessor private (
         logger.info(s"Giving up on persisting running commitments at $rt")
       ),
       failureMessage = "Persisting running commitments failed.",
-      logPassiveInstanceAtInfo = true,
     )
   }
 
@@ -1436,7 +1432,6 @@ class AcsCommitmentProcessor private (
         // Close ourselves so that we don't process any more messages
         close()
       },
-      logPassiveInstanceAtInfo = true,
     )
 
     HandlerResult.asynchronousUnit(result)
@@ -2275,6 +2270,7 @@ class AcsCommitmentProcessor private (
               sequencerClient
                 .send(
                   batch,
+                  currentSnapshotApproximation = None,
                   // ACS commitments are "best effort", so no need to amplify them
                   amplify = false,
                   callback = sendCallback,
@@ -2330,7 +2326,6 @@ class AcsCommitmentProcessor private (
             result <- FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
               sendUnlessClosing(msgsActiveParticipants).value,
               message,
-              logPassiveInstanceAtInfo = true,
             )
           } yield result,
           NoExceptionRetryPolicy,
@@ -2348,7 +2343,6 @@ class AcsCommitmentProcessor private (
               at,
             ),
           s"Failed to schedule sending commitment message batch for period $period at time $at}",
-          logPassiveInstanceAtInfo = true,
         )
         .discard
     }
@@ -2586,9 +2580,6 @@ class AcsCommitmentProcessor private (
           logger.info("Giving up on reinitializing ACS commitment due to shutdown")
         ),
         failureMessage = s"Reinitializing ACS commitments failed.",
-        // If the failure is due to the DB instance transitioning to pasive, then failing to produce commitments is
-        // expected, and we shouldn't log it as an error.
-        logPassiveInstanceAtInfo = true,
       )
       true
     } else false
@@ -2998,7 +2989,6 @@ object AcsCommitmentProcessor extends HasLoggerName {
     FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
       executed,
       "Failed to initialize the ACS commitment processor.",
-      logPassiveInstanceAtInfo = true,
     )
   }
 
@@ -3164,7 +3154,8 @@ object AcsCommitmentProcessor extends HasLoggerName {
         if (isActiveParticipant) {
           val allParties = runningCommitments.keySet.flatten
           snapshotForPartyLookup
-            .activeParticipantsOfParties(allParties.toSeq)
+            .activeParticipantsOfPartiesWithInfoIgnoringFreeze(allParties.toSeq)
+            .map(_.view.mapValues(_.participants.keySet).toMap)
             .flatMap { participantsOf =>
               FutureUnlessShutdown.outcomeF(
                 IterableUtil

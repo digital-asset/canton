@@ -445,7 +445,9 @@ trait DbStorage extends Storage { self: NamedLogging =>
   ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
-  def runJdbcWrite[T](traceContext: TraceContext, body: Connection => T): FutureUnlessShutdown[T]
+  def runJdbcWrite[T](body: Connection => T)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[T]
 }
 
 object DbStorage {
@@ -453,9 +455,6 @@ object DbStorage {
 
   // sql prepared statement have a limit of 65535 parameters
   val maxSqlParameters: PositiveInt = PositiveInt.tryCreate(65500)
-
-  final case class PassiveInstanceException(reason: String)
-      extends RuntimeException(s"DbStorage instance is not active: $reason")
 
   final case class NoConnectionAvailable()
       extends SQLTransientException("No free connection available")

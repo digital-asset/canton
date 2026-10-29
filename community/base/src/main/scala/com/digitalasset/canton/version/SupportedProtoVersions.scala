@@ -69,7 +69,7 @@ final case class SupportedProtoVersions[F[
           lowestProtoCodec.deserializer.asRight
         else
           OtherError(
-            s"Unable to find deserializer for version $protoVersion and message $name"
+            s"Unable to find deserializer for version $protoVersion and message $name. This indicates that the node is trying to parse a message with a proto version that is not supported anymore."
           ).asLeft
     }
 
@@ -173,7 +173,10 @@ object SupportedProtoVersions {
 
   private[version] def fromNonEmpty[F[
       _
-  ], ValueClass, Context, DeserializedValueClass, Comp, Dependency](name: String)(
+  ], ValueClass, Context, DeserializedValueClass, Comp, Dependency](
+      name: String,
+      expectedMinimumPv: ProtocolVersion = ProtocolVersion.minimum,
+  )(
       converters: NonEmpty[Seq[
         (
             ProtoVersion,
@@ -197,8 +200,8 @@ object SupportedProtoVersions {
     // remember to specify that explicitly by adding to the SupportedProtoVersions:
     // ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     require(
-      lowestProtocolVersion.fromInclusive.representative == ProtocolVersion.minimum,
-      s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found $lowestProtocolVersion",
+      lowestProtocolVersion.fromInclusive.representative == expectedMinimumPv,
+      s"ProtocolVersion corresponding to lowest proto version should be $expectedMinimumPv, found $lowestProtocolVersion",
     )
 
     SupportedProtoVersions(sortedConverters, name)

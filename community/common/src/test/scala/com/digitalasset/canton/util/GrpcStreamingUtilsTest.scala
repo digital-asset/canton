@@ -6,7 +6,12 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
 import com.google.protobuf.{ByteString, StringValue}
-import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.stub.{
+  ClientCallStreamObserver,
+  ClientResponseObserver,
+  ServerCallStreamObserver,
+  StreamObserver,
+}
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
@@ -15,6 +20,7 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream, OutputStream}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise, blocking}
 import scala.util.Success
 
@@ -25,18 +31,72 @@ final class GrpcStreamingUtilsTest
     with HasActorSystem {
   // we need to use the same value as in GrpcStreamingUtils since it's not configurable
   val defaultChunkSize = GrpcStreamingUtils.defaultChunkSize
-  private def load(
-      responseObserver: StreamObserver[String]
-  ): StreamObserver[String] = new StreamObserver[String] {
-    override def onNext(value: String): Unit = ()
-    override def onError(t: Throwable): Unit = responseObserver.onError(t)
 
+  private class FakeClientCall(responseObserver: StreamObserver[String], initiallyReady: Boolean)
+      extends ClientCallStreamObserver[String] {
+    private val started = new AtomicBoolean(false)
+    private val ready = new AtomicBoolean(initiallyReady)
+    @volatile private var onReadyHandler: Runnable = () => ()
+    val halfClosed = new AtomicBoolean(false)
+    val cancelledWith = new AtomicReference[Option[Throwable]](None)
+
+    def start(): Unit = {
+      responseObserver match {
+        case clientResponseObserver: ClientResponseObserver[String @unchecked, String @unchecked] =>
+          clientResponseObserver.beforeStart(this)
+        case _ => ()
+      }
+      started.set(true)
+    }
+
+    def setReady(): Unit = {
+      ready.set(true)
+      onReadyHandler.run()
+    }
+
+    def fail(error: Throwable): Unit = {
+      ready.set(false)
+      responseObserver.onError(error)
+    }
+
+    override def isReady: Boolean = ready.get()
+    override def setOnReadyHandler(handler: Runnable): Unit =
+      // This matches the upstream behavior from https://github.com/grpc/grpc-java/blob/1084e9707d05a64dcb16a934bc03f7e2f68d013e/stub/src/main/java/io/grpc/stub/ClientCalls.java#L489
+      if (started.get())
+        throw new IllegalStateException(
+          "Cannot alter onReadyHandler after call started. Use ClientResponseObserver"
+        )
+      else onReadyHandler = handler
+    override def cancel(message: String, cause: Throwable): Unit = onError(cause)
+    override def disableAutoInboundFlowControl(): Unit = ()
+    override def request(count: Int): Unit = ()
+    override def setMessageCompression(enable: Boolean): Unit = ()
+
+    override def onNext(value: String): Unit = ()
+    override def onError(t: Throwable): Unit = {
+      cancelledWith.set(Some(t))
+      responseObserver.onError(Status.CANCELLED.withCause(t).asRuntimeException())
+    }
     override def onCompleted(): Unit = {
+      halfClosed.set(true)
       responseObserver.onNext("response")
       responseObserver.onCompleted()
     }
   }
-  def makeRequest(bytes: Array[Byte]): String = new String(bytes)
+
+  private def startCall(
+      responseObserver: StreamObserver[String],
+      initiallyReady: Boolean = true,
+  ): FakeClientCall = {
+    val call = new FakeClientCall(responseObserver, initiallyReady)
+    call.start()
+    call
+  }
+
+  private def load(responseObserver: StreamObserver[String]): StreamObserver[String] =
+    startCall(responseObserver)
+
+  def makeRequest(bytes: ByteString): String = bytes.toStringUtf8
 
   /** Base test double for [[ServerCallStreamObserver]] with no-op implementations of the
     * flow-control and lifecycle callbacks. Tests override only what they care about (typically
@@ -94,7 +154,7 @@ final class GrpcStreamingUtilsTest
 
       val result = GrpcStreamingUtils.streamToServer(
         load,
-        bytes => { chunks += bytes.clone(); makeRequest(bytes) },
+        bytes => { chunks += bytes.toByteArray; makeRequest(bytes) },
         inputStream,
       )
 
@@ -111,7 +171,7 @@ final class GrpcStreamingUtilsTest
 
       val result = GrpcStreamingUtils.streamToServer(
         load,
-        bytes => { chunks += bytes.clone(); makeRequest(bytes) },
+        bytes => { chunks += bytes.toByteArray; makeRequest(bytes) },
         inputStream,
       )
 
@@ -128,7 +188,7 @@ final class GrpcStreamingUtilsTest
 
       val result = GrpcStreamingUtils.streamToServer(
         load,
-        bytes => { chunks += bytes.clone(); makeRequest(bytes) },
+        bytes => { chunks += bytes.toByteArray; makeRequest(bytes) },
         inputStream,
       )
 
@@ -171,6 +231,32 @@ final class GrpcStreamingUtilsTest
       chunksReceived.zipWithIndex.foreach { case (bytesReadAtSend, i) =>
         bytesReadAtSend shouldBe (i + 1) * defaultChunkSize
       }
+    }
+
+    "wait for the call to become ready before sending chunks" in {
+      val data = Array.tabulate[Byte](defaultChunkSize * 2)(_.toByte)
+      val callRef = new AtomicReference[FakeClientCall]()
+      val chunks = mutable.Buffer[Array[Byte]]()
+
+      val result = GrpcStreamingUtils.streamToServer(
+        (responseObserver: StreamObserver[String]) => {
+          val call = startCall(responseObserver, initiallyReady = false)
+          callRef.set(call)
+          call
+        },
+        bytes => { chunks.synchronized(chunks += bytes.toByteArray); makeRequest(bytes) },
+        new ByteArrayInputStream(data),
+      )
+
+      always(durationOfSuccess = 200.millis) {
+        chunks.synchronized(chunks shouldBe empty)
+        result.isCompleted shouldBe false
+      }
+
+      callRef.get().setReady()
+
+      result.futureValue shouldBe "response"
+      chunks.flatten.toArray shouldBe data
     }
   }
 

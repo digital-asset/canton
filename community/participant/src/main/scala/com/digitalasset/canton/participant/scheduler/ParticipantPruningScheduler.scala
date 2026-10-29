@@ -211,21 +211,18 @@ final class ParticipantPruningScheduler(
 
   def setParticipantSchedule(schedule: ParticipantPruningSchedule)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = updateScheduleAndReactivateIfActive(
-    pruningSchedulerStore
-      .setParticipantSchedule(schedule)
-      .failOnShutdownToAbortException("ParticipantPruningSchedule")
+  ): FutureUnlessShutdown[Unit] = updateScheduleAndReactivateIfActive(
+    pruningSchedulerStore.setParticipantSchedule(schedule)
   )
 
   def getParticipantSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[ParticipantPruningSchedule]] = pruningSchedulerStore
-    .getParticipantSchedule()
-    .failOnShutdownToAbortException("ParticipantPruningScheduler")
+  ): FutureUnlessShutdown[Option[ParticipantPruningSchedule]] =
+    pruningSchedulerStore.getParticipantSchedule()
 
   override def initializeSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[JobSchedule]] =
+  ): FutureUnlessShutdown[Option[JobSchedule]] =
     getParticipantSchedule().map { maybeSchedule =>
       // Always update pruning "max-event-age" metric.
       val metricsUpdateSchedule = pruningConfig.pruningMetricUpdateInterval.map(interval =>

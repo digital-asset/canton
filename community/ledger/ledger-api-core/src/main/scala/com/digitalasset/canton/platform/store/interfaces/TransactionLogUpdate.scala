@@ -31,6 +31,8 @@ import com.digitalasset.daml.lf.value.{Value, Value as LfValue}
 sealed trait TransactionLogUpdate extends Product with Serializable with HasTraceContext {
   def offset: Offset
   def completionStreamResponseO: Option[CompletionStreamResponse]
+  def synchronizerId: String
+  def recordTime: Timestamp
 
   /** Traffic cost paid by this node for the ordering of the corresponding confirmation request.
     * Only provided if the requesting parties are submitting parties (actAs)
@@ -60,6 +62,8 @@ object TransactionLogUpdate {
     *   The transaction events, in execution order.
     * @param completionStreamResponse
     *   The successful submission's completion details.
+    * @param synchronizerId
+    *   Synchronizer where this update was recorded
     * @param recordTime
     *   The time at which the transaction was recorded.
     * @param transactionHash
@@ -80,8 +84,8 @@ object TransactionLogUpdate {
       offset: Offset,
       events: Vector[Event],
       completionStreamResponseO: Option[CompletionStreamResponse],
-      synchronizerId: String,
-      recordTime: Timestamp,
+      override val synchronizerId: String,
+      override val recordTime: Timestamp,
       transactionHash: Option[CantonHash],
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate
@@ -92,9 +96,15 @@ object TransactionLogUpdate {
     *   The offset at which the rejection has been enqueued in the ledger.
     * @param completionStreamResponse
     *   The rejected submission's completion details.
+    * @param synchronizerId
+    *   The synchronizer where this rejection happened.
+    * @param recordTime
+    *   The time at which the transaction was recorded.
     */
   final case class TransactionRejected(
       offset: Offset,
+      override val synchronizerId: String,
+      override val recordTime: Timestamp,
       completionStreamResponse: CompletionStreamResponse,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
@@ -136,11 +146,11 @@ object TransactionLogUpdate {
       commandId: String,
       workflowId: String,
       offset: Offset,
-      recordTime: Timestamp,
+      override val recordTime: Timestamp,
       completionStreamResponseO: Option[CompletionStreamResponse],
       reassignmentInfo: ReassignmentInfo,
       reassignment: Seq[ReassignmentEvent],
-      synchronizerId: String,
+      override val synchronizerId: String,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
     def stakeholders: Set[Ref.Party] = reassignment.iterator.flatMap(_.stakeholders).toSet
@@ -150,7 +160,7 @@ object TransactionLogUpdate {
       updateId: String,
       offset: Offset,
       effectiveTime: Timestamp,
-      synchronizerId: String,
+      override val synchronizerId: String,
       events: Vector[PartyToParticipantAuthorization],
       synchronizerParametersState: Option[
         Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
@@ -158,6 +168,7 @@ object TransactionLogUpdate {
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
     override def completionStreamResponseO: Option[CompletionStreamResponse] = None
+    override def recordTime: Timestamp = effectiveTime
   }
 
   final case class ReceivedAcsCommitment(
@@ -166,6 +177,8 @@ object TransactionLogUpdate {
   ) extends TransactionLogUpdate {
     override def traceContext: TraceContext = update.traceContext
     override def completionStreamResponseO: Option[CompletionStreamResponse] = None
+    override def synchronizerId = update.synchronizerId.toProtoPrimitive
+    override def recordTime: Timestamp = update.recordTime.underlying
   }
 
   /* Models all but divulgence events */

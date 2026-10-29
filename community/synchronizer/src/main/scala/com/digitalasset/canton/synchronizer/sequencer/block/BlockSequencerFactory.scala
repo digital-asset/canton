@@ -9,7 +9,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator
@@ -113,7 +113,7 @@ abstract class BlockSequencerFactory(
       ec: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
-  ): BlockOrderer
+  ): UnlessShutdown[BlockOrderer]
 
   protected def createBlockSequencer(
       blockOrderer: BlockOrderer,
@@ -240,11 +240,13 @@ abstract class BlockSequencerFactory(
 
       balanceManager = new TrafficPurchasedManager(
         trafficPurchasedStore,
+        sequencerStore,
         trafficConfig,
         futureSupervisor,
         metrics,
         nodeParameters.processingTimeouts,
         lsuSequencingBounds,
+        protocolVersion,
         loggerFactory,
       )
       rateLimitManager = makeRateLimitManager(
@@ -255,11 +257,10 @@ abstract class BlockSequencerFactory(
         lsuSequencingBounds,
       )
       _ <- balanceManager.initialize
-    } yield {
-      val synchronizerLoggerFactory =
+      synchronizerLoggerFactory =
         loggerFactory.append("psid", synchronizerSyncCryptoApi.psid.toString)
 
-      val stateManager =
+      stateManager =
         BlockSequencerStateManager.create(
           initialHeadO,
           store,
@@ -275,14 +276,17 @@ abstract class BlockSequencerFactory(
           synchronizerLoggerFactory,
         )
 
-      val blockOrderer = createBlockOrderer(
-        synchronizerSyncCryptoApi,
-        clock,
-        initialBlockHeight,
-        sequencerSnapshot,
-        authenticationServices,
-        synchronizerLoggerFactory,
+      blockOrderer <- FutureUnlessShutdown.lift(
+        createBlockOrderer(
+          synchronizerSyncCryptoApi,
+          clock,
+          initialBlockHeight,
+          sequencerSnapshot,
+          authenticationServices,
+          synchronizerLoggerFactory,
+        )
       )
+    } yield {
       val sequencer = createBlockSequencer(
         blockOrderer,
         name,

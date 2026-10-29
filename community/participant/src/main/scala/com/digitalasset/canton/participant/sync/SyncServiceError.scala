@@ -329,25 +329,6 @@ object SyncServiceError extends SyncServiceErrorGroup {
       with ParentCantonError[PruningServiceError]
 
   @Explanation(
-    "This error is logged when a connected synchronizer is disconnected because the participant became passive."
-  )
-  @Resolution("Fail over to the active participant replica.")
-  object SyncServiceBecamePassive
-      extends ErrorCode(
-        "SYNC_SERVICE_BECAME_PASSIVE",
-        ErrorCategory.TransientServerFailure,
-      ) {
-
-    override def logLevel: Level = Level.WARN
-
-    final case class Error(synchronizerAlias: SynchronizerAlias)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause = show"$synchronizerAlias disconnected because participant became passive."
-        )
-  }
-
-  @Explanation(
     "This error is emitted when an operation is attempted such as repair that requires the synchronizers to be disconnected and clean."
   )
   @Resolution("Disconnect the still connected synchronizers before attempting the command.")

@@ -148,8 +148,12 @@ class AchsIndexComponentTest
     )
 
     val start = index.currentLedgerEnd().fold(0L)(_.lastOffset.unwrap)
+    val lastEventSeqIdBefore = getLastEventSeqId
 
     ingestUpdates(allUpdates*)
+    // ACHS maintenance runs asynchronously: wait until validAt has caught up with the ingested updates
+    val expectedLastEventSeqId = lastEventSeqIdBefore + txSize * txsCreatedNotArchived
+    verifyAchsConsistency(expectedLastEventSeqId)
 
     val validAt = getAchsValidAt
     val beforeValidAt = offsetForActivateContractEventSeqId(validAt) - 1L
@@ -179,8 +183,13 @@ class AchsIndexComponentTest
     }
 
     val start = index.currentLedgerEnd().fold(0L)(_.lastOffset.unwrap)
+    val lastEventSeqIdBefore = getLastEventSeqId
 
     ingestUpdates(allUpdates*)
+    // ACHS maintenance runs asynchronously: wait until validAt has caught up with the ingested updates
+    val expectedLastEventSeqId =
+      lastEventSeqIdBefore + txSize * (txsCreatedThenArchived * 2 + txsCreatedNotArchived) * repetitions
+    verifyAchsConsistency(expectedLastEventSeqId)
 
     val ledgerEnd = index.currentLedgerEnd().map(_.lastOffset)
 
@@ -276,6 +285,7 @@ class AchsIndexComponentTest
         activeAt = Some(Offset.tryFromLong(queryOffset)),
         rangeInfo = AcsRangeInfo.empty,
         configOverrides = None,
+        includeIncompleteReassignments = false,
       )
       .zipWithIndex
       .mapAsync(1) { case (elem, idx) =>

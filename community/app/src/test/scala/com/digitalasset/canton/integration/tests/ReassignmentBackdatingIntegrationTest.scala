@@ -172,14 +172,16 @@ class ReassignmentBackdatingIntegrationTestDefault extends ReassignmentBackdatin
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-//class ReassignmentBackdatingTestPostgres extends ReassignmentBackdatingTest {
+//class ReassignmentBackdatingTestPostgres extends ReassignmentBackdatingIntegrationTest {
 //  registerPlugin(new UsePostgres(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.Postgres](
+//    new UseBftSequencer(
 //      loggerFactory,
-//      sequencerGroups = Seq(
-//        Set(InstanceName.tryCreate("sequencer1")),
-//        Set(InstanceName.tryCreate("sequencer2")),
+//      sequencerGroups = MultiSynchronizer(
+//        Seq(
+//          Set(InstanceName.tryCreate("sequencer1")),
+//          Set(InstanceName.tryCreate("sequencer2")),
+//        )
 //      ),
 //    )
 //  )

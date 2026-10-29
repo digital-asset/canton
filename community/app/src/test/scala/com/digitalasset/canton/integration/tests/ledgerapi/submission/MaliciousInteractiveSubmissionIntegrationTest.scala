@@ -117,7 +117,7 @@ final class MaliciousInteractiveSubmissionIntegrationTest
       cpn,
       daId,
       testedProtocolVersion,
-      defaultProtocolLimits,
+      testedTransactionLimits,
       timeouts,
       loggerFactory,
     )

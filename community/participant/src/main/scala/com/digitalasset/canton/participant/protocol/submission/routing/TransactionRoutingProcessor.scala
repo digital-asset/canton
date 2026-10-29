@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
 import com.digitalasset.canton.participant.protocol.submission.routing.TransactionRoutingProcessor.inputContractIds
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizersLookup
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
@@ -73,6 +74,7 @@ class TransactionRoutingProcessor(
     */
   final def submitTransaction(
       submitterInfo: SubmitterInfo,
+      accounting: SubmissionAccounting,
       synchronizerRankTarget: SynchronizerRank,
       synchronizerState: RoutingSynchronizerState,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
@@ -96,7 +98,7 @@ class TransactionRoutingProcessor(
         )
 
       _ <- contractsReassigner
-        .reassign(synchronizerRankTarget, submitterInfo, synchronizerState)
+        .reassign(synchronizerRankTarget, submitterInfo, synchronizerState, accounting)
 
       topologySnapshot <- EitherT
         .fromEither[FutureUnlessShutdown] {
@@ -122,6 +124,7 @@ class TransactionRoutingProcessor(
         synchronizer
           .submitTransaction(
             submitterInfo,
+            accounting,
             transactionMeta,
             wfTransaction,
             inputDisclosedContracts.view.map(sc => sc.contractId -> sc).toMap,

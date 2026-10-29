@@ -121,7 +121,7 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
   }
 
   it should "not throw a warning for uncommited queue size growth when indexer pipeline is at full momentum and the commit is slow" in {
-    ingest(numberOfUpdates = 25000)
+    ingest(numberOfUpdates = 200000)
     val minExpectedCommitedSize: Int = 12000
 
     val peak = maxUncommittedGauge.max

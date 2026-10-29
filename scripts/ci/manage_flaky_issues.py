@@ -155,8 +155,8 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
                     if project_relation["releaseLine"]:
                         release_line = project_relation["releaseLine"]["name"]
 
-                # we found the flaky test project. no need to look at others.
-                break
+                    # we found the flaky test project. no need to look at others.
+                    break
 
             # we found a ticket with the exact same title, no need to look at others.
             break
@@ -272,6 +272,8 @@ def create_issue(
             try:
                 gh_issue_edit_cmd(idx, title, linked)
             except Exception as e:
+                # silent-ok: the evidence link is a nice-to-have, the issue itself
+                # already exists, already surfaced via the ::warning:: annotation
                 print(f"::warning::Could not link the evidence from issue #{idx}: {e}")
     return idx
 
@@ -435,6 +437,8 @@ def post_evidence_comment(idx: str, comment: str) -> Optional[str]:
         )
         return url
     except Exception as e:
+        # silent-ok: the evidence comment is a nice-to-have, already surfaced via the
+        # ::warning:: annotation, callers already handle a None return gracefully
         print(f"::warning::Could not post failure evidence to #{idx}: {e}")
         return None
 
@@ -601,6 +605,7 @@ def flake_predates_close(idx: str, commit_hash: str) -> bool:
             return False
         return _parse_iso(commit["committedDate"]) < _parse_iso(issue["closedAt"])
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        # silent-ok: deliberate fail-open classification helper, see the docstring above
         print(f"flake_predates_close: could not evaluate #{idx}/{commit_hash[:12]}: {exc}")
         return False
 
@@ -665,6 +670,82 @@ def migrate_table_header(body: str) -> str:
             old_header = None
         migrated.append(line)
     return "\n".join(migrated)
+
+
+# Caps on the failure-history table, so a test that keeps failing for months does not
+# grow its issue body without bound. Rows are appended at the bottom, so the oldest are
+# cut from the top; their evidence comments stay on the issue. Everything that parses
+# the table (streaks, the daily Slack cap, close_stale_flake_issues.py) only looks at
+# the most recent rows.
+HISTORY_MAX_ROWS = 500
+# Rows this recent are kept even past HISTORY_MAX_ROWS ...
+HISTORY_KEEP_DAYS = 90
+# ... unless the body would exceed this many characters. This hard cap is based on local tests,
+# GitHub started rejecting input at around 260k characters in an issue body, the chosen value
+# includes some safety margin
+HISTORY_MAX_CHARS = 200_000
+
+_TRUNCATED_RE = re.compile(r'^<!-- flaky-truncated (\d+) -->$')
+
+
+def truncate_history(body: str, today: Optional[datetime.date] = None) -> str:
+    """Cuts the oldest rows of the failure-history table, leaving a marker above it.
+
+    Keeps at most HISTORY_MAX_ROWS rows, but never drops one younger than
+    HISTORY_KEEP_DAYS, unless the body would exceed HISTORY_MAX_CHARS. The newest
+    row is always kept. The marker counts every row truncated so far, across runs.
+    """
+    lines = body.split("\n")
+    if _NEW_HEADER_LINE not in lines:
+        return body
+    header = lines.index(_NEW_HEADER_LINE)
+    first = header + 2
+    end = first
+    while end < len(lines) and lines[end].startswith("|"):
+        end += 1
+    rows = lines[first:end]
+
+    above = lines[:header]
+    already = 0
+    if len(above) >= 3 and (match := _TRUNCATED_RE.match(above[-3])):
+        already = int(match.group(1))
+        above = above[:-3]
+
+    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    cutoff = (today - datetime.timedelta(days=HISTORY_KEEP_DAYS)).isoformat()
+
+    def row_date(row: str) -> Optional[str]:
+        match = _ROW_DATE_RE.match(row)
+        return match.group(1) if match else None
+
+    def truncation_marker(total: int, oldest_kept: Optional[str]) -> list[str]:
+        kept = f", oldest kept row is from {oldest_kept}" if oldest_kept else ""
+        return [
+            f"<!-- flaky-truncated {total} -->",
+            f"_{total} earlier rows truncated{kept}. Any evidence comments for them are still on this issue._",
+            "",
+        ]
+
+    def render(drop: int) -> str:
+        if drop == 0:
+            return body
+        marker = truncation_marker(already + drop, row_date(rows[drop]))
+        return "\n".join(above + marker + lines[header:first] + rows[drop:] + lines[end:])
+
+    # Rows are oldest first, so the first recent row ends the count-based cut.
+    drop = 0
+    while len(rows) - drop > HISTORY_MAX_ROWS and (row_date(rows[drop]) or "") < cutoff:
+        drop += 1
+
+    out = render(drop)
+    # Re-render until it fits: adding or growing the marker can push it back over.
+    while len(out) > HISTORY_MAX_CHARS and drop < len(rows) - 1:
+        excess = len(out) - HISTORY_MAX_CHARS
+        while excess > 0 and drop < len(rows) - 1:
+            excess -= len(rows[drop]) + 1
+            drop += 1
+        out = render(drop)
+    return out
 
 
 def update_issue(
@@ -732,7 +813,7 @@ def update_issue(
     # The comment first, so the new row can link to it.
     evidence_url = post_evidence_comment(idx, evidence_comment) if evidence_comment else None
     label = comment_label(evidence_comment) if evidence_comment else ""
-    new_body = f"{body}\n{create_issue_table_row(cause, evidence_url, label)}"
+    new_body = truncate_history(f"{body}\n{create_issue_table_row(cause, evidence_url, label)}")
     gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if notify:
@@ -797,6 +878,7 @@ def self_test():
     test_update_issue_returns_consecutive_streak_info_unstable_slow()
     test_update_issue_dedupes_shard_duplicates()
     test_report_issue_assignment_grace_period()
+    test_report_issue_finds_flaky_project_among_other_projects()
     test_update_issue_assigned_daily_cap()
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
@@ -809,6 +891,8 @@ def self_test():
     test_update_issue_links_evidence_in_new_row()
     test_run_dry_run_writes_comments_without_github()
     test_run_reports_issues_even_if_evidence_is_broken()
+    test_truncate_history()
+    test_update_issue_truncates_history()
     print("manage_flaky_issues self-checks passed")
 
 
@@ -1639,6 +1723,58 @@ def test_report_issue_assignment_grace_period():
         ), f"Expected streak result when issue has no assignee ({label})"
 
 
+def test_report_issue_finds_flaky_project_among_other_projects():
+    # The issue is linked to another project before the flaky test project. The lookup must
+    # skip the unrelated project and still unarchive the issue / assign its release line.
+    title = format_issue_title("SomeFlakyTest")
+    search_response = json.dumps(
+        {
+            "data": {
+                "search": {
+                    "nodes": [
+                        {
+                            "title": title,
+                            "number": 99,
+                            "body": "",
+                            "assignees": {"totalCount": 0},
+                            "timelineItems": {"nodes": []},
+                            "projectItems": {
+                                "nodes": [
+                                    {
+                                        "id": "other_item",
+                                        "project": {"id": "other_project"},
+                                        "isArchived": False,
+                                        "releaseLine": {"name": "main"},
+                                    },
+                                    {
+                                        "id": "flaky_item",
+                                        "project": {"id": flaky_test_project},
+                                        "isArchived": True,
+                                        "releaseLine": None,
+                                    },
+                                ]
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    )
+
+    with (
+        patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+        patch(f'{__name__}.gh_unarchive_issue') as mock_unarchive,
+        patch(f'{__name__}.gh_assign_release_line') as mock_assign_release_line,
+        patch(f'{__name__}.update_issue'),
+    ):
+        mock_gh.return_value.returncode = 0
+        mock_gh.return_value.stdout = search_response
+        report_issue("SomeFlakyTest")
+
+    mock_unarchive.assert_called_once_with("99", "flaky_item")
+    mock_assign_release_line.assert_called_once_with("99", "flaky_item")
+
+
 def test_update_issue_assigned_daily_cap():
     # Past the assignment grace period, an assigned issue is alerted on at most once per
     # UTC calendar day, not on every consecutive-failure streak.
@@ -1698,6 +1834,97 @@ def test_update_issue_assigned_daily_cap():
     assert result is not None, "Expected unassigned issues to keep alerting on every streak"
 
 
+def _history_body(dates: list, pad: str = "") -> str:
+    rows = "\n".join(
+        f"| {d} 12:00:00 | test | 0 | [1](url{pad}) | "
+        f"[{i:08x}](https://github.com/DACH-NY/canton/commit/{i:040x}) |  | regular |"
+        for i, d in enumerate(dates)
+    )
+    return f"intro\n\n{create_issue_table_header()}\n{rows}"
+
+
+def _data_rows(body: str) -> list:
+    return [line for line in body.split("\n") if _ROW_DATE_RE.match(line)]
+
+
+def test_truncate_history():
+    today = datetime.date(2026, 10, 22)
+    old, recent = "2026-01-05", "2026-10-01"
+    n = HISTORY_MAX_ROWS
+
+    # At the row cap: unchanged.
+    at_cap = _history_body([old] * n)
+    assert truncate_history(at_cap, today) == at_cap
+
+    # Over the cap: the oldest rows go and a marker above the header counts them.
+    body = _history_body([old] * (n + 50))
+    cut = truncate_history(body, today)
+    assert _data_rows(cut) == _data_rows(body)[50:]
+    lines = cut.split("\n")
+    h = lines.index(_NEW_HEADER_LINE)
+    assert lines[h - 3] == "<!-- flaky-truncated 50 -->", lines[h - 3]
+    assert lines[h - 2].startswith(
+        "_50 earlier rows truncated, oldest kept row is from 2026-01-05."
+    ), lines[h - 2]
+    assert lines[h - 1] == "" and cut.startswith("intro\n\n"), cut[:200]
+    assert truncate_history(cut, today) == cut, "truncating twice changes nothing"
+
+    # The next run adds to the count instead of stacking a second marker.
+    again = truncate_history(f"{cut}\n{_data_rows(body)[-1]}", today)
+    assert again.count("<!-- flaky-truncated") == 1 and "<!-- flaky-truncated 51 -->" in again
+
+    # Rows inside the keep window survive past the cap; the boundary day is kept.
+    boundary = (today - datetime.timedelta(days=HISTORY_KEEP_DAYS)).isoformat()
+    just_out = (today - datetime.timedelta(days=HISTORY_KEEP_DAYS + 1)).isoformat()
+    body = _history_body([old] * 10 + [just_out] + [boundary] + [recent] * n)
+    assert _data_rows(truncate_history(body, today)) == _data_rows(body)[11:]
+
+    # The character cap wins over the keep window; the newest row is always kept.
+    body = _history_body([recent] * 400, pad="x" * 500)
+    cut = truncate_history(body, today)
+    assert len(body) > HISTORY_MAX_CHARS >= len(cut), (len(body), len(cut))
+    assert _data_rows(cut)[-1] == _data_rows(body)[-1]
+    assert truncate_history(cut, today) == cut
+
+    # Text after the table is kept, a body without the table is left alone.
+    assert truncate_history(_history_body([old] * (n + 1)) + "\n\nafter", today).endswith(
+        "\n\nafter"
+    )
+    assert truncate_history("auto-created", today) == "auto-created"
+
+    # Streak detection still sees the most recent commits.
+    body = _history_body([old] * (n + 50))
+    assert (
+        extract_commit_hashes_from_body(truncate_history(body, today))[-n:]
+        == extract_commit_hashes_from_body(body)[-n:]
+    )
+
+
+def test_update_issue_truncates_history():
+    env = {
+        "CIRCLECI": "true",
+        "GITHUB_ACTIONS": "false",
+        "CIRCLE_SHA1": "unknown",
+        "CIRCLE_JOB": "test",
+        "CIRCLE_NODE_INDEX": "0",
+        "CIRCLE_BUILD_URL": "https://circleci.com/gh/DACH-NY/canton/1",
+    }
+    edits: list = []
+
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    d = today - datetime.timedelta(days=(HISTORY_KEEP_DAYS + 1))
+
+    with (
+        patch.dict(os.environ, env),
+        patch(f"{__name__}.gh_issue_edit_cmd", side_effect=lambda i, t, b: edits.append(b)),
+    ):
+        update_issue("42", "Flaky FooTest", _history_body([str(d)] * (HISTORY_MAX_ROWS + 5)))
+    (written,) = edits
+    # 5 over the cap plus the row this run appended.
+    assert "<!-- flaky-truncated 6 -->" in written, written[:500]
+    assert len(_data_rows(written)) == HISTORY_MAX_ROWS
+
+
 # Ordered most specific first. A timeout is more telling than a regular
 # failure, which is more telling than a log error, which beats a log warning.
 _CAUSE_PRECEDENCE = ('timeout', 'regular', 'error_other', 'warn_other')
@@ -1711,6 +1938,7 @@ def _cause_rank(cause: str) -> int:
     try:
         return _CAUSE_PRECEDENCE.index(bucket)
     except ValueError:
+        # silent-ok: an unknown cause sorts last so it never overrides one we recognize
         return len(_CAUSE_PRECEDENCE)
 
 
@@ -1755,8 +1983,8 @@ def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
             f"Found failure evidence for {len(comments)} of {len(cause_by_title)} issue title(s)."
         )
     except Exception as e:
-        # The evidence is an add-on: a broken evidence.json must never stop the
-        # issues and their tables from being updated.
+        # silent-ok: the evidence is an add-on, a broken evidence.json must never
+        # stop the issues and their tables from being updated
         print(f"::warning::Could not render failure evidence, posting none: {e}")
         comments = {}
 

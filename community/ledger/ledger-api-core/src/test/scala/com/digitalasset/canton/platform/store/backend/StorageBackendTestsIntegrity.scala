@@ -47,7 +47,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtosCreate(event_offset = 7, event_sequential_id = 7L)(), // duplicate offset
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(7), 7L))
     val failure =
@@ -63,7 +63,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtosCreate(event_offset = 7, event_sequential_id = 7L)(), // duplicate id
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(7), 7L))
     val failure =
@@ -78,7 +78,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtosCreate(event_offset = 7, event_sequential_id = 7L)()
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(
       backend.event
@@ -106,7 +106,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
   }
 
   it should "find lapi_filter_achs_stakeholder's entries not present in lapi_filter_activate_stakeholder" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
 
     executeSql { connection =>
       SQL"""
@@ -122,7 +122,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
   }
 
   it should "verify lapi_achs_state contains at most one row" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
 
     // Insert multiple rows into lapi_achs_state to simulate the error
     executeSql { connection =>
@@ -148,7 +148,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       dtosCreate(event_offset = 3, event_sequential_id = 3L)(), // non-consecutive id
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(3), 3L))
     val failure =
@@ -178,7 +178,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset(2)))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(4), 4L))
@@ -219,7 +219,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 5L))
     val failure =
@@ -263,7 +263,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 5L))
     val failure =
@@ -308,7 +308,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 5L))
     val failure =
@@ -353,7 +353,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -399,7 +399,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -458,7 +458,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 5L))
     val failure =
@@ -496,7 +496,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -520,7 +520,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -549,7 +549,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -581,7 +581,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     val failure =
@@ -611,7 +611,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 4L))
     executeSql(backend.integrity.verifyIntegrity())
@@ -647,7 +647,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(), // non-consecutive id (beyond ledger end)
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     executeSql(backend.integrity.verifyIntegrity())
@@ -716,7 +716,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(14), 8L))
   }
@@ -785,7 +785,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(7), 7L))
 
@@ -815,7 +815,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset(3)))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(5), 3L))
@@ -882,7 +882,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset(9)))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(10), 10L))
@@ -911,7 +911,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.updatePrunedUptoInclusive(offset(3)))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
@@ -956,7 +956,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
           )(),
         ).flatten
 
-        executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+        executeSql(backend.parameter.initializeParameters(someIdentityParams))
         executeSql(backend.parameter.updatePrunedUptoInclusive(offset(10)))
         executeSql(ingest(updates, _))
         executeSql(updateLedgerEnd(offset(101), 1001L))
@@ -998,7 +998,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates, _))
     executeSql(updateLedgerEnd(offset(10), 4L))
     // Populate ACHS: both seq ids 1 and 2 are added (activeAt=2 means deactivation at seq id 3 is not yet visible)
@@ -1049,7 +1049,7 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     )
 
   private def performMissingMandatoryFieldCheck(updates: Seq[DbDto]) = {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(updates.toVector, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 

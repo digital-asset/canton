@@ -84,10 +84,15 @@ object TransferTesting {
       "Require same amount of mediators as synchronizers",
     )
 
-    val opsparticipant = participants.local.headOption
-      .getOrElse(
-        throw new IllegalStateException("cannot find local participant which i want to use for ops")
-      )
+    val opsparticipant =
+      participants.local
+        .find(_.name.startsWith("ops"))
+        .orElse(participants.local.headOption)
+        .getOrElse(
+          throw new IllegalStateException(
+            "cannot find local participant which i want to use for ops"
+          )
+        )
 
     waitForAllNodes("sequencers", sequencers.all)
     waitForAllNodes("mediators", mediators.all)
@@ -152,6 +157,8 @@ object TransferTesting {
         waitUntilReady.unwrap,
       )
       .discard
+
+    LongRunning.enableMultisync(opsparticipant)
 
     // ---------------------------------------------------
     // start master process
@@ -252,6 +259,9 @@ object TransferTesting {
       println(s"Waiting for nodes to be connected: ready=${good.length}, not-yet=${notgood.length}")
       notgood.isEmpty
     }
+
+    // enable multi-sync
+    participants.all.foreach(LongRunning.enableMultisync)
 
     // wait until we see the vetting state to include the key dar
     utils.retry_until_true(timeout = waitUntilReady) {

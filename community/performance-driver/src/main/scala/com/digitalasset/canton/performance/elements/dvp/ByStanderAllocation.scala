@@ -119,12 +119,13 @@ class LocalByStanderAllocation(
     metric: Gauge[Long],
     val config: LocalGrowth,
     val loggerFactory: NamedLoggerFactory,
+    allocatedPartyInitialNumber: Long = 0,
 )(implicit ec: ExecutionContext)
     extends ByStanderAllocationImpl(base, config.poolSize, config.ratio)
     with NamedLogging {
 
   metric.updateValue(0)
-  private val allocated = new AtomicLong(0)
+  private val allocated = new AtomicLong(allocatedPartyInitialNumber)
   private val pending = new AtomicInteger(0)
 
   override protected def requestNext(poolSize: Int)(implicit traceContext: TraceContext): Unit =

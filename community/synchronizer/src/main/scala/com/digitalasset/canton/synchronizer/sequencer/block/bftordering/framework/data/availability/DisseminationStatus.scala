@@ -62,9 +62,16 @@ sealed trait DisseminationStatus
     *   If defined, the patience and current time to be used to compute and return re-dissemination
     *   information.
     */
-  def sendBatchTo(
+  final def sendBatchTo(
       withRedissemination: Option[PatienceAndCurrentTime] = None
-  ): SendBatchTo
+  ): SendBatchTo =
+    computeSendTo(
+      membership,
+      acks,
+      sentToLast,
+      previousAcks.getOrElse(acks),
+      withRedissemination,
+    )
 
   /** Updates the dissemination status for a new membership.
     */
@@ -341,17 +348,6 @@ object DisseminationStatus extends PrettyPrintingCompanion[DisseminationStatus] 
     override lazy val needsSigning: Boolean =
       this.ackOf(membership.myId).isEmpty
 
-    override def sendBatchTo(
-        withRedissemination: Option[PatienceAndCurrentTime]
-    ): SendBatchTo =
-      computeSendTo(
-        membership,
-        acks,
-        sentToLast,
-        previousAcks.getOrElse(acks),
-        withRedissemination,
-      )
-
     override def resetRegressions(): InProgress =
       copy(regressionsToSigning = 0, disseminationRegressions = 0)
   }
@@ -381,18 +377,6 @@ object DisseminationStatus extends PrettyPrintingCompanion[DisseminationStatus] 
     override def tracedBatchId: Traced[BatchId] = tracedProofOfAvailability.map(_.batchId)
 
     override def acks: Set[AvailabilityAck] = tracedProofOfAvailability.value.acks.toSet
-
-    override def sendBatchTo(
-        withRedissemination: Option[PatienceAndCurrentTime]
-    ): SendBatchTo =
-      // If F == 0, no other nodes are required to store the batch because there is no fault tolerance,
-      //  so batches are ready for ordering immediately after being signed and stored locally,
-      //  i.e., without them being sent at all.
-      //  However, we still want to send the batch to other nodes to minimize fetches at the output phase.
-      if (sentToLast.isEmpty)
-        SendBatchTo(firstDissemination = recipients)
-      else
-        SendBatchTo.empty
 
     override def resetRegressions(): Complete =
       copy(regressionsToSigning = 0, disseminationRegressions = 0)

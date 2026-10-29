@@ -44,10 +44,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  BlockStatus,
+  SegmentStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
   ConsensusSegment,
+  ConsensusStatus,
   P2PNetworkOut,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
@@ -64,7 +69,7 @@ import io.opentelemetry.api.trace.{Span, Tracer}
 import java.time.{Duration, Instant}
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
-import scala.util.{Failure, Success, Try}
+import scala.util.{Failure, Random, Success, Try}
 
 /** Handles the PBFT consensus process for one segment of an epoch, either as a leader or as a
   * follower.
@@ -771,6 +776,46 @@ class IssSegmentModule[E <: Env[E]](
           case _ => sendMessage()
         }
 
+      case RequestMissingPrePrepare(blockMetadata, nodesThatHavePrePrepare) =>
+        // A weak quorum of prepares has been reached for this block, but no pre-prepare has been received yet.
+        // Request the pre-prepare from 2 of the nodes that have it via a retransmission request.
+        NonEmpty
+          .from(epoch.segments)
+          .filter(_ => !rehydrated)
+          .foreach(segments =>
+            context.pipeToSelf(
+              cryptoProvider
+                .signMessage(
+                  prePrepareRetransmissionMessage(segments, blockMetadata.blockNumber),
+                  AuthenticatedMessageType.BftSignedRetransmissionMessage,
+                )
+            ) {
+              case Success(Right(signedMessage)) =>
+                val nodesToAsk = Random.shuffle(nodesThatHavePrePrepare).take(2).toSet
+                logger.info(
+                  s"Reached weak quorum of prepares without a pre-prepare; requesting missing pre-prepare for block ${blockMetadata.blockNumber} from ${nodesToAsk
+                      .mkString(", ")}"
+                )
+                p2pNetworkOut.asyncSend(
+                  P2PNetworkOut.Multicast(
+                    P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+                      Consensus.RetransmissionsMessage.RetransmissionRequest(signedMessage)
+                    ),
+                    nodesToAsk,
+                  )
+                )
+                None
+              case Success(Left(errors)) =>
+                logger.error(
+                  s"Can't sign retransmission message to retrieve missing pre-prepare: $errors"
+                )
+                None
+              case Failure(exception) =>
+                logAsyncException(exception)
+                None
+            }
+          )
+
       case CompletedBlock(commitCertificate, traceContextFromProcessResult) =>
         implicit val traceContext: TraceContext = traceContextFromProcessResult
         logger.debug(
@@ -908,6 +953,35 @@ class IssSegmentModule[E <: Env[E]](
             cleanup = () => lastProposedBlockCommitInstant = Some(Instant.now()),
           )
         },
+    )
+  }
+
+  // Build a retransmission message just to get the pre-prepare for a block that we are missing.
+  // This is used when we have a weak quorum of prepares but no pre-prepare yet.
+  private def prePrepareRetransmissionMessage(
+      segments: NonEmpty[Seq[EpochState.Segment]],
+      blockNumber: BlockNumber,
+  ): ConsensusStatus.EpochStatus = {
+    val numberOfNodes = epoch.currentMembership.orderingTopology.size
+    val nonEmptySegments = segments.map[SegmentStatus](segment =>
+      if (segment.slotNumbers.contains(blockNumber))
+        SegmentStatus.InProgress(
+          ViewNumber.First,
+          segment.slotNumbers
+            .map[BlockStatus](number =>
+              if (number == blockNumber)
+                BlockStatus.InProgress(
+                  prePrepared = false,
+                  preparesPresent = Seq.fill(numberOfNodes)(true),
+                  commitsPresent = Seq.fill(numberOfNodes)(true),
+                )
+              else BlockStatus.Complete
+            ),
+        )
+      else SegmentStatus.Complete
+    )
+    ConsensusStatus.EpochStatus.create(thisNode, epoch.info.number, nonEmptySegments)(
+      synchronizerProtocolVersion
     )
   }
 

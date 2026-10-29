@@ -87,6 +87,14 @@ final case class ClientRequestTimeoutConfig(
   )
 }
 
+/** @param cookieAuthAllowedOrigins
+  *   Origins (e.g. `https://app.example.com`) allowed to authenticate websocket connections with
+  *   the JWT cookie. Browsers attach cookies to websocket handshakes started by any site, so the
+  *   `Origin` header of a cookie-authenticated handshake must match one of these entries, or the
+  *   connection is refused. Entries are compared with the browser's `Origin` header
+  *   case-insensitively as scheme, host and port, without a path. `*` allows any origin and should
+  *   only be used for development. When empty (the default), the JWT cookie is ignored altogether.
+  */
 final case class WebsocketConfig(
     maxDuration: FiniteDuration = WSC.DefaultMaxDuration, // v1 only
     throttleElem: Int = WSC.DefaultThrottleElem, // v1 only
@@ -96,11 +104,13 @@ final case class WebsocketConfig(
     heartbeatPeriod: FiniteDuration = WSC.DefaultHeartbeatPeriod, // v1 only
     httpListMaxElementsLimit: Long = WSC.DefaultHttpListMaxElementsLimit,
     httpListWaitTime: FiniteDuration = WSC.DefaultHttpListWaitTime,
+    cookieAuthAllowedOrigins: Seq[String] = WSC.DefaultCookieAuthAllowedOrigins,
 )
 
 object WebsocketConfig {
   implicit val showInstance: Show[WebsocketConfig] = Show.show(c =>
-    s"WebsocketConfig(httpListMaxElementsLimit=${c.httpListMaxElementsLimit}, httpListWaitTime=${c.httpListWaitTime})"
+    s"WebsocketConfig(httpListMaxElementsLimit=${c.httpListMaxElementsLimit}, httpListWaitTime=${c.httpListWaitTime}, cookieAuthAllowedOrigins=${c.cookieAuthAllowedOrigins
+        .mkString("[", ", ", "]")})"
   )
 
   val DefaultMaxDuration: FiniteDuration = 120.minutes
@@ -112,4 +122,6 @@ object WebsocketConfig {
   // Canton transactions can be quite big (20kb) so we keep max number of returned transactions in list low by default
   val DefaultHttpListMaxElementsLimit: Long = 200
   val DefaultHttpListWaitTime: FiniteDuration = 0.5.seconds
+  // Secure by default: cookie authentication is disabled until origins are explicitly allowed
+  val DefaultCookieAuthAllowedOrigins: Seq[String] = Seq.empty
 }

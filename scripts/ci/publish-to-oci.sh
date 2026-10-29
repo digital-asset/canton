@@ -69,7 +69,13 @@ if [[ "x$CI" != "x" ]]; then
 # Authorize in GCP
 info_step "Login ${c_lyellow}GCP ${c_lwhite}${OCI_REGISTRY}${c_reset}"
 # Hide login output, print only login failed
-if ! output=$(nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run ".circleci/gcp-login.sh \"${OCI_REGISTRY}\"" 2>&1)
+# Inside a nix shell (e.g. .ci/nix-exec on GHA) gcloud is already available and nix-shell may not be on the PATH
+if [[ -n "${IN_NIX_SHELL:-}" ]]; then
+  login_cmd=(.circleci/gcp-login.sh "${OCI_REGISTRY}")
+else
+  login_cmd=(nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run ".circleci/gcp-login.sh \"${OCI_REGISTRY}\"")
+fi
+if ! output=$("${login_cmd[@]}" 2>&1)
  then
     err "login failed: $output"
     exit 1

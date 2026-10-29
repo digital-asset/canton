@@ -11,9 +11,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.HasUnlessClosing
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
+import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionWrapper.ClosingReasonHandler
 import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnection,
   SequencerSubscriptionWrapper,
@@ -113,6 +113,10 @@ private[sequencing] class ReplaySequencerSubscriptionWrapper private[sequencing]
   )(implicit
       traceContext: TraceContext
   ): Unit = ()
+
+  override def setClosingReasonHandler(
+      closingReasonHandler: ClosingReasonHandler
+  )(implicit traceContext: TraceContext): Unit = ()
 }
 
 object ReplaySequencerSubscriptionWrapper {
@@ -149,6 +153,10 @@ private[sequencing] class NoOpSequencerSubscriptionWrapper private[sequencing] (
   )(implicit
       traceContext: TraceContext
   ): Unit = ()
+
+  override def setClosingReasonHandler(
+      closingReasonHandler: ClosingReasonHandler
+  )(implicit traceContext: TraceContext): Unit = ()
 }
 
 private[sequencing] class ReplaySequencerSubscriptionWrapperFactory(
@@ -162,7 +170,6 @@ private[sequencing] class ReplaySequencerSubscriptionWrapperFactory(
       member: Member,
       preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
-      parent: HasUnlessClosing,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -201,7 +208,6 @@ private[sequencing] class NoOpSequencerSubscriptionWrapperFactory(
       member: Member,
       preSubscriptionEventO: Option[EventAndOrdinal],
       subscriptionHandlerFactory: SubscriptionHandlerFactory,
-      parent: HasUnlessClosing,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,

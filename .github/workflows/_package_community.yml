@@ -51,6 +51,15 @@ jobs:
         with:
           command: performance/pack-performance.sh
 
+      - name: Upload packaged community zip archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-community-release.zip
+          path: community/app/target/release/*.zip
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+
       - name: Remember version info
         uses: ./.github/actions/nix/nix_run
         with:

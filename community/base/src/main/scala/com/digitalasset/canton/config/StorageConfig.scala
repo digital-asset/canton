@@ -368,16 +368,26 @@ object StorageConfig {
   */
 sealed trait DbConfig extends StorageConfig with PrettyPrinting {
 
-  /** Function to combine the defined migration path together with dev version changes */
-  final def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] =
+  /** Function to combine the defined migration path together with dev version changes
+    *
+    * @param includeRepeatableMigrations
+    *   Repeatable migrations reference tables that might not exist in older revisions. Set to false
+    *   to skip them.
+    */
+  final def buildMigrationsPaths(
+      devVersionSupport: Boolean,
+      includeRepeatableMigrations: Boolean = true,
+  ): Seq[String] =
     if (parameters.migrationsPaths.nonEmpty)
       parameters.migrationsPaths
-    else if (devVersionSupport)
-      Seq(stableMigrationPath, devMigrationPath, defaultTableSettingsPath) ++
-        parameters.repeatableMigrationsPaths
-    else
-      Seq(stableMigrationPath, defaultTableSettingsPath) ++
-        parameters.repeatableMigrationsPaths
+    else {
+      val versionedMigrationsPaths =
+        if (devVersionSupport) Seq(stableMigrationPath, devMigrationPath)
+        else Seq(stableMigrationPath)
+      if (includeRepeatableMigrations)
+        versionedMigrationsPaths ++ (defaultTableSettingsPath +: parameters.repeatableMigrationsPaths)
+      else versionedMigrationsPaths
+    }
 
   protected def devMigrationPath: String
   protected def stableMigrationPath: String

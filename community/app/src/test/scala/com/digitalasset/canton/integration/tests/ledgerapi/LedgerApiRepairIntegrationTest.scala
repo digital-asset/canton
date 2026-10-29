@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, TestSequencerClientFor}
 import com.digitalasset.canton.console.{CommandFailure, FeatureFlag, LocalParticipantReference}
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -10,9 +11,16 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.repair.RepairServiceIntegrationTest
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
+import com.digitalasset.canton.lifecycle.RunOnClosing
+import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient
+import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
+  DelaySequencerClient,
+  SequencedEventDelayPolicy,
+}
 import com.digitalasset.canton.sequencing.protocol.Deliver
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.tracing.TraceContext
 import monocle.syntax.all.*
 
 import scala.concurrent.Promise
@@ -61,7 +69,7 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
     participants.local.foreach(_.testing.fetch_synchronizer_times())
     participant1.synchronizers.disconnect(daName)
 
-    val (repairContract, releaseClient1) = withSynchronizerConnected(daName) {
+    val repairContract = withSynchronizerConnected(daName) {
       val startOffset = participant1.ledger_api.state.end()
       IouSyntax.createIous(participant1, alice, alice, 1 to 1)
 
@@ -75,7 +83,7 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
       // the last event is the topology transaction, so we need to delay the SequencerIndexMoved event.
       // Setting up the sequencer client of participant1 to block on processing the specified event.
       // The counter is set to 1, meaning that it should block events after one processed successfully
-      val releaseClient = setupDelayedSequencerClientToBlockOnEmptyBatch(daId, participant1)
+      setupDelayedSequencerClientToBlockOnEmptyBatch(daId, daName, participant1)
       val newParty = participant1.parties.testing.enable(
         "NewParty",
         synchronizeParticipants = List(participant1, participant2),
@@ -94,7 +102,7 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
 
       // no more events should be ingested after the topology transaction
       Some(participant1.ledger_api.state.end()) shouldBe txs.headOption.map(_.offset)
-      (repairContract, releaseClient)
+      repairContract
     }
 
     clue("repair event must fail") {
@@ -105,9 +113,6 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
         ),
       )
     }
-
-    logger.debug("releasing sequencer client")
-    releaseClient1.success(())
 
     clue("reconnecting and running a transaction") {
       withSynchronizerConnected(daName) {
@@ -120,10 +125,10 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
     }
 
     // same scenario again, but this time using the force flag
-    val releaseClient2 = withSynchronizerConnected(daName) {
+    withSynchronizerConnected(daName) {
       val startOffset = participant1.ledger_api.state.end()
       logger.debug("Creating the second topology event")
-      val releaseClient = setupDelayedSequencerClientToBlockOnEmptyBatch(daId, participant1)
+      setupDelayedSequencerClientToBlockOnEmptyBatch(daId, daName, participant1)
       val newParty = participant1.parties.testing.enable(
         "NewParty2",
         synchronizeParticipants = List(participant1, participant2),
@@ -134,7 +139,6 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
 
       // no more events should be ingested after the topology transaction
       Some(participant1.ledger_api.state.end()) shouldBe txs.headOption.map(_.offset)
-      releaseClient
     }
 
     clue("resubmitting with force flag") {
@@ -144,7 +148,6 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
         Seq(repairContract),
         forceRepairWhenTopologyTransactionAtLedgerEnd = true,
       )
-      releaseClient2.success(())
     }
 
     clue("reconnecting and running a transaction, showing that the repair was successful") {
@@ -159,28 +162,45 @@ class LedgerApiRepairIntegrationTest extends RepairServiceIntegrationTest {
   // empty batch (which should be the SequencerIndexMoved event)
   private def setupDelayedSequencerClientToBlockOnEmptyBatch(
       sync: PhysicalSynchronizerId,
+      syncAlias: SynchronizerAlias,
       participant: LocalParticipantReference,
-  ): Promise[Unit] = {
+  ): Unit = {
     @volatile var expectedTransactionObserved = false
     @volatile var blocking = false
     val releaseClient = Promise[Unit]()
     val participantSequencerClientInterceptor = DelayedSequencerClient
       .delayedSequencerClient(this.getClass.getSimpleName, sync, participant.id.uid.toString)
       .value
-    participantSequencerClientInterceptor.setDelayPolicy { sse =>
-      val isEmpty = sse.signedEvent.content match {
-        case d: Deliver[?] => d.batch.envelopes.isEmpty
-        case _ => false
+    participantSequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
+      override def apply(sse: SequencedSerializedEvent): DelaySequencerClient = {
+        val isEmpty = sse.signedEvent.content match {
+          case d: Deliver[?] => d.batch.envelopes.isEmpty
+          case _ => false
+        }
+        blocking = expectedTransactionObserved && (blocking || isEmpty)
+        if (blocking) {
+          logger.debug("Delaying sequencer batch")
+          DelayedSequencerClient.DelayUntil(releaseClient.future)
+        } else {
+          expectedTransactionObserved = true
+          DelayedSequencerClient.Immediate
+        }
       }
-      blocking = expectedTransactionObserved && (blocking || isEmpty)
-      if (blocking) {
-        logger.debug("Delaying sequencer batch")
-        DelayedSequencerClient.DelayUntil(releaseClient.future)
-      } else {
-        expectedTransactionObserved = true
-        DelayedSequencerClient.Immediate
+
+      locally {
+        val sequencerClient = participant.underlying.value.sync
+          .connectedSynchronizerForAlias(syncAlias)
+          .value
+          .sequencerClient
+
+        // Complete the delay when the sequencer client closes, so it can shut down properly
+        sequencerClient.runOnOrAfterClose_(new RunOnClosing {
+          override def name: String = s"release-sequencer-client-for-$participant"
+          override def done: Boolean = releaseClient.isCompleted
+          override def run()(implicit traceContext: TraceContext): Unit =
+            releaseClient.trySuccess(())
+        })
       }
-    }
-    releaseClient
+    })
   }
 }

@@ -65,6 +65,8 @@ message SequencerConnections {
   SequencerConnectionPoolDelays sequencer_connection_pool_delays = 5;
 
   SubscriptionLivenessLimits subscription_liveness_limits = 6;
+
+  SequencerConnectionPenaltyConfig sequencer_connection_penalty_config = 7;
 }
 
 message SubmissionRequestAmplification {
@@ -111,4 +113,26 @@ message SubscriptionLivenessLimits {
   // Maximum difference between the ordinal of the latest aggregated event and the ordinal of the latest event provided by a subscription.
   // This value must be non-negative.
   uint32 max_ordinal_delta = 2;
+}
+
+// Configuration of the penalty mechanism for sequencer connections.
+message SequencerConnectionPenaltyConfig {
+  // Whether the penalty mechanism is enabled. If disabled, penalties are still tracked but ignored when selecting sequencers.
+  bool enabled = 1;
+
+  // Interval at which the penalties of the sequencers in the connection pool are decayed.
+  //
+  // This value must be positive.
+  google.protobuf.Duration decay_interval = 2;
+
+  // Half-life of a sequencer's penalty. The penalty is reduced by half over this duration.
+  //
+  // This value must be positive.
+  google.protobuf.Duration half_life = 3;
+
+  // Decayed penalties below this value are reset to 0 so that a sequencer whose penalty has been
+  // increased can start over after a bounded number of decays.
+  //
+  // This value must be positive.
+  double zero_threshold = 4;
 }

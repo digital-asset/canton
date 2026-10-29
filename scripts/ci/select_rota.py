@@ -393,11 +393,13 @@ def main() -> int:
         )
 
     # Last resort: a deterministic pick from the roster pool. This must never raise,
-    # an unhandled error here would fail the CI notification step it feeds.
+    # an unhandled error here would crash with a traceback instead of a clean message.
     try:
         print(fallback_pick(roster))
     except Exception as exc:
+        # Nobody was pinged at all: exit 1 so this does not look like a clean run.
         log(f"warning: fallback pick failed ({exc!r}), no responder emitted")
+        return 1
     return 0
 
 
@@ -484,6 +486,7 @@ def self_test() -> None:
     assert fc == ["UB", "UC"], fc
 
     # fallback_pick: deterministic per workflow id, restores env, raises on an empty pool
+    global fallback_pick, ROSTER_PATH
     saved = {k: os.environ.get(k) for k in ("CIRCLE_WORKFLOW_ID", "GITHUB_RUN_ID")}
     try:
         os.environ.pop("GITHUB_RUN_ID", None)
@@ -502,6 +505,41 @@ def self_test() -> None:
         raise AssertionError("expected RuntimeError for an empty fallback pool")
     except RuntimeError:
         pass
+
+    # main(): when both the sheet lookup and the deterministic fallback pick fail,
+    # exit 1 instead of silently returning 0, nobody was pinged at all.
+    real_fallback_pick = fallback_pick
+    real_roster_path = ROSTER_PATH
+    real_argv = sys.argv
+    import tempfile
+
+    def raising_fallback_pick(_roster: dict[str, Any]) -> str:
+        raise RuntimeError("boom")
+
+    try:
+        fallback_pick = raising_fallback_pick
+        with tempfile.TemporaryDirectory() as tmp:
+            roster_file = Path(tmp) / "roster.json"
+            roster_file.write_text(
+                json.dumps({"slack_id_by_name": {}, "fallback_pool": []}), encoding="utf-8"
+            )
+            ROSTER_PATH = roster_file
+            values_file = Path(tmp) / "values.json"
+            values_file.write_text(json.dumps([["Week"]]), encoding="utf-8")  # no "CI" header
+            sys.argv = [
+                "select_rota.py",
+                "--rotation",
+                "ci",
+                "--date",
+                "2025-06-30",
+                "--values-file",
+                str(values_file),
+            ]
+            assert main() == 1
+    finally:
+        fallback_pick = real_fallback_pick
+        ROSTER_PATH = real_roster_path
+        sys.argv = real_argv
 
     # format_week_date: month name plus un-padded day
     assert format_week_date(dt.date(2025, 8, 31)) == "August 31"

@@ -123,8 +123,37 @@ object FormatValidator {
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, UpdateFormat] =
     for {
-      includeTransactions <- validateOptional(protoUpdateFormat.includeTransactions)(validate)
-      includeReassignments <- validateOptional(protoUpdateFormat.includeReassignments)(validate)
+      _ <- Either.cond(
+        !(protoUpdateFormat.includeTransactionsAndReassignments.isDefined &&
+          protoUpdateFormat.includeTransactions.isDefined),
+        (),
+        invalidArgument(
+          "include_transactions_and_reassignments and include_transactions cannot both be set"
+        ),
+      )
+      _ <- Either.cond(
+        !(protoUpdateFormat.includeTransactionsAndReassignments.isDefined &&
+          protoUpdateFormat.includeReassignments.isDefined),
+        (),
+        invalidArgument(
+          "include_transactions_and_reassignments and include_reassignments cannot both be set"
+        ),
+      )
+      includeTransactionsAndReassignments <- validateOptional(
+        protoUpdateFormat.includeTransactionsAndReassignments
+      )(validate)
+      explicitIncludeTransactions <- validateOptional(protoUpdateFormat.includeTransactions)(
+        validate
+      )
+      explicitIncludeReassignments <- validateOptional(protoUpdateFormat.includeReassignments)(
+        validate
+      )
+      // include_transactions_and_reassignments is a shorthand for including the transactions
+      // and the reassignments with the same event format
+      includeTransactions = includeTransactionsAndReassignments.orElse(explicitIncludeTransactions)
+      includeReassignments = includeTransactionsAndReassignments
+        .map(_.eventFormat)
+        .orElse(explicitIncludeReassignments)
       includeTopologyEvents <- validateOptional(protoUpdateFormat.includeTopologyEvents)(validate)
     } yield UpdateFormat(
       includeTransactions = includeTransactions,

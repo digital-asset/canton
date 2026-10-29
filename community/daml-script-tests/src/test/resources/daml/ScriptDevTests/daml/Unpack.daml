@@ -1,0 +1,98 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Unpack where
+
+import Daml.Script hiding (unpack)
+import DA.Assert
+import DA.Optional
+
+template Secret with
+    p : Party
+    secret : Text
+  where
+    signatory p
+
+    choice Burn: ()
+      controller p
+      do pure ()
+
+template Helper with
+     p : Party
+   where
+     signatory p
+
+     choice ReadSecret : Text
+       with cid : ContractId Secret
+       controller p
+       do
+         s <- unpack cid
+         pure s.secret
+
+     choice CreateSecret: ContractId Secret
+       with
+         secret: Text
+         ctrler: Party
+       controller ctrler
+       do
+         create (Secret p secret)
+
+testActiveWithSignatory: Script ()
+testActiveWithSignatory = do
+  alice <- allocateParty "Alice ActiveWithSignatory"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    disclosure <- fromSome <$> queryDisclosure alice cid
+    secret <- submitWithDisclosures alice [disclosure] (createAndExerciseCmd (Helper alice) (ReadSecret cid))
+    secret === "42"
+
+testActiveWithoutStakeholder: Script ()
+testActiveWithoutStakeholder = do
+  alice <- allocateParty "Alice ActiveWithoutStakeholder"
+  bob <- allocateParty "Bob ActiveWithoutStakeholder"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    disclosure <- fromSome <$> queryDisclosure alice cid
+    secret <- submitWithDisclosures bob [disclosure] (createAndExerciseCmd (Helper bob) (ReadSecret cid))
+    secret === "42"
+
+testNonVisibleActiveWithoutStakeholder: Script ()
+testNonVisibleActiveWithoutStakeholder = do
+  alice <- allocateParty "Alice NonVisibleActiveWithoutStakeholder"
+  bob <- allocateParty "Bob NonVisibleActiveWithoutStakeholder"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    submitMustFail bob (createAndExerciseCmd (Helper bob) (ReadSecret cid))
+
+testInactiveWithSignatory: Script ()
+testInactiveWithSignatory = do
+  alice <- allocateParty "Alice InactiveWithSignatory"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    disclosure <- fromSome <$> queryDisclosure alice cid
+    _ <- alice `submit` exerciseCmd cid Burn
+    secret <- submitWithDisclosures alice [disclosure] (createAndExerciseCmd (Helper alice) (ReadSecret cid))
+    secret === "42"
+
+testInactiveWithoutStakeholder: Script ()
+testInactiveWithoutStakeholder = do
+  alice <- allocateParty "Alice InactiveWithoutStakeholder"
+  bob <- allocateParty "Bob InactiveWithoutStakeholder"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    disclosure <- fromSome <$> queryDisclosure alice cid
+    _ <- alice `submit` exerciseCmd cid Burn
+    secret <- submitWithDisclosures bob [disclosure] (createAndExerciseCmd (Helper bob) (ReadSecret cid))
+    secret === "42"
+
+testConsumedWithSignatory: Script ()
+testConsumedWithSignatory = do
+  alice <- allocateParty "Alice ConsumedWithSignatory"
+  do
+    cid <- alice `submit` createCmd Secret with p = alice, secret = "42"
+    disclosure <- fromSome <$> queryDisclosure alice cid
+    secret <- submitWithDisclosures alice [disclosure] (
+        exerciseCmd cid Burn *>
+        createAndExerciseCmd (Helper alice) (ReadSecret cid)
+      )
+    secret === "42"

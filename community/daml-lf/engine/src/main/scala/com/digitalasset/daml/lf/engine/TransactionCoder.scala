@@ -7,7 +7,8 @@ package engine
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.Ref.{Name, Party}
 import com.digitalasset.daml.lf.data.{BackStack, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.transaction.TransactionOuterClass.Node.NodeTypeCase
+import com.digitalasset.daml.lf.testing.snapshot.Snapshot
+import com.digitalasset.daml.lf.testing.snapshot.Snapshot.Node.NodeTypeCase
 import com.digitalasset.daml.lf.transaction.{
   ContractInstanceCoder,
   CreationTime,
@@ -54,7 +55,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     *   decoded transaction
     */
   private[lf] def decodeTransaction(
-      protoTx: proto.Transaction
+      protoTx: Snapshot.Transaction
   ): Either[DecodeError, VersionedTransaction] =
     ensuresNoUnknownFieldsThenDecode(protoTx)(internal.decodeTransaction)
 
@@ -68,7 +69,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     */
   private[lf] def encodeTransaction(
       tx: VersionedTransaction
-  ): Either[EncodeError, proto.Transaction] =
+  ): Either[EncodeError, Snapshot.Transaction] =
     internal.encodeTransaction(tx)
 
   private[engine] object internal {
@@ -160,11 +161,11 @@ class TransactionCoder(allowNullCharacters: Boolean) {
         node: Node,
     ) = {
       val nodeBuilder =
-        proto.Node.newBuilder().setNodeId(encodeNodeId(nodeId))
+        Snapshot.Node.newBuilder().setNodeId(encodeNodeId(nodeId))
 
       node match {
         case Node.Rollback(children) =>
-          val builder = proto.Node.Rollback.newBuilder()
+          val builder = Snapshot.Node.Rollback.newBuilder()
           children.foreach(id => discard(builder.addChildren(encodeNodeId(id))))
           Right(nodeBuilder.setRollback(builder).build())
 
@@ -214,7 +215,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeFetch(
         node: Node.Fetch
-    ): Either[EncodeError, proto.Node.Fetch] = {
+    ): Either[EncodeError, Snapshot.Node.Fetch] = {
       val version = node.version
       val maintainers = node.keyOpt.fold(Set.empty[Party])(_.maintainers)
       val signatories = node.signatories
@@ -224,7 +225,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       val non_maintainer_signatories = signatories -- maintainers
       val non_signatory_stakeholders = stakeholders -- signatories
 
-      val builder = proto.Node.Fetch.newBuilder()
+      val builder = Snapshot.Node.Fetch.newBuilder()
       discard(builder.setContractId(node.coid.toBytes.toByteString))
       discard(builder.setPackageName(node.packageName))
       discard(builder.setTemplateId(ValueCoder.encodeIdentifier(node.templateId)))
@@ -262,8 +263,8 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeExercise(
         node: Node.Exercise
-    ): Either[EncodeError, proto.Node.Exercise] = {
-      val builder = proto.Node.Exercise.newBuilder()
+    ): Either[EncodeError, Snapshot.Node.Exercise] = {
+      val builder = Snapshot.Node.Exercise.newBuilder()
       val fetch = Node.Fetch(
         coid = node.targetCoid,
         packageName = node.packageName,
@@ -325,7 +326,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def encodeQueryByKey(
         node: Node.QueryByKey
-    ): Either[EncodeError, proto.Node.QueryByKey] =
+    ): Either[EncodeError, Snapshot.Node.QueryByKey] =
       for {
         _ <- Either.cond(
           node.version >= SerializationVersion.minContractKeys,
@@ -337,7 +338,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
           (),
           EncodeError("non exhaustive query by key node must have at least one contract id"),
         )
-        builder = proto.Node.QueryByKey.newBuilder()
+        builder = Snapshot.Node.QueryByKey.newBuilder()
         _ = discard(builder.setPackageName(node.packageName))
         _ = discard(builder.setTemplateId(ValueCoder.encodeIdentifier(node.templateId)))
         _ = node.result.foreach(cid => discard(builder.addContractId(cid.toBytes.toByteString)))
@@ -396,13 +397,13 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       */
     private[this] def decodeVersionedNode(
         serializationVersion: SerializationVersion,
-        protoNode: proto.Node,
+        protoNode: Snapshot.Node,
     ): Either[DecodeError, (NodeId, Node)] =
       decodeNode(serializationVersion, protoNode)
 
     private[engine] def decodeNode(
         txVersion: SerializationVersion,
-        msg: proto.Node,
+        msg: Snapshot.Node,
     ): Either[DecodeError, (NodeId, Node)] =
       for {
         nodeId <- decodeNodeId(msg.getNodeId)
@@ -423,7 +424,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def decodeRollback(
         nodeVersionStr: String,
-        msg: proto.Node.Rollback,
+        msg: Snapshot.Node.Rollback,
     ) =
       for {
         _ <- Either.cond(
@@ -458,7 +459,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeFetch(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: proto.Node.Fetch,
+        msg: Snapshot.Node.Fetch,
     ): Either[DecodeError, Node.Fetch] =
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
@@ -523,7 +524,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeExercise(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: proto.Node.Exercise,
+        msg: Snapshot.Node.Exercise,
     ): Either[DecodeError, Node.Exercise] =
       for {
         fetch <- decodeFetch(txVersion, nodeVersionStr, msg.getFetch)
@@ -585,7 +586,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     private[this] def decodeQueryByKey(
         txVersion: SerializationVersion,
         nodeVersionStr: String,
-        msg: proto.Node.QueryByKey,
+        msg: Snapshot.Node.QueryByKey,
     ) =
       for {
         nodeVersion <- decodeActionNodeVersion(txVersion, nodeVersionStr)
@@ -630,14 +631,14 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[TransactionCoder] def encodeTransaction(
         transaction: VersionedTransaction
-    ): Either[EncodeError, proto.Transaction] = {
-      val builder = proto.Transaction
+    ): Either[EncodeError, Snapshot.Transaction] = {
+      val builder = Snapshot.Transaction
         .newBuilder()
         .setVersion(SerializationVersion.toProtoValue(transaction.version))
       transaction.roots.foreach(nid => discard(builder.addRoots(encodeNodeId(nid))))
 
       transaction
-        .fold[Either[EncodeError, proto.Transaction.Builder]](
+        .fold[Either[EncodeError, Snapshot.Transaction.Builder]](
           Right(builder)
         ) { case (builderOrError, (nid, _)) =>
           for {
@@ -671,7 +672,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
       SerializationVersion.fromString(vs).left.map(DecodeError)
 
     private[TransactionCoder] def decodeTransaction(
-        protoTx: proto.Transaction
+        protoTx: Snapshot.Transaction
     ): Either[DecodeError, VersionedTransaction] =
       for {
         version <- decodeVersion(protoTx.getVersion)
@@ -680,7 +681,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
 
     private[this] def decodeTransaction(
         txVersion: SerializationVersion,
-        msg: proto.Transaction,
+        msg: Snapshot.Transaction,
     ): Either[DecodeError, VersionedTransaction] = for {
       roots <- msg.getRootsList.asScala
         .foldLeft[Either[DecodeError, BackStack[NodeId]]](Right(BackStack.empty[NodeId])) {

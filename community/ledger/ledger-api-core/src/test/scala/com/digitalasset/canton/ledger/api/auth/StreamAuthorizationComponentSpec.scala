@@ -349,6 +349,7 @@ class StreamAuthorizationComponentSpec
               ),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             )
           ),
           descendingOrder = false,

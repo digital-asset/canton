@@ -53,4 +53,18 @@ object ValidationErrors {
     RequestValidationErrors.InvalidAcsPageToken
       .Reject(message)
       .asGrpcError
+
+  def sizeLimitExceeded(
+      reason: String
+  )(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =
+    RequestValidationErrors.FieldSizeLimitExceeded
+      .Reject(reason)
+      .asGrpcError
+
+  def cardinalityLimitExceeded(
+      reason: String
+  )(implicit errorLoggingContext: ErrorLoggingContext): StatusRuntimeException =
+    RequestValidationErrors.FieldCardinalityLimitExceeded
+      .Reject(reason = reason)
+      .asGrpcError
 }

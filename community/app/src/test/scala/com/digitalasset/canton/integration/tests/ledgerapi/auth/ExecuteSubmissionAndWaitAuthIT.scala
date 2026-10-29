@@ -15,7 +15,8 @@ final class ExecuteSubmissionAndWaitAuthIT
     extends SyncServiceCallAuthTests
     with SubmitDummyPreparedSubmission
     with ExecuteAsAuthTests
-    with ActAsAnyPartyAuthTests {
+    with ActAsAnyPartyAuthTests
+    with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -27,6 +28,11 @@ final class ExecuteSubmissionAndWaitAuthIT
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
+  ): Future[Any] =
+    serviceCallWithAccountId(context, accountId = "")
+
+  override def serviceCallWithAccountId(context: ServiceCallContext, accountId: String)(implicit
+      env: TestConsoleEnvironment
   ): Future[Any] = {
     import env.*
     for {
@@ -35,7 +41,12 @@ final class ExecuteSubmissionAndWaitAuthIT
         getMainActorId,
         context.userId,
       )
-      executeResp <- executeSubmissionAndWait(context.token, context.userId, preparedSubmission)
+      executeResp <- executeSubmissionAndWait(
+        context.token,
+        context.userId,
+        preparedSubmission,
+        accountId,
+      )
     } yield executeResp
 
   }

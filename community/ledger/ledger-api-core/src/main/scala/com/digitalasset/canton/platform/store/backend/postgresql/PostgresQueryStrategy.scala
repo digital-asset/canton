@@ -14,12 +14,16 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
 }
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
+import com.digitalasset.canton.platform.store.backend.postgresql.PostgresQueryStrategy.{
+  handleNowaitException,
+  withAutoCommit,
+}
 import com.digitalasset.canton.platform.store.dao.DatabaseSelfServiceError
 import org.postgresql.util.PSQLException
 
 import java.sql.{Connection, PreparedStatement}
 
-object PostgresQueryStrategy extends QueryStrategy {
+final case class PostgresQueryStrategy(disableMergeAndHashJoins: Boolean) extends QueryStrategy {
   implicit object ArrayByteaToStatement extends ToStatement[Array[Array[Byte]]] {
     override def set(s: PreparedStatement, index: Int, v: Array[Array[Byte]]): Unit =
       s.setObject(index, v)
@@ -58,6 +62,18 @@ object PostgresQueryStrategy extends QueryStrategy {
       connection: Connection
   ): Unit = SQL"SET LOCAL synchronous_commit TO ON".execute()(connection).discard
 
+  override def withMergeAndHashJoinsDisabledForPostgres[T](
+      f: => T
+  )(implicit connection: Connection): T =
+    if (disableMergeAndHashJoins) {
+      SQL"SET LOCAL enable_mergejoin TO OFF".execute().discard
+      SQL"SET LOCAL enable_hashjoin TO OFF".execute().discard
+      val result = f
+      SQL"SET LOCAL enable_mergejoin TO DEFAULT".execute().discard
+      SQL"SET LOCAL enable_hashjoin TO DEFAULT".execute().discard
+      result
+    } else f
+
   override def cleanTable(tableName: String)(implicit connection: Connection): Unit =
     SQL"DELETE FROM #$tableName".execute().discard
 
@@ -90,6 +106,9 @@ object PostgresQueryStrategy extends QueryStrategy {
         )
     }(connection, errorLoggingContext.noTracingLogger)
 
+}
+
+object PostgresQueryStrategy {
   def handleNowaitException[T](t: => T)(uponLockNotAvailable: => T): T =
     try {
       t

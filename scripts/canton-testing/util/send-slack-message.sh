@@ -11,7 +11,7 @@
 
 set -eu -o pipefail
 
-data="$(jo text="$1")"
+data="$(jq -n --arg text "$1" '{text: $text}')"
 
 if [[ -n $SLACK_CHANNEL ]] ; then
   curl -s -S -X POST -H 'Content-type: application/json' \

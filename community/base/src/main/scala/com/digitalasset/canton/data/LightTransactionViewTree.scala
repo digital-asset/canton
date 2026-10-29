@@ -158,21 +158,23 @@ object LightTransactionViewTree
   )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.LightTransactionViewTree)(
-      supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.LightTransactionViewTree)(
+      supportedProtoVersionPVV(_)((pvv, context, proto) => fromProtoV30(pvv, context)(proto)),
       _.toProtoV30,
     ),
-    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.transparency)(
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.transparencyAndCiphertextId)(
       v31.LightTransactionViewTree
     )(
-      supportedProtoVersion(_)((context, proto) => fromProtoV31(context)(proto)),
+      supportedProtoVersionPVV(_)((pvv, context, proto) => fromProtoV31(pvv, context)(proto)),
       _.toProtoV31,
     ),
   )
 
   // From v`transparency` onwards, ciphertext IDs are used.
   private val rpvCiphertextIdEncryption =
-    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.transparency)
+    LightTransactionViewTree.protocolVersionRepresentativeFor(
+      ProtocolVersion.transparencyAndCiphertextId
+    )
 
   final case class InvalidLightTransactionViewTree(message: String)
       extends RuntimeException(message)
@@ -202,7 +204,8 @@ object LightTransactionViewTree
     ) {}.validated
 
   private def fromProtoV30(
-      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion)
+      pvv: ProtocolVersionValidation,
+      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion),
   )(
       protoT: v30.LightTransactionViewTree
   ): ParsingResult[LightTransactionViewTree] =
@@ -213,6 +216,7 @@ object LightTransactionViewTree
         protocolVersion,
       ) = context
       tree <- GenTransactionTree.fromProtoV30(
+        pvv,
         (GenTransactionTreeDeserializationContext(hashOps, synchronizerLimits), protocolVersion),
         protoTree,
       )
@@ -220,7 +224,7 @@ object LightTransactionViewTree
         .validateLengthThen(
           protoT.subviewHashesAndKeys,
           "subview_hashes_and_keys",
-          ProtocolVersionValidation.PV(protocolVersion),
+          pvv,
           ProtoValidation.MaxCollectionSize,
         ) { case (v30.ViewHashAndKey(viewHashT, keyT), _) =>
           for {
@@ -243,7 +247,8 @@ object LightTransactionViewTree
 
   @unused
   private def fromProtoV31(
-      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion)
+      pvv: ProtocolVersionValidation,
+      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion),
   )(
       protoT: v31.LightTransactionViewTree
   ): ParsingResult[LightTransactionViewTree] =
@@ -254,6 +259,7 @@ object LightTransactionViewTree
         protocolVersion,
       ) = context
       tree <- GenTransactionTree.fromProtoV30(
+        pvv,
         (GenTransactionTreeDeserializationContext(hashOps, synchronizerLimits), protocolVersion),
         protoTree,
       )
@@ -261,7 +267,7 @@ object LightTransactionViewTree
         .validateLengthThen(
           protoT.subviewKeysByCiphertextId,
           "subview_keys_by_ciphertext_id",
-          ProtocolVersionValidation.PV(protocolVersion),
+          pvv,
           ProtoValidation.MaxCollectionSize,
         ) { case (v31.CiphertextIdAndKey(ciphertextIdT, indexT, keyT), _) =>
           for {

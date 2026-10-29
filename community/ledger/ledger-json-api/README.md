@@ -64,6 +64,31 @@ Example:
 jwt.token.eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJhdWQiOm51bGwsImV4cCI6bnVsbCwiaXNzIjpudWxsLCJzY29wZSI6ImRhbWxfbGVkZ2VyX2FwaSIsInN1YiI6InRlc3RfNDAyYTNhYmYtMGQwNC00Yzg4LWE3ZjEtNDQ2NGFiYmFjMzZjIn0.wNx9G2u-N2R1KZYaJTS5n9lTyhL9GwsgQYQHrUDIL2c, daml.ws.auth)
 ```
 
+For websocket endpoints only, the token can also be passed in a cookie named `jwt.token`, as an alternative to
+passing it in `Sec-WebSocket-Protocol` for browser clients that cannot set the `Authorization` header.
+The `Sec-WebSocket-Protocol` header has a risk of being exposed in logs, because it is not redacted by default by
+e.g. network proxies. The token is looked up in this order: `Authorization` header, `Sec-WebSocket-Protocol`
+header, `jwt.token` cookie. Regular HTTP endpoints ignore the cookie.
+
+Cookie authentication is disabled unless the participant operator lists the allowed web application origins in
+`websocket-config.cookie-auth-allowed-origins`. A cookie-authenticated handshake whose `Origin` header is not in
+the list (or is missing / `null`) is refused with `403 Forbidden`, which prevents cross-site websocket hijacking.
+
+The server always selects the `daml.ws.auth` subprotocol in its handshake response, so the client must still offer it in
+`Sec-WebSocket-Protocol` (without the `jwt.token.` element); browsers otherwise reject the handshake because the server
+selected a subprotocol that was not offered.
+
+Example:
+```
+Sec-WebSocket-Protocol: daml.ws.auth
+Cookie: jwt.token=eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJhdWQiOm51bGwsImV4cCI6bnVsbCwiaXNzIjpudWxsLCJzY29wZSI6ImRhbWxfbGVkZ2VyX2FwaSIsInN1YiI6InRlc3RfNDAyYTNhYmYtMGQwNC00Yzg4LWE3ZjEtNDQ2NGFiYmFjMzZjIn0.wNx9G2u-N2R1KZYaJTS5n9lTyhL9GwsgQYQHrUDIL2c
+```
+
+or, from a browser:
+```javascript
+new WebSocket("wss://<host>/v2/state/active-contracts", ["daml.ws.auth"])
+```
+
 # Errors
 
 When applicable, the endpoint returns an error in JSON format. The error is also reflected in status of a response (4xx, 5xx).

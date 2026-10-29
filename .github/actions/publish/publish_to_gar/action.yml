@@ -1,0 +1,27 @@
+name: Publish Libraries to Google Artifact Registry
+description: Publish Canton libraries to Google Artifact Registry
+
+inputs:
+  gcloud_service_key:
+    required: true
+    description: GCP service key for authentication
+  release_suffix:
+    required: true
+    description: Release suffix (version string)
+
+runs:
+  using: composite
+  steps:
+    - name: Setup GCP credentials for GAR
+      run: |
+        key=$(mktemp)
+        echo "${{ inputs.gcloud_service_key }}" > $key
+        echo "GOOGLE_CREDENTIALS_FILE=$key" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Publish libraries to Google Artifact Registry
+      run: .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh publish
+      shell: bash
+      env:
+        FAIL_ON_ERROR_IN_OUTPUT: "false"
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}

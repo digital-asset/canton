@@ -77,6 +77,13 @@ jobs:
           echo "CANTON_TEST_EXTERNAL_PARTIES=true" >> "$GITHUB_ENV"
           echo "Canton will use external parties for capable tests"
 
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
       - name: Run Ordinary Tests
         uses: ./.github/actions/test/run_ordinary_tests
         with:

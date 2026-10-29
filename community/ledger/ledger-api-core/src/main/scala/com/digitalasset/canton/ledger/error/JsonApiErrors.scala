@@ -62,4 +62,28 @@ object JsonApiErrors extends JsonApiErrorGroup {
             s"The number of matching elements ($value) is greater than the node limit ($limit)."
         )
   }
+
+  @Explanation(
+    """This error occurs when a websocket client authenticates with the JWT cookie, but the `Origin` header of the
+      |request is missing, is the opaque `null` origin, or is not listed in
+      |'canton.participants.<participant-id>.http-ledger-api.websocket-config.cookie-auth-allowed-origins'.
+      |Browsers attach cookies to websocket handshakes started by any web site, so the check prevents cross-site
+      |websocket hijacking. The exact reason is logged on the participant, but not given to the client for
+      |security reasons."""
+  )
+  @Resolution(
+    """Send the token in the `Authorization` header or in the `Sec-WebSocket-Protocol` header instead, or ask the
+      |participant operator to add the origin of the web application to 'cookie-auth-allowed-origins'."""
+  )
+  object CookieAuthOriginNotAllowed
+      extends ErrorCode(
+        id = "JSON_API_COOKIE_AUTH_ORIGIN_NOT_ALLOWED",
+        ErrorCategory.InsufficientPermission,
+      ) {
+    final case class Reject(override val cause: String)(implicit
+        errorLogger: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = s"Websocket cookie authentication rejected: $cause"
+        )
+  }
 }

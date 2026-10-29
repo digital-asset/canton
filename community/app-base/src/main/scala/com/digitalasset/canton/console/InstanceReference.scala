@@ -211,7 +211,7 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 
   @Help.Summary("Access the local nodes metrics")
   @Help.Group("Metrics")
-  object metrics {
+  object metrics extends Helpful {
 
     private def filterByNodeAndAttribute(
         attributes: Map[String, String]
@@ -1136,6 +1136,10 @@ abstract class SequencerReference(
         |- for each member when they were registered and whether they are enabled
         |- a list of clients for each member, their last acknowledgement, and whether they are
         |  enabled
+        |Members that are not registered yet are not included: those that only had traffic
+        |purchased for them, and those disabled before their registration. As they have no
+        |events, they do not affect pruning. Use `traffic_control.traffic_state_of_members`
+        |to inspect their traffic.
         """
     )
     def status(): SequencerPruningStatus =

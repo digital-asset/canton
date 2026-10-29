@@ -207,42 +207,43 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
       .discard
 
     propose(to)
-    to.synchronizers.disconnect(daName)
-    propose(from)
+    whileDisconnected(to) {
+      propose(from)
 
-    logOperationStep("party replication")(
-      "proposals are sent, synchronizing...",
-      level = Level.DEBUG,
-    )
+      logOperationStep("party replication")(
+        "proposals are sent, synchronizing...",
+        level = Level.DEBUG,
+      )
 
-    File.usingTemporaryFile() { file =>
-      clue("party replication")(s"exporting acs for $party from ${from.id}") {
-        from.parties.export_party_acs(
-          party = party,
-          synchronizerId = daId,
-          targetParticipantId = to.id,
-          beginOffsetExclusive = fromLedgerEnd,
-          exportFilePath = file.canonicalPath,
+      File.usingTemporaryFile() { file =>
+        clue("party replication")(s"exporting acs for $party from ${from.id}") {
+          from.parties.export_party_acs(
+            party = party,
+            synchronizerId = daId,
+            targetParticipantId = to.id,
+            beginOffsetExclusive = fromLedgerEnd,
+            exportFilePath = file.canonicalPath,
+          )
+        }
+
+        to.parties.import_party_acs(daId, Some(party), file.canonicalPath)
+
+        logOperationStep("party replication")(
+          s"Done replicating party $party from ${from.id} to ${to.id}; reconnecting ${to.id} to the synchronizer"
         )
+
+        to.synchronizers.reconnect(daName)
+
+        logOperationStep("party replication")(
+          s"Clearing onboarding flag for $party on ${to.id}"
+        )
+
+        val now = environment.clock.now
+        val minimumConfirmingTime: CantonTimestamp = now
+          .add(decisionTimeout.asJava)
+
+        workerStatus.put(to.id, PartyConfirming(party, minimumConfirmingTime))
       }
-
-      to.parties.import_party_acs(daId, Some(party), file.canonicalPath)
-
-      logOperationStep("party replication")(
-        s"Done replicating party $party from ${from.id} to ${to.id}; reconnecting ${to.id} to the synchronizer"
-      )
-
-      to.synchronizers.reconnect(daName)
-
-      logOperationStep("party replication")(
-        s"Clearing onboarding flag for $party on ${to.id}"
-      )
-
-      val now = environment.clock.now
-      val minimumConfirmingTime: CantonTimestamp = now
-        .add(decisionTimeout.asJava)
-
-      workerStatus.put(to.id, PartyConfirming(party, minimumConfirmingTime))
     }
   }
 
@@ -263,6 +264,19 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
 
     clue("party offboarding")(s"party $party is hosted on ${from.id}") {
       hostingParticipants(from, party).map { case (id, _) => id } should contain(from.id)
+    }
+
+    // The onboarding flag is cleared automatically by `from` in the background. Proposing the removal
+    // concurrently can lead to a serial mismatch that silently rejects the removal, so wait for the
+    // clearance to be observed by the party owner first.
+    clue("party offboarding")(s"onboarding flag of $party on ${from.id} is cleared") {
+      eventually(timeUntilSuccess = topologyChangeTimeout.asFiniteApproximation) {
+        partyOwner.topology.party_to_participant_mappings
+          .list(synchronizerId = daId, filterParty = party.filterString)
+          .flatMap(_.item.participants)
+          .filter(_.participantId == from.id)
+          .map(_.onboarding) shouldBe Seq(false)
+      }
     }
 
     partyOwner.topology.party_to_participant_mappings
@@ -314,18 +328,36 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
         topology point of view, the party is not hosted on `from` anymore.
      */
 
-    from.synchronizers.disconnect(daName)
+    whileDisconnected(from) {
+      val contracts = from.ledger_api.state.acs
+        .active_contracts_of_party(party, activeAtOffsetO = Some(partyRemovedOffset))
+      val cids = contracts.map(c => LfContractId.fromString(c.createdEvent.value.contractId).value)
 
-    val contracts = from.ledger_api.state.acs
-      .active_contracts_of_party(party, activeAtOffsetO = Some(partyRemovedOffset))
-    val cids = contracts.map(c => LfContractId.fromString(c.createdEvent.value.contractId).value)
+      from.repair.purge(daName, cids)
+      from.synchronizers.reconnect(daName)
 
-    from.repair.purge(daName, cids)
-    from.synchronizers.reconnect(daName)
+      workerStatus.put(from.id, Idle(environment.clock.now))
 
-    workerStatus.put(from.id, Idle(environment.clock.now))
+      logOperationStep("party offboarding")(s"Done offboarding party $party from ${from.id}")
+    }
+  }
 
-    logOperationStep("party offboarding")(s"Done offboarding party $party from ${from.id}")
+  /** Runs `action` while `participant` is disconnected from the synchronizer, and always reconnects
+    * it afterwards.
+    *
+    * Reconnecting in a `finally` matters because a failing chaos operation does not fail the test:
+    * the scheduler only logs the exception and keeps going. Without it, a failure in `action` would
+    * leave the participant disconnected for the rest of the run, and the test would later fail on
+    * the final pings instead of at the actual error.
+    */
+  private def whileDisconnected(
+      participant: LocalParticipantReference
+  )(action: => Unit)(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+
+    participant.synchronizers.disconnect(daName)
+    try action
+    finally participant.synchronizers.reconnect(daName).discard
   }
 
   private def hostingParticipants(

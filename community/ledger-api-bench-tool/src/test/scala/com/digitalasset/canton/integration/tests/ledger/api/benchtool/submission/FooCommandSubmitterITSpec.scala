@@ -65,7 +65,7 @@ class FooCommandSubmitterITSpec
       )
 
       val (apiServices, allocatedParties, fooSubmission) =
-        benchtoolFooSubmissionFixture(config).futureValue
+        benchtoolFooSubmissionFixture(config, maxInFlightCommands = 10).futureValue
 
       allocatedParties.divulgees shouldBe empty
 

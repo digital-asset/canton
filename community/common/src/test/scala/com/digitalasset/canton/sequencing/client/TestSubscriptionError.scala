@@ -23,8 +23,8 @@ object TestSubscriptionError {
 
   val retryRule: CheckedSubscriptionErrorRetryPolicy[TestSubscriptionError] =
     new CheckedSubscriptionErrorRetryPolicy[TestSubscriptionError] {
-      override protected def retryInternal(error: TestSubscriptionError, receivedItems: Boolean)(
-          implicit traceContext: TraceContext
+      override protected def retryInternal(error: TestSubscriptionError)(implicit
+          traceContext: TraceContext
       ): Boolean = error match {
         case RetryableError => true
         case UnretryableError => false

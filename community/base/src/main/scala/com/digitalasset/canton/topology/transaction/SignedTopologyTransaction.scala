@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{TopologyLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.{SynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.nonempty.NonEmptyReturningOps.*
@@ -227,7 +227,10 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
 }
 
 object SignedTopologyTransaction
-    extends VersioningCompanion[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+    extends VersioningCompanionContext[
+      SignedTopologyTransaction[TopologyChangeOp, TopologyMapping],
+      TopologyTransactionDeserializationContext,
+    ]
     with PrettyPrintingCompanion[
       SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]
     ] {
@@ -253,7 +256,7 @@ object SignedTopologyTransaction
     SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.SignedTopologyTransaction
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -421,6 +424,7 @@ object SignedTopologyTransaction
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      context: TopologyTransactionDeserializationContext,
       transactionP: v30.SignedTopologyTransaction,
   ): ParsingResult[GenericSignedTopologyTransaction] = {
     val v30.SignedTopologyTransaction(
@@ -429,32 +433,51 @@ object SignedTopologyTransaction
       isProposal,
       multiTransactionSignaturesPO,
     ) = transactionP
+    val topologyLimits = context.topologyLimits
+    val maxSignatures = ValidationParam(
+      ProtocolVersion.nextValidationBoundPV -> topologyLimits.maxSignaturesPerTransaction
+    )
     for {
-      transaction <- TopologyTransaction.fromByteString(pvv, txBytes)
+      // An entry needs at least one signature, so the signature bound also bounds the entries.
+      multiTransactionSignaturesP <- ProtoValidation.validateLength(
+        multiTransactionSignaturesPO,
+        "multi_transaction_signatures",
+        pvv,
+        maxSignatures,
+      )
+      signatureCount = signaturesP.size + multiTransactionSignaturesP.map(_.signatures.size).sum
+      _ <- ProtoValidation.validateCondition(pvv, maxSignatures)(
+        max => signatureCount <= max.unwrap,
+        max =>
+          ProtoDeserializationError.InvariantViolation(
+            "signatures",
+            s"$signatureCount single and multi transaction signatures exceed the maximum of ${max.unwrap}",
+          ),
+      )
+      transaction <- TopologyTransaction.fromByteString(pvv, context, txBytes)
 
       singleSignatures <- ProtoValidation
         .validateLengthThen(
           signaturesP,
           "signatures",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          maxSignatures,
         )((element, _) => Signature.fromProtoV30(element))
         .map(
           _.map(SingleTransactionSignature(transaction.hash, _))
         )
 
-      multiTransactionHashes <- ProtoValidation
-        .validateLength(
-          multiTransactionSignaturesPO,
-          "multi_transaction_signatures",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )
-        .flatMap(
-          _.flatTraverse(
-            MultiTransactionSignature.fromProtoV30(pvv, _, transaction.hash).map(_.forgetNE)
+      multiTransactionHashes <- multiTransactionSignaturesP.flatTraverse(
+        MultiTransactionSignature
+          .fromProtoV30(
+            pvv,
+            maxSignatures,
+            topologyLimits.maxTransactionHashesPerMultiSignature,
+            _,
+            transaction.hash,
           )
-        )
+          .map(_.forgetNE)
+      )
 
       allSignaturesWithDuplicates <- NonEmpty
         .from(singleSignatures ++ multiTransactionHashes)
@@ -482,11 +505,15 @@ object SignedTopologyTransaction
       getByteString: GetResult[ByteString]
   ): GetResult[GenericSignedTopologyTransaction] =
     GetResult { r =>
-      fromTrustedByteString(r.<<[ByteString]).valueOr(err =>
+      // Trusted bytes from the node's own store, so the validators pass the content through and
+      // the limits in the context are never read.
+      fromTrustedByteString(TopologyTransactionDeserializationContext(TopologyLimits.default))(
+        r.<<[ByteString]
+      ).valueOr { err =>
         throw new DbSerializationException(
           s"Failed to deserialize SignedTopologyTransaction: $err"
         )
-      )
+      }
     }
 
   implicit def setParameterTopologyTransaction(implicit
@@ -528,7 +555,10 @@ final case class SignedTopologyTransactions[
 }
 
 object SignedTopologyTransactions
-    extends VersioningCompanion[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]]
+    extends VersioningCompanionContext[
+      SignedTopologyTransactions[TopologyChangeOp, TopologyMapping],
+      TopologyTransactionDeserializationContext,
+    ]
     with PrettyPrintingCompanion[
       SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]
     ] {
@@ -538,7 +568,7 @@ object SignedTopologyTransactions
     _.transactions
   )
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.SignedTopologyTransactions
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),
@@ -561,6 +591,7 @@ object SignedTopologyTransactions
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      context: TopologyTransactionDeserializationContext,
       proto: v30.SignedTopologyTransactions,
   ): ParsingResult[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
     for {
@@ -568,12 +599,15 @@ object SignedTopologyTransactions
         proto.signedTransactions,
         "signed_transactions",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(
+          ProtocolVersion.nextValidationBoundPV -> context.topologyLimits.maxTransactionsPerBroadcast
+        ),
       )
       transactions <- signedTransactionsP
         .traverse(
           SignedTopologyTransaction.fromByteString(
             pvv,
+            context,
             _,
           )
         )

@@ -5,9 +5,14 @@ package com.digitalasset.canton.integration.util
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.console.{InstanceReference, SequencerReference}
+import com.digitalasset.canton.console.{
+  InstanceReference,
+  LocalSequencerReference,
+  SequencerReference,
+}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 
 import scala.concurrent.duration.DurationInt
@@ -30,6 +35,19 @@ trait OnboardsNewSequencerNode {
     }
   }
 
+  /** Local sequencers expose their type through their config. For remote sequencers, we fall back
+    * to whether the test registered the BFT sequencer plugin.
+    */
+  private def isBftSequencer(sequencer: SequencerReference): Boolean =
+    sequencer match {
+      case local: LocalSequencerReference =>
+        local.config.sequencer match {
+          case _: SequencerConfig.BftSequencer => true
+          case _ => false
+        }
+      case _ => bftSequencerPlugin.isDefined
+    }
+
   protected def onboardNewSequencer(
       synchronizerId: PhysicalSynchronizerId,
       newSequencer: SequencerReference,
@@ -39,7 +57,7 @@ trait OnboardsNewSequencerNode {
     import env.*
 
     // Split into 2 branches for nicer documentation
-    if (bftSequencerPlugin.isDefined) {
+    if (isBftSequencer(newSequencer)) {
       // user-manual-entry-begin: DynamicallyOnboardBftSequencer
       bootstrap
         .onboard_new_sequencer(

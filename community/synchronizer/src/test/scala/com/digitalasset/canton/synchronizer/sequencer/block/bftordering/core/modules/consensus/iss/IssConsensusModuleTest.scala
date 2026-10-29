@@ -245,6 +245,54 @@ class IssConsensusModuleTest
         }
       }
 
+      "inform availability of the new topology even if the node is blacklisted" in {
+        val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+        val latestCompletedEpochFromStore = EpochStore.Epoch(
+          EpochInfo(
+            EpochNumber.First,
+            BlockNumber.First,
+            epochLength,
+            TopologyActivationTime(aTimestamp),
+          ),
+          Seq.empty,
+        )
+        when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
+          .thenReturn(() => Some(latestCompletedEpochFromStore))
+        when(epochStore.startEpoch(any[EpochInfo])(anyTraceContext)).thenReturn(() => ())
+
+        val availabilityBuffer =
+          new ArrayBuffer[Availability.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val (context, consensus) =
+          createIssConsensusModule(
+            availabilityModuleRef = fakeRecordingModule(availabilityBuffer),
+            p2pNetworkOutModuleRef = fakeIgnoringModule,
+            epochStore = epochStore,
+            preConfiguredInitialEpochState = Some(newEpochState(latestCompletedEpochFromStore, _)),
+            maybeRetransmissionsManager =
+              Some(mock[RetransmissionsManager[ProgrammableUnitTestEnv]]),
+          )
+        implicit val ctx: ContextType = context
+
+        val newMembership = Membership(
+          myId,
+          OrderingTopology.forTesting(
+            nodes = allIds.toSet,
+            activationTime = TopologyActivationTime(aTimestamp.immediateSuccessor),
+          ),
+          leaders = otherIds,
+          blacklistedNodes = Seq(myId),
+        )
+
+        consensus.receive(Consensus.Start)
+        consensus.receive(NewEpochMembership(EpochNumber(1L), newMembership, failingCryptoProvider))
+        context.runPipedMessagesAndReceiveOnModule(consensus)
+
+        availabilityBuffer.toSeq.collect {
+          case Availability.Consensus.UpdateTopology(membership, _, _) =>
+            membership
+        } should contain(newMembership)
+      }
+
       "start segment modules only once after restart with delayed Start signal" in {
         val segmentModuleMock = mock[ModuleRef[ConsensusSegment.Message]]
         val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
@@ -312,6 +360,7 @@ class IssConsensusModuleTest
 
         val (context, consensus) =
           createIssConsensusModule(
+            availabilityModuleRef = fakeIgnoringModule,
             p2pNetworkOutModuleRef = fakeIgnoringModule,
             segmentModuleFactoryFunction = _ => segmentModuleMock,
             epochStore = epochStore,
@@ -864,6 +913,7 @@ class IssConsensusModuleTest
           val epochLength = DefaultEpochLength
 
           val (context, consensus) = createIssConsensusModule(
+            availabilityModuleRef = fakeIgnoringModule,
             p2pNetworkOutModuleRef = fakeRecordingModule(p2pNetworkOutputBuffer),
             outputModuleRef = fakeRecordingModule(outputBuffer),
           )
@@ -1308,6 +1358,7 @@ class IssConsensusModuleTest
           )
           val (context, consensus) =
             createIssConsensusModule(
+              availabilityModuleRef = fakeIgnoringModule,
               p2pNetworkOutModuleRef = fakeIgnoringModule,
               preConfiguredInitialEpochState = Some { context =>
                 newEpochState(currentEpochState, context)
@@ -1580,6 +1631,7 @@ class IssConsensusModuleTest
             metrics,
             loggerFactory,
             logEndOfEpochProgress = true,
+            consensusExtraAllowedRetransmissionRequestsPerSecond = 0,
             windowSizeForRetransmissionOfCommitCertificates = None,
           )
         ),

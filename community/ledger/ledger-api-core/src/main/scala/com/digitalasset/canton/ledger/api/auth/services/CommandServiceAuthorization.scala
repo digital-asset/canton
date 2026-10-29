@@ -5,13 +5,14 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.command_service.*
 import com.daml.ledger.api.v2.command_service.CommandServiceGrpc.CommandService
+import com.daml.ledger.api.v2.commands.Commands
 import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
-import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.CommandServiceAuthorization.{
   getSubmitAndWaitForReassignmentClaims,
   getSubmitAndWaitForTransactionClaims,
 }
+import com.digitalasset.canton.ledger.api.auth.{RequiredClaims, TrafficAccountAuthorization}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
 import io.grpc.ServerServiceDefinition
@@ -26,6 +27,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final class CommandServiceAuthorization(
     protected val service: CommandService with AutoCloseable,
     private val authorizer: Authorizer,
+    trafficAccountAuthorization: Option[TrafficAccountAuthorization],
 )(implicit executionContext: ExecutionContext)
     extends CommandService
     with ProxyCloseable
@@ -35,14 +37,20 @@ final class CommandServiceAuthorization(
       request: SubmitAndWaitForTransactionRequest
   ): Future[SubmitAndWaitForTransactionResponse] =
     authorizer.rpc(service.submitAndWaitForTransaction)(
-      getSubmitAndWaitForTransactionClaims(request)*
+      (getSubmitAndWaitForTransactionClaims(request) :::
+        debitClaims[SubmitAndWaitForTransactionRequest](request.commands))*
     )(request)
 
   override def submitAndWaitForReassignment(
       request: SubmitAndWaitForReassignmentRequest
   ): Future[SubmitAndWaitForReassignmentResponse] =
     authorizer.rpc(service.submitAndWaitForReassignment)(
-      getSubmitAndWaitForReassignmentClaims(request)*
+      (getSubmitAndWaitForReassignmentClaims(request) :::
+        TrafficAccountAuthorization.requiredClaims[SubmitAndWaitForReassignmentRequest](
+          trafficAccountAuthorization,
+          accountId = request.reassignmentCommands.fold("")(_.accountId),
+          actAs = request.reassignmentCommands.fold(Set.empty[String])(c => Set(c.submitter)),
+        ))*
     )(request)
 
   override def submitAndWait(
@@ -50,13 +58,20 @@ final class CommandServiceAuthorization(
   ): Future[SubmitAndWaitResponse] = {
     val effectiveSubmitters = CommandsValidator.effectiveSubmitters(request.commands)
     authorizer.rpc(service.submitAndWait)(
-      RequiredClaims.submissionClaims(
+      (RequiredClaims.submissionClaims(
         actAs = effectiveSubmitters.actAs,
         readAs = effectiveSubmitters.readAs,
         userIdL = Lens.unit[SubmitAndWaitRequest].commands.userId,
-      )*
+      ) ::: debitClaims[SubmitAndWaitRequest](request.commands))*
     )(request)
   }
+
+  private def debitClaims[Req](commands: Option[Commands]): List[RequiredClaim[Req]] =
+    TrafficAccountAuthorization.requiredClaims[Req](
+      trafficAccountAuthorization,
+      accountId = commands.fold("")(_.accountId),
+      actAs = CommandsValidator.effectiveSubmitters(commands).actAs,
+    )
 
   override def bindService(): ServerServiceDefinition =
     CommandServiceGrpc.bindService(this, executionContext)

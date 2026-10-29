@@ -13,7 +13,8 @@ import com.digitalasset.canton.ledger.api.benchtool.submission.{
 class RandomPartySelecting(
     config: FooSubmissionConfig,
     allocatedParties: AllocatedParties,
-    randomnessProvider: RandomnessProvider,
+    generationRandomnessProvider: RandomnessProvider,
+    submissionRandomnessProvider: RandomnessProvider,
 ) {
 
   private val observersProbability = probabilitiesByPartyIndex(allocatedParties.observers)
@@ -40,14 +41,18 @@ class RandomPartySelecting(
       divulgees = pickParties(divulgeesProbability),
     )
 
-  def nextExtraSubmitter(): List[Party] = pickParties(extraSubmittersProbability)
+  def nextExtraSubmitter(): List[Party] =
+    pickParties(extraSubmittersProbability, submissionRandomnessProvider)
 
-  private def pickParties(probabilities: List[(Party, Double)]): List[Party] =
+  private def pickParties(
+      probabilities: List[(Party, Double)],
+      provider: RandomnessProvider = generationRandomnessProvider,
+  ): List[Party] =
     probabilities
-      .collect { case (party, probability) if randomBoolean(probability) => party }
+      .collect { case (party, probability) if randomBoolean(probability, provider) => party }
 
-  private def randomBoolean(truthProbability: Double): Boolean =
-    randomnessProvider.randomDouble() <= truthProbability
+  private def randomBoolean(truthProbability: Double, provider: RandomnessProvider): Boolean =
+    provider.randomDouble() <= truthProbability
 
   private def probabilitiesByPartyIndex(
       orderedParties: List[Party]

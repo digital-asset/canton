@@ -7,7 +7,13 @@ import com.daml.ledger.api.v2.command_completion_service.{
   GetCompletionsRequest,
   CompletionStreamRequest as GrpcCompletionStreamRequest,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.messages.command.completion.CompletionStreamRequest
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
+  CompletionStreamRequestSizeConfig,
+  GetCompletionByHashRequestSizeConfig,
+  GetCompletionsRequestSizeConfig,
+}
 import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator.GetCompletionsStreamRequest
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.daml.lf.data.Ref
@@ -21,6 +27,7 @@ import java.time.Duration
 class CompletionServiceRequestValidatorTest
     extends AnyWordSpec
     with ValidatorTestUtils
+    with SizeLimitTestUtils
     with MockitoSugar {
   private implicit val noLogging: ErrorLoggingContext = NoLogging
   private val grpcCompletionReq = GrpcCompletionStreamRequest(
@@ -35,6 +42,30 @@ class CompletionServiceRequestValidatorTest
   )
 
   private val validator = CompletionServiceRequestValidator
+
+  private val maxParties = 2
+  private val maxTransactionHashBytes = 32
+  private val sizeLimitsConfigWithLimits = sizeLimitsConfig.copy(
+    publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+      completionStreamRequest = CompletionStreamRequestSizeConfig(
+        partiesSizeLimit = PositiveInt.tryCreate(maxParties)
+      ),
+      getCompletionsRequest = GetCompletionsRequestSizeConfig(
+        partiesSizeLimit = PositiveInt.tryCreate(maxParties)
+      ),
+      getCompletionByHashRequest = GetCompletionByHashRequestSizeConfig(
+        transactionHashSizeLimit = PositiveInt.tryCreate(maxTransactionHashBytes)
+      ),
+    )
+  )
+
+  // the linked message-specific limits take the shared limits
+  private val sizeLimitsConfigWithSharedLimits = LedgerApiSizeLimitsConfig.defaultWithShared(
+    SharedSizeConfig(
+      completionsRequestPartiesSizeLimit = PositiveInt.tryCreate(maxParties),
+      transactionHashBytesSizeLimit = PositiveInt.tryCreate(maxTransactionHashBytes),
+    )
+  )
 
   "CompletionRequestValidation" when {
 
@@ -59,6 +90,19 @@ class CompletionServiceRequestValidatorTest
           metadata = Map.empty,
         )
       }
+
+      def validateCompletionStream(config: LedgerApiSizeLimitsConfig)(numberOfParties: Int) =
+        validator.validateGrpcCompletionStreamRequest(
+          grpcCompletionReq.withParties(parties(numberOfParties))
+        )(noLogging, config)
+
+      cardinalityLimit("parties", limit = maxParties)(
+        validateCompletionStream(sizeLimitsConfigWithLimits)
+      )
+
+      cardinalityLimit("parties", limit = maxParties, limitName = "shared limit")(
+        validateCompletionStream(sizeLimitsConfigWithSharedLimits)
+      )
 
       "accept requests with begin exclusive offset zero" in {
         inside(
@@ -214,6 +258,20 @@ class CompletionServiceRequestValidatorTest
         )
       }
 
+      def validateGetCompletions(config: LedgerApiSizeLimitsConfig)(numberOfParties: Int) =
+        validator.validateGetCompletionsRequest(
+          GetCompletionsRequest(parties(numberOfParties), offsetLong),
+          ledgerEnd,
+        )(noLogging, config)
+
+      cardinalityLimit(field = "parties", limit = maxParties)(
+        validateGetCompletions(sizeLimitsConfigWithLimits)
+      )
+
+      cardinalityLimit(field = "parties", limit = maxParties, limitName = "shared limit")(
+        validateGetCompletions(sizeLimitsConfigWithSharedLimits)
+      )
+
       "accept zero offset (participant begin)" in {
         inside(
           validator.validateGetCompletionsRequest(
@@ -244,6 +302,24 @@ class CompletionServiceRequestValidatorTest
           result shouldBe hash
         }
       }
+
+      def validateHash(config: LedgerApiSizeLimitsConfig)(numberOfBytes: Int) =
+        validator.validateCompletionByHash(hash = bytes(numberOfBytes))(noLogging, config)
+
+      byteSizeLimit(
+        field = "transaction_hash",
+        limit = maxTransactionHashBytes,
+      )(
+        validateHash(sizeLimitsConfigWithLimits)
+      )
+
+      byteSizeLimit(
+        field = "transaction_hash",
+        limit = maxTransactionHashBytes,
+        limitName = "shared limit",
+      )(
+        validateHash(sizeLimitsConfigWithSharedLimits)
+      )
     }
   }
 }

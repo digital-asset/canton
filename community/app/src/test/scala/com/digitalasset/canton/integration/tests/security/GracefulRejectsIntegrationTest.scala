@@ -137,6 +137,7 @@ sealed trait GracefulRejectsIntegrationTest
             customEventFormat = None,
             optTimeout = None,
             tapsMaxPasses = None,
+            accountId = "",
           ),
           participant2.config.clientLedgerApi,
           participant2.adminToken,

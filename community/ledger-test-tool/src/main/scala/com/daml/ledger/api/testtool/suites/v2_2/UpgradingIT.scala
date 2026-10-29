@@ -991,6 +991,7 @@ object UpgradingIT {
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat(subscriptionFilter, party, includeCreatedEventBlobs)),
       streamContinuationToken = None,
+      includeIncompleteReassignments = false,
     )
 
   def txRequest(
@@ -1015,6 +1016,7 @@ object UpgradingIT {
           ),
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
       ),
       descendingOrder = false,

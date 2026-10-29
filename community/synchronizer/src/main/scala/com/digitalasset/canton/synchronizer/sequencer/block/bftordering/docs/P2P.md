@@ -52,7 +52,7 @@ Connection state is split across two files, by concern:
 - **`P2PGrpcConnectionState.State`** (`bindings/p2p/grpc/P2PGrpcConnectionState.scala`) — *identity &
   routing*: the maps `endpointId→nodeId`, `nodeId↔peerSender`, `nodeId→networkRef`,
   `endpointId→networkRef`. This is where the result of authentication is recorded, and where
-  deduplication, consolidation, and equivocation checks live.
+  deduplication, consolidation, and routing consistency checks live.
 
 The **connect worker** that appears repeatedly below is the recursive `FutureUnlessShutdown` loop in
 `P2PGrpcConnectionManager.createPeerSender`: it opens the stream, sends the handshake, **awaits
@@ -126,6 +126,16 @@ service (`createServer`, filters applied in reverse list order):
   promise the connect worker is waiting on. → **A learns B** (the source the *outgoing* path reads,
   §3).
 
+Before reading the advertised endpoint or creating a callback channel,
+`P2PAddAuthTokenHeaderGrpcServerInterceptor` requires the token-authenticated member to be a
+`SequencerId`. Participants and mediators are rejected with `PERMISSION_DENIED`; a missing
+authenticated identity is rejected with `UNAUTHENTICATED`. The standard token interceptor runs
+first (the interceptor list in `BftBlockOrderer.createServer` is applied in reverse order) and uses
+`Contexts.interceptCall` to attach the authenticated context around the downstream interceptor
+invocation. The role check therefore does not depend on thread-local propagation across threads.
+This blocks non-sequencers from triggering reverse authentication; it does not prevent an
+authenticated malicious sequencer from relaying authentication challenges.
+
 So both sides end up with the *peer's* verified `SequencerId`; **which interceptor delivers it
 depends on this node's role for that connection** — the dialer waits on the reverse-flow promise, the
 acceptor reads the standard-flow `Context`. This single fact explains the central asymmetry between
@@ -153,9 +163,9 @@ endpoint header found"). The same advertised endpoint is *also* reused for conne
   `await` fails → §5.3 retry/backoff. The 5s `AuthenticationTimeout` in `P2PGrpcStreamingReceiver`
   guards against a peer that never supplies an id (and prevents auth from blocking shutdown).
 - **Auth-off path.** With no tokens, identity is taken on trust from the `ConnectionOpened` / first
-  frame's `sentBy` (`P2PGrpcStreamingReceiver` backfills the promise). The integrity checks in §5.2
-  (equivocation, `sentBy` match) still apply, but there is no cryptographic proof of identity —
-  hence the config comment to keep auth on in production (or rely deliberately on mTLS alone).
+  frame's `sentBy` (`P2PGrpcStreamingReceiver` backfills the promise). The `sentBy` consistency
+  check in §5.2 still applies, but there is no cryptographic proof of identity — hence the config
+  comment to keep auth on in production (or rely deliberately on mTLS alone).
 
 ---
 
@@ -318,6 +328,9 @@ once identity is known (§2):
   **single** `P2PNetworkRef`, preferring one already bound to the `nodeId` (typically the incoming
   connection), and returns the now-orphaned refs to `close()`. This is why a node may briefly hold
   two refs and then drop one — visible in the `BeforeAndAfter` state logs.
+  Ref consolidation is independent of sender selection: an outgoing ref can survive even when an
+  incoming sender wins, because sending through the ref resolves the currently registered sender.
+  The ref therefore does not carry connection direction; the winning `PeerSender` does.
 
 **Convergence is probabilistic, not deterministic.** The referee is purely local first-come; there
 is **no global tiebreaker** (e.g. "the lower `SequencerId` keeps its outgoing connection"). For a
@@ -330,53 +343,29 @@ connect delay ≤500ms + jittered backoff, §5.3), which desynchronizes the next
 authenticates first and both sides agree. A split decision is therefore a brief oscillation, not a
 deadlock — *provided the closes actually propagate* (when they may not, see §5.6).
 
-### 5.2 Identity equivocation — the security boundary
+### 5.2 Endpoint identity is not pinned
 
-<!-- TODO(#34191) review once addressed -->
+Authentication verifies the peer's identity, but the `endpointId→nodeId` mapping is a runtime
+routing association, **not** a security binding between an endpoint and one permanent node identity.
+After successful authentication, an endpoint may be reassociated from node A to node B; the mapping
+is updated without rejecting the connection, warning, or recording endpoint identity equivocation.
+The persisted node ID is also not used to pin identity across restarts (§5.4). This is the intended
+behavior: P2P does not perform endpoint-level impersonation checks.
 
-Authentication established *who* a peer is; this map keeps that binding honest. The
-`endpointId→nodeId` map is **intended to be monotonic**: once set it should not be silently
-re-pointed. `State.associateP2PEndpointIdToBftNodeId` currently rejects only self-association; it
-also defines a separate identity-equivocation error for endpoint reassociation, but **that check is
-currently disabled**, so a re-authentication to a *different* peer node id is silently
-accepted and the mapping is updated — the "monotonic" property is thus an intent, not an enforced
-invariant, until the check is re-enabled:
+The association-level restriction is self-association: `State.associateP2PEndpointIdToBftNodeId`
+rejects associating an endpoint to this node's own `BftNodeId`. The check runs before reassociation,
+so even an endpoint already mapped to another peer cannot be changed to point back to this node.
+This is a misconfiguration guard, not an impersonation check. The refusal leaves an existing
+association untouched until the connection teardown, which clears the affected runtime state and
+closes the network ref through the normal `shutdownConnection` path. That teardown also reports
+disconnection for the endpoints returned by the state cleanup, balancing earlier connection
+notifications and allowing configured endpoints to reconnect.
 
-- `P2PEndpointIdAlreadyAssociated`: an endpoint already bound to node A now (re)authenticates as
-  node B ("possible impersonation attempt"): logged at WARN, marks the `security.noncompliant`
-  metric (`emitIdentityEquivocation`), and the sender is failed. Note that this check is currently
-  **disabled**.
-- `CannotAssociateP2PEndpointIdsToSelf`: a peer authenticates as *this* node, i.e. a configured
-  endpoint points back to us. This check is evaluated **before** the existing-association case
-  above: while the impersonation check is disabled, re-association is permitted, so an endpoint
-  already bound to a peer (e.g. restored from the `P2PEndpointsStore` at startup) and later
-  resolving to this node would otherwise be silently re-pointed to *this* node instead of being
-  refused. The refusal leaves any existing association untouched, so that the shutdown below can
-  still clean up that peer's connection state consistently **by node id**, instead of closing a
-  network ref possibly shared with the peer's other endpoints while leaving the peer pointing at it.
-  This is a **misconfiguration, not equivocation**: it is still logged at
-  WARN, so that the operator fixes the configuration. The connection is torn down through the same path as an
-  admin disconnect (`shutdownConnection(endpointId)`, i.e. clear associations + close the network
-  ref), which stops the connection-managing actor and hence its unbounded `Initialize` retries, so
-  the warning is emitted once per connection attempt rather than every couple of seconds.
-  `shutdownConnection` also notifies `onDisconnect` for **every endpoint** returned by the state
-  teardown (`shutdownConnectionAndReturnPeerSender` now returns them): either just the requesting
-  endpoint when the refusal happens before `addSenderIfMissing` (so the earlier `onConnect` is
-  balanced), or every endpoint that shared the torn-down sender in the pre-associated case (a
-  single sender can back several endpoints via `consolidateNetworkRefs`). The notification is
-  idempotent, guarded by `if (connectedP2PEndpointIds.remove(...))` in the out-module. The teardown
-  also **clears the endpoint-to-node mappings** for the torn-down node (the state's `Right(bftNodeId)`
-  branch, when `clearNetworkRefAssociations = true`, filters `p2pEndpointIdToBftNodeId`); otherwise
-  the refused association from the pre-associated case (left in place by the check itself so that
-  the shutdown can look up the node consistently) would remain and `isDefined(endpointId)` would
-  still report true, causing a subsequent admin re-add of the same corrected endpoint to skip
-  reconnecting. With the mapping cleared, if the endpoint is later fixed and reconnected or
-  re-added, it is dialed again like any other endpoint.
-
-A separate check guards the data path: `P2PGrpcStreamingReceiver.validateNodeId` drops any frame
-whose `sentBy` disagrees with the authenticated `SequencerId` (metric
-`WrongGrpcMessageSentByBftNodeId`) and fails the stream. (Payload *signatures* are still verified
-later, downstream, against the inner signed message's `from` field.)
+A separate data-path check guards message consistency: `P2PGrpcStreamingReceiver.validateNodeId`
+drops any frame whose `sentBy` disagrees with the authenticated `SequencerId` (metric
+`WrongGrpcMessageSentByBftNodeId`) and fails the stream. This does not pin an endpoint to that
+identity. Payload *signatures* are verified later, downstream, against the inner signed message's
+`from` field.
 
 ### 5.3 Retries — two independent loops
 
@@ -451,12 +440,11 @@ all under `P2PConnectionManagementConfig`.
   The stored `node_id` is deliberately *ignored* when (re)establishing outgoing connectivity, both on
   this path and in `connectInitialNodes`: connections are always ensured by **endpoint**, because the
   peer must re-authenticate (§2) before it is addressable by node id again. Asserting a stored
-  association upfront would register the network ref under the node id, which
-  `addNetworkRefIfMissing` treats as *incoming* (`isOutgoingConnection = false`), and would make the
-  endpoint report `Authenticated` as soon as its gRPC channel is up but before any authentication —
+  association upfront would register the network ref under the node id and would make the
+  endpoint report `Authenticated` as soon as its gRPC channel is up but before any authentication,
   inflating `maxNodesContemporarilyAuthenticated` and potentially starting Availability/Consensus
   below their quorum of genuinely authenticated nodes. The persisted node id is for operator
-  visibility (`Admin.ListConfiguredEndpoints`) only; durable identity pinning is tracked by #34191.
+  visibility (`Admin.ListConfiguredEndpoints`) only; it does not pin the endpoint to that identity.
 - **Manager close** drains every connection (`closeConnectionState`) and, per endpoint, waits for the
   connect worker to finish before shutting the channel (`closeAsync`), avoiding orphaned gRPC
   channels (channel shutdown blocks on a dedicated long-running executor). The server-side
@@ -551,14 +539,13 @@ for A, so it relies on the incoming connection; when B needs to send to A it fin
 by node id (established when A authenticated) and uses it over the same bidi stream — no reverse dial
 needed. If that link drops, A's connect-worker backoff re-establishes and re-authenticates it.
 
-**(d) Impersonation attempt.** A forged or expired token is rejected by the standard or reverse auth
-interceptor, failing the call with `UNAUTHENTICATED` before any id is bound (§2.4). This is the only
-line of defense currently active against endpoint-level impersonation: if a peer at a known endpoint
-authenticates as a *different* node id than previously recorded, the intended `P2PEndpointIdAlreadyAssociated`
-guard would catch it (WARN + `security.noncompliant` metric, sender failed, no state change — §5.2),
-but that check is disabled, so today the reassociation is silently accepted. The self-check
-(`CannotAssociateP2PEndpointIdsToSelf`, §5.2) does still fire for a peer that authenticates as this
-node — but it is a misconfiguration guard, not a security metric.
+**(d) Authentication and endpoint reassociation.** A forged or expired token is rejected by the
+standard or reverse auth interceptor, failing the call with `UNAUTHENTICATED` before any id is
+bound (§2.4). Authentication does not pin a known endpoint to its previously associated node: a
+peer presenting valid credentials for a different node ID is accepted and replaces the runtime
+association (§5.2). The only association-level rejection is a peer identifying as this node itself,
+which is treated as a configuration error. The `sentBy` consistency check still rejects frames that
+disagree with the authenticated identity.
 
 **(e) Partition that heals (the duplicate-rejection loop).** A link `X = A→B` is silently
 partitioned. A's keepalive tears `X` down ~55s after A's last read and A re-dials; B's independent
@@ -589,9 +576,9 @@ only `P2PNetworkManager` / `P2PNetworkRef` / `P2PConnectionEventListener` / `P2P
 `framework/Module.scala`). The gRPC + token-auth stack in `bindings/p2p/grpc/` is one implementation
 of that seam; the deterministic simulator (`src/test/.../framework/simulation/`) is another,
 supplying its own manager/ref over `SimulationEnv` (and treating peers as pre-authenticated) so the
-*identical* out/in module logic — including the gating, dedup, and equivocation handling above — runs
-under modelled partitions and crashes (`NetworkSimulator`). Transport- and auth-level tests live
-under `src/test/.../bindings/p2p/grpc/`; module logic under `src/test/.../core/modules/p2p/`.
+*identical* out/in module logic — including the gating, dedup, and connection lifecycle behavior
+above — runs under modelled partitions and crashes (`NetworkSimulator`). Transport- and auth-level
+tests live under `src/test/.../bindings/p2p/grpc/`; module logic under `src/test/.../core/modules/p2p/`.
 
 ---
 
@@ -648,10 +635,21 @@ replace the stored set at startup.
 - **Admin**: `Admin.GetStatus` → `SequencerBftAdminData.PeerNetworkStatus` (per-endpoint health:
   `Authenticated(sequencerId)` / `Unauthenticated` / `Disconnected` / `UnknownEndpoint`, plus
   incoming-only entries), surfaced via the sequencer BFT admin API.
-- **Metrics** (`core/modules/p2p/P2PMetrics.scala` → `BftOrderingMetrics.p2p`): connected &
-  authenticated gauges; send/receive bytes & messages (labelled by peer and target/source module);
-  `sendsRetried`; network-write & gRPC latencies; and the `security.noncompliant` identity-
-  equivocation / wrong-`sentBy` counters.
+  For endpoint entries, `isOutgoing` reads the registered sender's direction. Without a sender, it
+  returns `true` only when the endpoint has a network ref, representing an outgoing/pending attempt;
+  unknown or association-only endpoints return `false`. This fallback also applies during teardown
+  when a ref temporarily outlives an incoming sender, so it is not evidence of an active outgoing
+  transport.
+- **Metrics** (`core/modules/p2p/P2PMetrics.scala` → `BftOrderingMetrics.p2p`): per-endpoint
+  status gauge; send/receive bytes & messages (labelled by peer and target/source module);
+  `sendsRetried`; network-write & gRPC latencies; and the `security.noncompliant` wrong-`sentBy`
+  counter. Endpoint reassociation does not emit an identity-equivocation metric.
+  The `endpoint-status` gauge reports a single value per endpoint: `2` (Authenticated), `1`
+  (Connected but not yet authenticated), or `0` (Disconnected). Each endpoint is labelled as
+  `url (-> sequencerId)` for an outgoing authenticated connection, `url (<- sequencerId)` for an
+  incoming authenticated connection, and `url (-> <unauth>)` while it is connected-unauthenticated or
+  disconnected, using the same sender-derived direction as admin status. Incoming connections without
+  a known endpoint use `<unknown> (<- sequencerId)` as the endpoint label.
 
 ### Standalone mode
 `bindings/p2p/grpc/standalone/P2PGrpcStandaloneBftOrderingService.scala` exposes a different service

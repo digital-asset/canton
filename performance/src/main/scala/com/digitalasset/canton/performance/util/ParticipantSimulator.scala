@@ -20,12 +20,7 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.crypto.{
-  HashPurpose,
-  SigningKeyUsage,
-  SyncCryptoError,
-  SynchronizerCrypto,
-}
+import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -36,7 +31,6 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
-import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
@@ -45,6 +39,7 @@ import com.digitalasset.canton.protocol.messages.{
   SignedProtocolMessage,
   UnsignedProtocolMessage,
 }
+import com.digitalasset.canton.protocol.{AcsCommitmentLimits, StaticSynchronizerParameters}
 import com.digitalasset.canton.sequencing.SequencerAggregator.MessageAggregationConfig
 import com.digitalasset.canton.sequencing.client.pool.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
 import com.digitalasset.canton.sequencing.client.pool.{
@@ -57,6 +52,7 @@ import com.digitalasset.canton.sequencing.client.pool.{
 import com.digitalasset.canton.sequencing.client.{
   NoDelay,
   RichSequencerClientImpl,
+  SequencedEventValidator,
   SequencedEventValidatorFactory,
   SequencerClientSubscriptionError,
 }
@@ -64,6 +60,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
   DecompressedSequencedEvent,
+  DecompressionPolicy,
   MessageId,
   Recipients,
   SequencedEvent,
@@ -74,6 +71,7 @@ import com.digitalasset.canton.sequencing.{
   PostAggregationHandlerImpl,
   SequencedSerializedEvent,
   SequencerAggregator,
+  SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubmissionRequestAmplification,
@@ -111,7 +109,6 @@ import com.digitalasset.canton.util.{EitherTUtil, HasFlushFuture, MonadUtil, Mut
 import com.digitalasset.canton.version.{ParticipantProtocolFeatureFlags, ReleaseVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config as cfg}
 import com.digitalasset.nonempty.NonEmpty
-import org.scalatest.OptionValues
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -263,7 +260,6 @@ class ParticipantSimulator(
     override val timeouts: ProcessingTimeout,
 )(implicit env: ConsoleEnvironment)
     extends HasFlushFuture
-    with OptionValues
     with FlagCloseable {
 
   import env.*
@@ -351,9 +347,7 @@ class ParticipantSimulator(
               SynchronizerTrustCertificate(
                 pid,
                 synchronizerId,
-                ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV
-                  .getOrElse(pv, Set.empty)
-                  .toSeq,
+                ParticipantProtocolFeatureFlags.requiredFeatureFlagsByPV.getOrElse(pv, Set.empty),
               ),
               pv,
             ),
@@ -452,7 +446,10 @@ class ParticipantSimulator(
         crypto.privateCrypto,
         pv,
       )
-      .map(_.select[TopologyChangeOp, TopologyMapping].value)
+      .map(
+        _.select[TopologyChangeOp, TopologyMapping]
+          .getOrElse(throw new IllegalStateException("No topology transaction found"))
+      )
       .leftMap(_.toString)
 
   def allocateParty(
@@ -487,6 +484,7 @@ class ParticipantSimulator(
           forceChanges = ForceFlags.none,
           waitToBecomeEffective = synchronize,
           serverVersion = nodeStatus.releaseVersion,
+          protocolVersion = None,
         )
       )
     } yield ()
@@ -538,6 +536,7 @@ class ParticipantSimulator(
                 submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
                 sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
                 subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+                sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
               )
             )
           ),
@@ -545,7 +544,12 @@ class ParticipantSimulator(
     )
 
     val subscriptionWrapperFactory = new SequencerSubscriptionWrapperFactoryImpl(
-      SequencedEventValidatorFactory.noValidation(psid, warn = false),
+      SequencedEventValidatorFactory.noValidation(
+        psid,
+        SequencedEventValidator.DecompressionPolicyProvider
+          .fixed(DecompressionPolicy.MaxValueUnsafe),
+        warn = false,
+      ),
       env.environment.config.parameters.timeouts.processing,
       loggerFactoryForParticipant,
     )
@@ -655,7 +659,7 @@ class ParticipantSimulator(
         val result = for {
           msgO <- determineMessageToSend(envelope.protocolMessage)
           _ <- msgO.traverse_ { case (msg, (sender, recipient)) =>
-            EitherT.right[SyncCryptoError](
+            EitherT.right[String](
               sendMessage(
                 pool,
                 msg,
@@ -677,7 +681,7 @@ class ParticipantSimulator(
   private def determineMessageToSend(incomingMessage: ProtocolMessage)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, SyncCryptoError, Option[
+  ): EitherT[FutureUnlessShutdown, String, Option[
     (ProtocolMessage, (ParticipantId, ParticipantId))
   ]] =
     incomingMessage match {
@@ -685,16 +689,24 @@ class ParticipantSimulator(
             AcsCommitment(psid, sender, counterparticipant, period, digest),
             _signature,
           ) =>
-        val payload = AcsCommitment.create(
-          psid,
-          sender = counterparticipant,
-          counterparticipant = sender,
-          period,
-          digest,
-          pv,
-        )
         for {
-          msg <- AcsCommitmentProtocolMessage.signImmediatelyAndCreate(syncCrypto, payload)
+          payload <- EitherT.fromEither[FutureUnlessShutdown](
+            AcsCommitment.create(
+              psid,
+              sender = counterparticipant,
+              counterparticipant = sender,
+              period,
+              digest,
+              pv,
+            )
+          )
+          msg <- AcsCommitmentProtocolMessage
+            .signImmediatelyAndCreate(
+              syncCrypto,
+              payload,
+              AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+            )
+            .leftMap(_.toString)
         } yield Some(
           msg -> (
             ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(counterparticipant)),

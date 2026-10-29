@@ -4,17 +4,29 @@
 package com.digitalasset.canton.integration.tests.ledgerapi.auth
 
 import com.daml.jwt.{Jwt, StandardJWTPayload, StandardJWTTokenFormat}
+import com.daml.ledger.api.v2.{state_service, transaction_filter}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.canton.auth.{AccessLevel, CantonAdminToken}
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.Circe
+import com.digitalasset.canton.http.json.v2.JsContractEntry.JsActiveContract
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
-import com.digitalasset.canton.http.json.v2.{JsCommand, JsCommands}
+import com.digitalasset.canton.http.json.v2.JsStateServiceCodecs.*
+import com.digitalasset.canton.http.json.v2.{
+  Endpoints,
+  JsCommand,
+  JsCommands,
+  JsGetActiveContractsResponse,
+  JsStateService,
+}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData
+import com.digitalasset.canton.integration.tests.jsonapi.HttpTestFuns.validSubprotocol
 import com.digitalasset.canton.integration.tests.jsonapi.{
   HttpServiceTestFixture,
   HttpServiceUserFixture,
@@ -32,10 +44,21 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.ledger.error.JsonApiErrors
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
+import io.circe.parser.decode
 import io.circe.syntax.EncoderOps
 import monocle.macros.syntax.lens.*
+import org.apache.pekko.http.scaladsl.model.headers.{Cookie, HttpOrigin, Origin}
+import org.apache.pekko.http.scaladsl.model.ws.{
+  Message,
+  TextMessage,
+  WebSocketRequest,
+  WebSocketUpgradeResponse,
+}
 import org.apache.pekko.http.scaladsl.model.{StatusCode, StatusCodes, Uri}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
+import org.slf4j.event.Level
 
 import java.io.File
 import java.time.{Duration, Instant}
@@ -63,6 +86,19 @@ class JsonApiAuthIT
 
   override protected def packageFiles: List[File] =
     List(super.darFile)
+
+  private val allowedOrigin = "https://app.example.com"
+  private val allowedOriginHeader = Origin(HttpOrigin(allowedOrigin))
+
+  /** Captures the warnings logged by the JSON API when a cookie-authenticated websocket handshake
+    * is rejected because of its `Origin`.
+    */
+  private val CookieAuthOriginSuppressionRule: SuppressionRule =
+    SuppressionRule.forLogger[JsStateService] && SuppressionRule.Level(Level.WARN)
+
+  // enable JWT cookie authentication for websockets from one origin
+  override def wsConfig: Option[WebsocketConfig] =
+    Some(WebsocketConfig(cookieAuthAllowedOrigins = Seq(allowedOrigin)))
 
   import com.digitalasset.canton.http.json.v2.JsCommandServiceCodecs.*
 
@@ -128,6 +164,74 @@ class JsonApiAuthIT
       )
     } yield (result._1)
   }
+
+  /** Sends `request` over the websocket and returns the first text message received from the
+    * server. Authentication failures on websockets are not reported at handshake time (the
+    * handshake only extracts the claims) but as a [[JsCantonError]] message once the first request
+    * is processed, hence the check has to go through the socket.
+    */
+  private def firstWebsocketMessage(
+      flow: Flow[Message, Message, Future[WebSocketUpgradeResponse]],
+      request: state_service.GetActiveContractsRequest,
+  ): Future[String] =
+    Source
+      .single[Message](TextMessage(request.asJson.noSpaces))
+      .concatMat(Source.maybe[Message])(Keep.left)
+      .via(flow)
+      .collect { case m: TextMessage => m.getStrictText }
+      .take(1)
+      .toMat(Sink.head)(Keep.right)
+      .run()
+
+  private def activeContractsRequest(
+      party: String
+  )(implicit env: TestConsoleEnvironment): state_service.GetActiveContractsRequest =
+    state_service.GetActiveContractsRequest(
+      activeAtOffset = env.participant1.ledger_api.state.end(),
+      includeIncompleteReassignments = false,
+      eventFormat = Some(
+        transaction_filter.EventFormat(
+          filtersByParty = Map(
+            party -> transaction_filter.Filters(
+              cumulative = Seq(
+                transaction_filter.CumulativeFilter(
+                  identifierFilter = transaction_filter.CumulativeFilter.IdentifierFilter
+                    .WildcardFilter(
+                      transaction_filter.WildcardFilter(includeCreatedEventBlob = false)
+                    )
+                )
+              )
+            )
+          ),
+          filtersForAnyParty = None,
+          verbose = false,
+        )
+      ),
+      streamContinuationToken = None,
+    )
+
+  /** Performs only the websocket handshake and returns its HTTP status: `101 Switching Protocols`
+    * when the handshake was accepted, otherwise the error status (e.g. `403`). Note that a missing
+    * or invalid token does not fail the handshake (see [[firstWebsocketMessage]]), but a rejected
+    * cookie-authentication origin does.
+    */
+  private def websocketHandshakeStatus(
+      flow: Flow[Message, Message, Future[WebSocketUpgradeResponse]]
+  ): Future[StatusCode] = {
+    val (closeSocket, upgrade) = Source
+      .maybe[Message]
+      .viaMat(flow)(Keep.both)
+      .toMat(Sink.ignore)(Keep.left)
+      .run()
+    upgrade.map { upgradeResponse =>
+      closeSocket.trySuccess(None).discard
+      upgradeResponse.response.status
+    }
+  }
+
+  private def jwtCookie(token: String): Cookie = Cookie(Endpoints.jwtCookieName, token)
+
+  private val websocketPath = Uri.Path("/v2/state/active-contracts")
 
   def partyCall(
       fixture: HttpServiceTestFixtureData,
@@ -415,6 +519,123 @@ class JsonApiAuthIT
           )
           _ <- expect(StatusCodes.OK)(
             serviceCall(fixture, toPrivilegedAudContext(privilegedAud.additionalDiscriminator))
+          )
+        } yield ()
+      }
+    }
+
+    "allow websocket access with a valid token in the JWT cookie" taggedAs securityAsset
+      .setHappyCase(
+        "Browser client can authenticate a websocket connection with the JWT cookie"
+      ) in httpTestFixture { fixture =>
+      implicit val env = provideEnvironment
+      val userContext = toScopeContext(scope.user)
+      val token = userContext.token.getOrElse(fail("expected a token"))
+      for {
+        // create a contract so that the active contracts stream is not empty
+        _ <- expect(StatusCodes.OK)(partyCall(fixture, userContext))
+        message <- firstWebsocketMessage(
+          websocketWithCookieAuth(
+            fixture.uri.withPath(websocketPath),
+            Jwt(token),
+            origin = Some(allowedOriginHeader),
+          ),
+          activeContractsRequest(getPartyId(randomParty)),
+        )
+      } yield inside(decode[JsGetActiveContractsResponse](message).value.contractEntry) {
+        case _: JsActiveContract => succeed
+      }
+    }
+
+    "deny websocket access without a token or with an invalid token in the JWT cookie" taggedAs securityAsset
+      .setAttack(
+        attackUnauthenticated(threat =
+          "Ledger API client cannot open a websocket stream without a valid token in the header, subprotocol or cookie"
+        )
+      ) in httpTestFixture { fixture =>
+      implicit val env = provideEnvironment
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        val wsUri = fixture.uri.withPath(websocketPath)
+        val expiredToken =
+          toScopeContext(scope.expired).token.getOrElse(fail("expected a token"))
+        // security sensitive errors are redacted, but the gRPC status code is kept
+        def expectUnauthenticated(message: String) =
+          decode[JsCantonError](message).value.grpcCodeValue shouldBe Some(
+            io.grpc.Status.Code.UNAUTHENTICATED.value()
+          )
+        val request = activeContractsRequest(getPartyId(randomParty))
+        for {
+          noToken <- firstWebsocketMessage(
+            websocketFlow(WebSocketRequest(wsUri, subprotocol = Some(HttpTestFuns.wsProtocol))),
+            request,
+          )
+          expiredInCookie <- firstWebsocketMessage(
+            websocketWithCookieAuth(wsUri, Jwt(expiredToken), origin = Some(allowedOriginHeader)),
+            request,
+          )
+        } yield {
+          expectUnauthenticated(noToken)
+          expectUnauthenticated(expiredInCookie)
+        }
+      }
+    }
+
+    "deny websocket cookie authentication from a non-allowed origin" taggedAs securityAsset
+      .setAttack(
+        attackUnauthenticated(threat =
+          "A web site not in the allowed origins cannot hijack a websocket with the JWT cookie of the browser"
+        )
+      ) in httpTestFixture { fixture =>
+      val wsUri = fixture.uri.withPath(websocketPath)
+      val token = toScopeContext(scope.user).token.getOrElse(fail("expected a token"))
+      val evilOrigin = Origin(HttpOrigin("https://evil.example.com"))
+      def handshakeWithOrigin(origin: Option[Origin]) =
+        websocketHandshakeStatus(websocketWithCookieAuth(wsUri, Jwt(token), origin))
+      def rejectedWith(reason: String)(entry: LogEntry) =
+        entry.shouldBeCantonError(
+          JsonApiErrors.CookieAuthOriginNotAllowed,
+          _ should include(reason),
+        )
+      // Every rejected handshake is logged as a warning on the participant; assert them so that
+      // they do not leak into the test output.
+      loggerFactory.assertLogs(CookieAuthOriginSuppressionRule)(
+        for {
+          _ <- expect(StatusCodes.Forbidden)(handshakeWithOrigin(Some(evilOrigin)))
+          // `Origin(Nil)` renders as the opaque `Origin: null`
+          _ <- expect(StatusCodes.Forbidden)(handshakeWithOrigin(Some(Origin(Nil))))
+          _ <- expect(StatusCodes.Forbidden)(handshakeWithOrigin(None))
+          // the check applies to the cookie only: the same origin may still use the subprotocol
+          _ <- expect(StatusCodes.SwitchingProtocols)(
+            websocketHandshakeStatus(
+              websocketFlow(
+                WebSocketRequest(
+                  wsUri,
+                  extraHeaders = List(evilOrigin),
+                  subprotocol = validSubprotocol(Jwt(token)),
+                )
+              )
+            )
+          )
+        } yield (),
+        rejectedWith("Origin 'https://evil.example.com' is not an allowed origin"),
+        rejectedWith("the opaque 'null' Origin is not allowed"),
+        rejectedWith("the Origin header is missing"),
+      )
+    }
+
+    "ignore the JWT cookie on non-websocket endpoints" taggedAs securityAsset
+      .setAttack(
+        attackUnauthenticated(threat =
+          "Ledger API client cannot authenticate a plain HTTP call with the JWT cookie"
+        )
+      ) in httpTestFixture { fixture =>
+      loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
+        val token = toScopeContext(scope.admin).token.getOrElse(fail("expected a token"))
+        for {
+          // the same token is accepted in the Authorization header
+          _ <- expect(StatusCodes.OK)(serviceCall(fixture, toScopeContext(scope.admin)))
+          _ <- expect(StatusCodes.Unauthorized)(
+            fixture.getRequestString(Uri.Path("/v2/parties"), List(jwtCookie(token))).map(_._1)
           )
         } yield ()
       }

@@ -41,7 +41,7 @@ private[backend] trait StorageBackendTestsBatchSize
   private def runBatchSizeTest(numOfDtos: Int, numOfInformees: Int) = {
     val dtos: Vector[DbDto] = prepareExercises(numOfDtos, numOfInformees)
     dtos.size shouldBe (numOfDtos * (numOfInformees + 1))
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     val directEc = DirectExecutionContext(noTracingLogger)
     val startTime = System.currentTimeMillis()
     tryWithConnections(1) {

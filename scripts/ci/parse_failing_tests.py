@@ -65,6 +65,8 @@ def failing_testcases(path: Path) -> Iterator[Tuple[str, Element, List[Element]]
     try:
         tree: ElementTree = ET.parse(path)
     except ET.ParseError as e:
+        # silent-ok: an unparsable report (e.g. from a killed JVM) is skipped rather
+        # than failing the whole run, already surfaced via the ::warning:: annotation
         print(f"::warning::Skipping unparsable test report {path}: {e}")
         return
     root: Element = tree.getroot()
@@ -167,13 +169,13 @@ def compute_single_log_failure(lines: list[str]):
             # If WARN or ERROR (case sensitive) is in the line, we report the line from WARN/ERROR until the end of the logger name
             failure = re.search("((WARN|ERROR).*?)(:| -| tid)", line).group(1)
         except (IndexError, AttributeError):
-            pass
+            pass  # silent-ok: just means this line isn't a WARN/ERROR line, falls through below
 
         try:
             # Likely an SBT failure
             failure = " ".join(re.search("(warn|error)\\][ ]+\t*(.+)", line).group(1, 2))
         except (IndexError, AttributeError):
-            pass
+            pass  # silent-ok: same idiom, a second fallback pattern for SBT-style failures
 
         if failure:
             failures.append(failure)

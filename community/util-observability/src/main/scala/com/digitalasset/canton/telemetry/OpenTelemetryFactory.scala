@@ -13,7 +13,6 @@ import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.ContextPropagators
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter
-import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.`export`.{CardinalityLimitSelector, MetricReader}
 import io.opentelemetry.sdk.metrics.{InstrumentType, SdkMeterProvider, SdkMeterProviderBuilder}
@@ -25,7 +24,6 @@ import io.opentelemetry.sdk.trace.`export`.{
 import io.opentelemetry.sdk.trace.samplers.Sampler
 import io.opentelemetry.sdk.trace.{SdkTracerProvider, SdkTracerProviderBuilder}
 
-import scala.annotation.nowarn
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.chaining.scalaUtilChainingOps
@@ -128,13 +126,7 @@ object OpenTelemetryFactory {
   private def loadCertificate(tlsCaCert: String): ByteString =
     ByteString.copyFrom(File(tlsCaCert).loadBytes)
 
-  @nowarn("cat=deprecation")
   private def createExporter(config: TracingConfig.Exporter): SpanExporter = config match {
-
-    case TracingConfig.Exporter.Zipkin(address, port) =>
-      val httpUrl = s"http://$address:$port/api/v2/spans"
-      ZipkinSpanExporter.builder.setEndpoint(httpUrl).build
-
     case TracingConfig.Exporter.Otlp(
           address,
           port,

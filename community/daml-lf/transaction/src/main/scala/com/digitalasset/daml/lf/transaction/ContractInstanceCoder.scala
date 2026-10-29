@@ -287,6 +287,15 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
           case None => Right(signatories | nonSignatoryStakeholders)
         }
         createdAt <- CreationTime.decode(msg.getCreatedAt).left.map(DecodeError)
+        _ <- createdAt match {
+          case CreationTime.Now if contractId.isAbsolute || contractId.isLocal =>
+            Left(
+              DecodeError(
+                "Creation time 'now' is not allowed for local and absolute contract ids"
+              )
+            )
+          case _ => Right(())
+        }
         authenticationData = msg.getAuthenticationData
       } yield FatContractInstanceImpl(
         version = txVersion,

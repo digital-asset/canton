@@ -59,6 +59,9 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   * @param acsFilteringParallelism
   *   The parallelism for filtering the active contracts service stream by synchronizer id and
   *   stakeholders.
+  * @param disableMergeAndHashJoins
+  *   If true, merge and hash joins are disabled on Postgres for selected queries of pruning and
+  *   ACHS maintenance.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -94,6 +97,7 @@ final case class IndexServiceConfig(
     maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
     maxRejectedCompletionsByHash: Int = IndexServiceConfig.DefaultMaxRejectedCompletionsByHash,
     acsFilteringParallelism: Int = IndexServiceConfig.DefaultAcsFilteringParallelism,
+    disableMergeAndHashJoins: Boolean = IndexServiceConfig.DefaultDisableMergeAndHashJoins,
 )
 
 object IndexServiceConfig {
@@ -122,6 +126,7 @@ object IndexServiceConfig {
   val DefaultMaxLookupLimit: Int = 1000
   val DefaultMaxRejectedCompletionsByHash: Int = 10
   val DefaultAcsFilteringParallelism: Int = 16
+  val DefaultDisableMergeAndHashJoins: Boolean = true
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value

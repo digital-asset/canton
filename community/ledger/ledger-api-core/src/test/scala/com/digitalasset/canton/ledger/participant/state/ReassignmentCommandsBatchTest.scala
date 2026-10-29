@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, ReassignmentId}
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -19,8 +20,15 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
     UniqueIdentifier.tryFromProtoPrimitive(s"synchronizer::source_$i")
   )
 
+  private val rpId: Option[LfPackageId] = None
   private val unassign =
-    ReassignmentCommand.Unassign(Source(synchronizerId(1)), Target(synchronizerId(2)), cid1)
+    ReassignmentCommand.Unassign(
+      Source(synchronizerId(1)),
+      Target(synchronizerId(2)),
+      cid1,
+      rpId,
+      rpId,
+    )
   private val assign = ReassignmentCommand.Assign(
     Source(synchronizerId(1)),
     Target(synchronizerId(2)),
@@ -38,6 +46,8 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
           source = unassign.sourceSynchronizer,
           target = unassign.targetSynchronizer,
           contractIds = NonEmpty.mk(Seq, unassign.contractId),
+          overrideSourceValidationPkgIds = Map.empty,
+          overrideTargetValidationPkgIds = Map.empty,
         )
       )
     }
@@ -63,6 +73,8 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
           source = unassign.sourceSynchronizer,
           target = unassign.targetSynchronizer,
           contractIds = NonEmpty.apply(Seq, cid1, cid2, cid3),
+          overrideSourceValidationPkgIds = Map.empty,
+          overrideTargetValidationPkgIds = Map.empty,
         )
       )
     }

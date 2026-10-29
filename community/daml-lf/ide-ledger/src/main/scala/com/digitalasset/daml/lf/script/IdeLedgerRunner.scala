@@ -12,19 +12,17 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error.Interpretation
 import com.digitalasset.daml.lf.engine.Result.Need
 import com.digitalasset.daml.lf.engine.refinement.{CommandPreprocessor, Enricher as LfEnricher}
-import com.digitalasset.daml.lf.engine.{Engine, Result, TransactionCoder}
+import com.digitalasset.daml.lf.engine.{Engine, Result, SnapshotRecorder}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SResult.*
-import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value.ContractId
 
-import java.nio.file.{Files, Path, StandardOpenOption}
+import java.nio.file.Path
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
-import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
 private[lf] object IdeLedgerRunner {
@@ -295,6 +293,7 @@ private[lf] object IdeLedgerRunner {
       location: Option[Location],
       seed: crypto.Hash,
       machineLogger: MachineLogger,
+      interpretationConfig: interpretation.InterpretationConfig,
       packageResolution: Map[PackageName, PackageId] = Map.empty,
       doEnrichment: Boolean = true,
       snapshotDir: Option[Path] = None,
@@ -325,8 +324,8 @@ private[lf] object IdeLedgerRunner {
       expr = SEApp(compiledCommands, ArraySeq(SValue.SToken)),
       committers = committers,
       commitLocation = location,
-      limits = interpretation.Limits.Lenient,
-      interpretationConfig = interpretation.InterpretationConfig.Default,
+      limits = interpretation.LimitConfig.Off,
+      interpretationConfig = interpretationConfig,
       logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter
@@ -351,53 +350,32 @@ private[lf] object IdeLedgerRunner {
       }
     }
 
-    def saveTransaction(result: Speedy.UpdateMachine.Result, snapshotDir: Path): Option[String] = {
-      val Speedy.UpdateMachine.Result(tx, _, _, nodeSeeds, globalKeyMapping, contractOrder) = result
-
-      deps(tx).flatMap { deps =>
-        val meta = Transaction.Metadata(
-          submissionSeed = None,
-          preparationTime = ledgerMachine.preparationTime,
-          usedPackages = deps,
-          timeBoundaries = ledgerMachine.getTimeBoundaries,
-          nodeSeeds = nodeSeeds,
-          globalKeyMapping = globalKeyMapping,
-          contractOrder = contractOrder,
-        )
-        val snapshotFile = snapshotDir.resolve("snapshot-ide-ledger.bin")
-
-        TransactionCoder
-          .encodeTransaction(tx)
-          .fold(
-            err => Some(s"TransactionCoder.encodeTransaction: $err"),
-            encoded => {
-              val txEntry = Snapshot.TransactionEntry
-                .newBuilder()
-                .setRawTransaction(encoded.toByteString)
-                .setParticipantId("ide-ledger")
-                .addAllSubmitters(committers.map(_.toString).asJava)
-                .setLedgerTime(ledger.currentTime.micros)
-                .setPreparationTime(meta.preparationTime.micros)
-                .build()
-              val txSubmission = Snapshot.SubmissionEntry
-                .newBuilder()
-                .setTransaction(txEntry)
-                .build()
-
-              txSubmission.writeDelimitedTo(
-                Files.newOutputStream(
-                  snapshotFile,
-                  StandardOpenOption.CREATE,
-                  StandardOpenOption.WRITE,
-                  StandardOpenOption.APPEND,
-                )
-              )
-
-              None
-            },
+    def saveTransaction(
+        result: Speedy.UpdateMachine.Result,
+        snapshotDir: Path,
+    ): Either[String, Unit] =
+      for {
+        usedPackages <- deps(result.tx).toRight("missing package dependencies")
+        txEntry <- SnapshotRecorder
+          .transactionEntry(
+            tx = result.tx,
+            participantId = "ide-ledger",
+            submitters = committers,
+            ledgerTime = ledger.currentTime,
+            preparationTime = ledgerMachine.preparationTime,
+            submissionSeed = None,
+            transactionSeed = seed,
+            contractIdVersion = ledgerMachine.contractIdVersion,
+            packageResolution = packageResolution,
+            inputContracts = result.inputContracts,
+            keyLookups = result.globalKeyMapping,
+            usedPackages = usedPackages,
+            interpretationConfig = interpretationConfig,
+            metricPlugins = Seq.empty,
           )
-      }
-    }
+          .left
+          .map(err => s"TransactionCoder.encodeTransaction: $err")
+      } yield SnapshotRecorder.append(snapshotDir.resolve("snapshot-ide-ledger.bin"), txEntry)
 
     def continue = () => go()
 
@@ -534,11 +512,16 @@ private[lf] object IdeLedgerRunner {
         case SResult.SResultFinal(_) =>
           ledgerMachine.finish match {
             case Right(result @ Speedy.UpdateMachine.Result(tx, _, locationInfo, _, _, _)) =>
-              snapshotDir.foreach(saveTransaction(result, _)) // FIXME:
               val committedTx = CommittedTransaction(enrich(suffixer.suffixCids(tx)))
               ledger.commit(committers, readAs, location, committedTx, locationInfo) match {
                 case Left(err) => submissionError(err)
-                case Right(r) => Commit(r, enrich(ledgerMachine.incompleteTransaction))
+                case Right(r) =>
+                  snapshotDir.fold[Either[String, Unit]](Right(()))(
+                    saveTransaction(result, _)
+                  ) match {
+                    case Left(err) => submissionError(Error.Internal(s"cannot save snapshot: $err"))
+                    case Right(()) => Commit(r, enrich(ledgerMachine.incompleteTransaction))
+                  }
               }
             case Left(err) =>
               throw err

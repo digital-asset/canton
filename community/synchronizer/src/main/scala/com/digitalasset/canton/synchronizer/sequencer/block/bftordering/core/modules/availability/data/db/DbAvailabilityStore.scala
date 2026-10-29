@@ -230,39 +230,13 @@ class DbAvailabilityStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[Option[OrderingRequestBatch]]] =
     storage.synchronizeWithClosing("lookup-batches") {
-      import DbStorage.Implicits.BuilderChain.*
-
-      val (batchsWithEpoch0, otherBatches) = batches.partition(_.epochNumber == EpochNumber(0))
-
-      // If a batch is requested with epoch number 0, it can be one of the following cases:
-      // - It was remotely requested by a node on an older version, whose remote batch request did not yet include an
-      //    epoch number, in which case the protobuf request by default deserealizes the empty epoch number field as 0.
-      //    In that case, we don't want to use the epoch number in the query, just the batch id.
-      // - The epoch number 0 was deliberately requested. Because we cannot differentiate between the 2 cases, we will
-      //    still perform this query without the epoch number, which will be of worse performance, but hopefully not that
-      //    bad considering that at that point, we probably don't have too much data in this table yet.
-      val query1 = NonEmpty
-        .from(batchsWithEpoch0.map(_.batchId))
-        .map(batchIds =>
-          (sql"""select id, batch from ord_availability_batch where """ ++ DbStorage
-            .toInClause("id", batchIds)).as[(BatchId, OrderingRequestBatch)]
-        )
-
-      // Otherwise if a non zero epoch number is given, this is included in the query, which improves its performance
-      // significantly, especially in the presence of many partitions.
-      val query2 = NonEmpty
-        .from(otherBatches)
-        .map(batchInfos =>
-          sql"""select id, batch from ord_availability_batch where (id, epoch_number) IN (#${batchInfos
-              .map(p => s"('${batchIdToPrimitive.toDbPrimitive(p.batchId)}', ${p.epochNumber})")
-              .mkString(", ")})""".as[(BatchId, OrderingRequestBatch)]
-        )
-
-      import cats.syntax.parallel.*
-
-      (query1.toList ++ query2.toList)
-        .parTraverse(query => storage.query(query, functionFullName).map(_.toMap))
-        .map(maps => maps.foldLeft(Map[BatchId, OrderingRequestBatch]())(_ ++ _))
+      val query =
+        sql"""select id, batch from ord_availability_batch where (id, epoch_number) IN (#${batches
+            .map(p => s"('${batchIdToPrimitive.toDbPrimitive(p.batchId)}', ${p.epochNumber})")
+            .mkString(", ")})""".as[(BatchId, OrderingRequestBatch)]
+      storage
+        .query(query, functionFullName)
+        .map(_.toMap)
         .map(result => batches.toSeq.map(_.batchId).map(result.get))
     }
 

@@ -7,22 +7,25 @@ import com.daml.ledger.api.v2.command_completion_service.CompletionStreamRespons
 import com.digitalasset.canton.ledger.api.benchtool.util.ObserverWithResult
 import org.slf4j.{Logger, LoggerFactory}
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.Future
 
 object CompletionsObserver {
-  def apply(): CompletionsObserver = new CompletionsObserver(
-    logger = LoggerFactory.getLogger(getClass)
+  def apply(endOffsetInclusive: Option[Long] = None): CompletionsObserver = new CompletionsObserver(
+    endOffsetInclusive = endOffsetInclusive,
+    logger = LoggerFactory.getLogger(getClass),
   )
 }
 
-class CompletionsObserver(logger: Logger)
+class CompletionsObserver(endOffsetInclusive: Option[Long], logger: Logger)
     extends ObserverWithResult[CompletionStreamResponse, ObservedCompletions](logger) {
 
   private val completions = collection.mutable.ArrayBuffer[ObservedCompletion]()
+  private val cancelled = new AtomicBoolean(false)
 
   override def streamName: String = "dummy-stream-name"
 
-  override def onNext(value: CompletionStreamResponse): Unit =
+  override def onNext(value: CompletionStreamResponse): Unit = {
     for {
       completion <- value.completionResponse.completion
     } {
@@ -32,6 +35,20 @@ class CompletionsObserver(logger: Logger)
           actAs = completion.actAs,
         )
       )
+    }
+    cancelIfEndOffsetReached(value)
+  }
+
+  private def cancelIfEndOffsetReached(value: CompletionStreamResponse): Unit =
+    for {
+      end <- endOffsetInclusive
+      offset <- value.completionResponse.completion
+        .map(_.offset)
+        .orElse(value.completionResponse.offsetCheckpoint.map(_.offset))
+      if offset >= end && cancelled.compareAndSet(false, true)
+    } {
+      logger.info(withStreamName(s"Reached end offset $end, cancelling the stream."))
+      cancel()
     }
 
   override def completeWith(): Future[ObservedCompletions] = Future.successful(

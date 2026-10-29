@@ -94,6 +94,7 @@ final class ApiCommandSubmissionService(
               packageIdSelectionPreference,
               prefetchKeys,
               tapsMaxPasses,
+              accountId,
             ) =>
           tracker.registerCommand(
             commandId,
@@ -178,8 +179,11 @@ final class ApiCommandSubmissionService(
                       sourceSynchronizer = unassignCommand.sourceSynchronizerId,
                       targetSynchronizer = unassignCommand.targetSynchronizerId,
                       contractId = unassignCommand.contractId,
+                      overrideSourceValidationPkgId = unassignCommand.overrideSourceValidationPkgId,
+                      overrideTargetValidationPkgId = unassignCommand.overrideTargetValidationPkgId,
                     )
                 },
+                accountId = request.accountId,
               )
               .transform(handleSubmissionResult)
               .thereafter(logger.logErrorsOnCall[SubmitReassignmentResponse])

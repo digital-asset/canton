@@ -4,6 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.{BaseTest, LfLedgerString}
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.{Status, StatusRuntimeException}
@@ -35,6 +36,15 @@ class AuthorizerSpec
 
   private val party = Ref.Party.assertFromString("party")
   private val party2 = Ref.Party.assertFromString("party2")
+  private val account = AccountId.tryCreate("party")
+  private val account2 = AccountId.tryCreate("party2")
+  private val debitAcceptingExecute =
+    RequiredClaim.DebitTrafficFrom[String]("party", acceptExecuteRights = true)
+  private val debitIgnoringExecute =
+    RequiredClaim.DebitTrafficFrom[String]("party", acceptExecuteRights = false)
+
+  private def withClaims(claims: Claim*): ClaimSet.Claims =
+    ClaimSet.Claims.Empty.copy(claims = claims)
 
   behavior of s"$className.authorize for RequiredClaim.Public"
 
@@ -232,6 +242,35 @@ class AuthorizerSpec
       expectedPermissionDenied,
     ),
   ).foreach(generateAuthorizationTest)
+
+  behavior of s"$className.authorize for RequiredClaim.DebitTrafficFrom accepting execute rights"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    withClaims(ClaimDebitTrafficFromAccount(account)) -> ExpectedSuccess,
+    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
+    withClaims(ClaimExecuteAsParty(party)) -> ExpectedSuccess,
+    ClaimSet.Claims.Wildcard -> ExpectedSuccess,
+    withClaims(ClaimDebitTrafficFromAccount(account2)) -> expectedPermissionDenied,
+    withClaims(ClaimReadAsParty(party)) -> expectedPermissionDenied,
+    ClaimSet.Claims.Admin -> expectedPermissionDenied,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(debitAcceptingExecute, claims, expected))
+  }
+
+  behavior of s"$className.authorize for RequiredClaim.DebitTrafficFrom ignoring execute rights"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    withClaims(ClaimDebitTrafficFromAccount(account)) -> ExpectedSuccess,
+    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
+    withClaims(
+      ClaimActAsParty(party),
+      ClaimExecuteAsParty(party),
+      ClaimActAsAnyParty,
+      ClaimExecuteAsAnyParty,
+    ) -> expectedPermissionDenied,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(debitIgnoringExecute, claims, expected))
+  }
 
   behavior of s"$className.authorize for RequiredClaim.ReadAsAnyParty"
 

@@ -53,16 +53,15 @@ object UpdateFormatHelpers {
       transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
       includeReassignments: Boolean = false,
   ): UpdateFormat = {
-    val eventFormat = getEventFormat(partyIds, filterTemplates)
+    val transactionFormat = TransactionFormat(
+      eventFormat = Some(getEventFormat(partyIds, filterTemplates)),
+      transactionShape = transactionShape,
+    )
     UpdateFormat(
-      includeTransactions = Some(
-        TransactionFormat(
-          eventFormat = Some(eventFormat),
-          transactionShape = transactionShape,
-        )
-      ),
-      includeReassignments = if (includeReassignments) Some(eventFormat) else None,
+      includeTransactions = Option.unless(includeReassignments)(transactionFormat),
+      includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = Option.when(includeReassignments)(transactionFormat),
     )
   }
 

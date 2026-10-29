@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId as AdminTopologyStoreId
@@ -144,7 +145,8 @@ class GrpcTopologyManagerWriteService(
           signedTopoTx <- authorizeFromHash(txHash)
         } yield signedTopoTx
 
-      case Type.Proposal(Proposal(op, serial, mapping)) =>
+      case Type.Proposal(Proposal(op, serial, mapping, requestedProtocolVersionP)) =>
+        val isV30Mapping = mapping.isV30
         val validatedMappingE = for {
           // we treat serial=0 as "serial was not set". negative values should be rejected by parsePositiveInt
           serial <- Option
@@ -167,9 +169,17 @@ class GrpcTopologyManagerWriteService(
             .flatMap(ForceFlags.fromProtoV30)
           validatedMapping <- mapping match {
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
-              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.AuthorizeRequest.Proposal.Mapping.V31(value) =>
-              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV31(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("AuthorizeRequest.mapping", None)
           }
@@ -197,6 +207,22 @@ class GrpcTopologyManagerWriteService(
           (op, serial, validatedMapping, signingKeys, forceChanges) = mapping
 
           manager <- targetManagerET(store)
+          _ <- checkV30MappingCanExpressHostingStates(
+            manager,
+            isV30Mapping,
+            validatedMapping,
+            forceChanges,
+          )
+          protocolVersion <- EitherT.fromEither[FutureUnlessShutdown](
+            requestedProtocolVersionP
+              .traverse(ProtocolVersion.fromProtoPrimitive(_))
+              .flatMap(requested =>
+                TopologyTransaction
+                  .protocolVersionToCreate(manager.managerVersion.serialization, requested)
+                  .leftMap(ProtoDeserializationError.InvariantViolation("protocol_version", _))
+              )
+              .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+          )
           signedTopoTx <- manager
             .proposeAndAuthorize(
               op,
@@ -204,7 +230,7 @@ class GrpcTopologyManagerWriteService(
               serial,
               signingKeys,
               namespacesToSignFor = Seq.empty,
-              manager.managerVersion.serialization,
+              protocolVersion,
               expectFullAuthorization = mustFullyAuthorize,
               forceChanges = forceChanges,
               waitToBecomeEffective = waitToBecomeEffectiveO,
@@ -214,6 +240,16 @@ class GrpcTopologyManagerWriteService(
     }
     CantonGrpcUtil.mapErrNewEUS(result.map(tx => v30.AuthorizeResponse(Some(tx.toProtoV30))))
   }
+
+  private def checkV30MappingCanExpressHostingStates(
+      manager: TopologyManager[TopologyStoreId, BaseCrypto],
+      isV30Mapping: Boolean,
+      mapping: TopologyMapping,
+      forceChanges: ForceFlags,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    if (isV30Mapping)
+      manager.checkV30MappingCanExpressHostingStates(mapping, forceChanges).leftWiden[RpcError]
+    else EitherTUtil.unitUS
 
   override def signTransactions(
       requestP: v30.SignTransactionsRequest
@@ -226,7 +262,11 @@ class GrpcTopologyManagerWriteService(
         ProtocolVersionValidation.AlwaysValidation,
         ProtoValidation.MaxCollectionSize,
       )((tx, _) =>
-        SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
+        SignedTopologyTransaction.fromProtoV30(
+          ProtocolVersionValidation.AlwaysValidation,
+          TopologyTransactionDeserializationContext(TopologyLimits.default),
+          tx,
+        )
       )
       signingKeys <-
         ProtoValidation.validateThen(
@@ -291,7 +331,13 @@ class GrpcTopologyManagerWriteService(
             // Always validate the length and not dependent on the store's protocol version
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
-          )((tx, _) => SignedTopologyTransaction.fromProtoV30(protocolVersionValidation, tx))
+          )((tx, _) =>
+            SignedTopologyTransaction.fromProtoV30(
+              protocolVersionValidation,
+              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              tx,
+            )
+          )
           .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
       )
       _ = if (signedTxs.exists(_.selectMapping[PartyToKeyMapping].isDefined)) {
@@ -497,9 +543,17 @@ class GrpcTopologyManagerWriteService(
           op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
           mapping <- mappingPO match {
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
-              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV30(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.GenerateTransactionsRequest.Proposal.Mapping.V31(value) =>
-              TopologyMapping.fromProtoV31(ProtocolVersionValidation.AlwaysValidation, value)
+              TopologyMapping.fromProtoV31(
+                ProtocolVersionValidation.AlwaysValidation,
+                TopologyLimits.default,
+                value,
+              )
             case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("mapping", None)
           }
@@ -511,6 +565,12 @@ class GrpcTopologyManagerWriteService(
             .leftMap(ProtoDeserializationFailure.Wrap(_))
           (serial, op, mapping) = serialOpMapping
           manager <- targetManagerET(store)
+          _ <- checkV30MappingCanExpressHostingStates(
+            manager,
+            mappingPO.isV30,
+            mapping,
+            ForceFlags.none,
+          )
           existingTransaction <- manager
             .findExistingTransaction(mapping)
           transaction <- manager

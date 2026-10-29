@@ -30,7 +30,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   behavior of "QueryValidRange.withRangeNotPruned"
 
   it should "allow valid range if no pruning and before ledger end" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(None))
     executeSql(updateLedgerEnd(offset(10), 10L))
@@ -47,7 +47,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow valid range if no pruning and before ledger end and start from ledger begin" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(None))
     executeSql(updateLedgerEnd(offset(10), 10L))
@@ -64,7 +64,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow valid range after pruning and before ledger end" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -81,7 +81,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow valid range boundary case" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -98,7 +98,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "deny in-valid range: earlier than pruning" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -123,7 +123,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "deny in-valid range: later than ledger end when ledger is not empty" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -148,7 +148,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "deny in-valid range: later than ledger end when ledger end is none" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
     loggerFactory
@@ -175,7 +175,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   behavior of "QueryValidRange.withOffsetNotBeforePruning"
 
   it should "allow offset in the valid range" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -193,7 +193,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow offset in the valid range if no pruning before" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(None))
@@ -210,7 +210,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow offset in the valid range lower boundary" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -227,7 +227,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "allow offset in the valid range higher boundary" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -244,7 +244,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "deny in-valid range: earlier than pruning" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -269,7 +269,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "deny in-valid range: later than ledger end" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
       .thenReturn(Future.successful(Some(offset(3))))
@@ -297,7 +297,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   behavior of "QueryValidRange.filterPrunedEvents"
 
   it should "return all events if no pruning" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     val events = (1L to 5L).map(offset)
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
@@ -310,7 +310,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "filter out events at or below the pruning offset" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     val events = (1L to 5L).map(offset)
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
@@ -325,7 +325,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "return empty if all events are pruned" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     val events = (1L to 3L).map(offset)
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
@@ -338,7 +338,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "return all events if pruning offset is before all events" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(10), 10L))
     val events = (5L to 7L).map(offset)
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
@@ -351,7 +351,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
   }
 
   it should "fail if any event offset is beyond ledger end" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val events = (1L to 5L).map(offset)
     when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))

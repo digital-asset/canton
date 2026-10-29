@@ -5,9 +5,14 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{InstanceReference, SequencerReference}
-import com.digitalasset.canton.crypto.{KeyPurpose, PublicKey}
+import com.digitalasset.canton.crypto.{
+  EncryptionPublicKey,
+  KeyPurpose,
+  PublicKey,
+  SigningKeyUsage,
+  SigningPublicKey,
+}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.nonempty.NonEmpty
@@ -80,16 +85,30 @@ trait TopologyOperationsHelpers {
     (sequencerNodes, sequencerSynchronizerState.threshold)
   }
 
-  protected def getCurrentKey(node: InstanceReference, purpose: KeyPurpose): PublicKey =
+  protected def getCurrentKey(
+      node: InstanceReference,
+      purpose: KeyPurpose,
+      usage: NonEmpty[Set[SigningKeyUsage]],
+      synchronizerId: SynchronizerId,
+  ): PublicKey =
     node.topology.owner_to_key_mappings
       .list(
-        store = Some(TopologyStoreId.Authorized),
+        store = Some(synchronizerId),
         filterKeyOwnerUid = node.id.filterString,
       )
       .find(_.item.member == node.id)
       .getOrElse(sys.error(s"No keys found for $node"))
       .item
       .keys
-      .find(_.purpose == purpose)
-      .getOrElse(sys.error(s"No ${purpose.name} keys found for $node"))
+      .find {
+        case _: EncryptionPublicKey =>
+          KeyPurpose.Encryption == purpose
+        case SigningPublicKey(_, _, _, keyUsage, _) =>
+          KeyPurpose.Signing == purpose && SigningKeyUsage.matchesRelevantUsages(
+            keyUsage,
+            usage,
+          )
+        case _ => sys.error("Unknown key type")
+      }
+      .getOrElse(sys.error(s"No $purpose keys found for $node"))
 }

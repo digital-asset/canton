@@ -34,6 +34,8 @@ def discover_executed_classes(junit_glob: str) -> set[str]:
         try:
             root = ET.parse(report_path).getroot()
         except ET.ParseError:
+            # silent-ok: skipping a corrupt report only excludes its classes from the
+            # executed set, erring toward re-running more tests, not fewer
             continue
         for testcase in root.findall(".//testcase"):
             classname = testcase.attrib.get("classname", "").strip()
@@ -127,6 +129,7 @@ def main() -> None:
     try:
         num_test_buckets = int(args.num_test_buckets)
     except ValueError:
+        # silent-ok: plain CLI input validation with a sensible default, no infra implication
         num_test_buckets = 1
 
     testcase_timeout_triggered = parse_bool(args.testcase_timeout_triggered)

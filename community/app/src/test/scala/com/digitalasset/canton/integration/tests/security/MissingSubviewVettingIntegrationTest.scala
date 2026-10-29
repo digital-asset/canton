@@ -10,7 +10,6 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.CollectionConverters.*
@@ -38,7 +37,7 @@ class MissingSubviewVettingIntegrationTest
         participant1,
         daId,
         testedProtocolVersion,
-        defaultProtocolLimits,
+        testedTransactionLimits,
         timeouts,
         loggerFactory,
       )
@@ -47,7 +46,7 @@ class MissingSubviewVettingIntegrationTest
 
   "A transaction that contains a unvetted subview" should {
 
-    "be rejected" onlyRunWithOrGreaterThan ProtocolVersion.v36 in { implicit env =>
+    "be rejected" in { implicit env =>
       import env.*
 
       val alice = env.participant1.parties.enable("Alice")

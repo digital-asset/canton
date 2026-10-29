@@ -1,0 +1,137 @@
+module TestTriparty where
+
+import DA.List (head, sortOn)
+import DA.Foldable
+import DA.Optional
+import Daml.Script
+import Triparty.Bootstrap
+import Triparty.TriPartyAgreement
+import Triparty.Asset
+import Triparty.Settle
+
+approveMints : Party -> Script() 
+approveMints registry = script do 
+   requests <- query @BootstrapAsset registry
+   forA_ requests \(cid, req) -> do 
+      registers <- query @Registry registry
+      let registryCid = fst $ fromSome $ find (\(_, r) -> r.id == req.request.id) registers
+      submit registry do 
+        exerciseCmd cid Approve with registryCid = registryCid
+   
+
+fetchAssetsByAccount : Party -> Text -> Script[(ContractId Asset, Asset)]
+fetchAssetsByAccount owner account = script do
+  assets <- query @Asset owner
+  let filtered = filter (\(_, a) -> a.account == account) assets
+  return $ sortOn (\(_, a) -> a.id) filtered
+
+takeEverySecond : [a] -> [a]
+takeEverySecond xs = case xs of
+  [] -> []
+  [y] -> [y]
+  (y::_::ys) -> y :: takeEverySecond ys
+
+fetchTripartyByAccount : Party -> Text -> Script (ContractId TriPartyAgreement, TriPartyAgreement)
+fetchTripartyByAccount owner account = script do
+  tpas <- query @TriPartyAgreement owner
+  return $ head $ filter (\(_, tpa) -> tpa.account == account) tpas
+
+pairs : [AssetWithCid] -> [(AssetWithCid, AssetWithCid)]
+pairs (x :: y :: rest) = (x, y) :: pairs rest
+pairs _              = []
+
+substitute : Party -> Party -> [Substitution] -> Script ()
+substitute sub user substitutions = script do
+  let accId = "acc.u0.r0.i0.a0"
+  (tp,_) <- fetchTripartyByAccount user accId
+  assets <- fetchAssetsByAccount user accId  
+  (st,_) <- head <$> query @SettlementApp sub
+  stD <- fromSome <$> queryDisclosure sub st
+  submitWithDisclosures user [stD] do 
+    exerciseCmd tp Substitute with substitutions = substitutions, assetCids = (map fst assets), settleCid = st
+  return ()
+
+scaleSubstitution : Decimal -> Substitution -> Substitution
+scaleSubstitution factor sub = sub with oldQty = sub.oldQty * factor, newQty = sub.newQty * factor
+
+submitWithDisclosure : Party -> Party -> ContractId PreBootstrap -> Commands a -> Script a
+submitWithDisclosure registry party dcid cmds = script do
+  mstC <- fromSome <$> queryDisclosure registry dcid
+  submitWithDisclosures party [mstC] cmds
+
+
+
+main : Script ()
+main = script do
+  -- reg = registry
+  -- s1 = subregister
+  -- a1 = agent
+  -- ci = cash issuer
+  -- i1 = issuer
+  -- t1 = taker
+  -- g1 = giver
+  [registry, s1, a1, ci, i1, t1, g1] <- mapA allocateParty ["registry", "S1", "A1", "CI", "I1", "T1", "G1"]
+  mst <- submit registry do
+    createCmd (PreBootstrap with 
+      registry = registry
+      cashIssuer = None
+      issuers = []
+      agents = []
+      subregisters = []
+      takers = []
+      numAgents = 1
+      numAssetsPerIssuer = 4
+      numAccountsPerIssuer = 2)
+
+  mst2 <- submitWithDisclosure registry s1 mst do
+    exerciseCmd mst AddSubregister with subregister = s1
+
+  mst3 <- submitWithDisclosure registry a1 mst2 do
+    exerciseCmd mst2 AddAgent with agent = a1
+
+  mst4 <- submitWithDisclosure registry ci mst3 do
+    exerciseCmd mst3 AddCashIssuer with cashIssuer = ci
+
+  mst5 <- submitWithDisclosure registry i1 mst4 do
+    exerciseCmd mst4 AddIssuer with issuer = i1
+
+  mst6 <- submitWithDisclosure registry t1 mst5 do
+    exerciseCmd mst5 AddTaker with taker = t1
+
+  bs <- submit registry do 
+    exerciseCmd mst6 ReadyForBootstrap
+
+  bsd <- fromSome <$> queryDisclosure registry bs
+  submitWithDisclosures g1 [bsd] do
+     exerciseCmd bs AddCustodian with custodian = g1
+
+  bcs <- query @BootstrapCustodianAccount registry
+  submit registry do
+    forA_ bcs \(bc, _) -> exerciseCmd bc ProcessBootstrap
+
+  approveMints registry    
+
+  
+  -- open tri party 
+  let accId = "acc.u0.r0.i0.a0"
+  assets <- fetchAssetsByAccount g1 accId
+  let assetsWithoutCash = filter (\(_, a) -> a.id /= cashId) assets
+  let from = map (\((_, a), (_, b)) -> Substitution with oldAssetId = a.id, oldQty = a.qty, newAssetId = b.id, newQty = b.qty) (pairs assetsWithoutCash)
+  let to = map (\((_, a), (_, b)) -> Substitution with oldAssetId = a.id, oldQty = a.qty, newAssetId = b.id, newQty = b.qty) (pairs (reverse assetsWithoutCash))
+
+  let pledges = map (\(_, a) -> (a.id, a.qty)) (takeEverySecond assetsWithoutCash)  
+  (st,_) <- head <$> query @SettlementApp s1
+  stD <- fromSome <$> queryDisclosure s1 st
+  (tp,_) <- fetchTripartyByAccount g1 accId
+  _ <- submitWithDisclosures g1 [stD] do
+      exerciseCmd tp Open with pledges = pledges, assetCids = (map fst assets), settleCid = st
+
+  substitute s1 g1 from
+  substitute s1 g1 to
+  substitute s1 g1 (map (scaleSubstitution 0.5) from)
+  substitute s1 g1 (map (scaleSubstitution 0.5) to)
+  substitute s1 g1 from
+  substitute s1 g1 to
+
+  return ()
+  

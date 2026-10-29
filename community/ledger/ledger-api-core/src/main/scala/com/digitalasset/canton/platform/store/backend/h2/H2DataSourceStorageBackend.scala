@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.h2
 
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.backend.DataSourceStorageBackend
 import com.digitalasset.canton.platform.store.backend.common.{
   DataSourceStorageBackendImpl,
@@ -13,10 +13,11 @@ import com.digitalasset.canton.platform.store.backend.common.{
 import java.sql.Connection
 import javax.sql.DataSource
 
-object H2DataSourceStorageBackend extends DataSourceStorageBackend {
+class H2DataSourceStorageBackend(val loggerFactory: NamedLoggerFactory)
+    extends DataSourceStorageBackend
+    with NamedLogging {
   override def createDataSource(
       dataSourceConfig: DataSourceStorageBackend.DataSourceConfig,
-      loggerFactory: NamedLoggerFactory,
       connectionInitHook: Option[Connection => Unit],
   ): DataSource = {
     val h2DataSource = new org.h2.jdbcx.JdbcDataSource()
@@ -26,9 +27,10 @@ object H2DataSourceStorageBackend extends DataSourceStorageBackend {
     // user/password in the URLs, so we don't bother exposing user/password configs separately from the url just for h2
     // which is anyway not supported for production. (This also helps run canton h2 participants that set user and
     // password.)
-    val (urlNoUserNoPassword, user, password) = extractUserPasswordAndRemoveFromUrl(
-      dataSourceConfig.jdbcUrl
-    )
+    val (urlNoUserNoPassword, user, password) =
+      H2DataSourceStorageBackend.extractUserPasswordAndRemoveFromUrl(
+        dataSourceConfig.jdbcUrl
+      )
     user.foreach(h2DataSource.setUser)
     password.foreach(h2DataSource.setPassword)
     h2DataSource.setUrl(urlNoUserNoPassword)
@@ -36,6 +38,11 @@ object H2DataSourceStorageBackend extends DataSourceStorageBackend {
     InitHookDataSourceProxy(h2DataSource, connectionInitHook.toList, loggerFactory)
   }
 
+  override def checkDatabaseAvailable(connection: Connection): Unit =
+    DataSourceStorageBackendImpl.checkDatabaseAvailable(connection)
+}
+
+object H2DataSourceStorageBackend {
   def extractUserPasswordAndRemoveFromUrl(
       jdbcUrl: String
   ): (String, Option[String], Option[String]) = {
@@ -52,7 +59,4 @@ object H2DataSourceStorageBackend extends DataSourceStorageBackend {
     val (urlNoUserNoPassword, password) = setKeyValueAndRemoveFromUrl(urlNoUser, "password")
     (urlNoUserNoPassword, user, password)
   }
-
-  override def checkDatabaseAvailable(connection: Connection): Unit =
-    DataSourceStorageBackendImpl.checkDatabaseAvailable(connection)
 }

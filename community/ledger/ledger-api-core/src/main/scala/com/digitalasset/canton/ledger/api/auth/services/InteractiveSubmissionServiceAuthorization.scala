@@ -20,7 +20,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
 }
 import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
 import com.digitalasset.canton.ledger.api.ProxyCloseable
-import com.digitalasset.canton.ledger.api.auth.RequiredClaims
+import com.digitalasset.canton.ledger.api.auth.{RequiredClaims, TrafficAccountAuthorization}
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator
 import io.grpc.ServerServiceDefinition
@@ -33,6 +33,7 @@ import scala.concurrent.{ExecutionContext, Future}
 final class InteractiveSubmissionServiceAuthorization(
     protected val service: InteractiveSubmissionService with AutoCloseable,
     private val authorizer: Authorizer,
+    trafficAccountAuthorization: Option[TrafficAccountAuthorization],
 )(implicit executionContext: ExecutionContext)
     extends InteractiveSubmissionService
     with ProxyCloseable
@@ -44,18 +45,25 @@ final class InteractiveSubmissionServiceAuthorization(
       request: PrepareSubmissionRequest
   ): Future[PrepareSubmissionResponse] =
     authorizer.rpc(service.prepareSubmission)(
-      getPreparedSubmissionClaims(request)*
+      (getPreparedSubmissionClaims(request) :::
+        debitClaims[PrepareSubmissionRequest](
+          request.accountId,
+          CommandsValidator.effectiveSubmitters(request).actAs,
+        ))*
     )(request)
 
   override def executeSubmission(
       request: ExecuteSubmissionRequest
   ): Future[ExecuteSubmissionResponse] =
     authorizer.rpc(service.executeSubmission)(
-      getExecuteSubmissionClaims(
+      (getExecuteSubmissionClaims(
         request,
         preparedTransactionForExecuteSubmissionL,
         userIdForExecuteSubmissionL,
-      )*
+      ) ::: debitClaims[ExecuteSubmissionRequest](
+        request.accountId,
+        executeAs(request, preparedTransactionForExecuteSubmissionL),
+      ))*
     )(request)
 
   override def getPreferredPackages(
@@ -70,22 +78,42 @@ final class InteractiveSubmissionServiceAuthorization(
       request: ExecuteSubmissionAndWaitRequest
   ): Future[ExecuteSubmissionAndWaitResponse] =
     authorizer.rpc(service.executeSubmissionAndWait)(
-      getExecuteSubmissionClaims(
+      (getExecuteSubmissionClaims(
         request,
         preparedTransactionForExecuteSubmissionAndWaitL,
         userIdForExecuteSubmissionAndWaitL,
-      )*
+      ) ::: debitClaims[ExecuteSubmissionAndWaitRequest](
+        request.accountId,
+        executeAs(request, preparedTransactionForExecuteSubmissionAndWaitL),
+      ))*
     )(request)
 
   override def executeSubmissionAndWaitForTransaction(
       request: ExecuteSubmissionAndWaitForTransactionRequest
   ): Future[ExecuteSubmissionAndWaitForTransactionResponse] =
     authorizer.rpc(service.executeSubmissionAndWaitForTransaction)(
-      getExecuteSubmissionAndWaitForTransactionClaims(request)*
+      (getExecuteSubmissionAndWaitForTransactionClaims(request) :::
+        debitClaims[ExecuteSubmissionAndWaitForTransactionRequest](
+          request.accountId,
+          executeAs(request, preparedTransactionForExecuteSubmissionAndWaitForTransactionL),
+        ))*
     )(request)
+
+  private def debitClaims[Req](accountId: String, actAs: Set[String]): List[RequiredClaim[Req]] =
+    TrafficAccountAuthorization.requiredClaims[Req](trafficAccountAuthorization, accountId, actAs)
 }
 
 object InteractiveSubmissionServiceAuthorization {
+
+  private def executeAs[Req](
+      request: Req,
+      preparedTransactionL: Lens[Req, Option[PreparedTransaction]],
+  ): Set[String] =
+    (for {
+      preparedTx <- preparedTransactionL.get(request)
+      metadata <- preparedTx.metadata
+      submitterInfo <- metadata.submitterInfo
+    } yield submitterInfo.actAs).getOrElse(Seq.empty).toSet
 
   def getPreparedSubmissionClaims(
       request: PrepareSubmissionRequest
@@ -102,19 +130,12 @@ object InteractiveSubmissionServiceAuthorization {
       request: Req,
       preparedTransactionL: Lens[Req, Option[PreparedTransaction]],
       userIdL: Lens[Req, String],
-  ): List[RequiredClaim[Req]] = {
-    val executeAsO = for {
-      preparedTx <- preparedTransactionL.get(request)
-      metadata <- preparedTx.metadata
-      submitterInfo <- metadata.submitterInfo
-    } yield submitterInfo.actAs
-    val executeAs = executeAsO.getOrElse(Seq.empty)
+  ): List[RequiredClaim[Req]] =
     RequiredClaims.executionClaims(
-      executeAs = executeAs.toSet[String],
+      executeAs = executeAs(request, preparedTransactionL),
       readAs = Set.empty[String],
       userIdL = userIdL,
     )
-  }
 
   def getExecuteSubmissionAndWaitForTransactionClaims(
       request: ExecuteSubmissionAndWaitForTransactionRequest

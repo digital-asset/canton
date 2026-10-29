@@ -21,7 +21,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.messages.LegacyAcsCommitment
-import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
@@ -62,7 +62,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
         participants.all.dars.upload(CantonExamplesPath)
       }
 
-  private val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+  private val synchronizerLimits = testedSynchronizerLimits
 
   def cryptoPureApi(config: LocalNodeConfig)(implicit ec: ExecutionContext): CryptoPureApi =
     JcePureCrypto

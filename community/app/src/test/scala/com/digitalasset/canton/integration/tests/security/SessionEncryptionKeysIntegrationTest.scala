@@ -26,7 +26,6 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
@@ -261,7 +260,7 @@ trait SessionKeyIntegrationTest
         )
         .valueOrFail("failed to create session key from randomness")
 
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = testedSynchronizerLimits
 
       val messages = Batch
         .openEnvelopes(submissionRequest.batch)(

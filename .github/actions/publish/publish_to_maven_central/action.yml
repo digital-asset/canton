@@ -1,0 +1,29 @@
+name: Publish Libraries to Maven Central
+description: Publish Canton libraries to Maven Central via Sonatype
+
+inputs:
+  gpg_code_signing:
+    required: true
+    description: GPG code signing key (base64 encoded)
+  release_suffix:
+    required: true
+    description: Release suffix (version string)
+
+runs:
+  using: composite
+  steps:
+    - name: Setup GPG
+      run: |
+        key=$(mktemp)
+        echo "${{ inputs.gpg_code_signing }}" | base64 --decode > $key
+        gpg --no-tty --quiet --import $key
+      shell: bash
+
+    - name: Publish libraries to Maven Central
+      run: .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh publishToSonatype
+      shell: bash
+      env:
+        FAIL_ON_ERROR_IN_OUTPUT: "false"
+        TIMEOUT: 60m
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+        gpg_code_signing: ${{ inputs.gpg_code_signing }}

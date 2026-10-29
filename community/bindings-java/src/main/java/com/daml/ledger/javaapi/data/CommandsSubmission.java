@@ -52,6 +52,7 @@ public final class CommandsSubmission {
   @NonNull private final Optional<String> accessToken;
   @NonNull private List<String> packageIdSelectionPreference;
   @NonNull private List<@NonNull PrefetchContractKey> prefetchContractKeys;
+  @NonNull private final Optional<String> accountId;
 
   protected CommandsSubmission(
       @NonNull Optional<String> workflowId,
@@ -69,7 +70,8 @@ public final class CommandsSubmission {
       @NonNull Optional<String> synchronizerId,
       @NonNull Optional<String> accessToken,
       @NonNull List<String> packageIdSelectionPreference,
-      @NonNull List<@NonNull PrefetchContractKey> prefetchContractKeys) {
+      @NonNull List<@NonNull PrefetchContractKey> prefetchContractKeys,
+      @NonNull Optional<String> accountId) {
     this.workflowId = workflowId;
     this.userId = userId;
     this.commandId = commandId;
@@ -86,6 +88,7 @@ public final class CommandsSubmission {
     this.accessToken = accessToken;
     this.packageIdSelectionPreference = packageIdSelectionPreference;
     this.prefetchContractKeys = prefetchContractKeys;
+    this.accountId = accountId;
   }
 
   public static CommandsSubmission create(
@@ -109,7 +112,8 @@ public final class CommandsSubmission {
         synchronizerId,
         empty(),
         emptyList(),
-        emptyList());
+        emptyList(),
+        empty());
   }
 
   @NonNull
@@ -191,6 +195,11 @@ public final class CommandsSubmission {
     return unmodifiableList(prefetchContractKeys);
   }
 
+  @NonNull
+  public Optional<String> getAccountId() {
+    return accountId;
+  }
+
   public CommandsSubmission withWorkflowId(String workflowId) {
     return new CommandsSubmission(
         Optional.of(workflowId),
@@ -208,7 +217,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withActAs(String actAs) {
@@ -228,7 +238,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withActAs(List<@NonNull String> actAs) {
@@ -248,7 +259,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withReadAs(List<@NonNull String> readAs) {
@@ -268,7 +280,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withMinLedgerTimeAbs(@NonNull Instant minLedgerTimeAbs) {
@@ -288,7 +301,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withMinLedgerTimeRel(@NonNull Duration minLedgerTimeRel) {
@@ -308,7 +322,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withDeduplicationDuration(@NonNull Duration deduplicationDuration)
@@ -333,7 +348,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withDeduplicationOffset(@NonNull Long deduplicationOffset)
@@ -358,7 +374,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withCommands(List<@NonNull ? extends HasCommands> commands) {
@@ -378,7 +395,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withAccessToken(@NonNull String accessToken) {
@@ -398,7 +416,8 @@ public final class CommandsSubmission {
         synchronizerId,
         Optional.of(accessToken),
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withDisclosedContracts(
@@ -419,7 +438,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withPackageIdSelectionPreference(
@@ -440,7 +460,8 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public CommandsSubmission withPrefetchContractKeys(
@@ -461,7 +482,29 @@ public final class CommandsSubmission {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
+  }
+
+  public CommandsSubmission withAccountId(@NonNull String accountId) {
+    return new CommandsSubmission(
+        workflowId,
+        userId,
+        commandId,
+        commands,
+        deduplicationDuration,
+        deduplicationOffset,
+        minLedgerTimeAbs,
+        minLedgerTimeRel,
+        actAs,
+        readAs,
+        submissionId,
+        disclosedContracts,
+        synchronizerId,
+        accessToken,
+        packageIdSelectionPreference,
+        prefetchContractKeys,
+        Optional.of(accountId).filter(id -> !id.isEmpty()));
   }
 
   public CommandsOuterClass.Commands toProto() {
@@ -485,7 +528,11 @@ public final class CommandsSubmission {
             .addAllActAs(actAs)
             .addAllReadAs(readAs)
             .addAllDisclosedContracts(disclosedContractsConverted)
-            .addAllPackageIdSelectionPreference(packageIdSelectionPreference);
+            .addAllPackageIdSelectionPreference(packageIdSelectionPreference)
+            .addAllPrefetchContractKeys(
+                prefetchContractKeys.stream()
+                    .map(PrefetchContractKey::toProto)
+                    .collect(Collectors.toList()));
 
     synchronizerId.ifPresent(builder::setSynchronizerId);
 
@@ -501,6 +548,8 @@ public final class CommandsSubmission {
     minLedgerTimeRel.ifPresent(rel -> builder.setMinLedgerTimeRel(Utils.durationToProto(rel)));
 
     submissionId.ifPresent(builder::setSubmissionId);
+
+    accountId.ifPresent(builder::setAccountId);
 
     return builder.build();
   }
@@ -560,6 +609,9 @@ public final class CommandsSubmission {
             .map(PrefetchContractKey::fromProto)
             .collect(Collectors.toList());
 
+    Optional<String> accountId =
+        commands.getAccountId().isEmpty() ? Optional.empty() : Optional.of(commands.getAccountId());
+
     return new CommandsSubmission(
         workflowId,
         userId,
@@ -576,7 +628,8 @@ public final class CommandsSubmission {
         synchronizerId,
         empty(),
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   @Override
@@ -617,6 +670,10 @@ public final class CommandsSubmission {
         + '\''
         + ", packageIdSelectionPreference="
         + packageIdSelectionPreference
+        + ", prefetchContractKeys="
+        + prefetchContractKeys
+        + ", accountId="
+        + accountId
         + '}';
   }
 
@@ -640,7 +697,9 @@ public final class CommandsSubmission {
         && Objects.equals(synchronizerId, commandsSubmission.synchronizerId)
         && Objects.equals(accessToken, commandsSubmission.accessToken)
         && Objects.equals(
-            packageIdSelectionPreference, commandsSubmission.packageIdSelectionPreference);
+            packageIdSelectionPreference, commandsSubmission.packageIdSelectionPreference)
+        && Objects.equals(prefetchContractKeys, commandsSubmission.prefetchContractKeys)
+        && Objects.equals(accountId, commandsSubmission.accountId);
   }
 
   @Override
@@ -660,7 +719,9 @@ public final class CommandsSubmission {
         disclosedContracts,
         synchronizerId,
         accessToken,
-        packageIdSelectionPreference);
+        packageIdSelectionPreference,
+        prefetchContractKeys,
+        accountId);
   }
 
   public static class RedundantDeduplicationSpecification extends RuntimeException {

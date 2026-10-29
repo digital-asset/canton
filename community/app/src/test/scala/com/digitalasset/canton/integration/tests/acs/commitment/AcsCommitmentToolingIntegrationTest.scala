@@ -7,7 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfi
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeProportion}
-import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig, SynchronizerTimeTrackerConfig}
+import com.digitalasset.canton.config.{CommitmentSendDelay, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.{
   CommandFailure,
   LocalParticipantReference,
@@ -18,9 +18,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.acs.commitment.util.ContractsAndCommitment.IouCommitmentWithContracts
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
@@ -28,6 +28,7 @@ import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   IntervalDuration,
 }
 import com.digitalasset.canton.integration.util.AcsInspection.assertInAcsSync
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -50,8 +51,8 @@ import com.digitalasset.canton.participant.pruning.{
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.Digest
-import com.digitalasset.canton.protocol.{ReassignmentId, SynchronizerLimits}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -176,7 +177,7 @@ trait AcsCommitmentToolingIntegrationTest
               if (countCommitments.getAndIncrement() == 0) {
                 logger.debug(
                   s"Withholding first commitment from participant2 ${submissionRequest.batch.envelopes
-                      .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, SynchronizerLimits.defaultFor(testedProtocolVersion), testedProtocolVersion))}"
+                      .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, testedSynchronizerLimits, testedProtocolVersion))}"
                 )
                 SendDecision.HoldBack(delayP2FirstCmt.future)
               } else SendDecision.Process
@@ -582,6 +583,7 @@ trait AcsCommitmentToolingIntegrationTest
       import env.*
 
       val simClock = environment.simClock.value
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
       deployThreeContractsAndCheck(daId, alreadyDeployedContracts, participant1, participant2)
 
@@ -594,6 +596,8 @@ trait AcsCommitmentToolingIntegrationTest
       simClock.advance(interval.multipliedBy(2))
       val cmtTick = tickAfter(simClock.uniqueTime())
       simClock.advanceTo(cmtTick.forgetRefinement.immediateSuccessor)
+
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
       logger.info("Send a commitment, which will cover the five intervals.")
       participant1.testing.fetch_synchronizer_times()
@@ -1112,8 +1116,7 @@ trait AcsCommitmentToolingIntegrationTest
 class AcsCommitmentToolingIntegrationTestPostgres extends AcsCommitmentToolingIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    // TODO(#29603): This test fails to advance time properly with BFT sequencer, too flaky (>50% failures).
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(

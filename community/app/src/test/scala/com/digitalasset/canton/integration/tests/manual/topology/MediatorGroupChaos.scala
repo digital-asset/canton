@@ -121,7 +121,12 @@ class MediatorGroupChaos(
 
           mediator.start()
           mediator.health.wait_for_ready_for_initialization()
-          val mediatorIdentity = mediator.topology.transactions.identity_transactions()
+          // Mediators no longer store their identity transactions in an authorized store,
+          // so `identity_transactions()` would return nothing: generate them for the
+          // synchronizer's protocol version.
+          val mediatorIdentity = mediator.topology.transactions.generate_onboarding_transactions(
+            sequencerToConnectTo.synchronizer_parameters.static.get().protocolVersion
+          )
           val mediatorId = mediator.id
 
           def identityTransactionsVisibleOnNode(
@@ -191,7 +196,13 @@ class MediatorGroupChaos(
                           "add mediator",
                           s"${mediator.name} to group ${group.unwrap} propose_delta on owner ${owner.name}",
                           fail(_), // trigger fail so the surrounding "eventually" retries
-                        )(
+                        ) {
+                          // The owner validates the proposal against its own topology state, so it
+                          // must have processed the mediator's identity first. Otherwise, the
+                          // proposal is rejected with TOPOLOGY_INSUFFICIENT_KEYS.
+                          if (!identityTransactionsVisibleOnNode(owner, proposals = false))
+                            fail(s"${owner.name} has not yet observed ${mediator.name}'s identity")
+
                           owner.topology.mediators.propose_delta(
                             daId,
                             group = group,
@@ -199,7 +210,7 @@ class MediatorGroupChaos(
                             mustFullyAuthorize = !needMultiOwnerAuthorization,
                             synchronize = Some(topologyChangeTimeout),
                           )
-                        )
+                        }
                       )
                     )
                 )
@@ -402,7 +413,16 @@ object MediatorGroupChaos extends TopologyOperationsCompanion {
     "LOCAL_VERDICT_TIMEOUT",
     "ALREADY_EXISTS/TOPOLOGY_MAPPING_ALREADY_EXISTS", // retry loop around proposals can cause duplicate MDS topology mappings to be proposed if topology transaction persistence is slow
     "Topology transaction is not properly authorized: No delegation found for keys", // This warning and the following error happen when a mediator change proposal ...
+    "during topology validation: No delegation found for keys",
     "GrpcClientError: INVALID_ARGUMENT/An error occurred. Please contact the operator and inquire about the request", // ... is submitted to a recently removed synchronizer owner
+    "TOPOLOGY_NO_APPROPRIATE_SIGNING_KEY_IN_STORE", // ... or refused locally by the recently removed synchronizer owner, whose key no longer authorizes the synchronizer namespace
     "Sequencing result message timed out.", // mediator times out phase 6 response if another mediator has since been removed and sequencer considers mediator aggregation rule invalid
+  )
+
+  override def acceptableNonRetryableLogEntries: Seq[String] = Seq(
+    // A mediator change proposal is submitted to a recently removed synchronizer owner, whose
+    // topology manager refuses to sign it with its namespace key; the change is retried with
+    // the updated set of owners
+    "missing namespace delegations for keys"
   )
 }

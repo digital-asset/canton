@@ -223,8 +223,24 @@ trait SequencedEventValidator extends AutoCloseable {
 
 object SequencedEventValidator extends HasLoggerName {
 
-  /** Do not validate sequenced events */
-  private case object NoValidation extends SequencedEventValidator {
+  /** Supplies the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] used to
+    * decompress an event, e.g. derived from the current synchronizer parameters.
+    */
+  type DecompressionPolicyProvider = TraceContext => FutureUnlessShutdown[DecompressionPolicy]
+
+  object DecompressionPolicyProvider {
+
+    /** Always yields the given policy. */
+    def fixed(policy: DecompressionPolicy): DecompressionPolicyProvider =
+      _ => FutureUnlessShutdown.pure(policy)
+  }
+
+  /** Skips signature and ordering checks. Events that arrive compressed are still decompressed
+    * within the limit from `decompressionPolicyProvider`.
+    */
+  private final class NoValidation(decompressionPolicyProvider: DecompressionPolicyProvider)(
+      implicit ec: ExecutionContext
+  ) extends SequencedEventValidator {
     override def validate(
         priorEvent: Option[ProcessingSerializedEvent],
         event: MaybeCompressedSerializedEvent,
@@ -234,18 +250,18 @@ object SequencedEventValidator extends HasLoggerName {
     ): EitherT[FutureUnlessShutdown, SequencedEventValidationError[
       Nothing
     ], SequencedSerializedEvent] =
-      // No validation means we blindly trust the sequencer, so we do not enforce a maxRequestSize
-      // bound on decompression here.
-      EitherT(
-        FutureUnlessShutdown.pure(
+      // Decompress within the limit; an event exceeding it fails with DecompressionFailed.
+      EitherT
+        .right[SequencedEventValidationError[Nothing]](decompressionPolicyProvider(traceContext))
+        .subflatMap { decompressionPolicy =>
           decompressEvent(
             event,
             ProtocolVersionValidation.NoValidation,
-            DecompressionPolicy.MaxValueUnsafe,
-            SynchronizerLimits.max,
+            decompressionPolicy,
+            SynchronizerLimits.default,
           )
-        )
-      )
+        }
+
     override def validateOnReconnect(
         priorEvent: Option[ProcessingSerializedEvent],
         reconnectEvent: MaybeCompressedSerializedEvent,
@@ -257,6 +273,9 @@ object SequencedEventValidator extends HasLoggerName {
     ], SequencedSerializedEvent] =
       validate(priorEvent, reconnectEvent, sequencerId)
 
+    // No size limit here: Pekko subscriptions deliver events that are already decoded. In
+    // production only the sequencer uses them, to read its own store, and every envelope in that
+    // store was checked against `maxRequestSize` before it was written.
     override def validatePekko[E: Pretty](
         subscription: SequencerSubscriptionPekko[E],
         priorReconnectEvent: Option[SequencedSerializedEvent],
@@ -289,24 +308,28 @@ object SequencedEventValidator extends HasLoggerName {
         signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
       )
 
-  /** Do not validate sequenced events. Only use it in case of a programming error and the need to
-    * unblock a deployment or if you blindly trust the sequencer.
+  /** Do not validate sequenced events (signatures, ordering). Only use it in case of a programming
+    * error and the need to unblock a deployment or if you blindly trust the sequencer.
     *
+    * @param decompressionPolicyProvider
+    *   limits the decompression of events that arrive compressed.
     * @param warn
     *   whether to log a warning when used
     */
   def noValidation(
       synchronizerId: PhysicalSynchronizerId,
+      decompressionPolicyProvider: DecompressionPolicyProvider,
       warn: Boolean = true,
   )(implicit
-      loggingContext: NamedLoggingContext
+      loggingContext: NamedLoggingContext,
+      ec: ExecutionContext,
   ): SequencedEventValidator = {
     if (warn) {
       loggingContext.warn(
         s"You have opted to skip event validation for synchronizer $synchronizerId. You should not do this unless you know what you are doing."
       )
     }
-    NoValidation
+    new NoValidation(decompressionPolicyProvider)
   }
 
   /** Validates the requested topology timestamp against the sequencing timestamp and the
@@ -418,23 +441,23 @@ trait SequencedEventValidatorFactory {
 
 object SequencedEventValidatorFactory {
 
-  /** Do not validate sequenced events. Only use it in case of a programming error and the need to
-    * unblock a deployment or if you blindly trust the sequencer.
-    *
-    * @param warn
-    *   whether to log a warning
+  /** Factory for [[SequencedEventValidator.noValidation]]; see there for when to use it and for the
+    * parameters.
     */
   def noValidation(
       synchronizerId: PhysicalSynchronizerId,
+      decompressionPolicyProvider: SequencedEventValidator.DecompressionPolicyProvider,
       warn: Boolean = true,
-  ): SequencedEventValidatorFactory = new SequencedEventValidatorFactory {
-    override def create(loggerFactory: NamedLoggerFactory)(implicit
-        traceContext: TraceContext
-    ): SequencedEventValidator =
-      SequencedEventValidator.noValidation(synchronizerId, warn)(
-        NamedLoggingContext(loggerFactory, traceContext)
-      )
-  }
+  )(implicit ec: ExecutionContext): SequencedEventValidatorFactory =
+    new SequencedEventValidatorFactory {
+      override def create(loggerFactory: NamedLoggerFactory)(implicit
+          traceContext: TraceContext
+      ): SequencedEventValidator =
+        SequencedEventValidator.noValidation(synchronizerId, decompressionPolicyProvider, warn)(
+          NamedLoggingContext(loggerFactory, traceContext),
+          ec,
+        )
+    }
 }
 
 /** Validate whether a received event is valid for processing. */
@@ -657,14 +680,18 @@ class SequencedEventValidatorImpl(
     if (psid.protocolVersion == ProtocolVersion.v35)
       FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
     else
-      snapshot.ipsSnapshot
-        .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
-        .map(parameters =>
-          DecompressionPolicy.forProtocolVersion(
-            psid.protocolVersion,
-            MaxBytesToDecompress(parameters.maxRequestSize.value),
+      // Guard with the validator's close context: an in-flight lookup is drained before close, and a
+      // later one short-circuits to AbortedDueToShutdown instead of racing the closing storage layer.
+      synchronizeWithClosing("decompression-bound")(
+        snapshot.ipsSnapshot
+          .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
+          .map(parameters =>
+            DecompressionPolicy.forProtocolVersion(
+              psid.protocolVersion,
+              MaxBytesToDecompress(parameters.maxRequestSize.value),
+            )
           )
-        )
+      )
 
   /** Verifies the event's signature against the resolved topology snapshot and decompresses its
     * batch within the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] derived

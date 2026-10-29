@@ -5,17 +5,21 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{SequencerClientHistograms, SequencerClientMetrics}
-import com.digitalasset.canton.sequencing.SequencerConnectionPoolDelays
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.SequencerConnectionPoolError
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.sequencing.{
+  SequencerConnectionPenaltyConfig,
+  SequencerConnectionPoolDelays,
+}
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, config}
 import com.digitalasset.nonempty.NonEmpty
+import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level.{INFO, WARN}
@@ -31,6 +35,70 @@ class SequencerConnectionPoolImplTest
 
   import ConnectionPoolTestHelpers.*
 
+  private lazy val seq0 = testSequencerId(0)
+  private lazy val seq1 = testSequencerId(1)
+  private lazy val seq2 = testSequencerId(2)
+
+  /** Decays penalties every 100ms with the given half-life */
+  private def poolPenaltyConfig(
+      halfLife: PositiveFiniteDuration,
+      enabled: Boolean = true,
+  ): SequencerConnectionPenaltyConfig =
+    SequencerConnectionPenaltyConfig(
+      enabled = enabled,
+      decayInterval = PositiveFiniteDuration.tryOfMillis(100),
+      halfLife = halfLife,
+      zeroThreshold = PositiveDouble.tryCreate(0.01),
+    )
+
+  /** Half-life long enough for the penalties not to decay noticeably during a test */
+  private val noDecay = PositiveFiniteDuration.tryOfDays(1)
+
+  /** Half-life equal to the decay interval: each decay halves the penalties */
+  private val fastDecay = PositiveFiniteDuration.tryOfMillis(100)
+
+  private def pickSequencers(pool: SequencerConnectionPool, nb: Int)(implicit
+      traceContext: com.digitalasset.canton.tracing.TraceContext
+  ): Set[SequencerId] =
+    pool
+      .getConnections("test", PositiveInt.tryCreate(nb), excluded = Set.empty, acceptableO = None)
+      .map(_.attributes.sequencerId)
+
+  private def increasePenalty(
+      pool: SequencerConnectionPool,
+      sequencerId: SequencerId,
+      amount: PositiveInt,
+  ): Unit = pool.contents(sequencerId).headOption.value.increasePenalty(amount)
+
+  /** Run `f` on a started pool with 3 connections, each to a different sequencer. Connection `i`
+    * connects to sequencer `i % 3`, so that connections added later connect to the same sequencers.
+    * `f` also receives a function returning the internal connection created for a given index.
+    */
+  private def withValidatedPool[V](
+      halfLife: PositiveFiniteDuration,
+      nbConnections: PositiveInt = PositiveInt.three,
+      trustThreshold: PositiveInt = PositiveInt.three,
+      penaltiesEnabled: Boolean = true,
+  )(
+      f: (SequencerConnectionPool, CreatedConnections) => V
+  ): V =
+    withConnectionPool(
+      nbConnections = nbConnections,
+      trustThreshold = trustThreshold,
+      index => mkConnectionAttributes(synchronizerIndex = 1, sequencerIndex = index % 3),
+      poolPenaltyConfig = poolPenaltyConfig(halfLife, penaltiesEnabled),
+    ) { (pool, createdConnections, _, _) =>
+      pool.start().futureValueUS.valueOrFail("initialization")
+
+      // Wait for all the connections to be validated
+      eventually() {
+        pool.nbSequencers shouldBe NonNegativeInt.three
+        pool.nbConnections shouldBe nbConnections.toNonNegative
+      }
+
+      f(pool, createdConnections)
+    }
+
   "SequencerConnectionPool" should {
     "initialize in the happy path" in {
       withConnectionPool(
@@ -42,7 +110,7 @@ class SequencerConnectionPoolImplTest
 
         clue("Normal start") {
           initializedF.futureValueUS.valueOrFail("initialization")
-          listener.shouldStabilizeOn(ComponentHealthState.Ok())
+          listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           pool.nbSequencers shouldBe NonNegativeInt.tryCreate(3)
           pool.physicalSynchronizerIdO shouldBe Some(testSynchronizerId(1))
         }
@@ -50,13 +118,13 @@ class SequencerConnectionPoolImplTest
         clue("Stop connections non-fatally") {
           (0 to 1).foreach(createdConnections(_).fail(reason = "test"))
           // Connections are restarted
-          listener.shouldStabilizeOn(ComponentHealthState.Ok())
+          listener.shouldStabilizeOnState(ComponentHealthState.Ok())
         }
 
         clue("Stop connections fatally") {
           (0 to 1).foreach(createdConnections(_).fatal(reason = "test"))
           // Connections are not restarted
-          listener.shouldStabilizeOn(
+          listener.shouldStabilizeOnState(
             ComponentHealthState.degraded(
               "only 1 connection(s) to different sequencers available, trust threshold = 3"
             )
@@ -65,7 +133,7 @@ class SequencerConnectionPoolImplTest
         }
 
         createdConnections(2).fatal(reason = "test")
-        listener.shouldStabilizeOn(ComponentHealthState.failed("no connection available"))
+        listener.shouldStabilizeOnState(ComponentHealthState.failed("no connection available"))
       }
     }
 
@@ -80,7 +148,7 @@ class SequencerConnectionPoolImplTest
           case Left(SequencerConnectionPoolError.ThresholdUnreachableError(message)) =>
             message shouldBe "Trust threshold of 2 is no longer reachable"
         }
-        listener.shouldStabilizeOn(ComponentHealthState.failed("Component is closed"))
+        listener.shouldStabilizeOnState(ComponentHealthState.failed("Component is closed"))
       }
     }
 
@@ -120,7 +188,7 @@ class SequencerConnectionPoolImplTest
           }
         }
 
-        listener.shouldStabilizeOn(ComponentHealthState.failed("Component is closed"))
+        listener.shouldStabilizeOnState(ComponentHealthState.failed("Component is closed"))
       }
     }
 
@@ -140,7 +208,7 @@ class SequencerConnectionPoolImplTest
             message shouldBe s"Connection pool failed to initialize within ${LoggerUtil
                 .roundDurationForHumans(testTimeout.duration)}"
         }
-        listener.shouldStabilizeOn(ComponentHealthState.failed("Component is closed"))
+        listener.shouldStabilizeOnState(ComponentHealthState.failed("Component is closed"))
       }
     }
 
@@ -168,7 +236,7 @@ class SequencerConnectionPoolImplTest
           failureUnavailable +: Seq.fill(2)(correctStaticParametersResponse),
       )
 
-      val poolDelays = SequencerConnectionPoolDelays(
+      val poolDelays = SequencerConnectionPoolDelays.default.copy(
         minRestartDelay = NonNegativeFiniteDuration.tryOfMillis(100),
         maxRestartDelay = NonNegativeFiniteDuration.tryOfSeconds(10),
         warnValidationDelay = NonNegativeFiniteDuration.tryOfMillis(700), // 100 + 200 + 400 = 700
@@ -199,7 +267,7 @@ class SequencerConnectionPoolImplTest
         )(
           {
             pool.start().futureValueUS.valueOrFail("initialization")
-            listener.shouldStabilizeOn(ComponentHealthState.Ok())
+            listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           },
           logEntries => {
             // 4 retries, due to one failure at each call
@@ -230,7 +298,7 @@ class SequencerConnectionPoolImplTest
         )(
           {
             createdConnections(0).fail(reason = "test")
-            listener.shouldStabilizeOn(ComponentHealthState.Ok())
+            listener.shouldStabilizeOnState(ComponentHealthState.Ok())
           },
           logEntries => {
             // The retry delay is reset after the connection has been validated
@@ -648,6 +716,174 @@ class SequencerConnectionPoolImplTest
               exclusions,
               acceptableO = None,
             ) should have size 0
+          }
+        }
+      }
+    }
+
+    "prefer the sequencers with the lowest penalties" in {
+      withValidatedPool(halfLife = noDecay) { (pool, _) =>
+        clue("all penalties at 0: all sequencers get picked") {
+          eventually() {
+            (1 to 10).flatMap(_ => pickSequencers(pool, 1)).toSet shouldBe Set(seq0, seq1, seq2)
+          }
+        }
+
+        increasePenalty(pool, seq0, PositiveInt.one)
+
+        clue("sequencer with a higher penalty is not picked") {
+          eventuallyForever(durationOfSuccess = 1.second) {
+            pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+          }
+        }
+
+        increasePenalty(pool, seq1, PositiveInt.two)
+
+        clue("sequencers are picked by increasing penalty") {
+          pickSequencers(pool, 1) shouldBe Set(seq2)
+          pickSequencers(pool, 2) shouldBe Set(seq2, seq0)
+          pickSequencers(pool, 3) shouldBe Set(seq2, seq0, seq1)
+        }
+      }
+    }
+
+    "pick a sequencer again once its penalty has decayed" in {
+      withValidatedPool(halfLife = fastDecay) { (pool, _) =>
+        // 0.5^7 < 0.01, so the penalty goes back to 0 after 7 decays
+        increasePenalty(pool, seq0, PositiveInt.one)
+        pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+
+        eventually() {
+          pickSequencers(pool, 2) should contain(seq0)
+        }
+      }
+    }
+
+    "apply a new half-life after a configuration update" in {
+      withValidatedPool(halfLife = noDecay) { (pool, _) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+        eventuallyForever(durationOfSuccess = 500.millis) {
+          pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+        }
+
+        pool
+          .updateConfig(
+            pool.config.copy(sequencerConnectionPenaltyConfig = poolPenaltyConfig(fastDecay))
+          )
+          .valueOrFail("update config")
+
+        eventually() {
+          pickSequencers(pool, 2) should contain(seq0)
+        }
+      }
+    }
+
+    "keep the penalty of a sequencer across connection restarts" in {
+      withValidatedPool(halfLife = noDecay) { (pool, createdConnections) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+
+        val initialConnection = pool.contents(seq0).loneElement
+        createdConnections(0).fail(reason = "test")
+
+        eventually() {
+          // A new user connection is built when the connection is validated again
+          pool.contents.get(seq0).map(_.loneElement) should not be Some(initialConnection)
+          pool.nbSequencers shouldBe NonNegativeInt.three
+        }
+
+        eventuallyForever(durationOfSuccess = 500.millis) {
+          pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+        }
+      }
+    }
+
+    "not keep the penalty of a sequencer removed from and added back to the configuration" in {
+      withValidatedPool(halfLife = noDecay, trustThreshold = PositiveInt.one) { (pool, _) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+        pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+
+        // Remove the only connection to `seq0`
+        val remainingConnections = pool.config.connections.drop(1)
+        pool
+          .updateConfig(pool.config.copy(connections = NonEmpty.from(remainingConnections).value))
+          .valueOrFail("remove connection")
+        eventually() {
+          pool.nbSequencers shouldBe NonNegativeInt.two
+        }
+
+        pool.connectionPenalties shouldBe empty
+
+        // Add a new connection to `seq0`, e.g., with a different endpoint
+        pool
+          .updateConfig(
+            pool.config.copy(connections =
+              NonEmpty.from(mkDummyConnectionConfig(3) +: remainingConnections).value
+            )
+          )
+          .valueOrFail("add a new connection to the sequencer")
+        eventually() {
+          pool.nbSequencers shouldBe NonNegativeInt.three
+        }
+
+        pool.connectionPenalties shouldBe empty
+
+        eventually() {
+          pickSequencers(pool, 2) should contain(seq0)
+        }
+      }
+    }
+
+    "keep the penalty of a sequencer with multiple connections when at least one of them remains" in {
+      withValidatedPool(
+        nbConnections = PositiveInt.tryCreate(4),
+        halfLife = noDecay,
+        trustThreshold = PositiveInt.one,
+      ) { (pool, _) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+        pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+
+        // Remove only one connection to `seq0`
+        val remainingConnections = pool.config.connections.drop(1)
+        pool
+          .updateConfig(pool.config.copy(connections = NonEmpty.from(remainingConnections).value))
+          .valueOrFail("remove connection")
+
+        pool.connectionPenalties should contain key seq0
+
+        eventuallyForever(durationOfSuccess = 500.millis) {
+          pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+        }
+      }
+    }
+
+    "still track penalty increases while penalties are disabled, but ignore them for selection" in {
+      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+
+        clue("we still track the penalties") {
+          pool.connectionPenalties should contain key seq0
+        }
+
+        clue("but penalties are ignored for selection") {
+          eventually() {
+            (1 to 10).flatMap(_ => pickSequencers(pool, 1)).toSet shouldBe Set(seq0, seq1, seq2)
+          }
+        }
+      }
+    }
+
+    "use existing penalties for selection immediately after enabling penalties" in {
+      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _) =>
+        increasePenalty(pool, seq0, PositiveInt.one)
+        pool.connectionPenalties should contain key seq0
+
+        pool
+          .updateConfig(pool.config.focus(_.sequencerConnectionPenaltyConfig.enabled).replace(true))
+          .valueOrFail("enable penalties")
+
+        clue("penalties recorded while disabled apply immediately for selection") {
+          eventuallyForever(durationOfSuccess = 500.millis) {
+            pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
           }
         }
       }

@@ -56,5 +56,9 @@ object UpdateFormatHashUtils {
         uf.includeTransactions,
         hashTransactionFormat,
       )
+      .addOptional(
+        uf.includeTransactionsAndReassignments,
+        hashTransactionFormat,
+      )
 
 }

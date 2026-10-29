@@ -78,7 +78,7 @@ abstract class GetConnectedSynchronizerIntegrationTest
       }
 
   protected def getConnectedSynchronizers(
-      party: PartyId,
+      party: Option[PartyId],
       participant: LocalParticipantReference,
   ): proto.state_service.GetConnectedSynchronizersResponse =
     participant
@@ -86,7 +86,7 @@ abstract class GetConnectedSynchronizerIntegrationTest
         StateService.getConnectedSynchronizers(
           proto.state_service
             .GetConnectedSynchronizersRequest(
-              party = party.toLf,
+              party = party.fold("")(_.toLf),
               participantId = "",
               identityProviderId = "",
             )
@@ -94,27 +94,67 @@ abstract class GetConnectedSynchronizerIntegrationTest
       )
       .tryResult
 
+  private def testGetConnectedSynchronizers(
+      party: Option[PartyId],
+      participant: LocalParticipantReference,
+      expectedSynchronizerIds: Seq[String],
+      expectedPermission: proto.state_service.ParticipantPermission,
+  ): Unit = {
+    val response = getConnectedSynchronizers(party, participant)
+    response.connectedSynchronizers.map(
+      _.synchronizerId
+    ) should contain theSameElementsAs expectedSynchronizerIds
+    response.connectedSynchronizers.map(
+      _.permission
+    ) should contain theSameElementsAs expectedSynchronizerIds.map(_ => expectedPermission)
+  }
+
   "StateService.GetConnectedSynchronizers" should {
     "list connected synchronizers if any" in { implicit env =>
       import env.*
 
-      val responseP1 = getConnectedSynchronizers(party1, participant1)
-      responseP1.connectedSynchronizers.map(_.synchronizerId) should contain theSameElementsAs Seq(
-        daId.logical.toProtoPrimitive,
-        acmeId.logical.toProtoPrimitive,
+      testGetConnectedSynchronizers(
+        Some(party1),
+        participant1,
+        Seq(daId.logical.toProtoPrimitive, acmeId.logical.toProtoPrimitive),
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
       )
 
-      val responseP2 = getConnectedSynchronizers(party2, participant2)
-      responseP2.connectedSynchronizers.map(_.synchronizerId) shouldBe Seq(
-        daId.logical.toProtoPrimitive
+      testGetConnectedSynchronizers(
+        Some(party2),
+        participant2,
+        Seq(daId.logical.toProtoPrimitive),
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
       )
-      responseP2.connectedSynchronizers.map(_.permission) shouldBe Seq(
-        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION
+
+      testGetConnectedSynchronizers(
+        None,
+        participant1,
+        Seq(daId.logical.toProtoPrimitive, acmeId.logical.toProtoPrimitive),
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_UNSPECIFIED,
+      )
+
+      testGetConnectedSynchronizers(
+        None,
+        participant2,
+        Seq(daId.logical.toProtoPrimitive),
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_UNSPECIFIED,
       )
 
       // disconnect a synchronizer
       participant2.synchronizers.disconnect(daName)
-      getConnectedSynchronizers(party2, participant2).connectedSynchronizers shouldBe empty
+      testGetConnectedSynchronizers(
+        Some(party2),
+        participant2,
+        Seq.empty,
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
+      )
+      testGetConnectedSynchronizers(
+        None,
+        participant2,
+        Seq.empty,
+        proto.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_UNSPECIFIED,
+      )
     }
   }
 }

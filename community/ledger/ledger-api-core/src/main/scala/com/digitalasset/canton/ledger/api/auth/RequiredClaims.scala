@@ -51,11 +51,12 @@ object RequiredClaims {
         .flatMap(transactionFormatClaims[Req]),
       updateFormat.includeReassignments.toList
         .flatMap(eventFormatClaims[Req]),
-      updateFormat.includeTopologyEvents
-        .flatMap(_.includeParticipantAuthorizationEvents)
-        .toList
-        .flatMap(t => readAsForAllPartiesOrAnyPartyIfEmpty[Req](t.parties)),
-    ).flatten.distinct
+      updateFormat.includeTransactionsAndReassignments.toList
+        .flatMap(transactionFormatClaims[Req]),
+    ).flatten.distinct match {
+      case Nil => List(RequiredClaim.Public[Req]())
+      case claims => claims
+    }
 
   def idpAdminClaimsAndMatchingRequestIdpId[Req](
       identityProviderIdL: Lens[Req, String],

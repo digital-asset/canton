@@ -235,7 +235,7 @@ final class NonGarbageCollectedShardedSequentialProcessingQueueTest
       failureMode = FailureMode.StopAfterFailure,
     )
 
-  "ShardedSequentialProcessingQueue" should {
+  "NonGarbageCollectedShardedSequentialProcessingQueue" should {
     behave like processingQueue()
 
     "stop processing the queue if a previous action fails" in {

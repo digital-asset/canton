@@ -7,7 +7,13 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.util.FailureMode.{ContinueAfterFailure, StopAfterFailure}
+import com.digitalasset.canton.util.FailureMode.{
+  ContinueAfterFailure,
+  CrashAfterFailure,
+  CrashAfterFailureContinueAfterAbort,
+  StopAfterFailure,
+  StopAfterFailureContinueAfterAbort,
+}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AsyncWordSpec
@@ -174,131 +180,6 @@ class SimpleExecutionQueueTest
         task1Res shouldBe Outcome("task1")
       }
     }
-  }
-
-  private def stopAfterFailureTests(
-      mk: () => SimpleExecutionQueue
-  ): Unit = {
-    "not run a future in case of a previous failure" in {
-      val queue = mk()
-      val task1 = new MockTask("task1")
-      val task2 = new MockTask("task2")
-      val task3 = new MockTask("task3")
-      val task4 = new MockTask("task4")
-      val task1Result = queue.executeUS(task1.run(), "Task1").failOnShutdown
-      val task2Result = queue.executeUS(task2.run(), "Task2").failOnShutdown
-      val task3Result = queue.executeUS(task3.run(), "Task3").failOnShutdown
-      val task4Result = queue.executeUS(task4.run(), "Task4").failOnShutdown
-
-      failTask(task1, Seq("Task2", "Task3", "Task4"))
-
-      task3.complete()
-
-      // Propagated to all subsequent tasks
-      val expectedFailure = "mocked failure for task1"
-
-      for {
-        task2Res <- task2Result.failed
-        _ = task2.started.get() shouldBe false
-        _ = task2Res.getMessage shouldBe expectedFailure
-        task4Res <- task4Result.failed
-        _ = task4.started.get() shouldBe false
-        _ = task4Res.getMessage shouldBe expectedFailure
-        task1Res <- task1Result.failed
-        _ = task1Res.getMessage shouldBe expectedFailure
-        task3Res <- task3Result.failed
-      } yield {
-        task3Res.getMessage shouldBe expectedFailure
-      }
-    }
-
-    "correctly propagate failures" in {
-      val queue = mk()
-      val task1 = new MockTask("task1")
-      val task2 = new MockTask("task2")
-      val task3 = new MockTask("task3")
-      val task1Result = queue.executeUS(task1.run(), "Task1")
-      val task2Result = queue.executeUS(task2.run(), "Task2")
-      val task3Result = queue.executeUS(task3.run(), "Task3")
-
-      failTask(task1, Seq("Task2", "Task3"))
-
-      task2.complete()
-      for {
-        task1Res <- task1Result.failed.failOnShutdown("aborted due to shutdown.")
-        task2Res <- task2Result.failed.failOnShutdown("aborted due to shutdown.")
-        task3Res <- task3Result.failed.failOnShutdown("aborted due to shutdown.")
-      } yield {
-        task1Res.getMessage shouldBe "mocked failure for task1"
-        task2Res.getMessage shouldBe "mocked failure for task1"
-        task3Res.getMessage shouldBe "mocked failure for task1"
-      }
-    }
-
-    "not run follow-up tasks if a task has been shutdown" in {
-      val queue = mk()
-      val task1 = new MockTask("task1")
-      val task2 = new MockTask("task2")
-      val task3 = new MockTask("task3")
-
-      val task1Result = queue.executeUS(task1.run(), "Task1")
-      val task2Result = queue.executeUS(task2.run(), "Task2")
-      val task3Result = queue.executeUS(task3.run(), "Task3")
-
-      task1.complete()
-      shutdownTask(task2, Seq("Task3"))
-
-      for {
-        task1res <- task1Result.unwrap
-        task2res <- task2Result.unwrap
-        task3res <- task3Result.unwrap
-      } yield {
-        task1.started.get() shouldBe true
-        task1res shouldBe UnlessShutdown.Outcome("task1")
-        task2.started.get() shouldBe true
-        task2res shouldBe UnlessShutdown.AbortedDueToShutdown
-        task3.started.get() shouldBe false
-        task3res shouldBe UnlessShutdown.AbortedDueToShutdown
-      }
-    }
-
-    "list the outstanding tasks" in {
-      val queue = mk()
-      val task1 = new MockTask("task1")
-      val task2 = new MockTask("task2")
-      val task3 = new MockTask("task3")
-      val task4 = new MockTask("task4")
-
-      val task1Result = queue.executeUS(task1.run(), "Task1")
-      val task2Result = queue.executeUS(task2.run(), "Task2")
-      val task3Result = queue.executeUS(task3.run(), "Task3")
-      val task4Result = queue.executeUS(task4.run(), "Task4")
-
-      val queue0 = queue.queued
-      task1.complete()
-      val queue1 = queue.queued
-      failTask(task2, Seq("Task3", "Task4"))
-
-      for {
-        _ <- task1Result.failOnShutdown
-        queue2 = queue.queued
-        _ = task3.complete()
-        _ <- task2Result.failed.failOnShutdown("aborted due to shutdown.")
-        _ <- task3Result.failed.failOnShutdown("aborted due to shutdown.")
-        queue3 = queue.queued
-        _ = task4.complete()
-        _ <- task4Result.failed.failOnShutdown("aborted due to shutdown.")
-        queue4 = queue.queued
-      } yield {
-        queue0 shouldBe Seq("sentinel (completed)", "Task1", "Task2", "Task3", "Task4")
-        queue1 shouldBe Seq("Task1 (completed)", "Task2", "Task3", "Task4")
-
-        // After task2 failure, all tasks removed from the queue
-        queue2 shouldBe Seq("Task4 (completed)")
-        queue3 shouldBe Seq("Task4 (completed)")
-        queue4 shouldBe Seq("Task4 (completed)")
-      }
-    }
 
     "queue can be checked for emptiness or single task" in {
       val queue = mk()
@@ -392,8 +273,133 @@ class SimpleExecutionQueueTest
         }
       }
     }
-
   }
+
+  private def stopAfterFailureTests(
+      mk: () => SimpleExecutionQueue
+  ): Unit = {
+    "not run a future in case of a previous failure" in {
+      val queue = mk()
+      val task1 = new MockTask("task1")
+      val task2 = new MockTask("task2")
+      val task3 = new MockTask("task3")
+      val task4 = new MockTask("task4")
+      val task1Result = queue.executeUS(task1.run(), "Task1").failOnShutdown
+      val task2Result = queue.executeUS(task2.run(), "Task2").failOnShutdown
+      val task3Result = queue.executeUS(task3.run(), "Task3").failOnShutdown
+      val task4Result = queue.executeUS(task4.run(), "Task4").failOnShutdown
+
+      failTask(task1, Seq("Task2", "Task3", "Task4"))
+
+      task3.complete()
+
+      // Propagated to all subsequent tasks
+      val expectedFailure = "mocked failure for task1"
+
+      for {
+        task2Res <- task2Result.failed
+        _ = task2.started.get() shouldBe false
+        _ = task2Res.getMessage shouldBe expectedFailure
+        task4Res <- task4Result.failed
+        _ = task4.started.get() shouldBe false
+        _ = task4Res.getMessage shouldBe expectedFailure
+        task1Res <- task1Result.failed
+        _ = task1Res.getMessage shouldBe expectedFailure
+        task3Res <- task3Result.failed
+      } yield {
+        task3Res.getMessage shouldBe expectedFailure
+      }
+    }
+
+    "correctly propagate failures" in {
+      val queue = mk()
+      val task1 = new MockTask("task1")
+      val task2 = new MockTask("task2")
+      val task3 = new MockTask("task3")
+      val task1Result = queue.executeUS(task1.run(), "Task1")
+      val task2Result = queue.executeUS(task2.run(), "Task2")
+      val task3Result = queue.executeUS(task3.run(), "Task3")
+
+      failTask(task1, Seq("Task2", "Task3"))
+
+      task2.complete()
+      for {
+        task1Res <- task1Result.failed.failOnShutdown("aborted due to shutdown.")
+        task2Res <- task2Result.failed.failOnShutdown("aborted due to shutdown.")
+        task3Res <- task3Result.failed.failOnShutdown("aborted due to shutdown.")
+      } yield {
+        task1Res.getMessage shouldBe "mocked failure for task1"
+        task2Res.getMessage shouldBe "mocked failure for task1"
+        task3Res.getMessage shouldBe "mocked failure for task1"
+      }
+    }
+
+    "list the outstanding tasks" in {
+      val queue = mk()
+      val task1 = new MockTask("task1")
+      val task2 = new MockTask("task2")
+      val task3 = new MockTask("task3")
+      val task4 = new MockTask("task4")
+
+      val task1Result = queue.executeUS(task1.run(), "Task1")
+      val task2Result = queue.executeUS(task2.run(), "Task2")
+      val task3Result = queue.executeUS(task3.run(), "Task3")
+      val task4Result = queue.executeUS(task4.run(), "Task4")
+
+      val queue0 = queue.queued
+      task1.complete()
+      val queue1 = queue.queued
+      failTask(task2, Seq("Task3", "Task4"))
+
+      for {
+        _ <- task1Result.failOnShutdown
+        queue2 = queue.queued
+        _ = task3.complete()
+        _ <- task2Result.failed.failOnShutdown("aborted due to shutdown.")
+        _ <- task3Result.failed.failOnShutdown("aborted due to shutdown.")
+        queue3 = queue.queued
+        _ = task4.complete()
+        _ <- task4Result.failed.failOnShutdown("aborted due to shutdown.")
+        queue4 = queue.queued
+      } yield {
+        queue0 shouldBe Seq("sentinel (completed)", "Task1", "Task2", "Task3", "Task4")
+        queue1 shouldBe Seq("Task1 (completed)", "Task2", "Task3", "Task4")
+
+        // After task2 failure, all tasks removed from the queue
+        queue2 shouldBe Seq("Task4 (completed)")
+        queue3 shouldBe Seq("Task4 (completed)")
+        queue4 shouldBe Seq("Task4 (completed)")
+      }
+    }
+  }
+
+  private def stopAfterAbortTests(mk: () => SimpleExecutionQueue): Unit =
+    "not run follow-up tasks if a task has been shutdown" in {
+      val queue = mk()
+      val task1 = new MockTask("task1")
+      val task2 = new MockTask("task2")
+      val task3 = new MockTask("task3")
+
+      val task1Result = queue.executeUS(task1.run(), "Task1")
+      val task2Result = queue.executeUS(task2.run(), "Task2")
+      val task3Result = queue.executeUS(task3.run(), "Task3")
+
+      task1.complete()
+      shutdownTask(task2, Seq("Task3"))
+
+      for {
+        task1res <- task1Result.unwrap
+        task2res <- task2Result.unwrap
+        task3res <- task3Result.unwrap
+      } yield {
+        task1.started.get() shouldBe true
+        task1res shouldBe UnlessShutdown.Outcome("task1")
+        task2.started.get() shouldBe true
+        task2res shouldBe UnlessShutdown.AbortedDueToShutdown
+        task3.started.get() shouldBe false
+        task3res shouldBe UnlessShutdown.AbortedDueToShutdown
+      }
+    }
 
   private def continueAfterFailureTests(
       mk: () => SimpleExecutionQueue
@@ -419,34 +425,6 @@ class SimpleExecutionQueueTest
         task1Res.getMessage shouldBe "mocked failure for task1"
         task2Res shouldBe "task2"
         task3Res shouldBe "task3"
-      }
-    }
-
-    "run follow-up tasks if a task has been shutdown" in {
-      val queue = mk()
-      val task1 = new MockTask("task1")
-      val task2 = new MockTask("task2")
-      val task3 = new MockTask("task3")
-
-      val task1Result = queue.executeUS(task1.run(), "Task1")
-      val task2Result = queue.executeUS(task2.run(), "Task2")
-      val task3Result = queue.executeUS(task3.run(), "Task3")
-
-      task1.complete()
-      task2.shutdown()
-      task3.complete()
-
-      for {
-        task1res <- task1Result.unwrap
-        task2res <- task2Result.unwrap
-        task3res <- task3Result.unwrap
-      } yield {
-        task1.started.get() shouldBe true
-        task1res shouldBe UnlessShutdown.Outcome("task1")
-        task2.started.get() shouldBe true
-        task2res shouldBe UnlessShutdown.AbortedDueToShutdown
-        task3.started.get() shouldBe true
-        task3res shouldBe UnlessShutdown.Outcome("task3")
       }
     }
 
@@ -487,8 +465,10 @@ class SimpleExecutionQueueTest
         queue4 shouldBe Seq("Task4 (completed)")
       }
     }
+  }
 
-    "complete subsequent tasks with shutdown even if the currently running task does not close" in {
+  private def continueAfterAbortTests(mk: () => SimpleExecutionQueue): Unit =
+    "run follow-up tasks if a task has been shutdown" in {
       val queue = mk()
       val task1 = new MockTask("task1")
       val task2 = new MockTask("task2")
@@ -498,59 +478,23 @@ class SimpleExecutionQueueTest
       val task2Result = queue.executeUS(task2.run(), "Task2")
       val task3Result = queue.executeUS(task3.run(), "Task3")
 
-      val closed = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        Future(queue.close()),
-        LogEntry.assertLogSeq(
-          Seq(
-            (
-              _.warningMessage should include(
-                "Task closing simple-exec-queue: test-queue did not complete within 1 second"
-              ),
-              "missing queue closing timeout message",
-            ),
-            (
-              _.warningMessage should include(
-                "Closing 'AsyncCloseable(name=simple-exec-queue: test-queue)' failed"
-              ),
-              "missing lifecycle closing error message",
-            ),
-            (
-              _.warningMessage should include(
-                "Forcibly completing Task2 with AbortedDueToShutdown"
-              ),
-              "missing task 2 shutdown",
-            ),
-            (
-              _.warningMessage should include(
-                "Forcibly completing Task3 with AbortedDueToShutdown"
-              ),
-              "missing task 3 shutdown",
-            ),
-          )
-        ),
-      )
-
-      eventually() {
-        closed.isCompleted shouldBe true
-      }
+      task1.complete()
+      task2.shutdown()
+      task3.complete()
 
       for {
-        task2Res <- task2Result.unwrap
-        task3Res <- task3Result.unwrap
+        task1res <- task1Result.unwrap
+        task2res <- task2Result.unwrap
+        task3res <- task3Result.unwrap
       } yield {
-        task3Res shouldBe AbortedDueToShutdown
-        task2Res shouldBe AbortedDueToShutdown
-        // The running task is not completed
-        task1Result.unwrap.isCompleted shouldBe false
-        // After we shut it down it should eventually complete though
-        task1.shutdown()
-        eventually() {
-          task1Result.unwrap.futureValue shouldBe AbortedDueToShutdown
-        }
+        task1.started.get() shouldBe true
+        task1res shouldBe UnlessShutdown.Outcome("task1")
+        task2.started.get() shouldBe true
+        task2res shouldBe UnlessShutdown.AbortedDueToShutdown
+        task3.started.get() shouldBe true
+        task3res shouldBe UnlessShutdown.Outcome("task3")
       }
     }
-
-  }
 
   "SimpleExecutionQueueWithShutdown" when {
     "not logging task timing" should {
@@ -566,6 +510,7 @@ class SimpleExecutionQueueTest
 
       behave like simpleExecutionQueueTests(factory)
       behave like stopAfterFailureTests(factory)
+      behave like stopAfterAbortTests(factory)
     }
 
     "logging task timingWithShutdown" should {
@@ -581,6 +526,22 @@ class SimpleExecutionQueueTest
 
       behave like simpleExecutionQueueTests(factory)
       behave like stopAfterFailureTests(factory)
+      behave like stopAfterAbortTests(factory)
+    }
+
+    "in ContinueAfterAbort mode" should {
+      val factory = () =>
+        new SimpleExecutionQueue(
+          "test-queue-continue-after-abort",
+          futureSupervisor,
+          queueTimeouts,
+          loggerFactory,
+          logTaskTiming = true,
+          failureMode = StopAfterFailureContinueAfterAbort,
+        )
+      behave like simpleExecutionQueueTests(factory)
+      behave like stopAfterFailureTests(factory)
+      behave like continueAfterAbortTests(factory)
     }
 
     "in ContinueAfterFailure mode" should {
@@ -596,6 +557,39 @@ class SimpleExecutionQueueTest
 
       behave like simpleExecutionQueueTests(factory)
       behave like continueAfterFailureTests(factory)
+      behave like continueAfterAbortTests(factory)
+    }
+
+    "in CrashAfterFailure mode" should {
+      val factory = () =>
+        new SimpleExecutionQueue(
+          "test-queue",
+          futureSupervisor,
+          queueTimeouts,
+          loggerFactory,
+          logTaskTiming = true,
+          failureMode = CrashAfterFailure,
+        )
+
+      behave like simpleExecutionQueueTests(factory)
+      // We cannot unit-test the crash behavior in a unit test because this would crash the JVM.
+      behave like stopAfterAbortTests(factory)
+    }
+
+    "in CrashAfterFailureContinueAfterAbort mode" should {
+      val factory = () =>
+        new SimpleExecutionQueue(
+          "test-queue",
+          futureSupervisor,
+          queueTimeouts,
+          loggerFactory,
+          logTaskTiming = true,
+          failureMode = CrashAfterFailureContinueAfterAbort,
+        )
+
+      behave like simpleExecutionQueueTests(factory)
+      // We cannot unit-test the crash behavior in a unit test because this would crash the JVM.
+      behave like continueAfterAbortTests(factory)
     }
   }
 }

@@ -88,7 +88,7 @@ private[backend] trait StorageBackendTestsParties
     val someOffset = offset(1)
     val dtos = Vector(dtoPTP(someOffset))
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     val partiesBeforeLedgerEndUpdate = executeSql(backend.party.knownParties(None, None, 10))
     executeSql(updateLedgerEndTo(dtos, someOffset))
@@ -121,7 +121,7 @@ private[backend] trait StorageBackendTestsParties
       dtoPTP(offset(17), party("ggf")),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     // ledger end deliberately omitting the last test entries
     executeSql(updateLedgerEndTo(dtos, offset(16)))
@@ -158,7 +158,7 @@ private[backend] trait StorageBackendTestsParties
       dtoPTP(offset(6), party("_a"), otherParticipantId),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     // ledger end deliberately omitting the last test entries
     executeSql(updateLedgerEndTo(dtos, offset(6)))
@@ -324,7 +324,7 @@ private[backend] trait StorageBackendTestsParties
       }
     }.toVector
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEndTo(dtos, offset(offsetCounter.get())))
 

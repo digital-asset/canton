@@ -89,7 +89,7 @@ final class PartyVettingMapComputation(
         // TODO(#28758): Use prescribed sync in admissibleSynchronizersComputation
         //               to reduce the search space in there
         partyHostingOnAllAdmissibleSyncs <- admissibleSynchronizersComputation
-          .forParties(submitters, informees, synchronizerState)
+          .forParties(submitters, informees, prescribedPsidO, synchronizerState)
           .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.toGrpcError))
           .merge
         withPrescribedPsidConsidered <- prescribedPsidO match {

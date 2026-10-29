@@ -31,11 +31,12 @@ object IouSyntax {
       owner: Party,
       amount: Double = 100.0,
       observers: List[PartyId] = List.empty,
+      currency: String = "USD",
   ): iou.Iou =
     new iou.Iou(
       payer.toProtoPrimitive,
       owner.toProtoPrimitive,
-      new iou.Amount(amount.toBigDecimal, "USD"),
+      new iou.Amount(amount.toBigDecimal, currency),
       observers.map(_.toProtoPrimitive).asJava,
     )
 
@@ -59,8 +60,10 @@ object IouSyntax {
         participant.consoleEnvironment.commandTimeouts.ledgerCommand
       ),
       observers: List[PartyId] = List.empty,
+      currency: String = "USD",
   ): Iou.Contract = {
-    val createIouCmds = testIou(payer, owner, amount, observers).create().commands().asScala.toSeq
+    val createIouCmds =
+      testIou(payer, owner, amount, observers, currency).create().commands().asScala.toSeq
 
     val tx = participant.ledger_api.javaapi.commands.submit(
       Seq(payer),

@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.{
   PositiveFiniteDuration,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -21,10 +22,9 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{SuppressionRule, TracedLogger}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.resource.DbLockedConnection.State
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.store.db.*
 import com.digitalasset.canton.time.{Clock, SimClock}
-import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -260,8 +260,8 @@ trait DbStorageMultiTest
   protected def withNewStorage[T](
       newStorage: DbStorageMulti
   )(fn: DbStorageMulti => FutureUnlessShutdown[T]): FutureUnlessShutdown[T] =
-    FutureUtil
-      .logOnFailureUS(fn(newStorage), "failed to run function with new storage")
+    FutureUnlessShutdownUtil
+      .logOnFailureUnlessShutdown(fn(newStorage), "failed to run function with new storage")
       .thereafter(_ => newStorage.close())
 
   protected def awaitActive(f: FixtureParam): Assertion =
@@ -305,7 +305,7 @@ trait DbStorageMultiTest
           result2 <- storage2.query(sql"select foo from #$tableName".as[String], "select foo")
           _ <- dropTable(f)
         } yield {
-          failedUpdate.failOnShutdown.failed.futureValue shouldBe a[PassiveInstanceException]
+          failedUpdate.unwrap.futureValue shouldBe AbortedDueToShutdown
 
           // We do not expect the testString2 to have been inserted
           result1 shouldEqual Vector(testString1)

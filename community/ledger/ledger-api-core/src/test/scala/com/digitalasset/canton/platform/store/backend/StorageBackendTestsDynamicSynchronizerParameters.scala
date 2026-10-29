@@ -83,7 +83,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
     }
 
   it should "return the event ids for a single event" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(singleDto, _))
     executeSql(updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L))
 
@@ -91,7 +91,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
   }
 
   it should "return the event ids across all synchronizers (no synchronizer id filtering in the DB)" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
 
@@ -99,7 +99,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
   }
 
   it should "respond with payloads for a single event" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(singleDto, _))
     executeSql(updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L))
 
@@ -117,7 +117,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
   }
 
   it should "respond with payloads for multiple events across synchronizers" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
 
@@ -139,7 +139,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
   }
 
   it should "deliver events ordered by event sequential id" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
 
@@ -151,7 +151,7 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
   }
 
   it should "respond with no events for a range with no matching ids" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(multipleDtos, _))
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
 

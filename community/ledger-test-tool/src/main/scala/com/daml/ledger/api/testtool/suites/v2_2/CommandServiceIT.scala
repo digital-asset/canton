@@ -1052,6 +1052,7 @@ object CommandServiceIT {
       ),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
   }
 }

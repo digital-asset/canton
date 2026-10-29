@@ -18,6 +18,8 @@ class SubmitRequestSpec extends AnyFlatSpec with Matchers with ScalaCheckDrivenP
     commandsGen.map(SubmitRequestProto.newBuilder().setCommands(_).build)
   ) { request =>
     val commands = SubmitRequest.fromProto(request)
+    // Guard against fromProto not preserving a field
+    SubmitRequest.toProto(commands) shouldEqual request
     SubmitRequest.fromProto(SubmitRequest.toProto(commands)) shouldEqual commands
   }
 }

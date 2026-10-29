@@ -60,7 +60,10 @@ class InterfaceSubscriptionITSpec extends BenchtoolSandboxFixture with AppendedC
       )
 
       (for {
-        (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(config)
+        (apiServices, allocatedParties, fooSubmission) <- benchtoolFooSubmissionFixture(
+          config,
+          maxInFlightCommands = 10,
+        )
         configDesugaring = new ConfigEnricher(
           allocatedParties,
           BenchtoolTestsPackageInfo.StaticDefault,

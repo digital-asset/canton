@@ -179,6 +179,6 @@ trait StorageBackendTestsDBLockForSuite
 
   override def getConnection: Connection =
     backend.dataSource
-      .createDataSource(DataSourceStorageBackend.DataSourceConfig(jdbcUrl), loggerFactory)
+      .createDataSource(DataSourceStorageBackend.DataSourceConfig(jdbcUrl))
       .getConnection
 }

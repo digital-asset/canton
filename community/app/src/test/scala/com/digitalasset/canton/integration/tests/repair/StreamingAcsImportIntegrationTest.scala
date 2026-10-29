@@ -4,8 +4,7 @@
 package com.digitalasset.canton.integration.tests.repair
 
 import better.files.File
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
@@ -119,6 +118,6 @@ sealed trait StreamingAcsImportIntegrationTest
 }
 
 final class StreamingAcsImportIntegrationTestPostgres extends StreamingAcsImportIntegrationTest {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))
 }

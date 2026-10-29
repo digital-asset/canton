@@ -47,7 +47,12 @@ fetch_newest_daml_version() {
   version_prefix=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' version.sbt | cut -d'.' -f1,2)
 
   # Use dpm to resolve latest version with that prefix
-  NEWEST_DAML_VERSION=$(dpm repo resolve-tags damlc:$version_prefix --registry $DPM_REGISTRY)
+  # dpm prints its usage on stdout on failure, so also check the output looks like a version
+  if ! NEWEST_DAML_VERSION=$(dpm repo resolve-tags damlc:$version_prefix --registry $DPM_REGISTRY) ||
+    [[ ! "$NEWEST_DAML_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    err "Failed to resolve damlc:$version_prefix from $DPM_REGISTRY. Has a Daml $version_prefix snapshot been published?"
+    return 1
+  fi
   echo $NEWEST_DAML_VERSION
 }
 
@@ -149,11 +154,6 @@ create_daml_upgrade_pull_request() {
 
   FIRST_COMMIT_EXCLUSIVE=$(commit_from_daml_version "$CANTON_DAML_VERSION")
   LAST_COMMIT_INCLUSIVE=$(commit_from_daml_version "$DAML_VERSION_TO_UPGRADE_TO")
-  # TODO(i27546) Remove adhoc handling once adhoc versions are no longer needed / used
-  if ! git merge-base --is-ancestor "$LAST_COMMIT_INCLUSIVE" main && [[ "$DAML_VERSION_TO_UPGRADE_TO" == *adhoc* ]]; then
-    echo "Daml version  $CANTON_DAML_VERSION commit $LAST_COMMIT_INCLUSIVE is not in main. Exiting." >&2
-    exit 1
-  fi
 
   cd $CANTON_DIR
 

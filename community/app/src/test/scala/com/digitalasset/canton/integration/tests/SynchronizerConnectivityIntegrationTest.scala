@@ -31,7 +31,7 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceInconsistentConnectivity,
-  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
   SyncServiceUnknownSynchronizer,
 }
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.NotConnectedToAnySynchronizer
@@ -312,6 +312,8 @@ sealed trait SynchronizerConnectivityIntegrationTest
 
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
+        val subscriptionPermissionDenied =
+          "Permanently closing sequencer subscription due to permission denied"
         // revoke the synchronizer trust certificate of participant1
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
@@ -329,8 +331,8 @@ sealed trait SynchronizerConnectivityIntegrationTest
           forEvery(_) { entry =>
             entry.message should (include(
               MemberAccessDisabled(participant1.id).reason
-            ) or include(
-              SyncServiceSynchronizerDisabledUs.id
+            ) or include(subscriptionPermissionDenied) or include(
+              SyncServiceSynchronizerDisconnect.id
             ) or // The participant might have started to refresh the token before being disabled, but the refresh request
               // is processed by the sequencer after the participant is disabled
               include(

@@ -5,9 +5,8 @@ package com.digitalasset.canton.integration.tests.continuity.latest
 
 import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
-  ProtocolContinuityConformanceTestParticipant,
+  ProtocolContinuityConformanceTestMixedVersions,
   ProtocolContinuityConformanceTestPing,
-  ProtocolContinuityConformanceTestSynchronizer,
 }
 import com.digitalasset.canton.util.ReleaseUtils
 
@@ -34,17 +33,9 @@ sealed trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityC
   override val shard: Int = 0
 }
 
-final class LatestProtocolContinuityConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
+final class LatestProtocolContinuityConformanceTestMixedVersions
+    extends ProtocolContinuityConformanceTestMixedVersions
     with LatestProtocolContinuityConformanceTest
-
-final class LatestProtocolContinuityConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with LatestProtocolContinuityConformanceTest {
-
-  override def disableBinaryVersionEnforcement: Boolean = true
-
-}
 
 final class LatestProtocolContinuityConformanceTestPing
     extends ProtocolContinuityConformanceTestPing

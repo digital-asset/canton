@@ -54,7 +54,7 @@ abstract sealed class TestSubmissionServiceIntegrationTest
       participant,
       daId,
       testedProtocolVersion,
-      defaultProtocolLimits,
+      testedTransactionLimits,
       timeouts,
       loggerFactory,
       testSubmissionServiceOverrideO = testSubmissionServiceOverrideO,

@@ -12,7 +12,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequest,
   OrderingRequestBatch,
 }
-import com.digitalasset.canton.tracing.{Traced, W3CTraceContext}
+import com.digitalasset.canton.tracing.{TraceContext, Traced, W3CTraceContext}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -60,16 +61,47 @@ class BatchIdValidationTest extends AnyWordSpec with BftSequencerBaseTest {
               ),
               epochNumber = EpochNumber.First,
             )
-          val batchIdBeforeSerialization = BatchId.from(batch)
+          val batchIdBeforeSerialization =
+            BatchId.from(batch, logger)(implicitly, TraceContext.empty)
           val serializedBatch = batch.toProtoV30
           val deserializedBatch =
             OrderingRequestBatch
               .fromProtoV30(serializedBatch)
               .getOrElse(fail("Failed to deserialize batch"))
-          val batchIdAfterDeserialization = BatchId.from(deserializedBatch)
+          val batchIdAfterDeserialization =
+            BatchId.from(deserializedBatch, logger)(implicitly, TraceContext.empty)
 
           batchIdBeforeSerialization shouldBe batchIdAfterDeserialization
         }
+      }
+    }
+  }
+
+  "BatchId.from" should {
+    "produce a stable id for a fixed batch" in {
+      val batch =
+        OrderingRequestBatch.create(
+          requests = Seq(
+            Traced(
+              OrderingRequest(
+                tag = BlockFormat.SendTag,
+                messageId = "aMessageId",
+                payload = ByteString.copyFromUtf8("payload1"),
+                orderingStartInstant = Some(Instant.parse("2026-01-01T00:00:00Z")),
+              )
+            )(TraceContext.empty)
+          ),
+          epochNumber = EpochNumber(7L),
+        )
+
+      ProtocolVersion.supported.foreach { protocolVersion =>
+        BatchId.from(batch, logger)(protocolVersion, traceContext).hash.toHexString shouldBe
+          (protocolVersion match {
+            case pv if pv <= ProtocolVersion.v36 =>
+              "1220adaf0c41ab56b822d643fc006ba8aae59efc9cc79d5c1604600d5b560bc80cd2"
+            case pv =>
+              "122081e19cab056cf75722b0b8822e0b8feeec486fae8b7b4a0a83294736bd7b9684"
+          })
       }
     }
   }

@@ -1,0 +1,24 @@
+name: Set Canton Protocol Version
+description: >
+  Export CANTON_PROTOCOL_VERSION for the subsequent steps of the job and fail fast when the
+  given protocol version is empty.
+
+inputs:
+  protocol_version:
+    description: Protocol version for the tests ('dev' or '35', '36', etc.)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set Canton Protocol Version
+      env:
+        CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+      run: |
+        if [[ -z "$CANTON_PROTOCOL_VERSION" ]]; then
+          echo "::error::protocol_version is empty. Pass a non-empty 'protocol_version' input ('dev' or '35', '36', etc.)."
+          exit 1
+        fi
+        echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+        echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+      shell: bash

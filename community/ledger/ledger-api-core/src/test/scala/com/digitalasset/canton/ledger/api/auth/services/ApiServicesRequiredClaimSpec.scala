@@ -22,7 +22,10 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   PreparedTransaction,
 }
-import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
+import com.daml.ledger.api.v2.state_service.{
+  GetActiveContractsRequest,
+  GetConnectedSynchronizersRequest,
+}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{
   EventFormat,
@@ -33,16 +36,16 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.daml.ledger.api.v2.update_service.GetUpdatesRequest
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.auth.RequiredClaim
-import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.ApiServicesRequiredClaimSpec.{
   executeSubmissionAndWaitForTransactionRequest,
   executeSubmissionRequest,
   prepareSubmissionRequest,
   submitAndWaitForTransactionRequest,
 }
+import com.digitalasset.canton.ledger.api.auth.{RequiredClaims, TrafficAccountAuthorization}
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scalapb.lenses.Lens
@@ -165,6 +168,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -190,6 +194,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
       RequiredClaim.ReadAs("a"),
@@ -210,6 +215,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
           )
         ),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
   }
@@ -220,8 +226,42 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
         activeAtOffset = 15,
         eventFormat = None,
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
     ) shouldBe Nil
+  }
+
+  behavior of "StateServiceAuthorization.getConnectedSynchronizersClaims"
+
+  it should "require only a public claim if no parameters are given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(party = "", participantId = "", identityProviderId = "")
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require only a public claim if no party is given, regardless of the other parameters" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "",
+        participantId = "some-participant",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(RequiredClaim.Public[GetConnectedSynchronizersRequest]())
+  }
+
+  it should "require admin, IDP admin or operate as party rights with a matching IDP if a party is given" in {
+    StateServiceAuthorization.getConnectedSynchronizersClaims(
+      GetConnectedSynchronizersRequest(
+        party = "alice",
+        participantId = "",
+        identityProviderId = "some-idp",
+      )
+    ) shouldBe List(
+      RequiredClaim.AdminOrIdpAdminOrOperateAsParty[GetConnectedSynchronizersRequest](Seq("alice")),
+      RequiredClaim.MatchIdentityProviderId(
+        StateServiceAuthorization.identityProviderIdForGetConnectedSynchronizersL
+      ),
+    )
   }
 
   behavior of "InteractiveSubmissionServiceAuthorization.prepareSubmission"
@@ -375,6 +415,28 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     )
   }
 
+  behavior of "TrafficAccountAuthorization.requiredClaims"
+
+  it should "require debit rights for explicit accounts, and for the fallback party in strict mode" in {
+    val adminParty = LfPartyId.assertFromString("participant1::default")
+    val cases = Table(
+      ("implicit", "accountId", "actAs", "expected"),
+      (true, "acme/billing", Set("alice", "bob"), Some("acme/billing" -> true)),
+      (true, "", Set("alice"), None),
+      (false, "acme/billing", Set("alice"), Some("acme/billing" -> false)),
+      (false, "", Set("alice"), Some("alice" -> false)),
+      (false, "", Set(adminParty: String), None),
+      (false, "", Set("alice", "bob"), None),
+    )
+    forAll(cases) { (implicitDebit, accountId, actAs, expected) =>
+      new TrafficAccountAuthorization(adminParty, implicitDebit)
+        .requiredClaims[Unit](accountId, actAs) shouldBe expected.toList.map {
+        case (account, acceptExecuteRights) =>
+          RequiredClaim.DebitTrafficFrom[Unit](account, acceptExecuteRights)
+      }
+    }
+  }
+
   behavior of "UpdateServiceAuthorization.getUpdatesClaims"
 
   it should "compute the correct claims in the happy path" in {
@@ -412,6 +474,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = Seq("e", "f"))))
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -421,8 +484,6 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
       RequiredClaim.ReadAs("d"),
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
       RequiredClaim.ReadAsAnyParty(),
     )
   }
@@ -462,6 +523,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = Seq("e", "f"))))
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -471,8 +533,6 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
       RequiredClaim.ReadAs("d"),
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
     )
   }
 
@@ -500,17 +560,17 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = Seq("e", "f"))))
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
+      RequiredClaim.Public()
     )
   }
 
-  it should "compute the correct claims if no filtersByParty in transactions and reassignments exists and topology format is empty" in {
+  it should "require only a public claim if no filtersByParty in transactions and reassignments exists and topology format is empty" in {
     val eventFormatO = Some(
       EventFormat(
         filtersByParty = Map.empty,
@@ -534,11 +594,14 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(None)
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
       )
-    ) shouldBe Nil
+    ) should contain theSameElementsAs RequiredClaims[GetUpdatesRequest](
+      RequiredClaim.Public()
+    )
   }
 
   it should "compute the correct claims if no updateFormat exists" in {
@@ -552,7 +615,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     ) shouldBe Nil
   }
 
-  it should "compute the correct claims for topology format without wildcard" in {
+  it should "require only a public claim for topology format with parties" in {
     UpdateServiceAuthorization.getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
@@ -564,13 +627,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = Seq("e", "f"))))
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAs("e"),
-      RequiredClaim.ReadAs("f"),
+      RequiredClaim.Public()
     )
   }
 
@@ -595,6 +658,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -620,6 +684,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             ),
             includeTransactions = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -629,7 +694,7 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
     )
   }
 
-  it should "compute the correct claims for topology format with wildcard" in {
+  it should "require only a public claim for topology format with wildcard" in {
     UpdateServiceAuthorization.getUpdatesClaims(
       GetUpdatesRequest(
         beginExclusive = 10,
@@ -641,12 +706,13 @@ class ApiServicesRequiredClaimSpec extends AsyncFlatSpec with BaseTest with Matc
             includeTopologyEvents = Some(
               TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = Seq.empty)))
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
       )
     ) should contain theSameElementsAs RequiredClaims[GetActiveContractsRequest](
-      RequiredClaim.ReadAsAnyParty()
+      RequiredClaim.Public()
     )
   }
 
@@ -729,6 +795,7 @@ object ApiServicesRequiredClaimSpec {
       estimateTrafficCost = None,
       tapsMaxPasses = None,
       hashingSchemeVersion = None,
+      accountId = "",
     )
 
   val preparedTransaction = PreparedTransaction(
@@ -765,6 +832,7 @@ object ApiServicesRequiredClaimSpec {
       userId = "userId",
       hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
       minLedgerTime = None,
+      accountId = "",
     )
 
   val executeSubmissionAndWaitForTransactionRequest =
@@ -780,5 +848,6 @@ object ApiServicesRequiredClaimSpec {
       hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
       minLedgerTime = None,
       transactionFormat = Some(transactionFormat),
+      accountId = "",
     )
 }

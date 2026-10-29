@@ -1,13 +1,19 @@
 name: Authorize Git
 description: Setup the canton-machine git identity and authenticated origin URL for pushing tags or commits.
 
+inputs:
+  github_token:
+    description: GitHub token used for authenticated git remote URL
+    required: false
+    default: ${{ github.token }}
+
 runs:
   using: composite
   steps:
     - name: Authorize git for canton-machine github account
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         git remote set-url origin "https://canton-machine:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
         git config --local user.name canton-machine

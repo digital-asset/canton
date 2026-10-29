@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.{
   TopologyConfig,
 }
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
+import com.digitalasset.canton.crypto.{Crypto, SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
@@ -23,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule, TracedLogger}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.State
 import com.digitalasset.canton.time.WallClock
@@ -44,6 +45,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -59,9 +61,10 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.*
 import scala.util.chaining.scalaUtilChainingOps
 
-class StoreBasedSynchronizerOutboxTest
+final class StoreBasedSynchronizerOutboxTest
     extends AsyncWordSpec
     with BaseTest
     with ProtocolVersionChecksAsyncWordSpec
@@ -104,6 +107,7 @@ class StoreBasedSynchronizerOutboxTest
         Iterator.continually(TopologyTransactionsBroadcast.State.Accepted),
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
       dropSequencedBroadcast: Iterator[Boolean] = Iterator.continually(false),
+      targetParameters: StaticSynchronizerParameters = defaultStaticSynchronizerParameters,
   ) = {
     val source = new InMemoryTopologyStore(
       TopologyStoreId.AuthorizedStore,
@@ -113,9 +117,12 @@ class StoreBasedSynchronizerOutboxTest
       timeouts,
     )
     val target = new InMemoryTopologyStore(
-      TopologyStoreId.SynchronizerStore(DefaultTestIdentities.physicalSynchronizerId),
+      TopologyStoreId.SynchronizerStore(
+        DefaultTestIdentities.physicalSynchronizerId
+          .copy(protocolVersion = targetParameters.protocolVersion)
+      ),
       predecessor = None,
-      testedProtocolVersion,
+      targetParameters.protocolVersion,
       loggerFactory.append("store", "Synchronizer"),
       timeouts,
     )
@@ -134,7 +141,7 @@ class StoreBasedSynchronizerOutboxTest
     )
     val client = new StoreBasedSynchronizerTopologyClient(
       clock,
-      defaultStaticSynchronizerParameters,
+      targetParameters,
       store = target,
       packageDependencyResolver = NoPackageDependencies,
       topologyConfig = TopologyConfig(),
@@ -188,24 +195,30 @@ class StoreBasedSynchronizerOutboxTest
         batches += transactions
       }
       val finalResult = transactions.map(_ => responses.next())
+      transactions.foreach { x =>
+        if (dropBroadcast) logger.debug(s"Dropping $x")
+        else logger.debug(s"Processing $x")
+      }
       for {
-        _ <- MonadUtil.sequentialTraverse(transactions) { x =>
-          if (dropBroadcast) logger.debug(s"Dropping $x")
-          else logger.debug(s"Processing $x")
+        _ <- {
           val ts = CantonTimestamp.now()
-          if (finalResult.forall(_ == State.Accepted) && !dropBroadcast)
+          if (finalResult.forall(_ == State.Accepted) && !dropBroadcast) {
+            val validated =
+              transactions.map(x => ValidatedTopologyTransaction(x, rejections.next()))
             store
               .update(
                 SequencedTime(ts),
                 EffectiveTime(ts),
-                additions = List(ValidatedTopologyTransaction(x, rejections.next())),
+                additions = validated,
                 // dumbed down version of how to "append" ValidatedTopologyTransactions:
-                removals = Option
-                  .when(x.operation == TopologyChangeOp.Remove)(
-                    x.mapping.uniqueKey -> (x.serial.some, Set.empty[TxHash])
+                removals = validated
+                  .filter(tx =>
+                    tx.rejectionReason.isEmpty && tx.operation == TopologyChangeOp.Remove
                   )
-                  .toList
-                  .toMap,
+                  .groupBy(_.mapping.uniqueKey)
+                  .map { case (key, txs) =>
+                    key -> (txs.maxBy(_.serial.value).serial.some, Set.empty[TxHash])
+                  },
               )
               .flatMap(_ =>
                 targetClient
@@ -213,10 +226,12 @@ class StoreBasedSynchronizerOutboxTest
                     SequencedTime(ts),
                     EffectiveTime(ts),
                     SequencerCounter(3),
-                    if (rejections.isEmpty) Seq(x) else Seq.empty,
+                    validated
+                      .filter(tx => tx.rejectionReason.isEmpty && !tx.transaction.isProposal)
+                      .map(_.transaction),
                   )
               )
-          else FutureUnlessShutdown.unit
+          } else FutureUnlessShutdown.unit
         }
         _ = if (buffer.sizeIs >= expect.get()) {
           promise.get().success(UnlessShutdown.Outcome(batches.toSeq))
@@ -271,6 +286,8 @@ class StoreBasedSynchronizerOutboxTest
       source: TopologyStore[TopologyStoreId.AuthorizedStore],
       target: TopologyStore[TopologyStoreId.SynchronizerStore],
       topologyConfig: TopologyConfig = topologyConfig,
+      targetParameters: StaticSynchronizerParameters = defaultStaticSynchronizerParameters,
+      outboxCrypto: Crypto = crypto,
   ): FutureUnlessShutdown[StoreBasedSynchronizerOutbox] = {
     val synchronizerOutbox = new StoreBasedSynchronizerOutbox(
       synchronizer,
@@ -281,7 +298,7 @@ class StoreBasedSynchronizerOutboxTest
       target,
       timeouts,
       loggerFactory,
-      SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
+      SynchronizerCrypto(outboxCrypto, targetParameters),
       topologyConfig,
       futureSupervisor = FutureSupervisor.Noop,
     )
@@ -543,5 +560,93 @@ class StoreBasedSynchronizerOutboxTest
 
     }
 
+    "not dispatch transactions whose conversion to the synchronizer's protocol version is already there" onlyRunWhen (
+      testedProtocolVersion < ProtocolVersion.v37
+    ) in {
+      val targetParameters =
+        BaseTest.defaultStaticSynchronizerParametersWith(protocolVersion = ProtocolVersion.dev)
+      val (source, target, manager, handle, client) =
+        mk(transactions.length, targetParameters = targetParameters)
+      for {
+        res <- push(manager, transactions)
+        converted <- TopologySigningHelper
+          .convertTransactions(
+            res.value,
+            ProtocolVersion.dev,
+            SynchronizerCrypto(crypto, targetParameters),
+            topologyConfig,
+          )
+          .valueOrFail("convert transactions")
+        ts = CantonTimestamp.now()
+        _ <- target.update(
+          SequencedTime(ts),
+          EffectiveTime(ts),
+          removals = Map.empty,
+          additions = converted.map(ValidatedTopologyTransaction(_)),
+        )
+        outbox <- outboxConnected(
+          manager,
+          handle,
+          client,
+          source,
+          target,
+          targetParameters = targetParameters,
+          // the outbox's node does not hold the signing key (e.g. offline root key)
+          outboxCrypto =
+            SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory),
+        )
+        // awaitIdle does not bound the wait while the dispatch keeps failing
+        _ = eventually()(target.currentDispatchingWatermark.futureValueUS shouldBe defined)
+        idle <- outbox.awaitIdle(10.seconds)
+      } yield {
+        idle shouldBe true
+        handle.buffer shouldBe empty
+      }
+    }
+
+    "skip a transaction that the synchronizer's protocol version cannot express" onlyRunWhen (
+      testedProtocolVersion >= ProtocolVersion.v37
+    ) in {
+      // v30 cannot express the Nominated state, so the transaction cannot be converted for a
+      // synchronizer on protocol version 36. Retrying it would block the later transactions.
+      val targetParameters =
+        BaseTest.defaultStaticSynchronizerParametersWith(protocolVersion = ProtocolVersion.v36)
+      val nominated = txAddFromMapping(
+        PartyToParticipant.tryCreate(
+          PartyId(UniqueIdentifier.tryCreate("nominee", namespace)),
+          PositiveInt.one,
+          Seq(
+            HostingParticipant(
+              participant2,
+              ParticipantPermission.Confirmation,
+              HostingParticipant.HostingState.Nominated,
+            )
+          ),
+        )
+      )
+      val later = txAddFromMapping(mkPTP("later"))
+      val (source, target, manager, handle, client) = mk(2, targetParameters = targetParameters)
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
+        (for {
+          _ <- push(manager, Seq(rootCert, nominated, later))
+          _ <- outboxConnected(
+            manager,
+            handle,
+            client,
+            source,
+            target,
+            targetParameters = targetParameters,
+          )
+          _ <- eventuallyAsync(10.seconds) {
+            handle.buffer.map(_.mapping) shouldBe Seq(rootCert.mapping, later.mapping)
+            ()
+          }
+        } yield succeed).onShutdown(fail("shutdown")),
+        entries => {
+          entries should not be empty
+          forAll(entries)(_.warningMessage should include("cannot express it"))
+        },
+      )
+    }
   }
 }

@@ -105,6 +105,7 @@ class LedgerTimeAwareCommandExecutorSpec
           None,
           None,
           transactionHash = None,
+          accountId = None,
         ),
         TransactionMeta(
           let,
@@ -173,6 +174,7 @@ class LedgerTimeAwareCommandExecutorSpec
       synchronizerId = None,
       prefetchKeys = Seq.empty,
       tapsMaxPasses = None,
+      accountId = None,
     )
 
     val instance = new LedgerTimeAwareCommandExecutor(
@@ -204,6 +206,7 @@ class LedgerTimeAwareCommandExecutorSpec
                 None,
                 None,
                 transactionHash = None,
+                accountId = None,
               ),
               TransactionMeta(
                 let,

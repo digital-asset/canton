@@ -9,11 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.BufferedProcessLogger
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.version.{
-  ProtocolVersion,
-  ProtocolVersionCompatibility,
-  ReleaseVersion,
-}
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 
 import java.nio.file.{Files, Paths}
@@ -109,22 +105,12 @@ object ReleaseUtils {
       .distinct
   }
 
-  // All previous stable releases minus releases that support only deleted protocol versions
-  lazy val previousSupportedStableReleases: List[ReleaseVersion] =
+  lazy val allPreviousReleases: List[ReleaseVersion] =
     File("release-notes/")
       .list(file => file.name.startsWith(ReleaseVersion.current.major.toString))
       .map(_.name.replace(".md", ""))
       .map(ReleaseVersion.tryCreate)
-      .filter { releaseVersion =>
-        val protocolVersions =
-          ProtocolVersionCompatibility.supportedProtocols(
-            includeDevVersion = false,
-            includeAlphaVersions = false,
-            includeBetaVersions = true,
-            release = releaseVersion,
-          )
-        releaseVersion.isStable && protocolVersions.exists(pv => !pv.isDeleted)
-      }
+      .filter(_.isStable)
       .toList
       .sorted
 
@@ -134,8 +120,8 @@ object ReleaseUtils {
   private val releasesRetrieval: TrieMap[ReleaseVersion, Future[String]] = TrieMap.empty
   private val lock = new Mutex()
 
-  /** If the .tar.gz corresponding to release is not found locally, attempts to download it from
-    * artifactory. Then, extract the .tar.gz file.
+  /** If the .tar.gz corresponding to release is not found locally, attempts to download it. Then,
+    * extract the .tar.gz file.
     * @param release
     *   Version that needs to be retrieved
     * @return

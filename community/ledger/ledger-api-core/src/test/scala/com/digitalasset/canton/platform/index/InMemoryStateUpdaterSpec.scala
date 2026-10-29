@@ -42,7 +42,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTr
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.*
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription
-import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
+import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.UpdateBatch
 import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
@@ -873,17 +873,13 @@ object InMemoryStateUpdaterSpec {
       offsetsUpdates: Vector[(Offset, Update)],
       ledgerEnd: LedgerEnd,
       batchTraceContext: TraceContext,
-  ): Batch[Unit] =
-    Batch(
+  ): UpdateBatch =
+    UpdateBatch(
       ledgerEnd = ledgerEnd,
-      batch = (),
       batchSize = offsetsUpdates.size,
       offsetsUpdates = offsetsUpdates,
-      missingDeactivatedActivations = Map.empty,
       eventCount = 0L,
       batchTraceContext = batchTraceContext,
-      distinctRawStrings = Nil,
-      usedInternalContractIds = Set.empty,
       contractStateEvents = Vector.empty,
     )
 
@@ -1113,6 +1109,8 @@ object InMemoryStateUpdaterSpec {
       Offset.tryFromLong(2222L)
 
     val tx_rejected_offset: Offset = Offset.tryFromLong(3333L)
+    val tx_rejected_synchronizer_id = synchronizerId1
+    val tx_rejected_record_time = Timestamp(3)
 
     val tx_accepted_withFlatEventWitnesses_offset: Offset = Offset.tryFromLong(4444L)
     val tx_accepted_withoutFlatEventWitnesses_offset: Offset = Offset.tryFromLong(5555L)
@@ -1178,6 +1176,8 @@ object InMemoryStateUpdaterSpec {
       TransactionLogUpdate.TransactionRejected(
         offset = tx_rejected_offset,
         completionStreamResponse = tx_rejected_completionStreamResponse,
+        synchronizerId = tx_rejected_synchronizer_id.toProtoPrimitive,
+        recordTime = tx_rejected_record_time,
       )(emptyTraceContext)
 
     val lastOffset: Offset = tx_rejected_offset
@@ -1271,7 +1271,7 @@ object InMemoryStateUpdaterSpec {
         input: Seq[(Vector[(Offset, Update)], LedgerEnd, TraceContext)]
     )(implicit mat: Materializer): Done =
       Source(input.map { case (updates, ledgerEnd, tc) =>
-        Batch(
+        UpdateBatch(
           ledgerEnd = ledgerEnd.copy(
             synchronizerIndices = ParallelIndexerSubscription.ledgerEndSynchronizerIndexFrom(
               updates.view
@@ -1280,16 +1280,12 @@ object InMemoryStateUpdaterSpec {
                 }
             )
           ),
-          batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
-          missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           batchTraceContext = tc,
-          distinctRawStrings = Nil,
-          usedInternalContractIds = Set.empty,
           contractStateEvents = Vector.empty,
-        ): Batch[?]
+        )
       })
         .via(inMemoryStateUpdater(false))
         .runWith(Sink.ignore)
@@ -1519,7 +1515,7 @@ object InMemoryStateUpdaterSpec {
 
     val output = sourceSomes
       .map(updates =>
-        Batch(
+        UpdateBatch(
           ledgerEnd = someLedgerEnd.copy(synchronizerIndices =
             updates.view
               .collect { case (_, u: SynchronizerUpdate) => u }
@@ -1540,14 +1536,10 @@ object InMemoryStateUpdaterSpec {
                 )
               }
           ),
-          batch = (),
           batchSize = updates.size,
           offsetsUpdates = updates,
-          missingDeactivatedActivations = Map.empty,
           eventCount = 0L,
           batchTraceContext = emptyTraceContext,
-          distinctRawStrings = Nil,
-          usedInternalContractIds = Set.empty,
           contractStateEvents = Vector.empty,
         )
       )

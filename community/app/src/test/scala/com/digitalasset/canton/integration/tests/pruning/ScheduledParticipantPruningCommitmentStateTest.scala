@@ -6,20 +6,19 @@ package com.digitalasset.canton.integration.tests.pruning
 import com.digitalasset.canton.admin.api.client.data.PruningSchedule
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.PositiveDurationSeconds
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{DbConfig, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.BackgroundWorkloadRunner
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   LegacyAcsCommitment,
   LegacyCommitmentPeriod,
@@ -46,7 +45,7 @@ import java.time.Duration as JDuration
 class ScheduledParticipantPruningCommitmentStateTestPostgres
     extends ScheduledParticipantPruningCommitmentStateTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
@@ -162,7 +161,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
           val openEnvelope = envelope
             .toOpenEnvelope(
               src.crypto.pureCrypto,
-              SynchronizerLimits.defaultFor(testedProtocolVersion),
+              testedSynchronizerLimits,
               testedProtocolVersion,
             )
             .valueOrFail("open envelopes")

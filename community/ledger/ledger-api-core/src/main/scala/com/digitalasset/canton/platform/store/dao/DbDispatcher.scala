@@ -133,15 +133,14 @@ private[dao] final class DbDispatcherOfStorage(
       implicit loggingContext: LoggingContextWithTrace => startWait =>
         dbStorage
           .runJdbcWrite(
-            loggingContext.traceContext,
             DbDispatcher.executeSql(
               databaseMetrics = databaseMetrics,
               overallWaitTimer = overallWaitTimer,
               overallExecutionTimer = overallExecutionTimer,
               logger = logger,
               startWaitNanos = startWait,
-            )(sql),
-          )
+            )(sql)
+          )(loggingContext.traceContext)
           .flatMap(FutureUnlessShutdown.fromTry)
           .transform(identity, DbDispatcher.handleJdbcError(logger))
     }
