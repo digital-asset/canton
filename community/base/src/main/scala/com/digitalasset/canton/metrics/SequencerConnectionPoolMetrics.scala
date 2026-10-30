@@ -5,7 +5,9 @@ package com.digitalasset.canton.metrics
 
 import cats.Eval
 import com.daml.metrics.api.*
+import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -106,18 +108,25 @@ class SequencerConnectionPoolMetrics(
   }
 
   def removeMetricsForAllConnections(psidO: Option[String]): Unit =
-    removeInternal(_.labels.get("psid") == psidO)
+    removeConnectionInternal(_.labels.get("psid") == psidO)
 
   def removeMetricsForConnection(toRemove: Set[String], psidO: Option[String]): Unit =
-    removeInternal(mc =>
+    removeConnectionInternal(mc =>
       mc.labels.get("psid") == psidO && mc.labels.get("connection").exists(toRemove(_))
     )
 
-  private def removeInternal[T](filter: MetricsContext => Boolean): Unit =
+  private def removeConnectionInternal(filter: MetricsContext => Boolean): Unit =
     Seq(connectionHealthMetrics, subscriptionHealthMetrics).foreach { metricsMap =>
-      val toRemove = metricsMap.keys.filter(filter)
-      toRemove.foreach(metricsMap.remove(_).foreach(_.value.close))
+      removeInternal(metricsMap, filter)
     }
+
+  private def removeInternal[G <: CloseableGauge](
+      metricsMap: TrieMap[MetricsContext, Eval[G]],
+      filter: MetricsContext => Boolean,
+  ): Unit = {
+    val toRemove = metricsMap.keys.filter(filter)
+    toRemove.foreach(metricsMap.remove(_).foreach(_.value.close()))
+  }
 
   // Gauges don't support metrics context per update. So instead create a map with a gauge per context.
   private val subscriptionHealthMetrics: TrieMap[MetricsContext, Eval[Gauge[Int]]] = TrieMap.empty
@@ -143,6 +152,45 @@ class SequencerConnectionPoolMetrics(
       .getOrElseUpdate(mc, Eval.later(createSubscriptionHealthGauge))
       .value
   }
+
+  @VisibleForTesting
+  private[canton] val sequencerPenaltyMetrics: TrieMap[MetricsContext, Eval[Gauge.CloseableGauge]] =
+    TrieMap.empty
+  def registerSequencerPenalty(mc: MetricsContext, getValue: () => Double): Unit = {
+    def createSequencerPenaltyGauge: Gauge.CloseableGauge =
+      metricsFactory.closeableGaugeWithSupplier(
+        MetricInfo(
+          prefix :+ "sequencer-penalty",
+          summary = "Penalty of a sequencer",
+          description = """The penalty is a number that indicates how stable and responsive a sequencer is.
+                        |When adverse events are observed on a connection, a penalty is applied to the associated sequencer.
+                        |When asked for connections, the connection pool will sort the candidates according
+                        |to their sequencer penalties and choose the lower ones, picking randomly among ties.
+                        |Penalties decay exponentially over time, so that a sequencer that was previously penalized
+                        |can recover and be selected again. A value of 0 indicates no penalty.""".stripMargin,
+          qualification = MetricQualification.Errors,
+        ),
+        getValue,
+      )(context.merge(mc))
+
+    // Two concurrent calls with the same context may cause getOrElseUpdate to evaluate the new value expression twice,
+    // even though only one of the results will be stored in the map.
+    // Eval.later ensures that we actually create only one instance of the gauge in such a case by delaying the creation
+    // until the getOrElseUpdate call has finished.
+    sequencerPenaltyMetrics
+      .getOrElseUpdate(mc, Eval.later(createSequencerPenaltyGauge))
+      .value
+      .discard
+  }
+
+  def removePenaltyMetricForSequencer(toRemove: Set[String], psidO: Option[String]): Unit =
+    removeInternal(
+      sequencerPenaltyMetrics,
+      mc => mc.labels.get("psid") == psidO && mc.labels.get("sequencer").exists(toRemove(_)),
+    )
+
+  def removeAllSequencerPenaltyMetrics(psidO: Option[String]): Unit =
+    removeInternal(sequencerPenaltyMetrics, _.labels.get("psid") == psidO)
 
   val connectionRequests: Counter = metricsFactory.counter(
     MetricInfo(

@@ -95,7 +95,9 @@ class DirectSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
   // There is a single sequencer, so its penalty is irrelevant
-  override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit = ()
+  override def increasePenalty(amount: PositiveInt, reason: String)(implicit
+      traceContext: TraceContext
+  ): Unit = ()
 
   override def sendAsync(
       request: SignedContent[SubmissionRequest],

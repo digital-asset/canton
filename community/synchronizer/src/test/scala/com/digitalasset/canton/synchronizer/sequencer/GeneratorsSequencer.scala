@@ -30,6 +30,7 @@ import com.digitalasset.canton.topology.{GeneratorsTopology, MediatorId, Member,
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.rpc.status.Status
 import magnolify.scalacheck.auto.*
+import org.scalacheck.util.Buildable
 import org.scalacheck.{Arbitrary, Gen}
 
 import scala.collection.immutable.SortedMap
@@ -72,7 +73,7 @@ final class GeneratorsSequencer(
               member -> AggregationBySender(sequencingTimestamp, signatures)
             )
         )
-      )
+      )(Buildable.buildableArrayList)
       aggregatedSenders = SortedMap.from(aggregatedSendersList.asScala)
     } yield InFlightAggregation.tryCreate(
       aggregatedSenders,

@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.sequencing.protocol.{AllMembersOfSynchronizer, DecompressionPolicy}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
-import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
+import com.digitalasset.canton.synchronizer.block.BlockFormat.{AcknowledgeTag, OrderedRequest}
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.deserializeSignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -150,7 +150,9 @@ class OutputModule[E <: Env[E]](
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     hashOps: HashOps,
-    requestInspector: RequestInspector = DefaultRequestInspector, // For testing
+    requestInspector: RequestInspector = new DefaultRequestInspector(
+      doNotWarnOnEmptyPayloads = false
+    ), // Overridable for testing
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // For testing
     // Passed from BftBlockOrderer to allow a near-0 latency `GetTime` implementation
     private[bftordering] val previousStoredBlock: PreviousStoredBlock = new PreviousStoredBlock,
@@ -1092,9 +1094,8 @@ class OutputModule[E <: Env[E]](
       val orderedBlockBftTime = previousStoredBlock.computeBlockBftTime(orderedBlock)
 
       if (
-        !currentEpochCouldAlterOrderingTopology && potentiallyAltersSequencersTopology(
-          orderedBlockData
-        )
+        !currentEpochCouldAlterOrderingTopology &&
+        potentiallyAltersSequencersTopology(orderedBlockData)
       ) {
         logger.debug(
           s"Found potential changes of the sequencing topology in ordered block $orderedBlockNumber " +
@@ -1189,12 +1190,25 @@ class OutputModule[E <: Env[E]](
 
   private def potentiallyAltersSequencersTopology(
       orderedBlockData: CompleteBlockData
-  ): Boolean = {
+  )(implicit traceContext: TraceContext): Boolean = {
+    // BftBlockOrderer sets both tag and payload from the invoked sequencer API: send requests
+    //  get SendTag, while acknowledge requests get AcknowledgeTag.
+    //  Availability verifies the batch ID against its contents, and consensus orders it only
+    //  with a valid availability proof, preserving that pairing.
+    //  A malicious submitter using the acknowledge API cannot smuggle a topology change through
+    //  this check: the sequencer processes AcknowledgeTag requests only as acknowledgements,
+    //  never as submission events, so their payload need not be inspected here.
     import metrics.performance.orderingStageLatency.*
     emitOrderingStageLatency(
       labels.stage.values.output.Inspection,
       () =>
         orderedBlockData.requestsView.zipWithIndex.exists {
+          case (Traced(orderingRequest), _) if orderingRequest.tag == AcknowledgeTag =>
+            logger.debug(
+              s"Skipping topology inspection for acknowledgement in block " +
+                s"${orderedBlockData.orderedBlockForOutput.orderedBlock.metadata.blockNumber}"
+            )
+            false
           case (tracedOrderingRequest @ Traced(orderingRequest), idx) =>
             requestInspector.mayChangeOrderingTopology(
               orderingRequest,
@@ -1579,7 +1593,11 @@ object OutputModule {
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean
   }
 
-  object DefaultRequestInspector extends RequestInspector {
+  class DefaultRequestInspector(
+      // Setting this to `true` is useful in tests to use empty payloads without causing warnings
+      //  due to failed deserialization.
+      doNotWarnOnEmptyPayloads: Boolean = false
+  ) extends RequestInspector {
 
     override def mayChangeOrderingTopology(
         request: OrderingRequest,
@@ -1642,9 +1660,13 @@ object OutputModule {
               )(traceContext)
             )
         case Left(error) =>
-          logger.debug(
-            s"Skipping BFT ordering ordering request in output while looking for sequencer events as it failed to deserialize: $error"
-          )(traceContext)
+          val message =
+            s"Skipping BFT ordering request containing submission request during output stage " +
+              s"while looking for sequencer events as it failed to deserialize: $error"
+          if (doNotWarnOnEmptyPayloads && request.payload.isEmpty)
+            logger.debug(message)(traceContext)
+          else
+            logger.warn(message)(traceContext)
           false
       }
   }

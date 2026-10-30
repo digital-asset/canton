@@ -321,7 +321,12 @@ class SequencerConnectionPoolImpl private[sequencing] (
       // can have multiple connections.
       val remainingSequencerIds = trackedConnections.keySet.flatMap(_.attributes.map(_.sequencerId))
       val possiblyRemovedSequencerIds = removedConnections.flatMap(_.attributes.map(_.sequencerId))
-      penalties.remove(possiblyRemovedSequencerIds.diff(remainingSequencerIds))
+      val sequencerIdsToRemove = possiblyRemovedSequencerIds.diff(remainingSequencerIds)
+      penalties.remove(sequencerIdsToRemove)
+      metrics.removePenaltyMetricForSequencer(
+        sequencerIdsToRemove.map(_.uid.toProtoPrimitive).toSet,
+        mc.labels.get("psid"),
+      )
 
       metrics.trackedConnections.updateValue(trackedConnections.size)
 
@@ -646,6 +651,7 @@ class SequencerConnectionPoolImpl private[sequencing] (
     // it triggers health callbacks
     LifeCycle.close(instances)(logger)
     metrics.removeMetricsForAllConnections(mc.labels.get("psid"))
+    metrics.removeAllSequencerPenaltyMetrics(mc.labels.get("psid"))
     super.onClosed()
   }
 
@@ -717,8 +723,10 @@ class SequencerConnectionPoolImpl private[sequencing] (
           synchronizerCrypto,
           clock,
           penaltyModifier = new SequencerPenaltyModifier {
-            override def increase(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
-              penalties.increase(sequencerId, amount)
+            override def increase(amount: PositiveInt, reason: String)(implicit
+                traceContext: TraceContext
+            ): Unit =
+              penalties.increase(sequencerId, amount, reason)
           },
         )
         .map { userConnection =>
@@ -741,6 +749,10 @@ class SequencerConnectionPoolImpl private[sequencing] (
             .discard
 
           metrics.validatedConnections.updateValue(pool.size)
+          metrics.registerSequencerPenalty(
+            mc.withExtraLabels("sequencer" -> sequencerId.uid.toProtoPrimitive),
+            getValue = () => penalties.get(sequencerId).value,
+          )
           updateHealth()
         }
         .valueOr { error =>
@@ -838,18 +850,20 @@ class SequencerConnectionPoolImpl private[sequencing] (
         head
       }.toSet
 
-      val penaltiesMsg = {
+      val penaltiesMsg = if (penaltiesAreEnabled) {
         val nonZeroPenalties = candidatePenalties.filter { case (_, penalty) =>
           penalty > NonNegativeDouble.zero
         }
         if (nonZeroPenalties.nonEmpty) {
           val penaltiesStr = nonZeroPenalties
-            .map { case (seqId, penalty) => f"${seqId.uid.identifier}=${penalty.value}%.3g" }
+            .map { case (seqId, penalty) => f"\"${seqId.uid.identifier}\"=${penalty.value}%.3g" }
             .mkString(", ")
           s" (penalties: $penaltiesStr)"
         } else {
           ""
         }
+      } else {
+        " (penalties are disabled)"
       }
 
       logger.debug(s"[$requester] returning ${pickedConnections.map(_.name)}$penaltiesMsg")

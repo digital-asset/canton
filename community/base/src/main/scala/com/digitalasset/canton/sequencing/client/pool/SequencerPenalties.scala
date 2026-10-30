@@ -18,14 +18,16 @@ import scala.collection.concurrent.TrieMap
 trait SequencerPenaltyModifier {
 
   /** Increase the penalty of the associated sequencer by `amount`, which must be positive. */
-  def increase(amount: PositiveInt)(implicit traceContext: TraceContext): Unit
+  def increase(amount: PositiveInt, reason: String)(implicit traceContext: TraceContext): Unit
 }
 
 object SequencerPenaltyModifier {
 
   /** A modifier that discards all penalty increases. */
   val noOp: SequencerPenaltyModifier = new SequencerPenaltyModifier {
-    override def increase(amount: PositiveInt)(implicit traceContext: TraceContext): Unit = ()
+    override def increase(amount: PositiveInt, reason: String)(implicit
+        traceContext: TraceContext
+    ): Unit = ()
   }
 }
 
@@ -47,10 +49,12 @@ final class SequencerPenalties(protected override val loggerFactory: NamedLogger
   private[client] def snapshot: Map[SequencerId, NonNegativeDouble] =
     penalties.readOnlySnapshot().toMap
 
-  def increase(sequencerId: SequencerId, amount: PositiveInt)(implicit
+  def increase(sequencerId: SequencerId, amount: PositiveInt, reason: String)(implicit
       traceContext: TraceContext
   ): Unit = {
-    logger.debug(s"Increasing penalty of sequencer ${sequencerId.uid.identifier} by $amount")
+    logger.debug(
+      s"Increasing penalty of sequencer \"${sequencerId.uid.identifier}\" by $amount ($reason)"
+    )
     penalties
       .updateWith(sequencerId) {
         // `create` should never fail because Double overflows to Infinity, not a negative value,

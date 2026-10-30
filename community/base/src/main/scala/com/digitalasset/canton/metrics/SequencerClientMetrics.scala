@@ -331,6 +331,7 @@ class SequencerClientMetrics(
 
     connectionPool.connectionHealth(dummyContext).discard
     connectionPool.subscriptionHealth(dummyContext).discard
+    connectionPool.registerSequencerPenalty(dummyContext, getValue = () => 0.0).discard
     handler.connectionMetrics(SequencerAlias.Default).discard
     trafficConsumption.lastTrafficUpdateTimestamp(dummyContext).discard
     trafficConsumption.extraTrafficPurchased(dummyContext).discard

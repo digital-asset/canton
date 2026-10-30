@@ -545,7 +545,7 @@ final class BftBlockOrderer(
       cryptoApi.pureCrypto,
       cryptoApi.ips.getSynchronizerLimits,
       requestInspector =
-        config.standalone.fold[RequestInspector](OutputModule.DefaultRequestInspector)(
+        config.standalone.fold[RequestInspector](new OutputModule.DefaultRequestInspector)(
           standaloneConfig =>
             StandaloneRequestInspector(
               standaloneConfig.testSlowdown

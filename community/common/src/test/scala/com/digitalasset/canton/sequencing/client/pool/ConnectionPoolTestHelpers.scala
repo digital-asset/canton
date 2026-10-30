@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client.pool
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.testing.MetricValues
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
@@ -88,7 +89,7 @@ import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, Promise}
 import scala.util.Random
 
-trait ConnectionPoolTestHelpers {
+trait ConnectionPoolTestHelpers extends MetricValues {
   this: BaseTest & HasExecutionContext =>
   import ConnectionPoolTestHelpers.*
 
