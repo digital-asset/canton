@@ -88,8 +88,10 @@ class GrpcSequencerConnection(
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit =
     underlying.fatal(reason)
 
-  override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
-    penaltyModifier.increase(amount)
+  override def increasePenalty(amount: PositiveInt, reason: String)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    penaltyModifier.increase(amount, reason)
 
   override def onClosed(): Unit =
     LifeCycle.close(clientAuth)(logger)

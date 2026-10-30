@@ -106,6 +106,11 @@ final case class SequencerConnections(
   ): SequencerConnections =
     this.copy(submissionRequestAmplification = submissionRequestAmplification)
 
+  def withSequencerConnectionPenaltyConfig(
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig
+  ): SequencerConnections =
+    this.copy(sequencerConnectionPenaltyConfig = sequencerConnectionPenaltyConfig)
+
   def withSequencerTrustThreshold(
       sequencerTrustThreshold: PositiveInt
   ): Either[String, SequencerConnections] =
@@ -443,8 +448,6 @@ final case class SequencerConnectionPenaltyConfig(
   def withZeroThreshold(zeroThreshold: PositiveDouble): SequencerConnectionPenaltyConfig =
     copy(zeroThreshold = zeroThreshold)
 
-  def disable(): SequencerConnectionPenaltyConfig = copy(enabled = false)
-
   private[canton] def toInternal: SequencerConnectionPenaltyConfigInternal =
     this.transformInto[SequencerConnectionPenaltyConfigInternal]
 }
@@ -460,6 +463,8 @@ object SequencerConnectionPenaltyConfig
 
   val default: SequencerConnectionPenaltyConfig =
     SequencerConnectionPenaltyConfigInternal.default.transformInto[SequencerConnectionPenaltyConfig]
+
+  val disabled: SequencerConnectionPenaltyConfig = default.copy(enabled = false)
 
   private[canton] def fromInternal(
       internal: SequencerConnectionPenaltyConfigInternal

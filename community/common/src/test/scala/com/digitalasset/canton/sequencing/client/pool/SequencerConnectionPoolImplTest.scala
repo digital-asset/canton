@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.sequencing.client.pool
 
+import cats.syntax.functorFilter.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.health.ComponentHealthState
@@ -68,7 +70,8 @@ class SequencerConnectionPoolImplTest
       pool: SequencerConnectionPool,
       sequencerId: SequencerId,
       amount: PositiveInt,
-  ): Unit = pool.contents(sequencerId).headOption.value.increasePenalty(amount)
+      reason: String = "test",
+  ): Unit = pool.contents(sequencerId).headOption.value.increasePenalty(amount, reason = reason)
 
   /** Run `f` on a started pool with 3 connections, each to a different sequencer. Connection `i`
     * connects to sequencer `i % 3`, so that connections added later connect to the same sequencers.
@@ -80,12 +83,23 @@ class SequencerConnectionPoolImplTest
       trustThreshold: PositiveInt = PositiveInt.three,
       penaltiesEnabled: Boolean = true,
   )(
-      f: (SequencerConnectionPool, CreatedConnections) => V
-  ): V =
+      f: (
+          SequencerConnectionPool,
+          CreatedConnections,
+          Set[SequencerId] => Map[SequencerId, Double],
+      ) => V
+  ): V = {
+    val metricsFactory = new InMemoryMetricsFactory
+    val poolMetrics = new SequencerClientMetrics(
+      new SequencerClientHistograms(MetricName("test"))(new HistogramInventory()),
+      metricsFactory,
+    )(MetricsContext.Empty).connectionPool
+
     withConnectionPool(
       nbConnections = nbConnections,
       trustThreshold = trustThreshold,
       index => mkConnectionAttributes(synchronizerIndex = 1, sequencerIndex = index % 3),
+      metrics = poolMetrics,
       poolPenaltyConfig = poolPenaltyConfig(halfLife, penaltiesEnabled),
     ) { (pool, createdConnections, _, _) =>
       pool.start().futureValueUS.valueOrFail("initialization")
@@ -96,8 +110,33 @@ class SequencerConnectionPoolImplTest
         pool.nbConnections shouldBe nbConnections.toNonNegative
       }
 
-      f(pool, createdConnections)
+      def getPenaltyMetrics(sequencerIds: Set[SequencerId]): Map[SequencerId, Double] = {
+        val gauges = metricsFactory.metrics.asyncGauges(penaltyMetricName)
+
+        sequencerIds.toSeq.mapFilter { seqId =>
+          val context = MetricsContext(Map("sequencer" -> seqId.uid.toProtoPrimitive))
+
+          Option.when(gauges.contains(context))(
+            seqId -> metricsFactory
+              .asyncGaugeValue(
+                penaltyMetricName,
+                LabelFilter("sequencer", seqId.uid.toProtoPrimitive),
+              )
+              .asInstanceOf[Double]
+          )
+        }.toMap
+      }
+
+      f(pool, createdConnections, getPenaltyMetrics)
     }
+  }
+
+  private val penaltyMetricName = MetricName(
+    "test",
+    "sequencer-client",
+    "sequencer-connection-pool",
+    "sequencer-penalty",
+  )
 
   "SequencerConnectionPool" should {
     "initialize in the happy path" in {
@@ -722,33 +761,60 @@ class SequencerConnectionPoolImplTest
     }
 
     "prefer the sequencers with the lowest penalties" in {
-      withValidatedPool(halfLife = noDecay) { (pool, _) =>
-        clue("all penalties at 0: all sequencers get picked") {
-          eventually() {
-            (1 to 10).flatMap(_ => pickSequencers(pool, 1)).toSet shouldBe Set(seq0, seq1, seq2)
+      val getPenaltyMetrics =
+        withValidatedPool(halfLife = noDecay) { (pool, _, getPenaltyMetrics) =>
+          // Penalty metrics are created when the connections are created
+          getPenaltyMetrics(Set(seq0, seq1, seq2)) shouldBe Map(
+            seq0 -> 0.0,
+            seq1 -> 0.0,
+            seq2 -> 0.0,
+          )
+
+          clue("all penalties at 0: all sequencers get picked") {
+            eventually() {
+              (1 to 10).flatMap(_ => pickSequencers(pool, 1)).toSet shouldBe Set(seq0, seq1, seq2)
+            }
           }
-        }
 
-        increasePenalty(pool, seq0, PositiveInt.one)
+          increasePenalty(pool, seq0, PositiveInt.one)
 
-        clue("sequencer with a higher penalty is not picked") {
-          eventuallyForever(durationOfSuccess = 1.second) {
-            pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+          {
+            val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
+            metrics(seq0) shouldBe 1.0 +- 0.01
+            metrics(seq1) shouldBe 0.0
+            metrics(seq2) shouldBe 0.0
           }
+
+          clue("sequencer with a higher penalty is not picked") {
+            eventuallyForever(durationOfSuccess = 1.second) {
+              pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+            }
+          }
+
+          increasePenalty(pool, seq1, PositiveInt.two)
+
+          {
+            val metrics = getPenaltyMetrics(Set(seq0, seq1, seq2))
+            metrics(seq0) shouldBe 1.0 +- 0.01
+            metrics(seq1) shouldBe 2.0 +- 0.01
+            metrics(seq2) shouldBe 0.0
+          }
+
+          clue("sequencers are picked by increasing penalty") {
+            pickSequencers(pool, 1) shouldBe Set(seq2)
+            pickSequencers(pool, 2) shouldBe Set(seq2, seq0)
+            pickSequencers(pool, 3) shouldBe Set(seq2, seq0, seq1)
+          }
+
+          getPenaltyMetrics
         }
 
-        increasePenalty(pool, seq1, PositiveInt.two)
-
-        clue("sequencers are picked by increasing penalty") {
-          pickSequencers(pool, 1) shouldBe Set(seq2)
-          pickSequencers(pool, 2) shouldBe Set(seq2, seq0)
-          pickSequencers(pool, 3) shouldBe Set(seq2, seq0, seq1)
-        }
-      }
+      // Penalty metrics are removed when the connection pool is closed
+      getPenaltyMetrics(Set(seq0, seq1, seq2)) shouldBe empty
     }
 
     "pick a sequencer again once its penalty has decayed" in {
-      withValidatedPool(halfLife = fastDecay) { (pool, _) =>
+      withValidatedPool(halfLife = fastDecay) { (pool, _, _) =>
         // 0.5^7 < 0.01, so the penalty goes back to 0 after 7 decays
         increasePenalty(pool, seq0, PositiveInt.one)
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
@@ -760,7 +826,7 @@ class SequencerConnectionPoolImplTest
     }
 
     "apply a new half-life after a configuration update" in {
-      withValidatedPool(halfLife = noDecay) { (pool, _) =>
+      withValidatedPool(halfLife = noDecay) { (pool, _, _) =>
         increasePenalty(pool, seq0, PositiveInt.one)
         eventuallyForever(durationOfSuccess = 500.millis) {
           pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
@@ -779,7 +845,7 @@ class SequencerConnectionPoolImplTest
     }
 
     "keep the penalty of a sequencer across connection restarts" in {
-      withValidatedPool(halfLife = noDecay) { (pool, createdConnections) =>
+      withValidatedPool(halfLife = noDecay) { (pool, createdConnections, _) =>
         increasePenalty(pool, seq0, PositiveInt.one)
 
         val initialConnection = pool.contents(seq0).loneElement
@@ -798,38 +864,45 @@ class SequencerConnectionPoolImplTest
     }
 
     "not keep the penalty of a sequencer removed from and added back to the configuration" in {
-      withValidatedPool(halfLife = noDecay, trustThreshold = PositiveInt.one) { (pool, _) =>
-        increasePenalty(pool, seq0, PositiveInt.one)
-        pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
+      withValidatedPool(halfLife = noDecay, trustThreshold = PositiveInt.one) {
+        (pool, _, getPenaltyMetrics) =>
+          increasePenalty(pool, seq0, PositiveInt.one)
+          pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
-        // Remove the only connection to `seq0`
-        val remainingConnections = pool.config.connections.drop(1)
-        pool
-          .updateConfig(pool.config.copy(connections = NonEmpty.from(remainingConnections).value))
-          .valueOrFail("remove connection")
-        eventually() {
-          pool.nbSequencers shouldBe NonNegativeInt.two
-        }
+          // Remove the only connection to `seq0`
+          val remainingConnections = pool.config.connections.drop(1)
+          pool
+            .updateConfig(pool.config.copy(connections = NonEmpty.from(remainingConnections).value))
+            .valueOrFail("remove connection")
+          eventually() {
+            pool.nbSequencers shouldBe NonNegativeInt.two
+          }
 
-        pool.connectionPenalties shouldBe empty
+          pool.connectionPenalties shouldBe empty
 
-        // Add a new connection to `seq0`, e.g., with a different endpoint
-        pool
-          .updateConfig(
-            pool.config.copy(connections =
-              NonEmpty.from(mkDummyConnectionConfig(3) +: remainingConnections).value
+          // Penalty metric for seq0 should be removed when the sequencer is removed from the configuration
+          getPenaltyMetrics(Set(seq0, seq1, seq2)).keySet shouldBe Set(seq1, seq2)
+
+          // Add a new connection to `seq0`, e.g., with a different endpoint
+          pool
+            .updateConfig(
+              pool.config.copy(connections =
+                NonEmpty.from(mkDummyConnectionConfig(3) +: remainingConnections).value
+              )
             )
-          )
-          .valueOrFail("add a new connection to the sequencer")
-        eventually() {
-          pool.nbSequencers shouldBe NonNegativeInt.three
-        }
+            .valueOrFail("add a new connection to the sequencer")
+          eventually() {
+            pool.nbSequencers shouldBe NonNegativeInt.three
+          }
 
-        pool.connectionPenalties shouldBe empty
+          pool.connectionPenalties shouldBe empty
 
-        eventually() {
-          pickSequencers(pool, 2) should contain(seq0)
-        }
+          // Penalty metric for seq0 should be created again when the sequencer is added back to the configuration
+          getPenaltyMetrics(Set(seq0, seq1, seq2)).keySet shouldBe Set(seq0, seq1, seq2)
+
+          eventually() {
+            pickSequencers(pool, 2) should contain(seq0)
+          }
       }
     }
 
@@ -838,7 +911,7 @@ class SequencerConnectionPoolImplTest
         nbConnections = PositiveInt.tryCreate(4),
         halfLife = noDecay,
         trustThreshold = PositiveInt.one,
-      ) { (pool, _) =>
+      ) { (pool, _, _) =>
         increasePenalty(pool, seq0, PositiveInt.one)
         pickSequencers(pool, 2) shouldBe Set(seq1, seq2)
 
@@ -857,7 +930,7 @@ class SequencerConnectionPoolImplTest
     }
 
     "still track penalty increases while penalties are disabled, but ignore them for selection" in {
-      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _) =>
+      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
         increasePenalty(pool, seq0, PositiveInt.one)
 
         clue("we still track the penalties") {
@@ -873,7 +946,7 @@ class SequencerConnectionPoolImplTest
     }
 
     "use existing penalties for selection immediately after enabling penalties" in {
-      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _) =>
+      withValidatedPool(halfLife = noDecay, penaltiesEnabled = false) { (pool, _, _) =>
         increasePenalty(pool, seq0, PositiveInt.one)
         pool.connectionPenalties should contain key seq0
 
@@ -1017,6 +1090,9 @@ class SequencerConnectionPoolImplTest
       def currentMetricsPsids =
         poolMetrics.connectionHealthMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
       def currentMetricsSize = poolMetrics.connectionHealthMetrics.size
+      def currentPenaltyMetricsPsids =
+        poolMetrics.sequencerPenaltyMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
+      def currentPenaltyMetricsSize = poolMetrics.sequencerPenaltyMetrics.size
 
       withConnectionPool(
         nbConnections = PositiveInt.three,
@@ -1030,6 +1106,8 @@ class SequencerConnectionPoolImplTest
 
         currentMetricsSize shouldBe 3
         currentMetricsPsids shouldBe Set(Some("psid1"))
+        currentPenaltyMetricsSize shouldBe 3
+        currentPenaltyMetricsPsids shouldBe Set(Some("psid1"))
 
         withConnectionPool(
           nbConnections = PositiveInt.two,
@@ -1043,14 +1121,20 @@ class SequencerConnectionPoolImplTest
 
           currentMetricsSize shouldBe 5
           currentMetricsPsids shouldBe Set(Some("psid1"), Some("psid2"))
+          currentPenaltyMetricsSize shouldBe 5
+          currentPenaltyMetricsPsids shouldBe Set(Some("psid1"), Some("psid2"))
         }
 
         currentMetricsSize shouldBe 3
         currentMetricsPsids shouldBe Set(Some("psid1"))
+        currentPenaltyMetricsSize shouldBe 3
+        currentPenaltyMetricsPsids shouldBe Set(Some("psid1"))
       }
 
       currentMetricsSize shouldBe 0
       currentMetricsPsids shouldBe Set()
+      currentPenaltyMetricsSize shouldBe 0
+      currentPenaltyMetricsPsids shouldBe Set()
     }
   }
 

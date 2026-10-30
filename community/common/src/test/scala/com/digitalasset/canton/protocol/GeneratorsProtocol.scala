@@ -22,6 +22,7 @@ import com.digitalasset.canton.{GeneratorsLf, LfPackageId, LfPartyId, LfVersione
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
 import com.google.protobuf.ByteString
 import magnolify.scalacheck.auto.*
+import org.scalacheck.util.Buildable
 import org.scalacheck.{Arbitrary, Gen}
 
 import scala.jdk.CollectionConverters.*
@@ -365,10 +366,9 @@ final class GeneratorsProtocol(
     for {
       parties <- boundedListGen[PartyId]
       signatures <- Gen.sequence(
-        parties.map(p => boundedListGen[Signature].map(p -> _))
-      )
+        parties.map(p => boundedListGen[Signature].map(sig => p -> sig))
+      )(Buildable.buildableArrayList)
       maxRecordTime <- Gen.option(Arbitrary.arbitrary[CantonTimestamp])
-
       hashingSchemeVersion <- hashingSchemeVersionArb.arbitrary
     } yield ExternalAuthorization.create(
       signatures.asScala.toMap,

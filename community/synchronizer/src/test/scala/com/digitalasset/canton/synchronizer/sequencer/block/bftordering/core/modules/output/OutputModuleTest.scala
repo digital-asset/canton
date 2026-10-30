@@ -151,6 +151,81 @@ class OutputModuleTest
   "OutputModule" should {
     val initialBlock = anOrderedBlockForOutput(batchIds = Seq(BatchId.createForTesting("batchId")))
 
+    "log deserialization failures at the appropriate level" when {
+      def inspect(
+          payload: ByteString,
+          requestInspector: RequestInspector =
+            new DefaultRequestInspector(doNotWarnOnEmptyPayloads = true),
+      ): Boolean =
+        requestInspector.mayChangeOrderingTopology(
+          OrderingRequest(BlockFormat.SendTag, messageId = "", payload),
+          BlockMetadata(EpochNumber.First, BlockNumber.First),
+          requestNumber = 0,
+          defaultMaxBytesToDecompress,
+          testedSynchronizerLimits,
+          logger,
+          TraceContext.empty,
+          new SymbolicPureCrypto(),
+          stricterDetectionOfRequestsPotentiallyChangingOrderingTopology = false,
+        )
+
+      "the payload is empty and the inspector does not warn on empty payloads" in {
+        assertWarns {
+          inspect(ByteString.EMPTY) shouldBe false
+          // no warns
+        }
+      }
+
+      "the payload is empty and the inspector uses production defaults" in {
+        assertWarns(
+          inspect(ByteString.EMPTY, new DefaultRequestInspector) shouldBe false,
+          _.warningMessage should include("failed to deserialize"),
+        )
+      }
+
+      "a non-empty payload is malformed" in {
+        assertWarns(
+          inspect(ByteString.copyFromUtf8("invalid")) shouldBe false,
+          _.warningMessage should include("failed to deserialize"),
+        )
+      }
+    }
+
+    "not inspect acknowledgements when checking for topology changes" in {
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+      val output =
+        createOutputModule[ProgrammableUnitTestEnv](
+          requestInspector = new AccumulatingRequestInspector
+        )()
+      val acknowledgementBatch = OrderingRequestBatch.create(
+        Seq(
+          Traced(
+            OrderingRequest(
+              BlockFormat.AcknowledgeTag,
+              messageId = "ack",
+              ByteString.EMPTY,
+            )
+          )
+        ),
+        EpochNumber.First,
+      )
+      val blockData = completeBlockData(BlockNumber.First, aTimestamp).copy(
+        batches = Seq(
+          BatchId.from(acknowledgementBatch, logger)(implicitly, TraceContext.empty) ->
+            acknowledgementBatch
+        )
+      )
+
+      output.receive(Output.Start)
+      output.receive(Output.BlockDataFetched(blockData))
+
+      // The inspector returns true on its first call,
+      //  so false here confirms the acknowledgement was not inspected.
+      output.currentEpochCouldAlterOrderingTopology shouldBe false
+      succeed
+    }
+
     "fetch block from availability" when {
       "a block hasn't been provided yet and is not being fetched" in {
         implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
@@ -2589,7 +2664,9 @@ class OutputModuleTest
       orderingTopologyProvider: OrderingTopologyProvider[E] = new FakeOrderingTopologyProvider[E],
       previousBftTimeForOnboarding: Option[CantonTimestamp] = None,
       areTherePendingTopologyChangesInOnboardingEpoch: Boolean = false,
-      requestInspector: RequestInspector = DefaultRequestInspector,
+      requestInspector: RequestInspector = new DefaultRequestInspector(
+        doNotWarnOnEmptyPayloads = true
+      ),
       tracer: Tracer = NoReportingTracerProvider.tracer,
       metrics: BftOrderingMetrics = SequencerMetrics.noop("output-module-test").bftOrdering,
   )(

@@ -163,7 +163,7 @@ final class SequencerConnectionPoolMetricsIntegrationTest
 
                 case (name, values)
                     if name == s"$prefix.connection-health" || name == s"$prefix.subscription-health" =>
-                  // The metrics on the first connect will be without `psid`, but they are closed when disconnecting.
+                  // These metrics on the first connect will be without `psid`, but they are closed when disconnecting.
                   // Metrics for the second connect will have the `psid`.
                   // With 4 sequencers and trust threshold = 4, we will have 4 connections and 4 subscriptions.
                   values should have size 4
@@ -219,6 +219,13 @@ final class SequencerConnectionPoolMetricsIntegrationTest
 
                     case (endpoint, _) => fail(s"unknown endpoint: $endpoint")
                   }
+
+                case (name, values) if name == s"$prefix.sequencer-penalty" =>
+                  // These metrics on the first connect will be without `psid`, but they are closed when disconnecting.
+                  // Metrics for the second connect will have the `psid`.
+                  // With 4 sequencers and trust threshold = 4, we will have 4 metrics.
+                  values should have size 4
+                  forAll(values)(_.attributes should contain key psidKeyName)
 
                 case (other, _) => fail(s"unexpected metric: $other")
               }

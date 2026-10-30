@@ -1159,7 +1159,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
-                protocolVersion = Some(Int.MaxValue),
+                protocolVersion = Some(Int.MinValue), // a protocol version can never be negative
               )
             )
             .failed

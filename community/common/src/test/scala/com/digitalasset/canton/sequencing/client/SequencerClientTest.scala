@@ -89,6 +89,7 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnection,
   SequencerConnectionPool,
   SequencerConnectionWithPekkoSubscribe,
+  SequencerPenalties,
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.{
@@ -1330,6 +1331,40 @@ final class SequencerClientTest
       }
     }
 
+    "penalties" should {
+      "be given to the sequencer of a connection that returns an overloaded error" in {
+        val env = RichEnvFactory.create(
+          firstSendAsyncResponseO = Some(Left(overloadedError))
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion))
+          .futureValueUS shouldBe Left(overloadedError)
+
+        env.pool.connectionPenalties shouldBe Map(
+          DefaultTestIdentities.daSequencerId -> NonNegativeDouble.one
+        )
+
+        env.client.close()
+      }
+
+      "not be given for a non-overloaded error" in {
+        // until other penalties are defined
+
+        val env = RichEnvFactory.create(
+          firstSendAsyncResponseO = Some(Left(senderUnknownError))
+        )
+
+        env
+          .sendAsync(Batch.empty(testedProtocolVersion))
+          .futureValueUS shouldBe Left(senderUnknownError)
+
+        env.pool.connectionPenalties shouldBe empty
+
+        env.client.close()
+      }
+    }
+
     "amplification" should {
       val amplificationConfig = SubmissionRequestAmplification(
         factor = PositiveInt.two,
@@ -1751,6 +1786,7 @@ final class SequencerClientTest
       ack: CantonTimestamp => Unit,
       clock: SimClock,
       firstSendAsyncResponseO: Option[SendAsyncResponse],
+      penalties: SequencerPenalties,
   ) extends SequencerConnectionWithPekkoSubscribe {
     override val health: SequencerConnectionHealth =
       new SequencerConnectionHealth.AlwaysValidated(s"$name-health", logger)
@@ -1777,8 +1813,9 @@ final class SequencerClientTest
 
     override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
-    override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit =
-      ()
+    override def increasePenalty(amount: PositiveInt, reason: String)(implicit
+        traceContext: TraceContext
+    ): Unit = penalties.increase(attributes.sequencerId, amount, reason)
 
     val lastSend = new AtomicReference[Option[SentSubmission]](None)
     def lastSubmissionTime: Option[CantonTimestamp] = lastSend.get.map(_.submissionTime)
@@ -1907,11 +1944,15 @@ final class SequencerClientTest
     ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] = ???
   }
 
-  private class MockPool(clock: SimClock, firstSendAsyncResponseO: Option[SendAsyncResponse])
-      extends SequencerConnectionPool {
+  private class MockPool(
+      clock: SimClock,
+      firstSendAsyncResponseO: Option[SendAsyncResponse],
+  ) extends SequencerConnectionPool {
     val acknowledgedTimestamps: AtomicReference[Set[CantonTimestamp]] = new AtomicReference(
       Set.empty
     )
+
+    private val penalties = new SequencerPenalties(loggerFactory)
 
     val connection =
       new MockConnection(
@@ -1919,6 +1960,7 @@ final class SequencerClientTest
         ack = ts => acknowledgedTimestamps.getAndUpdate(_ + ts),
         clock = clock,
         firstSendAsyncResponseO = firstSendAsyncResponseO,
+        penalties = penalties,
       )
 
     override protected def loggerFactory: NamedLoggerFactory =
@@ -1980,7 +2022,7 @@ final class SequencerClientTest
     override def contents: Map[SequencerId, Set[SequencerConnection]] = ???
 
     @VisibleForTesting
-    override def connectionPenalties: Map[SequencerId, NonNegativeDouble] = ???
+    override def connectionPenalties: Map[SequencerId, NonNegativeDouble] = penalties.snapshot
 
     override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 

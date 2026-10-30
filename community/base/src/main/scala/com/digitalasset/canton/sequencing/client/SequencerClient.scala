@@ -788,8 +788,16 @@ abstract class SequencerClientImpl(
           error: SendAsyncClientResponseError,
           sequencerId: SequencerId,
           sequencerAlias: SequencerAlias,
+          connection: SequencerConnection,
       ): Either[State, Either[SendAsyncClientError, Unit]] = {
         recordSyncError(sequencerAlias, error)
+
+        // Penalties
+        error match {
+          case SendAsyncClientError.RequestRefused(sendAsyncError) if sendAsyncError.isOverload =>
+            connection.increasePenalty(PositiveInt.one, "sequencer is overloaded")
+          case _ =>
+        }
 
         error match {
           case _: SendAsyncClientError.RequestFailed =>
@@ -971,7 +979,7 @@ abstract class SequencerClientImpl(
               scheduleAmplification(durationOfAttempt, sendInFlight = true)
               Right(Either.unit)
             case (_, Left(error)) =>
-              handleSyncError(error, sequencerId, sequencerAlias)
+              handleSyncError(error, sequencerId, sequencerAlias, connection)
           }
 
         case None if isClosing => FutureUnlessShutdown.abortedDueToShutdown

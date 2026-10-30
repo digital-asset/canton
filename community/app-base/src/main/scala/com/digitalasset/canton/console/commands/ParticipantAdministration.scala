@@ -2342,6 +2342,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
           SequencerConnectionPoolDelays.default,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
+        sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig =
+          SequencerConnectionPenaltyConfig.default,
     ): Unit = {
       val config = ParticipantCommands.synchronizers.reference_to_config(
         sequencers = sequencers,
@@ -2354,6 +2356,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         sequencerLivenessMargin = sequencerLivenessMargin,
         submissionRequestAmplification = submissionRequestAmplification,
         sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
+        sequencerConnectionPenaltyConfig = sequencerConnectionPenaltyConfig,
       )
       connect_by_config(config, validation, synchronize)
     }

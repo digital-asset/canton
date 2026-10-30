@@ -7,6 +7,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
+  SequencerConnectionPenaltyConfig,
   SubmissionRequestAmplification,
   TrafficControlParameters,
 }
@@ -453,7 +454,8 @@ abstract class SubmissionRequestAmplificationIntegrationTest
   }
 
   def reconfigurePatience(
-      newPatience: config.NonNegativeFiniteDuration
+      newPatience: config.NonNegativeFiniteDuration,
+      disablePenalties: Boolean = false,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
 
@@ -478,21 +480,31 @@ abstract class SubmissionRequestAmplificationIntegrationTest
       participant.synchronizers.disconnect(daName)
       participant.synchronizers.modify(
         daName,
-        _.focus(_.sequencerConnections).modify(old =>
-          old.withSubmissionRequestAmplification(
-            old.submissionRequestAmplification.copy(patience = newPatience)
-          )
-        ),
+        _.focus(_.sequencerConnections).modify { old =>
+          old
+            .withSubmissionRequestAmplification(
+              old.submissionRequestAmplification.copy(patience = newPatience)
+            )
+            .withSequencerConnectionPenaltyConfig(
+              if (disablePenalties) SequencerConnectionPenaltyConfig.disabled
+              else SequencerConnectionPenaltyConfig.default
+            )
+        },
       )
       participant.synchronizers.reconnect(daName)
     }
 
     mediators.local.foreach(
-      _.sequencer_connection.modify_connections(old =>
-        old.withSubmissionRequestAmplification(
-          old.submissionRequestAmplification.copy(patience = newPatience)
-        )
-      )
+      _.sequencer_connection.modify_connections { old =>
+        old
+          .withSubmissionRequestAmplification(
+            old.submissionRequestAmplification.copy(patience = newPatience)
+          )
+          .withSequencerConnectionPenaltyConfig(
+            if (disablePenalties) SequencerConnectionPenaltyConfig.disabled
+            else SequencerConnectionPenaltyConfig.default
+          )
+      }
     )
   }
 
@@ -613,7 +625,9 @@ abstract class SubmissionRequestAmplificationIntegrationTest
   "retry upon timeout" in { implicit env =>
     import env.*
     val patience = config.NonNegativeFiniteDuration.fromDuration(1.second).value
-    reconfigurePatience(patience)
+    // Disable penalties because the test assertions on metrics rely on random selection of sequencers
+    // and penalties on mediators from previous tests would bias the selection.
+    reconfigurePatience(patience, disablePenalties = true)
 
     // One of the sequencers drops all messages.
     // Check that some requests are amplified by finding duplicate message IDs recorded

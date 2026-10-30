@@ -67,8 +67,12 @@ trait SequencerConnection extends FlagCloseable with NamedLogging {
     *
     * @param amount
     *   the positive amount by which to increase the penalty
+    * @param reason
+    *   a human-readable reason for the penalty increase, for logging and debugging purposes
     */
-  def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit
+  def increasePenalty(amount: PositiveInt, reason: String)(implicit
+      traceContext: TraceContext
+  ): Unit
 
   def sendAsync(
       request: SignedContent[SubmissionRequest],

@@ -90,7 +90,7 @@ object Dependencies {
   lazy val scala_collections_contrib_version = "0.4.0"
   lazy val scala_csv_version = "2.0.0"
   lazy val scala_logging_version = "3.9.6"
-  lazy val scalacheck_version = "1.15.4"
+  lazy val scalacheck_version = "1.20.0"
   lazy val scalafx_version = "17.0.1-R26"
   lazy val scalafx_all_version = "17-ea+8"
   lazy val scalatest_version = "3.2.19"

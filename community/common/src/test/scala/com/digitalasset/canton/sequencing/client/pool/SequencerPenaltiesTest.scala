@@ -25,9 +25,9 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
 
     "accumulate increases" in {
       val penalties = new SequencerPenalties(loggerFactory)
-      penalties.increase(seq1, PositiveInt.one)
-      penalties.increase(seq1, PositiveInt.two)
-      penalties.increase(seq2, PositiveInt.tryCreate(4))
+      penalties.increase(seq1, PositiveInt.one, reason = "test")
+      penalties.increase(seq1, PositiveInt.two, reason = "test")
+      penalties.increase(seq2, PositiveInt.tryCreate(4), reason = "test")
 
       penalties.get(seq1) shouldBe NonNegativeDouble.tryCreate(3)
       penalties.get(seq2) shouldBe NonNegativeDouble.tryCreate(4)
@@ -36,8 +36,8 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
 
     "decay all penalties" in {
       val penalties = new SequencerPenalties(loggerFactory)
-      penalties.increase(seq1, PositiveInt.tryCreate(8))
-      penalties.increase(seq2, PositiveInt.two)
+      penalties.increase(seq1, PositiveInt.tryCreate(8), reason = "test")
+      penalties.increase(seq2, PositiveInt.two, reason = "test")
 
       penalties.decay(
         factor = NonNegativeDouble.tryCreate(0.5),
@@ -51,8 +51,8 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
 
     "reset decayed penalties below the threshold to 0" in {
       val penalties = new SequencerPenalties(loggerFactory)
-      penalties.increase(seq1, PositiveInt.two)
-      penalties.increase(seq2, PositiveInt.one)
+      penalties.increase(seq1, PositiveInt.two, reason = "test")
+      penalties.increase(seq2, PositiveInt.one, reason = "test")
 
       // 2/128 = 0.015625 >= 0.01 and 1/128 = 0.0078125 < 0.01
       penalties.decay(
@@ -66,7 +66,7 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
 
     "bring a penalty back to 0 after a bounded number of decays" in {
       val penalties = new SequencerPenalties(loggerFactory)
-      penalties.increase(seq1, PositiveInt.one)
+      penalties.increase(seq1, PositiveInt.one, reason = "test")
 
       // 0.9^43 ≈ 0.0108 >= 0.01 and 0.9^44 ≈ 0.0097 < 0.01
       (1 to 43).foreach(_ =>
@@ -86,13 +86,13 @@ final class SequencerPenaltiesTest extends AnyWordSpec with BaseTest {
 
     "start again from 0 after a penalty has been reset" in {
       val penalties = new SequencerPenalties(loggerFactory)
-      penalties.increase(seq1, PositiveInt.one)
+      penalties.increase(seq1, PositiveInt.one, reason = "test")
       penalties.decay(
         factor = NonNegativeDouble.tryCreate(1.0 / 128),
         zeroThreshold = PositiveDouble.tryCreate(0.01),
       )
 
-      penalties.increase(seq1, PositiveInt.one)
+      penalties.increase(seq1, PositiveInt.one, reason = "test")
 
       penalties.get(seq1) shouldBe NonNegativeDouble.one
     }

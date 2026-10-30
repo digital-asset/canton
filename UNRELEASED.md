@@ -91,6 +91,31 @@ A cookie-authenticated handshake whose `Origin` header is missing, `null`, or no
 `403 Forbidden` and the new error code `JSON_API_COOKIE_AUTH_ORIGIN_NOT_ALLOWED`. This protects against
 cross-site websocket hijacking.
 
+### Sequencer connection penalty mechanism
+The sequencer connection pool now implements a penalty mechanism to prioritize sequencers that are healthy and responsive
+when picking connections.
+When adverse events are observed on a connection, a penalty is applied to the sequencer. When asked for connections,
+the sequencer client's connection pool will sort the candidate sequencers according to their penalties and choose the lower ones, picking randomly among ties.
+Penalties decay exponentially over time, so that a sequencer that was previously penalized can recover and be selected again.
+
+The mechanism is configured with the following connection parameters, via the new `sequencer_connection_penalty_config` field in `SequencerConnections`:
+- `enabled` (default true) controls whether sequencer penalties affect the selection of sequencer connections. When disabled,
+  penalties are still recorded, but sequencers are picked randomly regardless of their penalties (this is equivalent to the previous behavior).
+- `half_life` (default 1 minute) controls the half-life of the exponential decay of penalties.
+- `decay_interval` (default 10 seconds) controls the interval at which the decay is applied to the current penalty values.
+- `zero_threshold` (default 0.01) controls the threshold below which penalties are reset to 0, so that a penalized sequencer
+  can recover after a bounded number of decays.
+
+The time for a penalty to decay below the threshold is given by `log2(penalty / zero_threshold) * half_life`, rounded up to a multiple of `decay_interval`.
+For the default values and a penalty of 1, this is 6min 40s.
+Due to the exponential nature of the decay, a penalty of 2 will take 1 half-life longer than a penalty of 1, a penalty of 4 will take 2 half-lives longer, and so on.
+
+The metric `daml.sequencer-client.sequencer-connection-pool.sequencer-penalty` is available to monitor the current penalty values of sequencers;
+its `sequencer` label holds the sequencer's unique identifier.
+
+Currently, the following events make use of this mechanism:
+- A penalty of 1 is given to a sequencer when it refuses a submission request with `SEQUENCER_OVERLOADED`.
+
 ### Minor Improvements
 - Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
 - Deprecated the `canton.participants.<participant>.parameters.ledger-api-server.indexer.batching-parallelism` configuration setting, which is no longer supported.

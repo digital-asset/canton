@@ -116,7 +116,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     hashOps: HashOps,
     synchronizerLimits: SynchronizerLimits,
     requestInspector: RequestInspector =
-      OutputModule.DefaultRequestInspector, // Only set by simulation and performance tests
+      new OutputModule.DefaultRequestInspector, // Only set by simulation and performance tests
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // Only set by simulation tests
     outputPreviousStoredBlock: OutputModule.PreviousStoredBlock =
       new OutputModule.PreviousStoredBlock,
