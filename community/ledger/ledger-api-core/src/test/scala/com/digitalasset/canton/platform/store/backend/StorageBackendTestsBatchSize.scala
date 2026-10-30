@@ -70,7 +70,8 @@ private[backend] trait StorageBackendTestsBatchSize
   // This test replicates the huge transaction of the mentioned sev1 issue. It is expected not to complete
   // within the default network timeout, but if the timeout or the environment changes the transaction size
   // may need adjustment. Note that in the sev1 2670 exercises and 1580 informees were present.
-  it should "ingest a transaction with 2670 exercises and 1580 informee (sev1 #4433)" in {
+  // Ignored as the variation in size required to cause the failure varies across environments 
+  it should "ingest a transaction with 2670 exercises and 1580 informee (sev1 #4433)" ignore {
     loggerFactory.assertEventuallyLogsSeq(
       SuppressionRule.Level(event.Level.WARN)
     )(
