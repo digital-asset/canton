@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.user
 
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.daml.lf.data.Ref
 
 sealed trait UserRight extends Product with Serializable
@@ -27,4 +28,8 @@ object UserRight {
   final case object CanExecuteAsAnyParty extends UserRight
 
   final case object CanActAsAnyParty extends UserRight
+
+  final case class CanDebitTrafficFrom(accountId: AccountId) extends UserRight
+
+  final case object CanDebitTrafficFromAnyAccount extends UserRight
 }

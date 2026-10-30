@@ -49,7 +49,7 @@ private[backend] trait StorageBackendTestsCompletions
         ),
       )
 
-      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(backend.parameter.initializeParameters(someIdentityParams))
       executeSql(ingest(dtos, _))
       executeSql(updateLedgerEnd(offset(3), 3L))
       val completions0to2 = executeSql(
@@ -104,7 +104,7 @@ private[backend] trait StorageBackendTestsCompletions
         dtoCompletion(offset(2), submitters = Set(party), userId = otherUserId),
       )
 
-      executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+      executeSql(backend.parameter.initializeParameters(someIdentityParams))
       executeSql(ingest(dtos, _))
       executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -140,7 +140,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(1), submitters = Set(party))
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
@@ -170,7 +170,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(2), submitters = Set(party), submissionId = None),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val completions = executeSql(
@@ -209,7 +209,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(2), submitters = Set(party), deduplicationOffset = None),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
 
     executeSql(updateLedgerEnd(offset(2), 2L))
@@ -256,7 +256,7 @@ private[backend] trait StorageBackendTestsCompletions
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
 
     executeSql(updateLedgerEnd(offset(2), 2L))
@@ -298,7 +298,7 @@ private[backend] trait StorageBackendTestsCompletions
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
 
     executeSql(updateLedgerEnd(offset(2), 2L))
@@ -350,7 +350,7 @@ private[backend] trait StorageBackendTestsCompletions
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -395,7 +395,7 @@ private[backend] trait StorageBackendTestsCompletions
       )
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos1, _))
     executeSql(updateLedgerEnd(offset(1), 1L))
     val caught = intercept[IllegalArgumentException](
@@ -483,7 +483,7 @@ private[backend] trait StorageBackendTestsCompletions
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.completion.commandCompletionsForRecovery(OffsetRange(offset(2), offset(10)))
@@ -526,7 +526,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(2), submitters = Set(party), transactionHash = None),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     val completions = executeSql(
@@ -561,7 +561,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("some rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejectedCompletion), _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
@@ -598,7 +598,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("some rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(completion), _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
@@ -658,7 +658,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection 3"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(
       ingest(
         Vector(
@@ -716,7 +716,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("some rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejectedCompletion, acceptedCompletion, meta), _))
 
     // Ledger end is below both rows (offset 1 < offsets 2 and 3): they must be invisible.
@@ -774,7 +774,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection b"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejectedA, rejectedB), _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -807,7 +807,7 @@ private[backend] trait StorageBackendTestsCompletions
       transactionHash = Some(hashBytes),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(accepted, meta), _))
     executeSql(updateLedgerEnd(offset(1), 1L))
 
@@ -856,7 +856,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejected, accepted, meta), _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -900,7 +900,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejected, accepted, meta), _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -942,7 +942,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejected, accepted, meta), _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -996,7 +996,7 @@ private[backend] trait StorageBackendTestsCompletions
       rejectionStatusMessage = Some("rejection 2"),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(Vector(rejected1, rejected2, accepted, meta), _))
     executeSql(updateLedgerEnd(offset(3), 3L))
 
@@ -1025,7 +1025,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(2), submitters = Set(party), userId = userId2),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -1064,7 +1064,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(2), submitters = Set(party2)),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
 
@@ -1105,7 +1105,7 @@ private[backend] trait StorageBackendTestsCompletions
       dtoCompletion(offset(3), submitters = Set(party1, party2), userId = userId1),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(3), 3L))
 

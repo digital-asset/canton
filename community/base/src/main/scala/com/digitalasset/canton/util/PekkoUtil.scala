@@ -2386,8 +2386,24 @@ object PekkoUtil extends HasLoggerName {
       else elc.info(logMessage, throwable)
       result
     }
-  }
 
+    def pause(
+        delay: FiniteDuration,
+        streamName: String,
+        warnLoggingAttemptThreshold: Int = Int.MaxValue, // by default always log on INFO
+        errorLoggingAttemptThreshold: Int = Int.MaxValue, // by default always log on INFO
+        failingAttemptThreshold: Int = Int.MaxValue, // by default always retry
+    )(recoverable: Throwable => Boolean): RecoveryStrategy =
+      // by setting initial and max delay of the exponential backoff to the same value, we get constant pausing behavior
+      exponentialBackoff(
+        initialDelay = delay,
+        maxDelay = delay,
+        streamName = streamName,
+        warnLoggingAttemptThreshold = warnLoggingAttemptThreshold,
+        errorLoggingAttemptThreshold = errorLoggingAttemptThreshold,
+        failingAttemptThreshold = failingAttemptThreshold,
+      )(recoverable)
+  }
   def recoveringSource[A, Mat, Point](
       init: Point,
       recoveryStrategy: RecoveryStrategy,

@@ -40,11 +40,13 @@ runs:
       if: steps.prepare_logic.outputs.needs_network_restore == 'true'
       uses: ./.github/actions/cache/compute_build_hash
 
-    - name: Compute main SHA
-      id: compute_main_sha
+    - name: Compute base branch SHA
+      id: compute_base_sha
       shell: bash
       run: |
-        echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+        echo "base_sha=$(git rev-parse "origin/${BASE_BRANCH}")" >> "$GITHUB_OUTPUT"
+      env:
+        BASE_BRANCH: ${{ steps.resolve_ref.outputs.base_branch }}
 
     - name: Restore Incremental Compile Cache
       if: steps.prepare_logic.outputs.needs_network_restore == 'true'
@@ -57,6 +59,6 @@ runs:
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-
           compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
-          compile-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
-          compile-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+          compile-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_base_sha.outputs.base_sha }}
+          compile-os=${{ runner.os }}-branch=branch-${{ steps.resolve_ref.outputs.base_branch }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
         # Restore keys are prefix matching on the cache keys, which we use to fallback on previous caches when not specifying an exact sha

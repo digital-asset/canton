@@ -4,11 +4,13 @@
 package com.digitalasset.canton.scheduler
 
 import cats.syntax.parallel.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success}
 
@@ -23,23 +25,23 @@ class SchedulersImpl(
     extends Schedulers
     with NamedLogging {
 
-  override def start()(implicit traceContext: TraceContext): Future[Unit] = {
+  override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Starting ${schedulers.size} scheduler(s): ${schedulers.keys.mkString(",")}")
     schedulers.values.toList
       .parTraverse_(_.start())
-      .transform {
-        case s @ Success(_) =>
+      .thereafter {
+        case Success(Outcome(_)) =>
           logger.debug(s"Started ${schedulers.size} scheduler(s)")
-          s
-        case f @ Failure(NonFatal(t)) =>
-          // Stop successfully started schedulers if one failed
+        case Success(AbortedDueToShutdown) =>
+          logger.info(s"Aborted starting ${schedulers.size} scheduler(s) due to shutdown")
+          stop()
+        case Failure(t) =>
           logger.error(
             s"Failed to start all ${schedulers.size} scheduler(s). Stopping all to ensure no partial set of schedulers are running.",
             t,
           )
-          stop()
-          f
-        case f => f
+          // Stop successfully started schedulers if one failed
+          if (NonFatal(t)) stop()
       }
   }
 

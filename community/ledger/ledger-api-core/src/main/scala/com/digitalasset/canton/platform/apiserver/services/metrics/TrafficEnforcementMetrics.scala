@@ -39,6 +39,60 @@ class TrafficEnforcementMetrics(
     )
   )
 
+  val completions: Meter = metricsFactory.meter(
+    MetricInfo(
+      name = prefix :+ "completions",
+      summary = "Number of completions processed by traffic enforcement",
+      description =
+        "The number of Ledger API completions traffic enforcement processed, labeled by outcome" +
+          " and, where applicable, reason.",
+      qualification = Traffic,
+      labelsWithDescription = Map(
+        TrafficEnforcementOutcome.OutcomeAttribute -> "The outcome of processing the completion: charged, skipped or failed.",
+        TrafficEnforcementOutcome.ReasonAttribute -> "Why the completion wasn't charged, present only for skipped completions.",
+      ),
+    )
+  )
+
+  private val unchargedLabels = Map(
+    TrafficEnforcementOutcome.ReasonAttribute -> "Why the completion wasn't charged.",
+    TrafficEnforcementOutcome.ActAsCategoryAttribute -> "Which kind of acting parties the completion had.",
+  )
+
+  val unchargedCompletions: Meter = metricsFactory.meter(
+    MetricInfo(
+      name = prefix :+ "uncharged-completions",
+      summary = "Number of completions with a positive cost that weren't charged",
+      description =
+        "The number of completions with a positive traffic cost that traffic enforcement recorded" +
+          " without charging an account, labeled by reason and acting party category.",
+      qualification = Traffic,
+      labelsWithDescription = unchargedLabels,
+    )
+  )
+
+  val unchargedCompletionCost: Meter = metricsFactory.meter(
+    MetricInfo(
+      name = prefix :+ "uncharged-completion-cost",
+      summary = "Traffic cost of completions that weren't charged",
+      description =
+        "The total traffic cost of completions that traffic enforcement recorded without charging" +
+          " an account, labeled by reason and acting party category.",
+      qualification = Traffic,
+      labelsWithDescription = unchargedLabels,
+    )
+  )
+
+  val prunedRows: Meter = metricsFactory.meter(
+    MetricInfo(
+      name = prefix :+ "pruned-rows",
+      summary = "Number of traffic enforcement rows pruned",
+      description = "The number of traffic enforcement rows pruned, labeled by table.",
+      qualification = Traffic,
+      labelsWithDescription = Map("table" -> "The pruned table."),
+    )
+  )
+
   val enforcementCheckDuration: Timer = metricsFactory.timer(inventory.enforcementCheckItem.info)
 
   val projectionTimestamp: Gauge[Long] = metricsFactory.gauge[Long](
@@ -62,14 +116,31 @@ class TrafficEnforcementMetrics(
     0L,
   )
 
-  def markDecision(outcome: String, reason: Option[String]): Unit = {
+  def markDecision(outcome: String, reason: Option[String]): Unit =
+    decisions.mark()(outcomeLabels(outcome, reason))
+
+  def markCompletion(outcome: String, reason: Option[String]): Unit =
+    completions.mark()(outcomeLabels(outcome, reason))
+
+  def markUnchargedCompletion(reason: String, actAsCategory: String, cost: Long): Unit = {
+    val labeled = metricsContext.withExtraLabels(
+      TrafficEnforcementOutcome.ReasonAttribute -> reason,
+      TrafficEnforcementOutcome.ActAsCategoryAttribute -> actAsCategory,
+    )
+    unchargedCompletions.mark()(labeled)
+    unchargedCompletionCost.mark(cost)(labeled)
+  }
+
+  private def outcomeLabels(outcome: String, reason: Option[String]): MetricsContext = {
     val withOutcome =
       metricsContext.withExtraLabels(TrafficEnforcementOutcome.OutcomeAttribute -> outcome)
-    val labeled = reason.fold(withOutcome)(r =>
+    reason.fold(withOutcome)(r =>
       withOutcome.withExtraLabels(TrafficEnforcementOutcome.ReasonAttribute -> r)
     )
-    decisions.mark()(labeled)
   }
+
+  def markPrunedRows(table: String, count: Int): Unit =
+    prunedRows.mark(count.toLong)(metricsContext.withExtraLabels("table" -> table))
 }
 
 class TrafficEnforcementInventory(parent: MetricName)(implicit inventory: HistogramInventory) {

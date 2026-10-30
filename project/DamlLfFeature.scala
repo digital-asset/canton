@@ -163,6 +163,19 @@ object DamlLfFeature {
     versionRange = VersionRange.Inclusive(v2_3, v2_3),
   )
 
+  // Once a protocol version is stable, the range of its feature MUST NOT change.
+  val featurePV36 = DamlLfFeature(
+    name = "LF versions supported by PV36",
+    cppFlag = "DAML_PV36",
+    versionRange = VersionRange.Inclusive(v2_1, v2_4),
+  )
+
+  val featurePV37 = DamlLfFeature(
+    name = "LF versions supported by PV37",
+    cppFlag = "DAML_PV37",
+    versionRange = VersionRange.Inclusive(v2_1, v2_4),
+  )
+
   val allFeatures: Map[String, DamlLfFeature] = Map(
     "featureUnstable" -> featureUnstable,
     "featureBigNumeric" -> featureBigNumeric,
@@ -182,6 +195,8 @@ object DamlLfFeature {
     "featureStableCallStack" -> featureStableCallStack,
     "featurePV34" -> featurePV34,
     "featurePV35" -> featurePV35,
+    "featurePV36" -> featurePV36,
+    "featurePV37" -> featurePV37,
     "featureUnpack" -> featureUnpack,
   )
 

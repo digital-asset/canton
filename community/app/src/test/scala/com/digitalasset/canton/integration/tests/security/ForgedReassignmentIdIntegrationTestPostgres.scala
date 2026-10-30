@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests.security
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Availability
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -20,7 +19,12 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.{AcsInspection, EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.integration.util.{
+  AcsInspection,
+  AutomaticAssignment,
+  EntitySyntax,
+  PartiesAllocator,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -88,6 +92,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         // TODO(i31578) Remove this when corrupted ACS commitments are fixed
@@ -124,10 +129,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
 
         // Disable the automatic assignment, so that the assignments below are the only ones submitted
         Seq(sequencer1, sequencer2).foreach { sequencer =>
-          sequencer.topology.synchronizer_parameters.propose_update(
-            sequencer.synchronizer_id,
-            _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-          )
+          AutomaticAssignment.disable(Seq(sequencer), sequencer.synchronizer_id)
         }
 
         signatory = signatoryName.toPartyId(participant1)
@@ -139,7 +141,7 @@ final class ForgedReassignmentIdIntegrationTestPostgres
           participant1,
           acmeId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
         )

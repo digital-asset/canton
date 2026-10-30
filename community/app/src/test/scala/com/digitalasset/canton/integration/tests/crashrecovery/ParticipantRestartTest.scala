@@ -732,6 +732,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
       ),
       includeReassignments = Some(eventFormat),
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
   }
 
@@ -2614,6 +2615,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       ),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
 
     val clock = environment.simClock.value

@@ -25,10 +25,12 @@ import org.slf4j.event
 import java.nio.file.Files
 import scala.util.Random
 
-sealed trait MigrateAndStartIntegrationTest
+class MigrateAndStartIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with OperabilityTestHelpers {
+
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   private val dbPrefix = Random.alphanumeric.map(_.toLower).take(7).mkString
   private val remedy = operabilityTest("Nodes")("Database schema version")
@@ -107,7 +109,7 @@ sealed trait MigrateAndStartIntegrationTest
     }
   )
 
-  // map all praticipants to the same db
+  // map all participants to the same db
   protected def adjustDbNames(name: String): String =
     if (name.startsWith("participant")) {
       dbPrefix + "_participant"
@@ -229,8 +231,4 @@ sealed trait MigrateAndStartIntegrationTest
       }
     }
   }
-}
-
-final class MigrateAndStartReferenceIntegrationTest extends MigrateAndStartIntegrationTest {
-  registerPlugin(new UseBftSequencer(loggerFactory))
 }

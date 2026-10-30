@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.Commit
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
@@ -42,7 +43,7 @@ object CanonicalCommitSet {
   def fromProto(canonicalCommitSet: v30.CanonicalCommitSet): ParsingResult[CanonicalCommitSet] =
     canonicalCommitSet.canonicalCommits
       .traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage)(
+        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
           Commit.fromProtoConsensusMessage(actualSender = None, _)
         )
       )

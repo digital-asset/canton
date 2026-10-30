@@ -122,6 +122,7 @@ class SubmitRequestValidator(
       userIdP,
       hashingSchemeVersionP,
       minLedgerTimeP,
+      accountIdP,
     ) = req
     for {
       submissionId <- validateSubmissionId(submissionIdP)
@@ -154,6 +155,7 @@ class SubmitRequestValidator(
         minLedgerTimeP.flatMap(_.time.minLedgerTimeAbs),
         minLedgerTimeP.flatMap(_.time.minLedgerTimeRel),
       )
+      accountId <- optionalAccountId(accountIdP, "account_id")
     } yield {
       ExecuteRequest(
         userId,
@@ -163,6 +165,7 @@ class SubmitRequestValidator(
         preparedTransaction,
         hashingSchemeVersion,
         ledgerEffectiveTime,
+        accountId,
       )
     }
   }

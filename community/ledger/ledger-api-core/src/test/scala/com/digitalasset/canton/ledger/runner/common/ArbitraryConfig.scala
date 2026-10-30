@@ -194,7 +194,7 @@ object ArbitraryConfig {
     inputMappingParallelism <- nonNegativeIntGen
     maxInputBufferSize <- nonNegativeIntGen
     restartDelay <- nonNegativeFiniteDurationGen
-    submissionBatchSize <- Gen.long
+    submissionBatchSize <- nonNegativeIntGen
     achsConfig <- Gen.option(achsConfig)
   } yield IndexerConfig(
     batchingParallelism = batchingParallelism,
@@ -203,7 +203,7 @@ object ArbitraryConfig {
     inputMappingParallelism = inputMappingParallelism,
     maxInputBufferSize = maxInputBufferSize,
     restartDelay = restartDelay,
-    submissionBatchSize = submissionBatchSize,
+    submissionBatchSize = submissionBatchSize.value,
     achsConfig = achsConfig,
   )
 

@@ -271,6 +271,7 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
     submissionId = None,
     externallySignedSubmission = None,
     transactionHash = None,
+    accountId = None,
   )
 
   override def withFixture(test: OneArgTest): Outcome = {

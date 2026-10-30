@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
@@ -13,6 +14,7 @@ import com.digitalasset.canton.data.ViewType.UnassignmentViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
@@ -21,6 +23,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerClient
@@ -49,10 +52,12 @@ class UnassignmentProcessor(
     override protected val timeouts: ProcessingTimeout,
     sourceProtocolVersion: Source[ProtocolVersion],
     reassignmentMetrics: ReassignmentMetrics,
+    participantNodeParameters: ParticipantNodeParameters,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     override val testingConfig: TestingConfigInternal,
     promiseFactory: PromiseUnlessShutdownFactory,
+    trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       UnassignmentProcessingSteps.SubmissionParam,
@@ -71,6 +76,7 @@ class UnassignmentProcessor(
         clock,
         sourceProtocolVersion,
         reassignmentMetrics,
+        participantNodeParameters,
         loggerFactory,
       ),
       inFlightSubmissionSynchronizerTracker,
@@ -89,6 +95,20 @@ class UnassignmentProcessor(
       "user-id" -> submissionParam.submitterMetadata.userId,
       "type" -> "unassignment",
     )
+
+  override protected def validateLocalTrafficCost(
+      submissionParam: UnassignmentProcessingSteps.SubmissionParam
+  )(
+      trafficCost: Long,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    ReassignmentProcessingSteps.registerWithTrafficEnforcement(
+      trafficEnforcementBackendO,
+      submissionParam.submitterMetadata,
+      submissionParam.accounting,
+      trafficCost,
+      logger,
+    )(traceContext, ec)
 
   def buildSubmissionBatch(
       submissionParam: UnassignmentProcessingSteps.SubmissionParam,

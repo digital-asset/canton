@@ -15,7 +15,8 @@ final class ExecuteSubmissionAndWaitForTransactionAuthIT
     extends SyncServiceCallAuthTests
     with SubmitDummyPreparedSubmission
     with ExecuteAsAuthTests
-    with ActAsAnyPartyAuthTests {
+    with ActAsAnyPartyAuthTests
+    with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -27,6 +28,11 @@ final class ExecuteSubmissionAndWaitForTransactionAuthIT
   override def executeAsShouldSucceed: Boolean = true
 
   override def serviceCall(context: ServiceCallContext)(implicit
+      env: TestConsoleEnvironment
+  ): Future[Any] =
+    serviceCallWithAccountId(context, accountId = "")
+
+  override def serviceCallWithAccountId(context: ServiceCallContext, accountId: String)(implicit
       env: TestConsoleEnvironment
   ): Future[Any] = {
     import env.*
@@ -40,6 +46,7 @@ final class ExecuteSubmissionAndWaitForTransactionAuthIT
         context.token,
         context.userId,
         preparedSubmission,
+        accountId,
       )
     } yield executeResp
 

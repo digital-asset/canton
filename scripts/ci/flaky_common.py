@@ -8,11 +8,13 @@ names it needs (`from flaky_common import ...`).
 
 import os
 import re
+import io
 import subprocess
 import datetime
 import time
 import json
 import tempfile
+import contextlib
 from typing import Final, Optional
 from unittest.mock import patch
 
@@ -552,6 +554,18 @@ def self_test():
     test_get_ci_log_url_links_the_running_step()
     test_is_nightly_job()
     test_is_unstable_job()
+    test_ci_environment_detection()
+    test_get_ci_branch()
+    test_get_ci_job_name_and_defaults()
+    test_get_ci_commit_url()
+    test_format_test_name_sanitizes()
+    test_format_issue_title_and_should_report_issues()
+    test_with_evidence_link()
+    test_is_transient_gh_error()
+    test_run_gh_with_retries()
+    test_check_result()
+    test_artifact_dir()
+    test_required_env_vars()
     print("flaky_common self-checks passed")
 
 
@@ -750,6 +764,8 @@ def test_create_issue_table_row():
         assert get_ci_build_url() == 'https://github.com/DACH-NY/canton/actions/runs/9876543210', (
             f"Expected bare run URL without attempt, got: {get_ci_build_url()}"
         )
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}, clear=True):
+        assert get_ci_build_url() == '', "GHA without repository/run id has no build URL"
 
 
 def test_is_nightly_job():
@@ -784,6 +800,199 @@ def test_is_unstable_job():
     assert not is_unstable_job("test_with_java17")
     assert not is_unstable_job("nightly_integration_test")
     assert not is_unstable_job("")
+
+
+def test_ci_environment_detection():
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'TRUE'}, clear=True):
+        assert is_github_actions_ci(), "GITHUB_ACTIONS must be matched case-insensitively"
+        assert not is_circle_ci()
+    with patch.dict(os.environ, {'CIRCLECI': 'true'}, clear=True):
+        assert is_circle_ci()
+        assert not is_github_actions_ci()
+    with patch.dict(os.environ, {}, clear=True):
+        assert not is_github_actions_ci()
+        assert not is_circle_ci()
+
+
+def test_get_ci_branch():
+    gha = {'GITHUB_ACTIONS': 'true', 'GITHUB_REF_NAME': 'main'}
+    # On a pull request GITHUB_HEAD_REF holds the source branch and wins.
+    with patch.dict(os.environ, {**gha, 'GITHUB_HEAD_REF': 'feature-x'}, clear=True):
+        assert get_ci_branch() == 'feature-x', get_ci_branch()
+    # On a push GITHUB_HEAD_REF is empty, so fall back to GITHUB_REF_NAME.
+    with patch.dict(os.environ, {**gha, 'GITHUB_HEAD_REF': ''}, clear=True):
+        assert get_ci_branch() == 'main', get_ci_branch()
+    with patch.dict(os.environ, {'CIRCLECI': 'true', 'CIRCLE_BRANCH': 'main-2.x'}, clear=True):
+        assert get_ci_branch() == 'main-2.x', get_ci_branch()
+    with patch.dict(os.environ, {}, clear=True):
+        assert get_ci_branch() == '', get_ci_branch()
+
+
+def test_get_ci_job_name_and_defaults():
+    gha = {'GITHUB_ACTIONS': 'true', 'GITHUB_JOB': 'run_tests'}
+    # The composite's CANTON_CI_JOB_NAME carries the logical job name and wins over GITHUB_JOB.
+    with patch.dict(
+        os.environ, {**gha, 'CANTON_CI_JOB_NAME': 'nightly_integration_test'}, clear=True
+    ):
+        assert get_ci_job_name() == 'nightly_integration_test', get_ci_job_name()
+    with patch.dict(os.environ, gha, clear=True):
+        assert get_ci_job_name() == 'run_tests', get_ci_job_name()
+        assert get_ci_node_index() == '0', "GHA without MATRIX_SHARD must default to shard 0"
+        assert get_ci_commit_hash() == 'unknown', get_ci_commit_hash()
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}, clear=True):
+        assert get_ci_job_name() == 'unknown', get_ci_job_name()
+        assert get_ci_node_index() == '0', get_ci_node_index()
+        assert get_ci_commit_hash() == 'unknown', get_ci_commit_hash()
+    with patch.dict(os.environ, {'CIRCLECI': 'true'}, clear=True):
+        assert get_ci_job_name() == 'unknown', get_ci_job_name()
+        assert get_ci_node_index() == '0', get_ci_node_index()
+        assert get_ci_commit_hash() == 'unknown', get_ci_commit_hash()
+
+
+def test_get_ci_commit_url():
+    sha = 'd' * 40
+    gha_oss = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'digital-asset/canton'}
+    with patch.dict(os.environ, gha_oss, clear=True):
+        assert get_ci_commit_url(sha) == f'https://github.com/digital-asset/canton/commit/{sha}'
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}, clear=True):
+        assert get_ci_commit_url(sha) == f'https://github.com/DACH-NY/canton/commit/{sha}'
+    with patch.dict(os.environ, {'CIRCLECI': 'true'}, clear=True):
+        assert get_ci_commit_url(sha) == f'https://github.com/DACH-NY/canton/commit/{sha}'
+
+
+def test_format_test_name_sanitizes():
+    # Datadog tags must be ASCII
+    assert remove_non_ascii_characters("Tést–Name") == "T_st_Name"
+    assert remove_non_ascii_characters("PlainName") == "PlainName"
+    # Variable context after the first slash is dropped
+    assert remove_everything_after_first_slash("Foo/sequencerx=sequencer1/bar") == "Foo"
+    assert remove_everything_after_first_slash("Foo") == "Foo"
+    assert (
+        format_test_name("WARN c.d.c.r.DbStorageSingle:BftShard3Test/sequencerx=sequencer2")
+        == "WARN c.d.c.r.DbStorageSingle:BftTest"
+    )
+    # Long names are truncated to 200 characters
+    assert format_test_name("A" * 250) == "A" * 200
+    assert format_test_name("A" * 200) == "A" * 200
+
+
+def test_format_issue_title_and_should_report_issues():
+    with patch(f'{__name__}.branch', 'main'):
+        assert format_issue_title("FooShard1Test/x=1") == "[main] Flaky FooTest"
+        assert should_report_issues()
+    with patch(f'{__name__}.branch', 'main-2.x'):
+        assert should_report_issues()
+    with patch(f'{__name__}.branch', 'feature-x'):
+        assert not should_report_issues()
+    with patch(f'{__name__}.branch', ''):
+        assert not should_report_issues()
+
+
+def test_with_evidence_link():
+    row = "| d | job | 0 | [1](u) | [c](u) |  | regular |"
+    assert with_evidence_link(row, None) == row
+    assert with_evidence_link(row, "") == row
+    assert (
+        with_evidence_link(row, "https://e")
+        == "| d | job | 0 | [1](u) | [c](u) | [evidence](https://e) | regular |"
+    )
+
+
+def test_is_transient_gh_error():
+    def result(stdout='', stderr=''):
+        return subprocess.CompletedProcess(args=[], returncode=1, stdout=stdout, stderr=stderr)
+
+    for code in TRANSIENT_HTTP_CODES:
+        assert is_transient_gh_error(result(stderr=f'HTTP {code}: Bad Gateway')), code
+    assert is_transient_gh_error(result(stdout='HTTP 503')), "stdout must be checked too"
+    assert not is_transient_gh_error(result(stderr='HTTP 404: Not Found'))
+    assert not is_transient_gh_error(result())
+
+
+def test_run_gh_with_retries():
+    def completed(returncode, stderr=''):
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout='', stderr=stderr)
+
+    ok = completed(0)
+    transient = completed(1, 'HTTP 502')
+    permanent = completed(1, 'HTTP 404')
+
+    # A transient error is retried and the eventual success is returned.
+    with (
+        patch(f'{__name__}.subprocess.run', side_effect=[transient, ok]) as run_mock,
+        patch(f'{__name__}.time.sleep') as sleep_mock,
+    ):
+        assert run_gh_with_retries(['issue', 'list'], stdin='body') is ok
+        assert run_mock.call_count == 2, run_mock.call_count
+        assert sleep_mock.call_count == 1, sleep_mock.call_count
+        for call in run_mock.call_args_list:
+            assert call.args[0] == ['gh', 'issue', 'list'], call
+            assert call.kwargs['input'] == 'body', "stdin must be passed on every attempt"
+            assert call.kwargs['env'] is gh_flaky_test_env, "gh must get the flaky-test token"
+
+    # A non-transient error is returned straight away.
+    with (
+        patch(f'{__name__}.subprocess.run', return_value=permanent) as run_mock,
+        patch(f'{__name__}.time.sleep') as sleep_mock,
+    ):
+        assert run_gh_with_retries(['issue', 'list']) is permanent
+        assert run_mock.call_count == 1, run_mock.call_count
+        assert sleep_mock.call_count == 0, sleep_mock.call_count
+
+    # Persistent transient errors give up after GH_RETRY_ATTEMPTS.
+    with (
+        patch(f'{__name__}.subprocess.run', return_value=transient) as run_mock,
+        patch(f'{__name__}.time.sleep') as sleep_mock,
+    ):
+        assert run_gh_with_retries(['issue', 'list']) is transient
+        assert run_mock.call_count == GH_RETRY_ATTEMPTS, run_mock.call_count
+        assert sleep_mock.call_count == GH_RETRY_ATTEMPTS - 1, sleep_mock.call_count
+
+
+def test_check_result():
+    check_result(subprocess.CompletedProcess(args=['gh'], returncode=0, stdout='', stderr=''))
+    failed = subprocess.CompletedProcess(args=['gh'], returncode=1, stdout='', stderr='boom')
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            check_result(failed)
+    except Exception as e:
+        assert str(e) == "gh command failed", e
+    else:
+        raise AssertionError("check_result must raise on a non-zero return code")
+
+
+def test_artifact_dir():
+    with patch.dict(
+        os.environ, {'FLAKY_ARTIFACT_DIR': '/flaky', 'RUNNER_TEMP': '/runner'}, clear=True
+    ):
+        assert artifact_dir() == '/flaky', artifact_dir()
+        assert failing_tests_path() == os.path.join('/flaky', 'failing_tests.json')
+        assert streaks_path() == os.path.join('/flaky', 'streaks.json')
+        assert evidence_path() == os.path.join('/flaky', 'evidence.json')
+    with patch.dict(os.environ, {'RUNNER_TEMP': '/runner'}, clear=True):
+        assert artifact_dir() == '/runner', artifact_dir()
+    with patch.dict(os.environ, {}, clear=True):
+        assert artifact_dir() == tempfile.gettempdir(), artifact_dir()
+
+
+def test_required_env_vars():
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}, clear=True):
+        assert 'MATRIX_SHARD' in ci_required_context_vars(), ci_required_context_vars()
+        assert 'GITHUB_SHA' in ci_required_context_vars(), ci_required_context_vars()
+    with patch.dict(os.environ, {'CIRCLECI': 'true'}, clear=True):
+        assert 'CIRCLE_SHA1' in ci_required_context_vars(), ci_required_context_vars()
+    with patch.dict(os.environ, {}, clear=True):
+        assert 'CIRCLE_SHA1' in ci_required_context_vars(), ci_required_context_vars()
+
+    with patch.dict(os.environ, {'PRESENT': 'x', 'EMPTY': ''}, clear=True):
+        assert_required_env_vars(['PRESENT'])
+        try:
+            assert_required_env_vars(['PRESENT', 'EMPTY', 'ABSENT'])
+        except RuntimeError as e:
+            assert 'EMPTY, ABSENT' in str(e), e
+            assert 'PRESENT' not in str(e), e
+        else:
+            raise AssertionError("assert_required_env_vars must raise on empty/absent vars")
 
 
 if __name__ == "__main__":

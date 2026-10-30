@@ -32,7 +32,6 @@ import com.digitalasset.canton.{TempDirectory, TempFile}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import monocle.macros.syntax.lens.*
-import pureconfig.ConfigCursor
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
@@ -85,37 +84,32 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
   ): Map[InstanceName, SequencerConfig] = {
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.forClass(loggerFactory, getClass)
-    config.sequencers.map { case (sequencerName, originalConfig) =>
-      val driverConfigCursor = ConfigCursor(
-        driverFactory
-          .configWriter(confidential = false)
-          .to(
-            ReferenceSequencerDriver.Config(
-              storageConfigs.getOrElse(
-                sequencerName,
-                ErrorUtil.invalidState(s"Missing storage config for $sequencerName"),
+    // Only the sequencers of this plugin: with multiple synchronizers, other sequencers may be
+    // configured by another sequencer plugin
+    config.sequencers.filter { case (name, _) => storageConfigs.contains(name) }.map {
+      case (sequencerName, originalConfig) =>
+        val driverConfig: ReferenceSequencerDriver.Config[StorageConfig] =
+          ReferenceSequencerDriver.Config(
+            storageConfigs.getOrElse(
+              sequencerName,
+              ErrorUtil.invalidState(s"Missing storage config for $sequencerName"),
+            )
+          )
+
+        sequencerName ->
+          (originalConfig.sequencer match {
+            case external: SequencerConfig.External =>
+              // Here we preserve any settings coming from the original config, i.e. from ConfigTransforms
+              external.copy(
+                config = driverConfig
               )
-            )
-          ),
-        List(),
-      )
 
-      sequencerName ->
-        (originalConfig.sequencer match {
-          case external: SequencerConfig.External =>
-            // Here we preserve any settings coming from the original config, i.e. from ConfigTransforms
-            external.copy(
-              sequencerType = driverFactory.name,
-              config = driverConfigCursor,
-            )
-
-          case _ =>
-            SequencerConfig.External(
-              driverFactory.name,
-              BlockSequencerConfig(),
-              driverConfigCursor,
-            )
-        })
+            case _ =>
+              SequencerConfig.External(
+                BlockSequencerConfig(),
+                driverConfig,
+              )
+          })
     }
   }
 
@@ -213,7 +207,7 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
       case (name, cfg) =>
         (
           name,
-          cfg.focus(_.sequencer).replace(sequencersToConfig(name)),
+          sequencersToConfig.get(name).fold(cfg)(cfg.focus(_.sequencer).replace(_)),
         )
     }
 
@@ -230,18 +224,6 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
         postgresPlugin.dropDatabases(dbNames),
         config.parameters.timeouts.processing.io.duration,
       )
-    }
-
-  def recreateDatabases(): Future[Unit] =
-    pgPlugin match {
-      case Some(postgresPlugin) =>
-        dbNames.forgetNE.parTraverse_(db =>
-          postgresPlugin
-            .recreateDatabaseForNodeWithName(db)
-            .failOnShutdownToAbortException("recreateDatabases")
-        )
-      case _ =>
-        warnNoPlugin(functionFullName)
     }
 
   def dumpDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false): Future[Unit] =

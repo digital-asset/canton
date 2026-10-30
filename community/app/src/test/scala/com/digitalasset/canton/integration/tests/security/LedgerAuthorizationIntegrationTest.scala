@@ -13,7 +13,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.ErrorCode
-import com.digitalasset.canton.config.DbConfig
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters as ConsoleSequencingParameters
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.*
@@ -30,8 +30,9 @@ import com.digitalasset.canton.error.MediatorError.{
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.DecentralizedPartyCannotSubmit
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
+  UseH2,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.security.SecurityTestHelpers.SignedMessageTransform
 import com.digitalasset.canton.integration.util.TestSubmissionService
@@ -45,6 +46,7 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageUtils.Optics.signatureLens
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.MaliciousParticipantNode
@@ -237,7 +239,7 @@ trait LedgerAuthorizationIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
-          defaultProtocolLimits,
+          testedTransactionLimits,
           timeouts,
           loggerFactory,
           testSubmissionServiceOverrideO = Some(submissionService),
@@ -287,6 +289,25 @@ trait LedgerAuthorizationIntegrationTest
             adds = List(participant1.id -> ParticipantPermission.Submission),
             store = daId,
           )
+        }
+
+        // CantonBFT does not preserve the submission order of requests: requests packed
+        // into the same batch, or batches in the same block proposal, can be sequenced in a
+        // different order than they were submitted.
+        // Some of the test cases replace a confirmation result by multiple messages
+        // (see `replacingConfirmationResult`) and rely on them being sequenced in the order they are sent.
+        // Allowing only one request per batch and one batch per block proposal makes the sequencing order follow the submission order.
+        val newSequencingParameters = SequencingParameters
+          .Default(testedProtocolVersion)
+          .update(maxRequestsInBatch = 1, maxBatchesPerBlockProposal = 1)
+        sequencer1.topology.sequencing_parameters.propose(
+          synchronizer1Id.logical,
+          ConsoleSequencingParameters(Some(newSequencingParameters.toByteString)),
+        )
+        eventually() {
+          sequencer1.bft
+            .get_ordering_topology()
+            .sequencingParameters shouldBe newSequencingParameters
         }
 
       }
@@ -2120,18 +2141,14 @@ trait LedgerAuthorizationIntegrationTest
       .map(l => checkLoggerNameAndLogEntry(_ should include regex l) -> s"$description at $l")
 }
 
-class LedgerAuthorizationReferenceIntegrationTestDefault
-    extends LedgerAuthorizationIntegrationTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.H2](
-      loggerFactory
-    )
-  )
+class LedgerAuthorizationIntegrationTestDefault extends LedgerAuthorizationIntegrationTest {
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-//class LedgerAuthorizationReferenceIntegrationTestPostgres extends LedgerAuthorizationIntegrationTest {
+//class LedgerAuthorizationIntegrationTestPostgres extends LedgerAuthorizationIntegrationTest {
 //  registerPlugin(new UsePostgres(loggerFactory))
-//  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+//  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 //  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 //}

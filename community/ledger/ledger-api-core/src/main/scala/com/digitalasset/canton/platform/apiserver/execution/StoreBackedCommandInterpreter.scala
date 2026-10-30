@@ -174,6 +174,7 @@ final class StoreBackedCommandInterpreter(
             commands.submissionId.map(_.unwrap),
             externallySignedSubmission = None,
             transactionHash = None,
+            accountId = commands.accountId,
           ),
           optSynchronizerId = prescribedSynchronizerIdO,
           transactionMeta = state.TransactionMeta(

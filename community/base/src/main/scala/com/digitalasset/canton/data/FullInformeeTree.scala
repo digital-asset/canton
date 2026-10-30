@@ -77,8 +77,8 @@ object FullInformeeTree
   override protected val pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.FullInformeeTree)(
-      supportedProtoVersion(_)(fromProtoV30),
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.FullInformeeTree)(
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -180,12 +180,13 @@ object FullInformeeTree
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       context: (GenTransactionTreeDeserializationContext, ProtocolVersion),
       protoInformeeTree: v30.FullInformeeTree,
   ): ParsingResult[FullInformeeTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
-      tree <- GenTransactionTree.fromProtoV30(context, protoTree)
+      tree <- GenTransactionTree.fromProtoV30(pvv, context, protoTree)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       fullInformeeTree <- FullInformeeTree
         .create(tree, rpv)

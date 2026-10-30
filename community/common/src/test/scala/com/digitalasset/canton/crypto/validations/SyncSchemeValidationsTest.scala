@@ -16,7 +16,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
@@ -97,7 +97,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
         enableTransparencyChecks = false,
         protocolVersion = testedProtocolVersion,
         serial = NonNegativeInt.zero,
-        synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+        synchronizerLimits = testedSynchronizerLimits,
       )
       .value
 

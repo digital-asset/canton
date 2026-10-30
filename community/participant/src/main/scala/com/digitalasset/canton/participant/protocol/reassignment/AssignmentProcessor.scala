@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
@@ -19,6 +20,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
@@ -27,6 +29,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -58,6 +61,7 @@ class AssignmentProcessor private (
     futureSupervisor: FutureSupervisor,
     override val testingConfig: TestingConfigInternal,
     promiseFactory: PromiseUnlessShutdownFactory,
+    trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       AssignmentProcessingSteps.SubmissionParam,
@@ -90,10 +94,12 @@ class AssignmentProcessor private (
       timeouts: ProcessingTimeout,
       targetProtocolVersion: Target[ProtocolVersion],
       reassignmentMetrics: ReassignmentMetrics,
+      participantNodeParameters: ParticipantNodeParameters,
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
       testingConfig: TestingConfigInternal,
       promiseFactory: PromiseUnlessShutdownFactory,
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
   )(implicit ec: ExecutionContext) = this(
     new AssignmentProcessingSteps(
       synchronizerId,
@@ -106,6 +112,7 @@ class AssignmentProcessor private (
       clock,
       targetProtocolVersion,
       reassignmentMetrics,
+      participantNodeParameters,
       loggerFactory,
     ),
     participantId,
@@ -119,6 +126,7 @@ class AssignmentProcessor private (
     futureSupervisor,
     testingConfig,
     promiseFactory,
+    trafficEnforcementBackendO,
   )
 
   override protected def metricsContextForSubmissionParam(
@@ -128,6 +136,20 @@ class AssignmentProcessor private (
       "user-id" -> submissionParam.submitterMetadata.userId,
       "type" -> "assignment",
     )
+
+  override protected def validateLocalTrafficCost(
+      submissionParam: AssignmentProcessingSteps.SubmissionParam
+  )(
+      trafficCost: Long,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    ReassignmentProcessingSteps.registerWithTrafficEnforcement(
+      trafficEnforcementBackendO,
+      submissionParam.submitterMetadata,
+      submissionParam.accounting,
+      trafficCost,
+      logger,
+    )(traceContext, ec)
 
   /** Builds a submission batch for cost estimation.
     *

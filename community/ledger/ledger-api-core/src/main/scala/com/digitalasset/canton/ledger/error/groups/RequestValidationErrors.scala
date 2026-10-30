@@ -99,10 +99,10 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
     }
 
     @Explanation(
-      "Record time is either before synchronizer connection was esablished or it was pruned already."
+      "Record time is either before synchronizer connection was established or it was pruned already."
     )
     @Resolution(
-      "Make sure that record time was not pruned yet and that the connection from this participand node to this synchronizer was esablished before this record time."
+      "Make sure that record time was not pruned yet and that the connection from this participant node to this synchronizer was established before this record time."
     )
     object RecordTime
         extends ErrorCode(
@@ -113,7 +113,7 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           loggingContext: ErrorLoggingContext
       ) extends DamlErrorWithDefiniteAnswer(
             cause =
-              "Record time is either before synchronizer connection was esablished or it was pruned already"
+              "Record time is either before synchronizer connection was established or it was pruned already"
           ) {
         override def resources: Seq[(ErrorResource, String)] = Seq(
           (ErrorResource.SynchronizerId, synchronizerId.toProtoPrimitive),
@@ -457,6 +457,69 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause = s"The submitted request has invalid arguments: $reason"
+        )
+  }
+
+  @Explanation(
+    """This error is emitted when the size of a ledger API request field, such as the number of bytes
+      |of a bytes field (for example a transaction hash), is larger than the defined maximum."""
+  )
+  @Resolution(
+    "Reduce the size of the field so that it does not exceed the maximum."
+  )
+  object FieldSizeLimitExceeded
+      extends ErrorCode(
+        id = "FIELD_SIZE_LIMIT_EXCEEDED",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(
+        reason: String
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = reason
+        )
+  }
+
+  @Explanation(
+    """This error is emitted when the number of elements in a ledger API request field is larger than the defined maximum."""
+  )
+  @Resolution(
+    "Reduce the number of elements in the field so that it does not exceed the maximum."
+  )
+  object FieldCardinalityLimitExceeded
+      extends ErrorCode(
+        id = "FIELD_CARDINALITY_LIMIT_EXCEEDED",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(
+        reason: String
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = reason
+        )
+  }
+
+  @Explanation(
+    """This error is emitted when the total number of the filters derived from an event format (the expansion of template and interface filters across the requested parties) exceeds the defined maximum."""
+  )
+  @Resolution(
+    "Reduce the number of templates, interfaces or parties in the event format so that the total number of decomposed filters does not exceed the maximum."
+  )
+  object EventFormatFiltersLimitExceeded
+      extends ErrorCode(
+        id = "EVENT_FORMAT_FILTERS_LIMIT_EXCEEDED",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject(
+        actualSize: Long,
+        maxLimit: Long,
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The total number of decomposed filters in the event format(s) ($actualSize) exceeds the maximum allowed number of $maxLimit"
         )
   }
 

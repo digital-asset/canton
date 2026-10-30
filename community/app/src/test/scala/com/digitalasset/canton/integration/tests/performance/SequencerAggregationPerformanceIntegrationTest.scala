@@ -299,11 +299,13 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
       },
       forEvery(_)(
         acceptableLogMessageExt(
-          Seq(
+          additional = Seq(
             "SUBMISSION_SYNCHRONIZER_NOT_READY",
             "No connection available",
             "Is the server running",
             "Connection is not started",
+            // The performance runner wraps this error in a "Failed to submit" warning.
+            "UNKNOWN_CONTRACT_SYNCHRONIZERS",
             // Netty public server shutdown doesn't always complete within 3s on CI
             // The logs look fine though, so assuming too much load from other tests that delays the shutdown.
             // The 3s shutdown is hard coded in CloseableServer / defaultGracefulShutdownTimeout
@@ -311,7 +313,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             // May happen if the sequencer is down while the participant tries to submit a periodic acknowledgement to it
             "Failed to acknowledge clean timestamp (usually because sequencer is down)",
           ),
-          Seq(),
+          additionalNonRetryable = Seq(),
         )
       ),
     )

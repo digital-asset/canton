@@ -5,9 +5,8 @@ package com.digitalasset.canton.integration.tests.continuity.all
 
 import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
-  ProtocolContinuityConformanceTestParticipant,
+  ProtocolContinuityConformanceTestMixedVersions,
   ProtocolContinuityConformanceTestPing,
-  ProtocolContinuityConformanceTestSynchronizer,
 }
 import com.digitalasset.canton.util.ReleaseUtils
 
@@ -24,26 +23,14 @@ sealed trait AllProtocolContinuityConformanceTest extends ProtocolContinuityConf
   protected def shard: Int
 }
 
-final class ProtocolContinuityShard0ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
+final class ProtocolContinuityShard0ConformanceTestMixedVersions
+    extends ProtocolContinuityConformanceTestMixedVersions
     with AllProtocolContinuityConformanceTest {
   override def shard: Int = 0
 }
 
-final class ProtocolContinuityShard1ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 1
-}
-
-final class ProtocolContinuityShard0ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 0
-}
-
-final class ProtocolContinuityShard1ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
+final class ProtocolContinuityShard1ConformanceTestMixedVersions
+    extends ProtocolContinuityConformanceTestMixedVersions
     with AllProtocolContinuityConformanceTest {
   override def shard: Int = 1
 }

@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
+import com.digitalasset.canton.ledger.api.auth.TrafficAccountAuthorization
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
 import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
@@ -137,6 +138,7 @@ object ApiServices {
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
       tracer: Tracer,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): ApiServices = {
     implicit val traceContext: TraceContext = TraceContext.empty
     val activeContractsService: IndexActiveContractsService = indexService
@@ -454,13 +456,30 @@ object ApiServices {
         )
       }
 
+      // TODO(#33681): Read implicitDebitFromExecuteRights from TrafficAccountingConfig.
+      val trafficAccountAuthorizationO = trafficEnforcementBackendO.map(backend =>
+        new TrafficAccountAuthorization(backend.adminParty, implicitDebitFromExecuteRights = true)
+      )
+
       List(
-        new CommandSubmissionServiceAuthorization(apiSubmissionService, authorizer),
-        new CommandServiceAuthorization(apiCommandService, authorizer),
+        new CommandSubmissionServiceAuthorization(
+          apiSubmissionService,
+          authorizer,
+          trafficAccountAuthorizationO,
+        ),
+        new CommandServiceAuthorization(
+          apiCommandService,
+          authorizer,
+          trafficAccountAuthorizationO,
+        ),
         new PartyManagementServiceAuthorization(apiPartyManagementService, authorizer),
         new PackageManagementServiceAuthorization(apiPackageManagementService, authorizer),
         new ParticipantPruningServiceAuthorization(participantPruningService, authorizer),
-        new InteractiveSubmissionServiceAuthorization(apiInteractiveSubmissionService, authorizer),
+        new InteractiveSubmissionServiceAuthorization(
+          apiInteractiveSubmissionService,
+          authorizer,
+          trafficAccountAuthorizationO,
+        ),
       ) ++ apiPartyManagementAlphaServiceO
         .map(new PartyManagementAlphaServiceAuthorization(_, authorizer))
         .toList ++ trafficServiceO.toList

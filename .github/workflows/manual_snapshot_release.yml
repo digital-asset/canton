@@ -1,0 +1,144 @@
+name: Manual Snapshot Release
+on:
+  workflow_dispatch: {}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    if: ${{ github.repository == 'DACH-NY/canton' }}
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      # A tag ref makes obtain-release-suffix.sh use the tag version, which would
+      # publish a stable release instead of a snapshot.
+      - name: Fail for tag refs
+        if: ${{ github.ref_type == 'tag' }}
+        shell: bash
+        run: |
+          echo "::error::Snapshots must be started from a branch, not a tag. Current ref: ${GITHUB_REF}"
+          exit 1
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  compile:
+    name: Compile
+    needs: pick_runner
+    uses: ./.github/workflows/_compile.yml
+    secrets: inherit
+    with:
+      reset_classes_if_requested: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_community:
+    name: Package Community
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_community.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_scaladoc:
+    name: Build Scaladoc
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_build_scaladoc.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_jsonapi:
+    name: Package JSON API
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_jsonapi.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_kms_driver:
+    name: Package KMS Driver
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_kms_driver.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  assembly_ledger_api_test_tool:
+    name: Assembly Ledger API Test Tool
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_assembly_ledger_api_test_tool.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  release_test:
+    name: Release Test
+    needs: [pick_runner, package_community, package_kms_driver]
+    uses: ./.github/workflows/_release_test.yml
+    permissions:
+      actions: write
+      contents: read
+      issues: write
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_and_publish_docker:
+    name: Build and Publish Docker
+    needs: [pick_runner, package_community]
+    uses: ./.github/workflows/_build_and_publish_docker.yml
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  publish_libraries:
+    name: Publish Libraries
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_publish_libraries.yml
+    permissions:
+      contents: read
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: false
+      is_manual: true
+
+  publish_release:
+    name: Publish Release
+    needs:
+      - pick_runner
+      - package_community
+      - package_jsonapi
+      - package_kms_driver
+      - assembly_ledger_api_test_tool
+      - build_scaladoc
+      - compile
+      - release_test
+    uses: ./.github/workflows/_publish_release.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+      is_nightly_workflow: false
+      is_manual: true

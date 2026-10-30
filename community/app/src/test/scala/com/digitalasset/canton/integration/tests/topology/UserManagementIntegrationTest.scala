@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidField
 import com.digitalasset.canton.ledger.error.groups.UserManagementServiceErrors.{
   UserAlreadyExists,
   UserNotFound,
@@ -93,6 +94,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = false,
+        debitTrafficFrom = Set.empty,
+        debitTrafficFromAnyAccount = false,
       )
     }
 
@@ -127,6 +130,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = false,
+        debitTrafficFrom = Set.empty,
+        debitTrafficFromAnyAccount = false,
       )
     }
 
@@ -272,6 +277,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
+        debitTrafficFrom = Set.empty,
+        debitTrafficFromAnyAccount = false,
       )
       lapi_users
         .update(id = userId, identityProviderId = idpId, modifier = _.copy(isDeactivated = true))
@@ -347,6 +354,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
+        debitTrafficFrom = Set(),
+        debitTrafficFromAnyAccount = false,
       )
     }
 
@@ -365,6 +374,7 @@ trait UserManagementIntegrationTest
         actAs = Set(david),
         primaryParty = Some(david),
         readAs = Set(),
+        debitTrafficFrom = Set(david.toProtoPrimitive),
       )
 
       val expectedBase = UserRights(
@@ -376,6 +386,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = false,
         identityProviderAdmin = false,
+        debitTrafficFrom = Set(david.toProtoPrimitive),
+        debitTrafficFromAnyAccount = false,
       )
 
       participant1.ledger_api.users.rights.list("admin1") shouldBe expectedBase
@@ -420,6 +432,26 @@ trait UserManagementIntegrationTest
         ) shouldBe expectedWithExecuteAs
 
       participant1.ledger_api.users.rights.list("admin1") shouldBe expectedWithExecuteAs
+
+      val expectedWithDebit = expectedWithExecuteAs.copy(
+        debitTrafficFrom = Set("acme/billing", david.toProtoPrimitive),
+        debitTrafficFromAnyAccount = true,
+      )
+
+      participant1.ledger_api.users.rights
+        .grant(
+          "admin1",
+          debitTrafficFrom = Set("acme/billing"),
+          debitTrafficFromAnyAccount = true,
+        ) shouldBe expectedWithDebit
+
+      participant1.ledger_api.users.rights.list("admin1") shouldBe expectedWithDebit
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.ledger_api.users.rights
+          .grant("admin1", debitTrafficFrom = Set("acme//billing")),
+        _.shouldBeCantonErrorCode(InvalidField),
+      )
     }
 
     "support removing rights" in { implicit env =>
@@ -445,6 +477,8 @@ trait UserManagementIntegrationTest
         actAsAnyParty = false,
         participantAdmin = true,
         identityProviderAdmin = true,
+        debitTrafficFrom = Set("acme/billing", david.toProtoPrimitive),
+        debitTrafficFromAnyAccount = true,
       )
 
       participant1.ledger_api.users.rights.list("admin1") shouldBe expectedBase
@@ -489,6 +523,20 @@ trait UserManagementIntegrationTest
         ) shouldBe expectedWithoutExecuteAs
 
       participant1.ledger_api.users.rights.list("admin1") shouldBe expectedWithoutExecuteAs
+
+      val expectedWithoutDebit = expectedWithoutExecuteAs.copy(
+        debitTrafficFrom = Set(david.toProtoPrimitive),
+        debitTrafficFromAnyAccount = false,
+      )
+
+      participant1.ledger_api.users.rights
+        .revoke(
+          "admin1",
+          debitTrafficFrom = Set("acme/billing"),
+          debitTrafficFromAnyAccount = true,
+        ) shouldBe expectedWithoutDebit
+
+      participant1.ledger_api.users.rights.list("admin1") shouldBe expectedWithoutDebit
     }
   }
 }

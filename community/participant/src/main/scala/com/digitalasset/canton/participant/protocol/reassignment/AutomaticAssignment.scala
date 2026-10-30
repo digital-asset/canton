@@ -8,8 +8,12 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{
+  NonNegativeFiniteDuration,
+  ProcessingTimeout,
+  ReassignmentsConfig,
+}
+import com.digitalasset.canton.crypto.PseudoRandom
 import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
 import com.digitalasset.canton.error.CantonBaseError.isStatusErrorCode
 import com.digitalasset.canton.error.MediatorError
@@ -20,7 +24,9 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessorError.AutomaticAssignmentError
 import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentCompleted
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -28,14 +34,26 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
+import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId}
 import com.google.rpc.Code
 import com.google.rpc.status.Status
 import org.slf4j.event.Level
 
+import java.time.Duration as JDuration
+import java.util.UUID
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
 
 private[participant] object AutomaticAssignment {
+
+  /** Returns a duration drawn uniformly at random in [delay, 2 * delay), or zero if delay is zero.
+    */
+  private[reassignment] def randomizedDelay(delay: NonNegativeFiniteDuration): JDuration = {
+    val delayJ = delay.asJava
+    if (delayJ.toMillis > 0) delayJ.plusMillis(PseudoRandom.randomLong(delayJ.toMillis))
+    else delayJ
+  }
+
   def perform(
       id: ReassignmentId,
       targetSynchronizer: Target[PhysicalSynchronizerId],
@@ -45,6 +63,9 @@ private[participant] object AutomaticAssignment {
       unassignmentSubmitterMetadata: ReassignmentSubmitterMetadata,
       participantId: ParticipantId,
       targetTimestamp: Target[CantonTimestamp],
+      unassignmentTs: CantonTimestamp,
+      reassignmentsConfig: ReassignmentsConfig,
+      clock: Clock,
   )(implicit
       ec: ExecutionContext,
       elc: ErrorLoggingContext,
@@ -81,12 +102,13 @@ private[participant] object AutomaticAssignment {
               assignmentSubmitter,
               participantId,
               unassignmentSubmitterMetadata.commandId,
-              submissionId = None,
+              submissionId = Some(LedgerSubmissionId.assertFromString(UUID.randomUUID().toString)),
               unassignmentSubmitterMetadata.userId,
               workflowId = None,
             ),
             id,
             targetTopology,
+            SubmissionAccounting.participantAdmin(participantId.adminParty.toLf),
           )
           .mapK(FutureUnlessShutdown.outcomeK)
         AssignmentProcessingSteps.SubmissionResult(completionF) = submissionResult
@@ -126,38 +148,15 @@ private[participant] object AutomaticAssignment {
 
     def triggerAutoAssignment(
         targetSnapshot: Target[TopologySnapshot],
-        targetSynchronizerParameters: Target[DynamicSynchronizerParametersWithValidity],
+        awaitSubmissionTime: => EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit],
     ): Unit = {
 
       val autoAssignment = for {
-        exclusivityLimit <- EitherT
-          .fromEither[FutureUnlessShutdown](
-            targetSynchronizerParameters.unwrap
-              .assignmentExclusivityLimitFor(targetTimestamp.unwrap)
-              .map(Target(_))
-              .leftMap(ReassignmentParametersError(targetSynchronizer.unwrap, _))
-          )
-          .leftWiden[ReassignmentProcessorError]
-
         targetHostedStakeholders <- EitherT.right(hostedStakeholders(targetSnapshot))
         _ <-
           if (targetHostedStakeholders.nonEmpty) {
-            logger.info(
-              s"Registering automatic submission of assignment with ID $id at time $exclusivityLimit, where base timestamp is $targetTimestamp"
-            )
             for {
-              _ <- reassignmentCoordination
-                .awaitSynchronizerTime(targetSynchronizer, exclusivityLimit)
-                .mapK(FutureUnlessShutdown.outcomeK)
-              _ <- reassignmentCoordination
-                .awaitTimestamp(
-                  targetSynchronizer,
-                  targetStaticSynchronizerParameters,
-                  exclusivityLimit,
-                  FutureUnlessShutdown.pure(
-                    logger.debug(s"Automatic assignment triggered immediately")
-                  ),
-                )
+              _ <- awaitSubmissionTime
 
               _ <- EitherTUtil.leftSubflatMap(performAutoAssignmentRepeatedly) {
                 // Filter out submission errors occurring because the reassignment is already completed
@@ -180,11 +179,10 @@ private[participant] object AutomaticAssignment {
       EitherTUtil.doNotAwaitUS(autoAssignment, "Automatic assignment failed", Level.INFO)
     }
 
-    for {
+    def triggerAfterExclusivityTimeout
+        : EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] = for {
       // targetTimestamp is provided by the unassignment submitter and may be ahead of the target
       // topology observed locally, so wait for it before taking the snapshot
-      // TODO(i33545): verify that awaiting this submitter-provided timestamp is not a new security
-      //  vulnerability
       _ <- reassignmentCoordination.awaitTimestamp(
         targetSynchronizer,
         targetStaticSynchronizerParameters,
@@ -211,8 +209,61 @@ private[participant] object AutomaticAssignment {
     } yield {
 
       if (targetSynchronizerParameters.unwrap.automaticAssignmentEnabled)
-        triggerAutoAssignment(targetSnapshot, targetSynchronizerParameters)
+        triggerAutoAssignment(
+          targetSnapshot,
+          for {
+            exclusivityLimit <- EitherT
+              .fromEither[FutureUnlessShutdown](
+                targetSynchronizerParameters.unwrap
+                  .assignmentExclusivityLimitFor(targetTimestamp.unwrap)
+                  .map(Target(_))
+                  .leftMap(ReassignmentParametersError(targetSynchronizer.unwrap, _))
+              )
+              .leftWiden[ReassignmentProcessorError]
+            _ = logger.info(
+              s"Registering automatic submission of assignment with ID $id at time $exclusivityLimit, where base timestamp is $targetTimestamp"
+            )
+            _ <- reassignmentCoordination
+              .awaitSynchronizerTime(targetSynchronizer, exclusivityLimit)
+              .mapK(FutureUnlessShutdown.outcomeK)
+              .leftWiden[ReassignmentProcessorError]
+            _ <- reassignmentCoordination
+              .awaitTimestamp(
+                targetSynchronizer,
+                targetStaticSynchronizerParameters,
+                exclusivityLimit,
+                FutureUnlessShutdown.pure(
+                  logger.debug(s"Automatic assignment triggered immediately")
+                ),
+              )
+              .leftWiden[ReassignmentProcessorError]
+          } yield (),
+        )
       else ()
     }
+
+    def triggerAfterDelay: EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
+      reassignmentCoordination
+        .getTargetApproximateSnapshot(targetSynchronizer)
+        .leftWiden[ReassignmentProcessorError]
+        .map { targetSnapshot =>
+          triggerAutoAssignment(
+            targetSnapshot, {
+              val delay = randomizedDelay(reassignmentsConfig.automaticAssignmentDelay)
+              val submissionTime = unassignmentTs.plus(delay)
+              logger.info(
+                s"Scheduling automatic assignment of $id at $submissionTime ($delay after the unassignment at $unassignmentTs)"
+              )
+              EitherT.right[ReassignmentProcessorError](
+                clock.scheduleAt(_ => (), s"automatic assignment of $id", submissionTime)
+              )
+            },
+          )
+        }
+
+    if (ReassignmentValidation.isAssignmentExclusivityEnforced(targetSynchronizer.unwrap))
+      triggerAfterExclusivityTimeout
+    else if (reassignmentsConfig.enableAutomaticAssignment) triggerAfterDelay
+    else EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](())
   }
 }

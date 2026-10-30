@@ -15,5 +15,6 @@ EXPOSE 10013
 
 COPY app.conf /app/
 
+# -Y off: busybox wget ignores no_proxy, so a proxy injected via the environment would break the probe.
 HEALTHCHECK --start-period=10m \
-  CMD grpc-health-probe -addr=:5061 || exit 1
+  CMD wget -Y off -q -T 5 -O /dev/null http://localhost:5071/health/ready || exit 1

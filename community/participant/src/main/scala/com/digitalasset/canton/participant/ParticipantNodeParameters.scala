@@ -46,6 +46,7 @@ final case class ParticipantNodeParameters(
     crashAfterFailedValidation: Boolean,
     validateLegacyContractsV11: Boolean,
     acsCommitments: AcsCommitmentConfig,
+    damlTopUpEnabled: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -72,6 +73,7 @@ object ParticipantNodeParameters {
       processingTimeouts = DefaultProcessingTimeouts.testing,
       enablePreviewFeatures = false,
       enableTestingFeatures = false,
+      enableKeyDownload = false,
       nonStandardConfig = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(
@@ -123,5 +125,6 @@ object ParticipantNodeParameters {
     crashAfterFailedValidation = false,
     validateLegacyContractsV11 = true,
     acsCommitments = AcsCommitmentConfig(),
+    damlTopUpEnabled = false,
   )
 }

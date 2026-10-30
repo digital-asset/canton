@@ -11,16 +11,12 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.StorageConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
-import com.digitalasset.canton.integration.plugins.{
-  UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.util.TestSubmissionService
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.integration.{
@@ -184,19 +180,27 @@ trait TimeValidationIntegrationTest
 
     val count = new AtomicInteger(0)
 
-    sequencer.setPolicy_("advance sim clock by tolerance + 1 before second command") {
-      submissionRequest =>
+    val simClock = env.environment.simClock.value
+    val sequencerTimeTracker = sequencer1.underlying.value.sequencer.timeTracker
+
+    sequencer.setPolicy("advance sim clock by tolerance + 1 before second command") {
+      implicit traceContext => submissionRequest =>
         val allRecipients = submissionRequest.batch.allRecipients
         submissionRequest.sender match {
           case _: ParticipantId
               if allRecipients.contains(MemberRecipient(participant1)) &&
                 submissionRequest.isConfirmationRequest && count.incrementAndGet() == 2 =>
             // Delay the sequencing timestamp of the second request
-            env.environment.simClock.value.advance(tolerance.plus(Duration.ofSeconds(1)))
-          case _ =>
+            simClock.advance(tolerance.plus(Duration.ofSeconds(1)))
+            // With CantonBFT a block's time lags behind the sim clock: without waiting, the
+            // request would be stamped with the pre-jump time and its responses with the post-jump
+            // time, so it would time out instead of failing the time validation. Hold the request
+            // back until the sequencer has observed the new time.
+            sequencerTimeTracker
+              .awaitTick(simClock.now)
+              .fold[SendDecision](SendDecision.Process)(SendDecision.HoldBack(_))
+          case _ => SendDecision.Process
         }
-
-        SendDecision.Process
     }
 
     // Set minLedgerTime to bump ledger time for first command.
@@ -261,7 +265,7 @@ trait TimeValidationIntegrationTest
         participant1,
         daId,
         testedProtocolVersion,
-        defaultProtocolLimits,
+        testedTransactionLimits,
         timeouts,
         loggerFactory,
         testSubmissionServiceOverrideO = Some(
@@ -327,7 +331,7 @@ trait TimeValidationIntegrationTest
   }
 }
 
-class TimeValidationReferenceIntegrationTestInMemory extends TimeValidationIntegrationTest {
-  registerPlugin(new UseReferenceBlockSequencer[StorageConfig.Memory](loggerFactory))
+class TimeValidationIntegrationTestInMemory extends TimeValidationIntegrationTest {
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

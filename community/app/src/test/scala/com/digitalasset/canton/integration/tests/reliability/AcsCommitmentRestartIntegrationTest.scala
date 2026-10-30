@@ -6,20 +6,21 @@ package com.digitalasset.canton.integration.tests.reliability
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
-import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig, PositiveDurationSeconds}
+import com.digitalasset.canton.config.{CommitmentSendDelay, PositiveDurationSeconds}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UseH2,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
   IntervalDuration,
 }
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -54,7 +55,7 @@ trait AcsCommitmentRestartIntegrationTest
     with HasCycleUtils
     with CommitmentTestUtil {
 
-  // TODO(#35929) Enable again when we fix the flakiness of this test
+  // The new processor is disabled below, so it doesn't even make sense to run the consistency check
   override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(60)
@@ -121,6 +122,7 @@ trait AcsCommitmentRestartIntegrationTest
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
           ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),
+          disableMergeAndHashJoins = LedgerApiServerConfig().indexService.disableMergeAndHashJoins,
           timeouts = timeouts,
           loggerFactory = loggerFactory,
           metrics = ParticipantTestMetrics.ledgerApiServer,
@@ -245,6 +247,14 @@ trait AcsCommitmentRestartIntegrationTest
     import env.*
     val simClock = environment.simClock.value
 
+    /** Advances the sim clock and waits until the sequencer has observed the new time. We do that
+      * every time before submitting a command to make sure it will reflect the new time
+      */
+    def advance(duration: java.time.Duration): Unit = {
+      simClock.advance(duration)
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
+    }
+
     val now = simClock.uniqueTime()
     // Align clock to checkpoint boundary
     val start = now.getEpochSecond % checkpointInterval.duration.toSeconds match {
@@ -258,7 +268,7 @@ trait AcsCommitmentRestartIntegrationTest
     // create some contracts to have ACS changes, and have the changes span over two checkpoint intervals
     val step = checkpointInterval.duration.toSeconds / 2
     val acsChangeTimes = (1 to 4).map(step * _)
-    simClock.advance(java.time.Duration.ofSeconds(step))
+    advance(java.time.Duration.ofSeconds(step))
     acsChangeTimes.foreach { i =>
       val createIouCmd = new Iou(
         participant1.adminParty.toProtoPrimitive,
@@ -268,7 +278,7 @@ trait AcsCommitmentRestartIntegrationTest
       ).create.commands.asScala.toSeq
       participant1.ledger_api.javaapi.commands
         .submit(Seq(participant1.adminParty), createIouCmd)
-      simClock.advance(java.time.Duration.ofSeconds(step))
+      advance(java.time.Duration.ofSeconds(step))
     }
 
     // crash the participant
@@ -313,7 +323,7 @@ trait AcsCommitmentRestartIntegrationTest
       tickAfter(simClock.uniqueTime())(IntervalDuration(reconciliationInterval.duration))
     simClock.advanceTo(reconciliationIntervalTick.forgetRefinement.immediateSuccessor)
     // advance a step, which is smaller than a checkpoint interval, and create a contract
-    simClock.advance(java.time.Duration.ofSeconds(step))
+    advance(java.time.Duration.ofSeconds(step))
     val createIouCmd = new Iou(
       participant1.adminParty.toProtoPrimitive,
       participant2.adminParty.toProtoPrimitive,
@@ -362,12 +372,12 @@ trait AcsCommitmentRestartIntegrationTest
 
 class AcsCommitmentRestartIntegrationTestH2 extends AcsCommitmentRestartIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
 class AcsCommitmentRestartIntegrationTestPostgres extends AcsCommitmentRestartIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

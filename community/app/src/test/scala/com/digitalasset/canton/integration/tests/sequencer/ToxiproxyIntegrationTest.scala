@@ -3,33 +3,45 @@
 
 package com.digitalasset.canton.integration.tests.sequencer
 
-import com.digitalasset.canton.admin.api.client.data.SubmissionRequestAmplification
+import com.digitalasset.canton.admin.api.client.data.{NodeStatus, SubmissionRequestAmplification}
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.console.SequencerReference
+import com.digitalasset.canton.console.{LocalSequencerReference, SequencerReference}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.health.LivenessHealthService
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.ToxiproxyConfig
-import com.digitalasset.canton.integration.plugins.toxiproxy.{ProxyConfig, UseToxiproxy}
+import com.digitalasset.canton.integration.plugins.toxiproxy.{
+  ProxyConfig,
+  RunningProxy,
+  UseToxiproxy,
+}
 import com.digitalasset.canton.integration.tests.toxiproxy.ToxiproxyHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.util.TryUtil.ForFailedOps
+import com.digitalasset.canton.{UniquePortGenerator, config}
 import eu.rekawek.toxiproxy.model.{Toxic, ToxicDirection, ToxicList}
+import io.grpc.health.v1.health.HealthCheckResponse.ServingStatus
+import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import monocle.macros.syntax.lens.*
 import org.scalatest.BeforeAndAfter
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 
 /** Template for Toxiproxy tests for various components, see implementation(s). While the plain old
   * HA is not supported, it leverages submission request amplification for overcoming faulty
@@ -44,8 +56,15 @@ abstract class ToxiproxyIntegrationTest
   private lazy val BongTimeout = 3.minutes
   private lazy val PingTimeout = config.NonNegativeDuration.ofMinutes(1)
   private lazy val NetworkTimeout = config.NonNegativeDuration.ofSeconds(15)
-  private lazy val SequencersCount = 3
+  private lazy val SelfRecoveryGracePeriod = 30.seconds
+  private lazy val LivenessCheckTimeout = 5.seconds
+  // The failover test requires ordering to continue while 1 sequencer is disrupted: with the BFT
+  //  orderer, this requires at least 4 sequencers.
+  private lazy val SequencersCount = 4
   private lazy val MediatorsCount = 1
+
+  // Together with a trust threshold of two, ensures that sequencer clients connect to all sequencers
+  private lazy val livenessMargin = NonNegativeInt.tryCreate(SequencersCount - 2)
 
   private lazy val amplification = SubmissionRequestAmplification(
     factor = PositiveInt.tryCreate(SequencersCount),
@@ -90,7 +109,7 @@ abstract class ToxiproxyIntegrationTest
                   _ -> MediatorSequencersConfiguration(
                     testSequencers,
                     trustThreshold = PositiveInt.two,
-                    livenessMargin = NonNegativeInt.zero,
+                    livenessMargin = livenessMargin,
                   )
                 )
                 .toMap
@@ -104,6 +123,22 @@ abstract class ToxiproxyIntegrationTest
           .focus(_.parameters.timeouts.processing.network)
           .replace(NetworkTimeout)
       )
+      // Expose the gRPC liveness service, which is what an orchestrator would probe
+      .addConfigTransform(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.monitoring.grpcHealthServer).replace(
+            Some(config.GrpcHealthServerConfig(internalPort = Some(UniquePortGenerator.next)))
+          )
+        )
+      )
+      // With replication, a sequencer whose DB lock can't be re-acquired in time after an outage
+      //  halts the whole test JVM; without it, there is no DB lock and the sequencer just becomes
+      //  unhealthy until restarted.
+      .addConfigTransform(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.replication).replace(Some(config.ReplicationConfig.disabled))
+        )
+      )
       .withSetup { implicit env =>
         import env.*
         val connections = sequencers.local.take(SequencersCount)
@@ -111,12 +146,14 @@ abstract class ToxiproxyIntegrationTest
           connections,
           synchronizerAlias = daName,
           sequencerTrustThreshold = PositiveInt.two,
+          sequencerLivenessMargin = livenessMargin,
           submissionRequestAmplification = amplification,
         )
         participant2.synchronizers.connect_local_bft(
           connections,
           synchronizerAlias = daName,
           sequencerTrustThreshold = PositiveInt.two,
+          sequencerLivenessMargin = livenessMargin,
           submissionRequestAmplification = amplification,
         )
 
@@ -147,11 +184,89 @@ abstract class ToxiproxyIntegrationTest
         toxic.remove()
       }
     }
+    // Also needed if a test failed before healing the connection
+    dropAllProxiedConnections()
   }
 
   // toxiproxy needs to be registered last
   pluginsToRegister.foreach(registerPlugin)
   registerPlugin(toxiproxyPlugin)
+
+  // Toxiproxy keeps the connections to the backend open even when the client gave up on them (e.g.,
+  //  with zero bandwidth), which defeats Postgres' TCP keepalives. The resulting zombie Postgres
+  //  sessions can hold transactions and their locks open indefinitely, blocking the sequencer
+  //  after reconnecting. Disabling a proxy closes all its connections, emulating the
+  //  keepalive-based cleanup that would happen without toxiproxy.
+  private def dropAllProxiedConnections(): Unit =
+    proxyConfs.foreach { conf =>
+      val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(conf.name).value.underlying
+      proxy.disable()
+      proxy.enable()
+    }
+
+  // Some failures (e.g., a failed DB write in the BFT orderer or in the block sequencer's
+  //  background writer) are fatal by design and require a node restart: in production, the node
+  //  exits and is restarted by the orchestrator, while in tests it just stays unhealthy.
+  //  This emulates the orchestrator by restarting the disrupted sequencers that do not recover by
+  //  themselves after the connection has been healed.
+  private def simulateOrchestratorRestartOfUnrecoveredSequencers()(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+
+    def findDisruptedSequencers()(implicit
+        env: TestConsoleEnvironment
+    ): Seq[LocalSequencerReference] =
+      env.sequencers.local.filter(sequencer =>
+        proxyConfs.exists(_.name.startsWith(s"${sequencer.name}-"))
+      )
+
+    // Both checks are needed, as they detect different failure modes:
+    //  - liveness detects a fatal storage or block sequencer background writer failure (the latter is
+    //    not reported in the node status);
+    //  - the node status detects an unhealthy BFT orderer, which does not affect liveness.
+    def isHealthy(sequencer: LocalSequencerReference): Boolean = {
+
+      def isAlive(sequencer: LocalSequencerReference): Boolean = {
+        val healthServer = sequencer.config.monitoring.grpcHealthServer.value
+        val channel =
+          NettyChannelBuilder
+            .forAddress(healthServer.address, healthServer.port.unwrap)
+            .usePlaintext()
+            .executor(env.executionContext)
+            .build()
+        try {
+          Try(
+            Await
+              .result(
+                HealthGrpc.stub(channel).check(HealthCheckRequest(LivenessHealthService.Name)),
+                LivenessCheckTimeout,
+              )
+              .status == ServingStatus.SERVING
+          ).getOrElse(false)
+        } finally channel.shutdownNow().discard
+      }
+
+      def isActive: Boolean =
+        sequencer.health.status match {
+          case NodeStatus.Success(status) => status.active
+          case _ => false
+        }
+
+      isAlive(sequencer) && isActive
+    }
+
+    val sequencers = findDisruptedSequencers()
+    Try(eventually(SelfRecoveryGracePeriod)(sequencers.filterNot(isHealthy) shouldBe empty)).discard
+    sequencers.filterNot(isHealthy).foreach { sequencer =>
+      logger.debug(s"restarting ${sequencer.name} as it did not recover by itself")
+      // Closing a fatally failed sequencer reports the original failure, but the node is stopped anyway
+      Try(sequencer.stop())
+        .forFailed(e => logger.debug(s"ignoring failure while stopping ${sequencer.name}", e))
+      sequencer.start()
+      sequencer.health.wait_for_initialized()
+    }
+    eventually()(sequencers.filterNot(isHealthy) shouldBe empty)
+  }
 
   "The sequencer should recover" when {
     def enableTimeout(
@@ -188,13 +303,17 @@ abstract class ToxiproxyIntegrationTest
       downstreamOnly,
     )
 
-    def testBongWithToxic(enableToxics: ToxicList => Seq[Toxic], recoverAfter: FiniteDuration)(
-        implicit env: TestConsoleEnvironment
+    def testBongWithToxic(
+        enableToxics: ToxicList => Seq[Toxic],
+        toxicDesc: String,
+        recoverAfter: FiniteDuration,
+    )(implicit
+        env: TestConsoleEnvironment
     ): Unit = {
       import env.*
 
       val time = participant1.health.ping(participant2)
-      logger.debug(s"pinging with healthy connection takes time: $time")
+      logger.debug(s"pinging with healthy connection takes time: $time ($toxicDesc)")
 
       logger.debug("breaking the connection to the sequencers")
       val toxics = proxyConfs.flatMap { conf =>
@@ -218,8 +337,10 @@ abstract class ToxiproxyIntegrationTest
       )
       Threading.sleep(recoverAfter.toMillis)
 
-      logger.debug("healing the connection to the sequencers")
+      logger.debug(s"healing the connection to the sequencers ($toxicDesc)")
       toxics.foreach(_.remove())
+      dropAllProxiedConnections()
+      simulateOrchestratorRestartOfUnrecoveredSequencers()
 
       logger.debug("now the previously started bong should succeed")
       Await.result(bongF, BongTimeout)
@@ -229,22 +350,22 @@ abstract class ToxiproxyIntegrationTest
     }
 
     s"the connection to $component has timeouts" in { implicit env =>
-      testBongWithToxic(enableTimeout(_), 10.seconds)
+      testBongWithToxic(enableTimeout(_), "timeouts", 10.seconds)
     }
 
     s"the connection to $component has zero bandwidth" in { implicit env =>
-      testBongWithToxic(enableZeroBandwidth(_), 10.seconds)
+      testBongWithToxic(enableZeroBandwidth(_), "zero bandwidth", 10.seconds)
     }
 
     // Choose a toxicity of less than 1.0. As a result, toxiproxy will let some messages go through.
     // Consequently, a retry at the sequencer will succeed after a few iterations, but then a different attempt to reach the backend will fail.
     // Overall, the failures will hit more code paths than in a test with toxicity of 1.0.
     s"the connection to $component has intermittent timeouts" in { implicit env =>
-      testBongWithToxic(enableTimeout(_, 0.8), 60.seconds)
+      testBongWithToxic(enableTimeout(_, 0.8), "intermittent timeouts", 60.seconds)
     }
 
     s"the connection to $component has intermittent zero bandwidth" in { implicit env =>
-      testBongWithToxic(enableZeroBandwidth(_, 0.8), 60.seconds)
+      testBongWithToxic(enableZeroBandwidth(_, 0.8), "intermittent zero bandwidth", 60.seconds)
     }
 
     // Downstream failures are a bit tricky, because requests do get executed, but the client does not learn about it.
@@ -252,6 +373,7 @@ abstract class ToxiproxyIntegrationTest
     s"the connection to $component has intermittent timeouts (downstream only)" in { implicit env =>
       testBongWithToxic(
         enableTimeout(_, 0.8, downstreamOnly = true),
+        "intermittent timeouts (downstream only)",
         30.seconds,
       )
     }
@@ -260,6 +382,7 @@ abstract class ToxiproxyIntegrationTest
       implicit env =>
         testBongWithToxic(
           enableZeroBandwidth(_, 0.8, downstreamOnly = true),
+          "intermittent zero bandwidth (downstream only)",
           30.seconds,
         )
     }
@@ -267,7 +390,7 @@ abstract class ToxiproxyIntegrationTest
     "failover to other sequencers" in { implicit env =>
       import env.*
 
-      def toxicsForSequencer(sequencer: SequencerReference) =
+      def toxicsForSequencer(sequencer: SequencerReference): Seq[RunningProxy] =
         proxyConfs.filter(_.name.contains(sequencer.name)).map { conf =>
           val name = conf.name
           val proxy = toxiproxyPlugin.runningToxiproxy.getProxy(name).value
@@ -287,6 +410,7 @@ abstract class ToxiproxyIntegrationTest
 
       logger.debug("healing the connection to the first sequencer")
       toxicsForFirstSequencer.foreach(_.underlying.enable())
+      simulateOrchestratorRestartOfUnrecoveredSequencers()
 
       participant1.health.ping(participant2)
 
@@ -301,8 +425,9 @@ abstract class ToxiproxyIntegrationTest
 
       logger.debug("healing the connection to the second sequencer")
       toxicsForSecondSequencer.foreach(_.underlying.enable())
+      simulateOrchestratorRestartOfUnrecoveredSequencers()
 
-      logger.debug("stopping first sequencer so we use second sequencer for the last ping")
+      logger.debug("stopping first sequencer so we use the other sequencers for the last ping")
       sequencer1.stop()
 
       participant1.health.ping(participant2)

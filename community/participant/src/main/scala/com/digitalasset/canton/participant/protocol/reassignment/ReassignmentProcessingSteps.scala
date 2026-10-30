@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import cats.syntax.option.*
 import cats.syntax.traverse.*
-import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -24,6 +24,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.ReassignmentErrorGroup.SubmissionErrorGroup
 import com.digitalasset.canton.error.{CantonError, TransactionError}
 import com.digitalasset.canton.ledger.participant.state.{
+  ChangeId,
   CompletionInfo,
   SequencedEventUpdate,
   Update,
@@ -35,7 +36,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   DecryptedViewData,
   DecryptedViews,
@@ -54,6 +55,10 @@ import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMess
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
 import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentStoreError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  SubmissionAccounting,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
 import com.digitalasset.canton.protocol.messages.*
@@ -352,7 +357,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       userId = submitterMetadata.userId,
       commandId = submitterMetadata.commandId,
       optDeduplicationPeriod = None,
-      submissionId = None,
+      submissionId = submitterMetadata.submissionId,
       paidTrafficCost = trafficCost,
     )
     val updateO = Option.when(isSubmittingParticipant)(
@@ -610,10 +615,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *   - Is the reassignment id consistent with the reassignment data?
     *   - the multi-synchronizer topology feature flag should be set on all participants hosting a
     *     stakeholder.
-    *
-    * TODO(#34870): Handle a failed activeness check here: log a warning, or crash if
-    * `crashAfterFailedValidation` is set. A local activeness failure must not turn into a
-    * rejection, as participants do not agree on the activeness result.
     */
   def checkPhase7Validations(
       commonValidationResult: ReassignmentValidationResult.CommonValidationResult
@@ -654,6 +655,30 @@ private[reassignment] trait ReassignmentProcessingSteps[
 }
 
 object ReassignmentProcessingSteps {
+
+  private[reassignment] def registerWithTrafficEnforcement(
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      accounting: SubmissionAccounting,
+      trafficCost: Long,
+      logger: TracedLogger,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    TrafficEnforcementBackend.registerIfEnabled(
+      trafficEnforcementBackendO,
+      ChangeId(
+        submitterMetadata.userId,
+        submitterMetadata.commandId,
+        // Not the routed transaction's actAs: TEA matches the reassignment completion by
+        // change id, and its actAs is only the submitter.
+        Set(submitterMetadata.submitter),
+      ),
+      submitterMetadata.submissionId,
+      accounting,
+      trafficCost,
+    )(ErrorLoggingContext.fromTracedLogger(logger), ec)
 
   final case class PendingReassignmentSubmission(
       mkReassignmentId: CantonTimestamp => ReassignmentId,

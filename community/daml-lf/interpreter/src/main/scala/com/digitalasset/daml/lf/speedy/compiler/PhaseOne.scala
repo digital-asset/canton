@@ -687,10 +687,10 @@ private[lf] final class PhaseOne(
             case ExecutionMode.UpdateMachine => Return(t.FetchInterfaceDefRef(ifaceId)(coid))
           }
         }
-      case UpdateUnpackTemplate(_, _) =>
-        Return(SEBuiltin(new NotImplement("unpack_template", 1)))
-      case UpdateUnpackInterface(_, _) =>
-        Return(SEBuiltin(new NotImplement("unpack_interface", 1)))
+      case UpdateUnpackTemplate(tmplId, coid) =>
+        compileExp(env, coid)(coid => Return(SBUUnpackTemplate(tmplId)(coid)))
+      case UpdateUnpackInterface(ifaceId, coid) =>
+        compileExp(env, coid)(coid => Return(SBUUnpackInterface(ifaceId)(coid)))
       case UpdateEmbedExpr(_, exp) =>
         compileEmbedExpr(env, exp)
       case UpdateCreate(tmplId, arg) =>

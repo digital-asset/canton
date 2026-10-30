@@ -24,7 +24,6 @@ import com.digitalasset.canton.sequencer.api.v30.{
 }
 import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
-import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionError
 import com.digitalasset.canton.sequencing.client.transports.{
   ConsumesCancellableGrpcStreamObserver,
   GrpcSequencerSubscription,
@@ -40,18 +39,15 @@ import com.digitalasset.canton.sequencing.protocol.{
   TopologyStateForInitRequest,
   TopologyStateForInitResponse,
 }
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import io.grpc.Channel
 import io.grpc.Context.CancellableContext
-import io.grpc.{Channel, StatusRuntimeException}
-import org.apache.pekko.stream.Materializer
+import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.util.{Failure, Success}
 
 import SequencerConnectionStub.SequencerConnectionStubError
 
@@ -67,7 +63,6 @@ class GrpcUserSequencerConnectionStub(
 )(implicit
     ec: ExecutionContextExecutor,
     esf: ExecutionSequencerFactory,
-    materializer: Materializer,
 ) extends UserSequencerConnectionStub {
   override def sendAsync(
       request: SignedContent[SubmissionRequest],
@@ -185,77 +180,33 @@ class GrpcUserSequencerConnectionStub(
       )
     } yield timestampO
 
-  override def downloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    SequencerConnectionStubError,
+  override def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(
+      implicit traceContext: TraceContext
+  ): Either[SequencerConnectionStubError, Source[
     TopologyStateForInitResponse,
-  ] =
-    // TODO(i26281): Maybe use a `KillSwitch` to enforce a timeout
-    for {
-      source <-
-        connection
-          .serverStreamingRequestPekko(
-            stubFactory = sequencerSvcFactory,
-            metricsContext =
-              metricsContext.withExtraLabels("endpoint" -> "DownloadTopologyStateForInit"),
-          )(
-            request = request.toProtoV30,
-            send = _.downloadTopologyStateForInit,
-          )
-          .leftMap[SequencerConnectionStubError](
-            SequencerConnectionStubError.ConnectionError.apply
-          )
-          .toEitherT[FutureUnlessShutdown]
+    NotUsed,
+  ]] = for {
+    source <-
+      connection
+        .serverStreamingRequestPekko(
+          stubFactory = sequencerSvcFactory,
+          metricsContext =
+            metricsContext.withExtraLabels("endpoint" -> "DownloadTopologyStateForInit"),
+        )(
+          request = request.toProtoV30,
+          send = _.downloadTopologyStateForInit,
+        )
+        .leftMap[SequencerConnectionStubError](
+          SequencerConnectionStubError.ConnectionError.apply
+        )
 
-      result <- EitherT[Future, SequencerConnectionStubError, TopologyStateForInitResponse](
-        source
-          .map(TopologyStateForInitResponse.fromProtoV30(_))
-          .flatMapConcat { parsingResult =>
-            parsingResult.fold(
-              err => Source.failed(ProtoDeserializationFailure.Wrap(err).asGrpcError),
-              Source.single,
-            )
-          }
-          // TODO(i26281): Maybe use `.runWith(Sink.seq)` to simplify
-          .runFold(Vector.empty[GenericStoredTopologyTransaction])((acc, txs) =>
-            acc ++ txs.topologyTransactions.value.result
-          )
-          .map { accumulated =>
-            val storedTxs = StoredTopologyTransactions(accumulated)
-            TopologyStateForInitResponse(Traced(storedTxs))
-          }
-          .transformWith {
-            case Success(value) => Future.successful(Right(value))
-
-            case Failure(grpcExc: StatusRuntimeException) =>
-              logger.debug(
-                s"Downloading topology state for initialization failed with gRPC exception",
-                grpcExc,
-              )
-              val grpcError =
-                GrpcError("download-topology-state-for-init", connection.name, grpcExc)
-              Future.successful(
-                Left(
-                  SequencerConnectionStubError
-                    .ConnectionError(ConnectionError.TransportError(grpcError))
-                )
-              )
-
-            case Failure(exc) =>
-              logger.warn(
-                s"Downloading topology state for initialization failed with unexpected exception",
-                exc,
-              )
-              Future.failed(exc)
-          }
-      )
-        .mapK(FutureUnlessShutdown.outcomeK)
-    } yield result
+  } yield {
+    source
+      .map(TopologyStateForInitResponse.fromProtoV30(_))
+      .map { parsingResult =>
+        parsingResult.valueOr(err => throw ProtoDeserializationFailure.Wrap(err).asGrpcError)
+      }
+  }
 
   override def subscribe[E](
       request: SubscriptionRequest,

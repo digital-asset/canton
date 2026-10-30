@@ -1,0 +1,29 @@
+name: Publish API to GAR
+description: Publish API artifacts to Google Artifact Registry
+
+inputs:
+  release_suffix:
+    description: Release version suffix
+    required: true
+  gar_maven_repo_url:
+    description: Target GAR Maven repository URL
+    required: true
+  gac_json:
+    description: GCP service account key JSON for GAR
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup GCP credentials for GAR
+      uses: ./.github/actions/publish/setup_gcp_gar
+      with:
+        gac_json: ${{ inputs.gac_json }}
+
+    - name: Publish API artifacts to Google Artifact Registry
+      uses: ./.github/actions/nix/nix_run
+      env:
+        GAR_MAVEN_REPO_URL: ${{ inputs.gar_maven_repo_url }}
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+      with:
+        command: scripts/ci/publish-api-to-gar.sh

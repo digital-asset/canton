@@ -11,7 +11,7 @@ import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisconnect
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.InitialOnboardingError
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
@@ -138,6 +138,8 @@ sealed trait PermissionedSynchronizerTest
     )
     adminPartyBefore.loneElement.participants.exists(_.participant == participant1.id)
 
+    val subscriptionPermissionDenied =
+      "Permanently closing sequencer subscription due to permission denied"
     // revoking the participant synchronizer permission results in the connection to the sequencer being closed.
     // this produces a bunch of warnings
     loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
@@ -170,10 +172,14 @@ sealed trait PermissionedSynchronizerTest
           ),
           (
             _.shouldBeCantonError(
-              SyncServiceSynchronizerDisabledUs,
-              _ should include(s"$daName rejected our subscription attempt with permission denied"),
+              SyncServiceSynchronizerDisconnect,
+              _ should include("Trust threshold of 1 is no longer reachable"),
             ),
-            "participant synchronizer reporting subscription rejection",
+            "participant disconnected from synchronizer",
+          ),
+          (
+            _.warningMessage should include(subscriptionPermissionDenied),
+            "subscription closed due to permission denied",
           ),
         ),
         mayContain = Seq(

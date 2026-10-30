@@ -96,7 +96,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
         participantId = Ref.ParticipantId.assertFromString("participant"),
         submissionSeed = crypto.Hash.hashPrivateKey(getClass.getName + time.toString),
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         prefetchKeys = Seq.empty,
       )
       .consume(lookupHandler(pcs = contracts, pkgs = packages))
@@ -164,7 +164,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
           preparationTime = time,
           ledgerEffectiveTime = time,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(pcs = contracts, pkgs = packages))
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet

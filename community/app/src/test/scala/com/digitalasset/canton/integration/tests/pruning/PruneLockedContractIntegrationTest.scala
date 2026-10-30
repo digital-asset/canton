@@ -5,13 +5,12 @@ package com.digitalasset.canton.integration.tests.pruning
 
 import cats.syntax.either.*
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.damltests.java.failedtransactionsdonotdivulge.One
 import com.digitalasset.canton.integration.plugins.{
+  UseBftSequencer,
   UsePostgres,
   UseProgrammableSequencer,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -23,7 +22,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.protocol.LocalRejectError.ConsistencyRejections.LockedContracts
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isConfirmationResponse
-import com.digitalasset.canton.synchronizer.sequencer.SendPolicy.processTimeProofs_
+import com.digitalasset.canton.synchronizer.sequencer.SendPolicy.processTimeProofs
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.*
 import org.scalactic.source.Position
@@ -106,14 +105,20 @@ trait PruneLockedContractIntegrationTest
     // Ideally, we should make sure that the sequencer delivers the delayed result message before
     // it advances the sim clock again, but the programmable sequencer backend doesn't allow us to do so
     // at the moment.
-    sequencer.setPolicy_("spread transactions over time") {
-      processTimeProofs_ { submissionRequest =>
+    val sequencerTimeTracker = sequencer1.underlying.value.sequencer.timeTracker
+
+    sequencer.setPolicy("spread transactions over time") {
+      processTimeProofs { implicit traceContext => submissionRequest =>
         submissionRequest.sender match {
           case _: ParticipantId =>
             if (submissionRequest.isConfirmationRequest) {
               val previouslyQueued = queuedRequests.getAndIncrement()
               val delay = delayS.minus(2.millisecond) * previouslyQueued.toDouble + initialDelay
-              SendDecision.DelayUntil(startTime.plusMillis(delay.toMillis))
+              // Hold the request back until the sequencer has observed the release time.
+              val releaseAt = startTime.plusMillis(delay.toMillis)
+              SendDecision.HoldBack(
+                sequencerTimeTracker.awaitTick(releaseAt).getOrElse(Future.unit)
+              )
             } else {
               if (isConfirmationResponse(submissionRequest)) {
                 // This is a confirmation response so a request must have been delivered.
@@ -176,9 +181,8 @@ trait PruneLockedContractIntegrationTest
   }
 }
 
-class PruneLockedContractReferenceIntegrationTestPostgres
-    extends PruneLockedContractIntegrationTest {
+class PruneLockedContractIntegrationTestPostgres extends PruneLockedContractIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

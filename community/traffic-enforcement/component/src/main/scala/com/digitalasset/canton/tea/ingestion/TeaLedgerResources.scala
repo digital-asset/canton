@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.LifeCycle.CloseableChannel
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.user.store.UserManagementStore
+import io.grpc.ManagedChannel
 import org.apache.pekko.actor.ActorSystem
 
 import scala.concurrent.ExecutionContext
@@ -25,11 +26,20 @@ import scala.concurrent.ExecutionContext
   */
 final class TeaLedgerResources private (
     val client: LedgerClient,
+    channel: ManagedChannel,
     val executionSequencerFactory: ExecutionSequencerFactory,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 ) extends FlagCloseable
     with NamedLogging {
+
+  /** After a failed connection attempt (e.g. while the Ledger API server is not up yet), the
+    * channel stays in TRANSIENT_FAILURE and fails calls fast until its exponential reconnect
+    * backoff (up to 2 minutes) expires. Resetting the backoff makes the channel reconnect
+    * immediately on the next call. This is a no-op while the channel is idle or ready.
+    */
+  def resetConnectBackoff(): Unit = channel.resetConnectBackoff()
+
   override def onClosed(): Unit =
     LifeCycle.close(
       client,
@@ -61,7 +71,7 @@ object TeaLedgerResources {
       clientConfiguration(token),
       loggerFactory,
     )
-    new TeaLedgerResources(client, esf, loggerFactory, timeouts)
+    new TeaLedgerResources(client, channel.channel, esf, loggerFactory, timeouts)
   }
 
   private def clientConfiguration(

@@ -112,6 +112,7 @@ class PartyVettingMapComputationTest extends AsyncWordSpec with BaseTest with Ha
         ),
         expectedSubmitters = Set(alice),
         expectedInformees = Set(alice, bob),
+        expectedPrescribedSynchronizerO = Some(psId1),
       )
       when(routingSynchronizerState.getPhysicalId(psId1.logical)).thenReturn(Some(psId1))
       partyVettingMapComputation
@@ -238,6 +239,7 @@ class PartyVettingMapComputationTest extends AsyncWordSpec with BaseTest with Ha
           ),
           expectedSubmitters = Set(alice),
           expectedInformees = Set(alice),
+          expectedPrescribedSynchronizerO = Some(psId2),
         )
         when(routingSynchronizerState.getPhysicalId(psId2.logical)).thenReturn(Some(psId2))
         partyVettingMapComputation
@@ -295,6 +297,7 @@ class PartyVettingMapComputationTest extends AsyncWordSpec with BaseTest with Ha
         ],
         expectedSubmitters: Set[LfPartyId],
         expectedInformees: Set[LfPartyId],
+        expectedPrescribedSynchronizerO: Option[PhysicalSynchronizerId] = None,
         // If specified, overrides the default VettedPackage with None bounds
         withVettingBounds: Map[
           PhysicalSynchronizerId,
@@ -328,6 +331,7 @@ class PartyVettingMapComputationTest extends AsyncWordSpec with BaseTest with Ha
           admissibleSynchronizersComputation.forParties(
             expectedSubmitters,
             expectedInformees,
+            expectedPrescribedSynchronizerO,
             routingSynchronizerState,
           )
         ).thenReturn(

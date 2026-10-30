@@ -132,9 +132,13 @@ object ReleaseVersion {
   }
 
   object Feature {
-    object signingKeyUsageProtoV31 extends Feature {
-      // TODO(#32231) Switch to 3.6
-      override def introduced: ReleaseVersion = ReleaseVersion(42, 6, 0)
+
+    /** The admin API carries `v31` topology mappings: topology proposals can contain them, and
+      * `ListPartyToParticipant` returns them to clients of this version. The lowest pre-release of
+      * 3.7.0, so that its snapshots count as well.
+      */
+    object topologyMappingProtoV31 extends Feature {
+      override def introduced: ReleaseVersion = ReleaseVersion(3, 7, 0, Some("0"))
     }
   }
 }

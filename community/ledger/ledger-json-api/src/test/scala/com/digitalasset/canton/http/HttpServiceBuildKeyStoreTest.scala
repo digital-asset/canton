@@ -8,6 +8,8 @@ import com.digitalasset.canton.util.JarResourceUtils
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.io.FileInputStream
+import java.security.cert.{Certificate, X509Certificate}
+import javax.net.ssl.{X509KeyManager, X509TrustManager}
 
 class HttpServiceBuildKeyStoreTest extends AnyWordSpec with BaseTest {
 
@@ -53,4 +55,54 @@ class HttpServiceBuildKeyStoreTest extends AnyWordSpec with BaseTest {
       chain should have length 1
     }
   }
+
+  private def keyStore(certName: String, keyName: String) =
+    HttpService.buildKeyStore(
+      certFile = new FileInputStream(certResource(certName)),
+      privateKeyFile = certResource(keyName).toPath,
+      caCertFile = new FileInputStream(certResource("ca.crt")),
+    )
+
+  private def subjectOf(certs: Array[Certificate]): String =
+    certs.head.asInstanceOf[X509Certificate].getSubjectX500Principal.getName
+
+  "HttpService.buildKeyManagerFactory" should {
+
+    "use the PKIX algorithm and expose the configured key and certificate" in {
+      val factory = HttpService.buildKeyManagerFactory(keyStore("server.crt", "server.pem"))
+      factory.getAlgorithm shouldBe "PKIX"
+
+      val keyManager = factory.getKeyManagers.collectFirst { case km: X509KeyManager => km }.value
+      val alias = keyManager.chooseServerAlias("RSA", null, null)
+      alias should not be null
+      keyManager.getPrivateKey(alias) should not be null
+      subjectOf(keyManager.getCertificateChain(alias).map(c => c: Certificate)) should include(
+        "CN=0.0.0.0.server"
+      )
+    }
+  }
+
+  "HttpService.buildTrustManagerFactory" should {
+
+    "use the PKIX algorithm and trust certificates issued by the configured CA" in {
+      val factory = HttpService.buildTrustManagerFactory(keyStore("server.crt", "server.pem"))
+      factory.getAlgorithm shouldBe "PKIX"
+
+      val trustManager =
+        factory.getTrustManagers.collectFirst { case tm: X509TrustManager => tm }.value
+      val acceptedIssuers = trustManager.getAcceptedIssuers
+      acceptedIssuers should not be empty
+      acceptedIssuers.map(_.getSubjectX500Principal.getName) should contain("CN=0.0.0.0.ca")
+
+      val serverChain = keyStore("server.crt", "server.pem")
+        .getCertificateChain("key")
+        .collect { case c: X509Certificate => c }
+      serverChain should not be empty
+      subjectOf(serverChain.map(c => c: Certificate)) should include("CN=0.0.0.0.server")
+
+      noException should be thrownBy trustManager.checkServerTrusted(serverChain, "RSA")
+      noException should be thrownBy trustManager.checkClientTrusted(serverChain, "RSA")
+    }
+  }
+
 }

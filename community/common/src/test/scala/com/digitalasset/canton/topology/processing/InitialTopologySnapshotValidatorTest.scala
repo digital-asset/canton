@@ -5,8 +5,9 @@ package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, BatchingConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoPureApi}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.store.db.{DbTest, PostgresTest}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -21,10 +22,15 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
+  HostingParticipant,
+  ParticipantPermission,
+  PartyToParticipant,
   SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyTransaction,
 }
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -36,27 +42,35 @@ abstract class InitialTopologySnapshotValidatorTest
 
   import Factory.*
 
-  protected def mkDefault() = mk(
+  protected def mkDefault(
+      validateInitialTopologySnapshot: Boolean = true
+  ): (InitialTopologySnapshotValidator, TopologyStore[TopologyStoreId.SynchronizerStore]) = mk(
     mkStore(
       Factory.physicalSynchronizerId1a,
       "initial-validation",
-    )
+    ),
+    validateInitialTopologySnapshot = validateInitialTopologySnapshot,
   )
 
   protected def mk(
-      store: TopologyStore[TopologyStoreId.SynchronizerStore]
+      store: TopologyStore[TopologyStoreId.SynchronizerStore],
+      validateInitialTopologySnapshot: Boolean = true,
+      maxTopologyUpdateBatchSize: PositiveInt = BatchingConfig().maxTopologyUpdateBatchSize,
   ): (InitialTopologySnapshotValidator, TopologyStore[TopologyStoreId.SynchronizerStore]) = {
 
     val validator = new InitialTopologySnapshotValidator(
       new SynchronizerCryptoPureApi(defaultStaticSynchronizerParameters, crypto),
       store,
-      BatchAggregatorConfig.defaultsForTesting,
-      TopologyConfig.forTesting.copy(validateInitialTopologySnapshot = true),
+      BatchingConfig().copy(
+        topologyCacheAggregator = BatchAggregatorConfig.defaultsForTesting,
+        maxTopologyUpdateBatchSize = maxTopologyUpdateBatchSize,
+      ),
+      TopologyConfig.forTesting
+        .copy(validateInitialTopologySnapshot = validateInitialTopologySnapshot),
       staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
       timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory,
-      cleanupTopologySnapshot = true,
     )
     (validator, store)
   }
@@ -99,6 +113,35 @@ abstract class InitialTopologySnapshotValidatorTest
       result shouldBe Right(())
       val stateAfterInitialization = fetch(store, timestampForInit.immediateSuccessor)
       validate(stateAfterInitialization, genesisState.result.map(_.transaction))
+    }
+
+    "store the same state with and without validation" in {
+      val timestampForInit = SignedTopologyTransaction.InitialTopologySequencingTime
+      // more transactions with the same effective time than fit into one batch
+      val genesisState = StoredTopologyTransactions(
+        List(ns1k1_k1, dmp1_k1, ns2k2_k2, ns3k3_k3, ns1k2_k1, okm1bk5k1E_k1, dtcp1_k1).map(tx =>
+          StoredTopologyTransaction(
+            SequencedTime(timestampForInit),
+            EffectiveTime(timestampForInit),
+            validUntil = None,
+            tx,
+            None,
+          )
+        )
+      )
+      def importAndHash(synchronizerId: PhysicalSynchronizerId, validate: Boolean) = {
+        val (validator, store) = mk(
+          mkStore(synchronizerId, s"validate-$validate"),
+          validateInitialTopologySnapshot = validate,
+          maxTopologyUpdateBatchSize = PositiveInt.two,
+        )
+        val result = validator.validateAndApplyInitialTopologySnapshot(genesisState).futureValueUS
+        result shouldBe Right(())
+        store.findEssentialStateHashAtSequencedTime(SequencedTime.MaxValue).futureValueUS
+      }
+
+      importAndHash(Factory.physicalSynchronizerId1a, validate = true) shouldBe
+        importAndHash(Factory.physicalSynchronizerId1, validate = false)
     }
 
     "successfully process the genesis state at topology initialization time ignoring missing signatures of signing keys" in {
@@ -168,6 +211,7 @@ abstract class InitialTopologySnapshotValidatorTest
         SignedTopologyTransaction
           .fromProtoV30(
             testedProtocolVersionValidation,
+            testedTopologyTransactionContext,
             protoWithDuplicateSig,
           )
           .value
@@ -285,7 +329,7 @@ abstract class InitialTopologySnapshotValidatorTest
         ) :+ StoredTopologyTransaction(
           SequencedTime(ts(1)),
           EffectiveTime(
-            ts(1).plus((StaticSynchronizerParameters.defaultTopologyChangeDelay.unwrap))
+            ts(1).plus(StaticSynchronizerParameters.defaultTopologyChangeDelay.unwrap)
           ),
           validUntil = None,
           okmS1k7_without_k7_signature,
@@ -296,7 +340,7 @@ abstract class InitialTopologySnapshotValidatorTest
       val (validator, store) = mkDefault()
 
       val result = validator.validateAndApplyInitialTopologySnapshot(genesisState).futureValueUS
-      result.left.value should include regex ("(?s)Store:.*rejectionReason = 'Not fully authorized'".r)
+      result.left.value should include regex "(?s)Store:.*rejectionReason = 'Not fully authorized'".r
 
       val stateAfterInitialization = fetch(store, ts(2))
       // the OTK is rejected and therefore is not returned when looking up valid transactions
@@ -310,6 +354,147 @@ abstract class InitialTopologySnapshotValidatorTest
         .rejectionReason
         .value
         .str shouldBe "Not fully authorized"
+    }
+
+    "accept a hosting state move that the protocol version it was sequenced under accepted" in {
+      // A synchronizer on protocol version 36 accepted setting the onboarding flag of an Active
+      // entry, i.e. moving it back to Onboarding. A successor on protocol version 37, which
+      // rejects such a move, validates this history when it is initialized from its predecessor.
+      val timestampForInit = SignedTopologyTransaction.InitialTopologySequencingTime
+      def partyToParticipant(serial: PositiveInt, onboarding: Boolean) =
+        mkTrans(
+          TopologyTransaction.tryCreate(
+            TopologyChangeOp.Replace,
+            serial,
+            PartyToParticipant.tryCreate(
+              party1b,
+              PositiveInt.one,
+              Seq(
+                HostingParticipant(
+                  participant1,
+                  ParticipantPermission.Confirmation,
+                  onboarding = onboarding,
+                )
+              ),
+            ),
+            ProtocolVersion.v36,
+          )
+        )
+      def stored(
+          transaction: GenericSignedTopologyTransaction,
+          sequenced: CantonTimestamp,
+          validUntil: Option[CantonTimestamp],
+      ) = StoredTopologyTransaction(
+        SequencedTime(sequenced),
+        EffectiveTime(sequenced),
+        validUntil.map(EffectiveTime(_)),
+        transaction,
+        rejectionReason = None,
+      )
+      val history = StoredTopologyTransactions(
+        Seq(ns1k1_k1, dmp1_k1, okm1bk5k1E_k1, dtcp1_k1).map(
+          stored(_, timestampForInit, None)
+        ) ++ Seq(
+          stored(partyToParticipant(PositiveInt.one, onboarding = false), ts(1), Some(ts(2))),
+          stored(partyToParticipant(PositiveInt.two, onboarding = true), ts(2), None),
+        )
+      )
+      val (validator, _) = mk(
+        new InMemoryTopologyStore(
+          TopologyStoreId.SynchronizerStore(Factory.physicalSynchronizerId1a),
+          predecessor = None,
+          ProtocolVersion.v37,
+          loggerFactory.appendUnnamedKey("testName", "initial-validation-successor"),
+          timeouts,
+        )
+      )
+
+      validator.validateAndApplyInitialTopologySnapshot(history).value.futureValueUS shouldBe Right(
+        ()
+      )
+    }
+
+    "detect inconsistent timestamps" in {
+      val inconsistentEffectiveTime = StoredTopologyTransactions(
+        Seq(
+          StoredTopologyTransaction(
+            SequencedTime(ts(1)),
+            EffectiveTime(ts(2)),
+            None,
+            ns1k1_k1,
+            None,
+          ),
+          StoredTopologyTransaction(
+            SequencedTime(ts(1)),
+            EffectiveTime(ts(3)),
+            None,
+            ns2k2_k2,
+            None,
+          ),
+        )
+      )
+
+      val inconsistentSequencedTime = StoredTopologyTransactions(
+        Seq(
+          StoredTopologyTransaction(
+            SequencedTime(ts(1)),
+            EffectiveTime(ts(2)),
+            None,
+            ns1k1_k1,
+            None,
+          ),
+          StoredTopologyTransaction(
+            SequencedTime(ts(2)),
+            EffectiveTime(ts(2)),
+            None,
+            ns2k2_k2,
+            None,
+          ),
+        )
+      )
+
+      def checkTimestampConsistency(validator: InitialTopologySnapshotValidator) = {
+
+        loggerFactory.assertLogs(
+          {
+            val result = validator
+              .validateAndApplyInitialTopologySnapshot(inconsistentEffectiveTime)
+              .value
+              .failed
+              .futureValueUS
+            result shouldBe an[IllegalArgumentException]
+            result.getMessage should include(
+              "Received different effective times for the same sequenced time"
+            )
+          },
+          _.throwable.value.getMessage should include(
+            "Received different effective times for the same sequenced time"
+          ),
+        )
+
+        loggerFactory.assertLogs(
+          {
+            val result = validator
+              .validateAndApplyInitialTopologySnapshot(inconsistentSequencedTime)
+              .value
+              .failed
+              .futureValueUS
+            result shouldBe an[IllegalArgumentException]
+            result.getMessage should include(
+              "Received different sequenced times for the same effective time"
+            )
+          },
+          _.throwable.value.getMessage should include(
+            "Received different sequenced times for the same effective time"
+          ),
+        )
+      }
+
+      val (validator, _) = mkDefault()
+      val (validatorNoValidation, _) = mkDefault(validateInitialTopologySnapshot = false)
+
+      checkTimestampConsistency(validator)
+      checkTimestampConsistency(validatorNoValidation)
     }
 
     "detect inconsistencies between the snapshot and the result of processing the transactions" in {

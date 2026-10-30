@@ -220,6 +220,9 @@ message ListPartyToParticipantRequest {
 message ListPartyToParticipantResponse {
   message Result {
     BaseResult context = 1;
+    // Clients that send a client_version of 3.7 or later get the item of the transaction's proto
+    // version. Other clients get the v30 item whenever v30 can express the mapping, i.e. unless an
+    // entry is Nominated or Freezing.
     oneof item {
       com.digitalasset.canton.protocol.v30.PartyToParticipant v30 = 2;
       com.digitalasset.canton.protocol.v31.PartyToParticipant v31 = 3;

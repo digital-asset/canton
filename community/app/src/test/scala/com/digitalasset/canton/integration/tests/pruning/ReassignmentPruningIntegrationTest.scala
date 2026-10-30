@@ -3,29 +3,31 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
-import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig, PositiveDurationSeconds}
+import com.digitalasset.canton.config.{CommitmentSendDelay, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   EntitySyntax,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
   PartiesAllocator,
+  TestUtils,
 }
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
-import com.digitalasset.canton.{BaseTest, config}
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration as JDuration
@@ -73,6 +75,7 @@ sealed trait ReassignmentPruningIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         // To ensure that pruning can happen quickly
@@ -95,10 +98,10 @@ sealed trait ReassignmentPruningIntegrationTest
 
         Seq((sequencer1, daId), (sequencer2, acmeId)).foreach { case (sequencer, synchronizerId) =>
           // Disable automatic assignment
+          AutomaticAssignment.disable(Seq(sequencer), synchronizerId)
           sequencer.topology.synchronizer_parameters.propose_update(
             synchronizerId,
             _.update(
-              assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero,
               reconciliationInterval = PositiveDurationSeconds(reconciliationInterval),
               confirmationResponseTimeout = confirmationResponseTimeout.toConfig,
               mediatorReactionTimeout = mediatorReactionTimeout.toConfig,
@@ -190,7 +193,11 @@ sealed trait ReassignmentPruningIntegrationTest
     import env.*
 
     eventually() {
-      environment.simClock.value.advance(15.seconds.toJava)
+      val clock = environment.simClock.value
+      clock.advance(15.seconds.toJava)
+      Seq(sequencer1, sequencer2).foreach(
+        TestUtils.waitForTargetTimeOnSynchronizerNode(clock.now, logger)(_)
+      )
       participant1.health.ping(participant2, synchronizerId = Some(env.daId))
       participant1.health.ping(participant2, synchronizerId = Some(env.acmeId))
 
@@ -380,7 +387,7 @@ sealed trait ReassignmentPruningIntegrationTest
 final class ReassignmentPruningIntegrationTestPostgres extends ReassignmentPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(
@@ -395,7 +402,7 @@ final class ReassignmentPruningIntegrationTestPostgres extends ReassignmentPruni
 //class ReassignmentPruningIntegrationTestH2 extends ReassignmentPruningIntegrationTest {
 //  registerPlugin(new UseH2(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](
+//    new UseBftSequencer(
 //      loggerFactory,
 //      sequencerGroups = MultiSynchronizer(
 //        Seq(

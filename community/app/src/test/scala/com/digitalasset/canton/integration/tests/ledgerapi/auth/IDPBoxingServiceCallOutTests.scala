@@ -46,6 +46,10 @@ trait IDPBoxingServiceCallOutTests
       rights: Vector[uproto.Right],
   )(implicit ec: ExecutionContext): Future[Any]
 
+  // The transcending-rights cases share one IDP, because the participant allows only 16.
+  private lazy val transcendingIdpAdminContext: ServiceCallContext =
+    createIDPBundle(canBeAnAdmin, "transcending")(directExecutionContext).futureValue._2
+
   serviceCallName should {
 
     "deny IDP Admin granting permissions to parties which do not exist" taggedAs adminSecurityAsset
@@ -161,6 +165,16 @@ trait IDPBoxingServiceCallOutTests
             "participant admin",
             uproto.Right.Kind.ParticipantAdmin(uproto.Right.ParticipantAdmin()),
           ),
+          (
+            "debit traffic from an account",
+            uproto.Right.Kind.CanDebitTrafficFrom(uproto.Right.CanDebitTrafficFrom("acme/billing")),
+          ),
+          (
+            "debit traffic from any account",
+            uproto.Right.Kind.CanDebitTrafficFromAnyAccount(
+              uproto.Right.CanDebitTrafficFromAnyAccount()
+            ),
+          ),
         )
       ) {
         s"deny granting $description rights" taggedAs adminSecurityAsset
@@ -169,18 +183,13 @@ trait IDPBoxingServiceCallOutTests
           ) in { implicit env =>
           import env.*
           loggerFactory.suppress(AuthServiceJWTSuppressionRule) {
-            expectPermissionDenied {
-              val suffix = UUID.randomUUID().toString
-              for {
-                (_, idpAdminContext, _) <- createIDPBundle(canBeAnAdmin, suffix)
-
-                _ <- boxedCall(
-                  "user-" + suffix,
-                  idpAdminContext,
-                  Vector(uproto.Right(kind)),
-                )
-              } yield ()
-            }
+            expectPermissionDenied(
+              boxedCall(
+                "user-" + UUID.randomUUID().toString,
+                transcendingIdpAdminContext,
+                Vector(uproto.Right(kind)),
+              )
+            )
           }
         }
       }

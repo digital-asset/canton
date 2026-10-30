@@ -11,8 +11,10 @@ import com.digitalasset.canton.http.json.v2.{
   ProtocolConverters,
 }
 import com.typesafe.scalalogging.Logger
+import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
+import org.typelevel.jawn.Parser
 
 import scala.concurrent.ExecutionContext
 
@@ -22,9 +24,7 @@ import scala.concurrent.ExecutionContext
   * depth-aware [[CirceToUJson]] bridge in place, deeply nested JSON is rejected cleanly with
   * [[CirceToUJson.MaxNestingExceededException]] instead of throwing `StackOverflowError`.
   */
-class JsonParsingDepthTest extends AnyWordSpecLike with Matchers {
-
-  private val depth = 100000
+class JsonParsingDepthTest extends AnyWordSpecLike with Matchers with EitherValues {
 
   private def arr(levels: Int): String = ("[" * levels) + ("]" * levels)
 
@@ -33,16 +33,18 @@ class JsonParsingDepthTest extends AnyWordSpecLike with Matchers {
     new ProtocolConverters(new MockSchemaProcessor(), new MockTranscodePackageIdResolver())
 
   "deeply nested JSON" should {
-    "be parsed by circe without overflow (parse #1 is stack-safe)" in {
-      io.circe.parser.parse(arr(depth)).isRight shouldBe true
+    "fail circe parsing gracefully instead of a StackOverflow (parse #1 is stack-safe)" in {
+      val res = io.circe.parser.parse(arr(100000))
+      res.isLeft shouldBe true
+      res.left.value.message shouldBe "max depth exceeded"
     }
 
     "reject deeply nested JSON cleanly instead of overflowing the stack" in {
-      val js = io.circe.parser.parse(arr(depth)).fold(throw _, identity)
+      // DefaultMaxDepth is the deepest nesting circe/jawn accepts to parse
+      // one level deeper fails with "max depth exceeded"
+      val js = io.circe.parser.parse(arr(Parser.DefaultMaxDepth)).value
       try {
-        a[CirceToUJson.MaxNestingExceededException] should be thrownBy (converters.fromCirce(
-          js
-        ): Unit)
+        assertThrows[CirceToUJson.MaxNestingExceededException](converters.fromCirce(js))
       } catch {
         case _: StackOverflowError =>
           fail("fromCirce overflowed the stack on deeply nested JSON")

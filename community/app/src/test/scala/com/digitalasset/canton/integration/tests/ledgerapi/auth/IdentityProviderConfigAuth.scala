@@ -248,6 +248,7 @@ trait IdentityProviderConfigAuth extends KeyPairs {
           otherConfirmingParticipantUids = Seq(),
           confirmationThreshold = 1,
           observingParticipantUids = Seq(),
+          protocolVersion = None,
         )
       )
       signature = signTopology(generated)

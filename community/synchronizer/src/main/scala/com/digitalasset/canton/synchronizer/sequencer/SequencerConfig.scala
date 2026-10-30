@@ -31,14 +31,11 @@ import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
   TestingInterceptor,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
-  ReferenceSequencerDriver,
-  ReferenceSequencerDriverFactory,
-}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.ReferenceSequencerDriver
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.nonempty.NonEmpty
 import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
-import pureconfig.{ConfigCursor, ConfigReader, ConfigWriter}
+import pureconfig.{ConfigReader, ConfigWriter}
 
 import scala.concurrent.ExecutionContext
 
@@ -57,10 +54,10 @@ object SequencerConfig {
     override def highAvailabilityEnabled: Boolean = highAvailability.exists(_.isEnabled)
   }
 
+  // TODO(#29603): remove this option once the reference sequencer is no longer used
   final case class External(
-      sequencerType: String,
       block: BlockSequencerConfig,
-      config: ConfigCursor,
+      config: ReferenceSequencerDriver.Config[StorageConfig],
   ) extends SequencerConfig
 
   final case class BftSequencer(
@@ -70,19 +67,11 @@ object SequencerConfig {
       config: BftBlockOrdererConfig = BftBlockOrdererConfig(),
   ) extends SequencerConfig
 
-  def default: SequencerConfig = {
-    val driverFactory = new ReferenceSequencerDriverFactory
+  def default: SequencerConfig =
     External(
-      driverFactory.name,
       BlockSequencerConfig(),
-      ConfigCursor(
-        driverFactory
-          .configWriter(confidential = false)
-          .to(ReferenceSequencerDriver.Config(storage = StorageConfig.Memory())),
-        List(),
-      ),
+      ReferenceSequencerDriver.Config(storage = StorageConfig.Memory()),
     )
-  }
 
   /** Configuration for how many sequencers are concurrently operating within the synchronizer.
     * @param enabled

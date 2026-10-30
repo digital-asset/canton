@@ -18,8 +18,10 @@ from com.digitalasset.canton.protocol.v31 import topology_pb2 as topology_v31_pb
 from com.digitalasset.canton.crypto.v30 import crypto_pb2
 from com.daml.ledger.api.v2 import crypto_pb2 as ledger_api_crypto_pb2
 from interactive_topology_util import (
+    DEFAULT_PROTOCOL_VERSION,
     compute_fingerprint,
     compute_sha256_canton_hash,
+    get_topology_version_number,
     serialize_topology_transaction,
     sign_hash,
 )
@@ -27,14 +29,15 @@ from interactive_topology_util import (
 
 def build_serialized_transaction_and_hash(
     mapping,
-    protocol_version: str,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ) -> (bytes, bytes):
     """
     Generates a serialized topology transaction and its corresponding hash.
 
     Args:
         mapping: The topology mapping to be serialized.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         tuple: A tuple containing:
@@ -54,7 +57,8 @@ def onboard_external_party(
     confirming_threshold: int,
     synchronizer_id: str,
     channel: Channel,
-    protocol_version: str,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ) -> (EllipticCurvePrivateKey, str):
     """
     Onboard a new external party.
@@ -66,7 +70,7 @@ def onboard_external_party(
         confirming_threshold (int): Minimum number of confirmations that must be received from the confirming participants to authorize a transaction.
         synchronizer_id (str): ID of the synchronizer on which the party will be registered.
         channel (grpc.Channel): gRPC channel to one of the confirming participants Admin API.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         tuple: A tuple containing:
@@ -117,8 +121,7 @@ def onboard_external_party(
     # on behalf of the party by confirming or rejecting them according to the ledger model. They also records transaction for that party on the ledger.
     # It also contains the protocol signing keys and signing threshold for the party
     # Both v30 and v31 use the v30 ParticipantPermission; v31 additionally sets the hosting state of each participant
-    # TODO(#35499): Cannot stay on dev PV for a proper release
-    if protocol_version == "dev":
+    if get_topology_version_number(protocol_version) == 31:
         confirming_participants_hosting = [
             topology_v31_pb2.PartyToParticipant.HostingParticipant(
                 participant_uid=confirming_participant_id,
@@ -159,7 +162,7 @@ def onboard_external_party(
         )
 
     (party_to_participant_transaction, party_to_participant_transaction_hash) = (
-        build_serialized_transaction_and_hash(party_to_participant_mapping, protocol_version)
+        build_serialized_transaction_and_hash(party_to_participant_mapping, protocol_version=protocol_version)
     )
 
     signature = sign_hash(private_key, party_to_participant_transaction_hash)

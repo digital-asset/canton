@@ -1,0 +1,80 @@
+name: Publish Libraries
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      GAC_JSON:
+        required: true
+      GPG_CODE_SIGNING:
+        required: true
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+jobs:
+  publish_libraries:
+    name: Publish Libraries
+    timeout-minutes: 120
+    runs-on: ${{ inputs.runner }}
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GOOGLE_ARTIFACT_REGISTRY: europe-maven.pkg.dev/da-images/public-maven-unstable
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      gpg_code_signing: ${{ secrets.GPG_CODE_SIGNING }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Track CPU and Memory Usage
+        id: track_start
+        uses: ./.github/actions/build/track_cpu_memory
+
+      - name: Publish to Google Artifact Registry
+        uses: ./.github/actions/publish/publish_libs_to_gar
+        with:
+          gac_json: ${{ secrets.GAC_JSON }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Publish to Maven Central
+        if: ${{ !inputs.is_nightly_workflow }}
+        uses: ./.github/actions/publish/publish_libs_to_maven_central
+        with:
+          gpg_code_signing: ${{ secrets.GPG_CODE_SIGNING }}
+          release_suffix: ${{ steps.release_suffix.outputs.release_suffix }}
+
+      - name: Track CPU and Memory Stop
+        if: always()
+        uses: ./.github/actions/cache/store_track_cpu_and_memory
+        with:
+          monitor_pid: ${{ steps.track_start.outputs.monitor_pid }}
+          store: 'true'

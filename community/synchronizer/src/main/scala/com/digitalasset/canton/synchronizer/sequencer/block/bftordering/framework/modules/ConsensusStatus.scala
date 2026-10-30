@@ -88,7 +88,7 @@ object ConsensusStatus {
           .toRight(
             ProtoDeserializationError.ValueConversionError("segments", "must not be empty")
           )
-        rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData)
+        rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
       } yield EpochStatus(
         from,
         EpochNumber(protoEpochStatus.epochNumber),
@@ -96,15 +96,15 @@ object ConsensusStatus {
       )(rpv, Some(originalByteString))
 
     override val versioningTable: VersioningTable = VersioningTable(
-      SupportedVersions.ProtoData ->
-        VersionedProtoCodec(SupportedVersions.CantonProtocol)(v30.EpochStatus)(
+      SupportedVersions.ProtoData30 ->
+        VersionedProtoCodec(SupportedVersions.CantonProtocol36)(v30.EpochStatus)(
           supportedProtoVersionMemoized(_)(fromProto),
           _.toProto,
         )
     )
   }
 
-  sealed trait SegmentStatus extends PrettyPrintingFromCompanion {
+  sealed trait SegmentStatus extends PrettyPrintingFromCompanion with Product with Serializable {
     def toProto: v30.SegmentStatus
   }
 

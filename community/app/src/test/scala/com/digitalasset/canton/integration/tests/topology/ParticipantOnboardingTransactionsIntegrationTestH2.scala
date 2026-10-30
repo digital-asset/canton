@@ -7,9 +7,8 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.FeatureFlag
-import com.digitalasset.canton.integration.plugins.{UseH2, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -32,7 +31,7 @@ final class ParticipantOnboardingTransactionsIntegrationTestH2
     with TopologyTransactionReSignHelpers
     with SharedEnvironment {
   registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1

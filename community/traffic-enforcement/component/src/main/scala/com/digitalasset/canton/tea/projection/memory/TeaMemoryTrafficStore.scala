@@ -11,7 +11,6 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TrafficEnforcementError
 import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.{
   BalanceKey,
@@ -19,14 +18,22 @@ import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.{
   TrafficUpdateOutOfBoundException,
 }
 import com.digitalasset.canton.tea.projection.{
-  AccountId,
   AccountState,
+  CompletionAccounting,
+  CompletionAccountingPolicy,
+  CompletionDecision,
+  CorrelationKey,
   DeltaEvent,
   EventId,
   EventSource,
+  ProjectionEvent,
+  PruneCounts,
+  SubmissionCorrelation,
   TeaTrafficStore,
   TrafficDelta,
+  UnchargedCompletion,
 }
+import com.digitalasset.canton.tea.{AccountId, TrafficEnforcementErrors}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 
@@ -71,6 +78,28 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
   // Deduplication is global on (event_source, event_id), independent of the account, so we track
   // the set of keys seen across all accounts.
   private val seenKeys = scala.collection.mutable.Set.empty[EventKey]
+  private val correlations =
+    scala.collection.mutable.Map.empty[CorrelationKey, SubmissionCorrelation]
+  private val uncharged = scala.collection.mutable.Map.empty[Long, UnchargedCompletion]
+  // A memory projection replays completions from the start after a restart.
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var lastAppliedCompletionOffset: Option[Long] = None
+
+  override def insertCorrelation(correlation: SubmissionCorrelation)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Unit] =
+    EitherT.fromEither[FutureUnlessShutdown](lock.exclusive {
+      if (correlations.contains(correlation.key)) Left(correlation.key.conflictError)
+      else {
+        correlations.update(correlation.key, correlation)
+        Right(())
+      }
+    })
+
+  override def lookupCorrelation(key: CorrelationKey)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[SubmissionCorrelation]] =
+    EitherT.rightT(lock.exclusive(correlations.get(key)))
 
   override def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
@@ -113,69 +142,126 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
       timestamp: CantonTimestamp,
   ): Future[Option[AccountState]] = Future {
     lock.exclusive {
-      val deltaEvent = DeltaEvent(trafficDelta, timestamp, eventSource)
-      val key = EventKey(deltaEvent.eventSource, eventId)
-      val balanceKey = BalanceKey(account)
+      persistDeltaLocked(account, eventId, eventSource, trafficDelta, timestamp)
+    }
+  }
 
-      // Deduplication is global on (event_source, event_id): if the key was already seen for any
-      // account, this is a duplicate and must be a no-op.
-      val eventPersisted = !seenKeys.contains(key)
-
-      if (eventPersisted) {
-        val (debitUpdate, creditUpdate) = trafficDelta.debitAndCreditDeltas
-
-        // Compute the resulting totals as raw Longs: they may transiently be negative (or overflow),
-        // which we detect and reject rather than let the NonNegativeLong conversion throw.
-        val (newTotalDebits, newTotalCredits, newUpdatedAt) = balances.get(balanceKey) match {
-          case None =>
-            (debitUpdate, creditUpdate, deltaEvent.timestamp)
-          case Some(state) =>
-            (
-              Math.addExact(state.totalDebits.value, debitUpdate),
-              Math.addExact(state.totalCredits.value, creditUpdate),
-              deltaEvent.timestamp.max(state.updatedAt),
-            )
+  private[tea] def applyCompletion(
+      event: ProjectionEvent.Completion,
+      projectionId: String,
+      eventSource: EventSource,
+      policy: CompletionAccountingPolicy,
+  )(implicit traceContext: TraceContext): Future[Option[CompletionDecision]] = Future {
+    lock.exclusive {
+      if (lastAppliedCompletionOffset.exists(_ >= event.offset)) None
+      else {
+        val correlation = correlations.get(event.record.correlationKey)
+        val decision = CompletionAccounting.decide(event, correlation, policy)
+        decision match {
+          case CompletionDecision.Debit(delta) =>
+            val reject = TeaMemoryTrafficStore.rejection(delta.account, delta.delta)
+            try
+              persistDeltaLocked(
+                delta.account,
+                event.debitEventId(projectionId),
+                eventSource,
+                delta.delta,
+                event.timestamp,
+              ).discard
+            catch reject.andThen(err => throw err.asGrpcError)
+          case CompletionDecision.RecordUncharged(completion) =>
+            uncharged.getOrElseUpdate(completion.offset, completion).discard
+          case CompletionDecision.NoEvent => ()
         }
-
-        // Reject the update if applying the delta would drive either running total below zero.
-        // Validate before mutating so the in-memory state is left untouched on failure.
-        val newState =
-          (NonNegativeLong.create(newTotalDebits), NonNegativeLong.create(newTotalCredits)) match {
-            case (Right(debits), Right(credits)) =>
-              AccountState(account, debits, credits, newUpdatedAt)
-            case _ =>
-              throw new TrafficUpdateOutOfBoundException
-          }
-
-        seenKeys.add(key).discard
-        events
-          .updateWith(account) {
-            case None => Some(VectorMap(key -> deltaEvent))
-            case Some(existingEvents) => Some(existingEvents.updated(key, deltaEvent))
-          }
-          .discard
-        balances.update(balanceKey, newState)
-        Some(newState)
-      } else {
-        balances.get(balanceKey)
+        correlation.foreach(c => correlations.remove(c.key).discard)
+        lastAppliedCompletionOffset = Some(event.offset)
+        Some(decision)
       }
     }
   }
 
-  override def pruneEvents(beforeInclusive: CantonTimestamp)(implicit
+  private def persistDeltaLocked(
+      account: AccountId,
+      eventId: EventId,
+      eventSource: EventSource,
+      trafficDelta: TrafficDelta,
+      timestamp: CantonTimestamp,
+  ): Option[AccountState] = {
+    val deltaEvent = DeltaEvent(trafficDelta, timestamp, eventSource)
+    val key = EventKey(deltaEvent.eventSource, eventId)
+    val balanceKey = BalanceKey(account)
+
+    // Deduplication is global on (event_source, event_id): if the key was already seen for any
+    // account, this is a duplicate and must be a no-op.
+    val eventPersisted = !seenKeys.contains(key)
+
+    if (eventPersisted) {
+      val (debitUpdate, creditUpdate) = trafficDelta.debitAndCreditDeltas
+
+      // Compute the resulting totals as raw Longs: they may transiently be negative (or overflow),
+      // which we detect and reject rather than let the NonNegativeLong conversion throw.
+      val (newTotalDebits, newTotalCredits, newUpdatedAt) = balances.get(balanceKey) match {
+        case None =>
+          (debitUpdate, creditUpdate, deltaEvent.timestamp)
+        case Some(state) =>
+          (
+            Math.addExact(state.totalDebits.value, debitUpdate),
+            Math.addExact(state.totalCredits.value, creditUpdate),
+            deltaEvent.timestamp.max(state.updatedAt),
+          )
+      }
+
+      // Reject the update if applying the delta would drive either running total below zero.
+      // Validate before mutating so the in-memory state is left untouched on failure.
+      val newState =
+        (NonNegativeLong.create(newTotalDebits), NonNegativeLong.create(newTotalCredits)) match {
+          case (Right(debits), Right(credits)) =>
+            AccountState(account, debits, credits, newUpdatedAt)
+          case _ =>
+            throw new TrafficUpdateOutOfBoundException
+        }
+
+      seenKeys.add(key).discard
+      events
+        .updateWith(account) {
+          case None => Some(VectorMap(key -> deltaEvent))
+          case Some(existingEvents) => Some(existingEvents.updated(key, deltaEvent))
+        }
+        .discard
+      balances.update(balanceKey, newState)
+      Some(newState)
+    } else {
+      balances.get(balanceKey)
+    }
+  }
+
+  override def prune(beforeInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int] =
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, PruneCounts] =
     EitherT {
-      val prunedCount = lock.exclusive {
-        events.foldLeft(0) { case (count, (accountId, accountEvents)) =>
+      val prunedCounts = lock.exclusive {
+        val prunedEvents = events.foldLeft(0) { case (count, (accountId, accountEvents)) =>
           val (toPrune, toKeep) = accountEvents.partition { case (_, event) =>
             event.timestamp <= beforeInclusive
           }
           events.update(accountId, toKeep)
           count + toPrune.size
         }
+        val correlationsBefore = correlations.size
+        correlations.filterInPlace { case (_, correlation) =>
+          correlation.insertedAt > beforeInclusive
+        }.discard
+        val unchargedBefore = uncharged.size
+        uncharged.filterInPlace { case (_, completion) =>
+          completion.timestamp > beforeInclusive
+        }.discard
+        PruneCounts(
+          events = prunedEvents,
+          correlations = correlationsBefore - correlations.size,
+          unchargedCompletions = unchargedBefore - uncharged.size,
+        )
       }
-      FutureUnlessShutdown.pure[Either[TrafficEnforcementError, Int]](Right(prunedCount))
+      FutureUnlessShutdown.pure[Either[TrafficEnforcementError, PruneCounts]](Right(prunedCounts))
     }
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
@@ -187,5 +273,13 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
       .flatMap(_.values)
       .sortBy(_.timestamp)
       .dropWhile(_.timestamp.isBefore(fromInclusive))
+  }
+
+  override def getUnchargedCompletions(fromInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[UnchargedCompletion]] = FutureUnlessShutdown.pure {
+    lock.exclusive {
+      uncharged.values.filter(_.timestamp >= fromInclusive).toSeq.sortBy(_.offset)
+    }
   }
 }

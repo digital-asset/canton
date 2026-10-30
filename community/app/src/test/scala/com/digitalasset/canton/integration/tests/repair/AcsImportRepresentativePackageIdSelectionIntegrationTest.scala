@@ -362,6 +362,7 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
           ),
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         ),
         completeAfter = PositiveInt.tryCreate(expectedNumberOfEventsForUpdatesQuery),
       )
@@ -471,6 +472,7 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
         activeAtOffset = ledgerEndOffset,
         eventFormat = Some(queryEventFormat),
         streamContinuationToken = None,
+        includeIncompleteReassignments = false,
       )
       .asJson
       .toString()

@@ -30,6 +30,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
+  SynchronizerUpdate,
   TestAcsChangeFactory,
   TransactionMeta,
   Update,
@@ -201,7 +202,7 @@ trait IndexComponentTest
     // this mimics protocol processing that stores contracts and retrieves their internal contract ids afterward
     testServices.participantContractStore.participantContractStore
       .storeContracts(contracts)
-      .failOnShutdownToAbortException("storeContracts")
+      .onShutdown(fail("storeContracts"))
       .flatMap(_ =>
         testServices.participantContractStore
           .lookupBatchedInternalIdsNonReadThrough(
@@ -293,6 +294,7 @@ trait IndexComponentTest
   )
 
   private val indexComponentTestDbMetrics = DatabaseMetrics.ForTesting("index-component-test")
+  protected def ledgerApiServerMetrics: LedgerApiServerMetrics = LedgerApiServerMetrics.ForTesting
 
   protected def withConnection[T](f: Connection => T): T =
     dbSupport.dbDispatcher
@@ -372,13 +374,14 @@ trait IndexComponentTest
               clientConnectionCheckInterval = None
             ),
           ),
+          disableMergeAndHashJoins = true,
           loggerFactory = loggerFactory,
         )
       indexer <- new JdbcIndexer.Factory(
         participantId = participantId,
         participantDataSourceConfig = DbSupport.ParticipantDataSourceConfig(jdbcUrl),
         config = config,
-        metrics = LedgerApiServerMetrics.ForTesting,
+        metrics = ledgerApiServerMetrics,
         inMemoryState = inMemoryState,
         apiUpdaterFlow = updaterFlow,
         executionContext = ec,
@@ -393,6 +396,7 @@ trait IndexComponentTest
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
+        disableMergeAndHashJoins = true,
       ).initialized()
     } yield (indexer, participantContractStore, dbSupport, inMemoryState)
 
@@ -613,6 +617,68 @@ trait IndexComponentTest
       .foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
     transaction(synchronizerId = synchronizer1, recordTime = recordTime)(tx, contractsToCreate)
+  }
+
+  /** Creates updates of
+    *   - creates
+    *   - archives (of previously created)
+    *   - and LsuTimeReached updates, which yield no DbDtos
+    *
+    * The transactions contain various number of contracts determined by an exponential
+    * distribution. This distribution allows that most of the transactions are small, except from a
+    * few large outliers.
+    */
+  protected def createsArchivesAndNoDbDtoUpdates(
+      nextRecordTime: () => CantonTimestamp,
+      txsCreatedThenArchived: Int,
+      txsCreatedNotArchived: Int,
+      txsNoDbDto: Int,
+      txSizeMean: Int,
+      createPayloadLengthFromTo: (Int, Int),
+      archiveArgumentPayloadLengthFromTo: (Int, Int),
+      archiveResultPayloadLengthFromTo: (Int, Int),
+  ): Seq[(SynchronizerUpdate, Vector[ContractInstance])] = {
+    val expDistribution =
+      new IndexComponentTest.ExponentialDistribution(random, txSizeMean.toDouble)
+    val noDbDtoPositions = random.shuffle(
+      Vector.fill(txsNoDbDto)(true) ++ Vector.fill(txsCreatedThenArchived + txsCreatedNotArchived)(
+        false
+      )
+    )
+    val createPayloadLength = randomLength(createPayloadLengthFromTo)
+    val argumentPayloadLength = randomLength(archiveArgumentPayloadLengthFromTo)
+    val resultPayloadLength = randomLength(archiveResultPayloadLengthFromTo)
+    val (createAndNoDbDtoTxs, contracts) =
+      noDbDtoPositions.map {
+        case false =>
+          creates(
+            recordTime = nextRecordTime,
+            payloadLength = createPayloadLength,
+          )(math.max(1, expDistribution.sample()))
+        case true =>
+          (
+            Update.LsuTimeReached(
+              synchronizerId = synchronizer1,
+              recordTime = nextRecordTime(),
+              traceContext = implicitly,
+            ),
+            Vector.empty,
+          )
+      }.unzip
+    val archivingTxs = contracts
+      .filter(_.nonEmpty)
+      .iterator
+      .take(txsCreatedThenArchived)
+      .map(_.map(_.inst.toCreateNode))
+      .map(
+        archives(
+          recordTime = nextRecordTime,
+          argumentLength = argumentPayloadLength,
+          resultLength = resultPayloadLength,
+        )
+      )
+      .toVector
+    createAndNoDbDtoTxs.zip(contracts) ++ archivingTxs.map(_ -> Vector.empty)
   }
 
   protected def creates(
@@ -1018,6 +1084,7 @@ trait IndexComponentTest
         activeAt = Some(Offset.tryFromLong(activeAt)),
         rangeInfo = rangeInfo,
         configOverrides = None,
+        includeIncompleteReassignments = false,
       )
       .runWith(Sink.seq)
       .futureValue
@@ -1053,5 +1120,14 @@ object IndexComponentTest {
     override protected def jdbcUrl: String = super[PostgresAroundAll].jdbcUrl
     // Improves the visibility of afterAll(), which is public in IndexComponentTest and protected in PostgresAroundAll.
     override def afterAll(): Unit = super.afterAll()
+  }
+
+  class ExponentialDistribution(random: scala.util.Random, mean: Double) {
+    private val lambda = 1 / mean
+
+    def sample(): Int = {
+      val u = random.nextDouble()
+      math.ceil(-math.log(1 - u) / lambda).toInt
+    }
   }
 }

@@ -5,6 +5,7 @@ package com.digitalasset.daml
 package lf
 package transaction
 
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoderSpec.{
   addUnknownField,
@@ -341,6 +342,268 @@ final class ContractInstanceCoderSpec
         case Left(DecodeError(errorMessage)) =>
           errorMessage should include("is declared as signatory and nonSignatoryStakeholder")
 
+      }
+    }
+  }
+
+  // The decoder must never build a FatContractInstanceImpl that violates one of the requirements
+  // checked in its body. Whatever the (parsable) proto is, decoding returns a DecodeError or a
+  // valid instance, but never throws.
+  "decodeFatContractInstance" should {
+    import scala.util.{Failure, Success, Try}
+
+    val alice = Party.assertFromString("alice")
+    val pkgName = Ref.PackageName.assertFromString("pkg-name")
+    val templateId = Ref.Identifier.assertFromString("-dummyPkg-:Module:Template")
+
+    def bytesOf(bs: Int*) =
+      data.Bytes.fromByteString(ByteString.copyFrom(bs.map(_.toByte).toArray))
+    val local12 = bytesOf(Seq.fill(Value.ContractId.V2.localSize)(1)*)
+    val v1Hash = crypto.Hash.hashPrivateKey("cid")
+
+    val localCid: Value.ContractId = Value.ContractId.V2.assertBuild(local12, data.Bytes.Empty)
+    val relativeCid: Value.ContractId =
+      Value.ContractId.V2.assertBuild(local12, bytesOf(0x01, 0x02))
+    val absoluteCid: Value.ContractId =
+      Value.ContractId.V2.assertBuild(local12, bytesOf(0x81, 0x02))
+    val v1LocalCid: Value.ContractId = Value.ContractId.V1(v1Hash)
+    val v1AbsoluteCid: Value.ContractId = Value.ContractId.V1.assertBuild(v1Hash, bytesOf(0x01))
+
+    val relativeCids = Seq(relativeCid)
+    val localOrAbsoluteCids = Seq(localCid, absoluteCid, v1LocalCid, v1AbsoluteCid)
+    val allCids = relativeCids ++ localOrAbsoluteCids
+
+    val baseKey = GlobalKeyWithMaintainers(
+      templateId = templateId,
+      value = Value.ValueText("key"),
+      crypto.Hash.hashPrivateKey("key-hash"),
+      maintainers = Set(alice),
+      packageName = pkgName,
+    )
+
+    val baseInstance: FatContractInstance = FatContractInstance.fromCreateNode(
+      Node.Create(
+        coid = relativeCid,
+        packageName = pkgName,
+        templateId = templateId,
+        arg = Value.ValueText("arg"),
+        signatories = Set(alice),
+        stakeholders = Set(alice),
+        keyOpt = None,
+        version = SerializationVersion.V2,
+      ),
+      CreationTime.CreatedAt(data.Time.Timestamp.Epoch),
+      data.Bytes.Empty,
+    )
+
+    // Raw strings are used for parties, to be able to produce unordered lists and duplicates
+    def decode(
+        cid: Value.ContractId,
+        createdAt: CreationTime,
+        nonMaintainerSignatories: Seq[String] = Seq("alice"),
+        nonSignatoryStakeholders: Seq[String] = Seq.empty,
+        keyMaintainers: Option[Seq[String]] = None,
+    ) = {
+      val protoKey = keyMaintainers.map { ms =>
+        hackKeyProto(
+          SerializationVersion.V2,
+          baseKey,
+          { b =>
+            b.clearMaintainers()
+            ms.foreach((m: String) => b.addMaintainers(m))
+            b
+          },
+        )
+      }
+      val bytes = hackProto(
+        baseInstance,
+        { b =>
+          b.setContractId(cid.toBytes.toByteString)
+          b.setCreatedAt(CreationTime.encode(createdAt))
+          b.clearContractKeyWithMaintainers()
+          protoKey.foreach(k => b.setContractKeyWithMaintainers(k))
+          b.clearNonMaintainerSignatories()
+          nonMaintainerSignatories.foreach((p: String) => b.addNonMaintainerSignatories(p))
+          b.clearNonSignatoryStakeholders()
+          nonSignatoryStakeholders.foreach((p: String) => b.addNonSignatoryStakeholders(p))
+          b.build()
+        },
+      )
+      ContractInstanceCoder.decodeFatContractInstance(bytes)
+    }
+
+    val timestamp = CreationTime.CreatedAt(data.Time.Timestamp.Epoch)
+
+    // The whole input space explored by the tests below, decoded once.
+    val partyLists: Seq[Seq[String]] = Seq(
+      Seq.empty,
+      Seq("alice"),
+      Seq("bob"),
+      Seq("alice", "bob"), // strictly ordered
+      Seq("bob", "alice"), // not ordered
+      Seq("alice", "alice"), // duplicate
+    )
+    val keyMaintainerOptions: Seq[Option[Seq[String]]] = None +: partyLists.map(Some(_))
+    val createdAts = Seq[CreationTime](CreationTime.Now, timestamp)
+
+    case class Decoding(
+        cid: Value.ContractId,
+        createdAt: CreationTime,
+        keyMaintainers: Option[Seq[String]],
+        nonMaintainerSignatories: Seq[String],
+        nonSignatoryStakeholders: Seq[String],
+    ) {
+      override def toString: String =
+        s"cid=${cid.coid}, createdAt=$createdAt, keyMaintainers=$keyMaintainers, " +
+          s"nonMaintainerSignatories=$nonMaintainerSignatories, " +
+          s"nonSignatoryStakeholders=$nonSignatoryStakeholders"
+    }
+
+    lazy val results: Seq[(Decoding, Try[Either[DecodeError, FatContractInstance]])] =
+      for {
+        cid <- allCids
+        createdAt <- createdAts
+        keyMaintainers <- keyMaintainerOptions
+        nonMaintainerSignatories <- partyLists
+        nonSignatoryStakeholders <- partyLists
+      } yield {
+        val input =
+          Decoding(
+            cid,
+            createdAt,
+            keyMaintainers,
+            nonMaintainerSignatories,
+            nonSignatoryStakeholders,
+          )
+        input -> Try(
+          decode(cid, createdAt, nonMaintainerSignatories, nonSignatoryStakeholders, keyMaintainers)
+        )
+      }
+
+    // A violated requirement shows up as an exception thrown by the FatContractInstanceImpl
+    // constructor, so every requirement test starts by checking that nothing threw.
+    def assertNoException(): Unit =
+      results.foreach { case (input, result) =>
+        result match {
+          case Failure(e) => fail(s"decoding threw an exception for $input: $e", e)
+          case Success(_) => ()
+        }
+      }
+
+    def decoded: Seq[(Decoding, FatContractInstance)] =
+      results.collect { case (input, Success(Right(instance))) => input -> instance }
+
+    // Sanity check: the tests below are only meaningful if the success path is exercised.
+    "decode some of the explored inputs successfully" in {
+      decoded should not be empty
+    }
+
+    // Requirement: maintainers should be a TreeSet
+    "satisfy the requirement 'maintainers should be a TreeSet'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          instance.maintainers shouldBe a[TreeSet[?]]
+        }
+      }
+    }
+
+    // Requirement: maintainers should be a subset of signatories
+    "satisfy the requirement 'maintainers should be a subset of signatories'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          instance.maintainers.subsetOf(instance.signatories) shouldBe true
+        }
+      }
+      // A key whose maintainers are not declared as signatories is accepted, as the
+      // maintainers are added to the signatories.
+      inside(decode(relativeCid, timestamp, Seq.empty, Seq.empty, Some(Seq("bob")))) {
+        case Right(instance) =>
+          instance.signatories shouldBe TreeSet(Party.assertFromString("bob"))
+      }
+    }
+
+    // Requirement: signatories should be non empty
+    "satisfy the requirement 'signatories should be non empty'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          instance.signatories should not be empty
+        }
+      }
+      inside(decode(relativeCid, timestamp, Seq.empty, Seq.empty, None)) {
+        case Left(DecodeError(errorMessage)) =>
+          errorMessage should include(
+            "maintainers or non_maintainer_signatories should be non empty"
+          )
+      }
+    }
+
+    // Requirement: signatories should be a subset of stakeholders
+    "satisfy the requirement 'signatories should be a subset of stakeholders'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          instance.signatories.subsetOf(instance.stakeholders) shouldBe true
+        }
+      }
+      // Stakeholders that are not signatories are accepted and kept
+      inside(decode(relativeCid, timestamp, Seq("alice"), Seq("bob"), None)) {
+        case Right(instance) =>
+          instance.stakeholders shouldBe
+            TreeSet(Party.assertFromString("alice"), Party.assertFromString("bob"))
+      }
+    }
+
+    // Requirement: creation time 'now' is not allowed for local and absolute contract ids
+    "satisfy the requirement 'creation time now is not allowed for local and absolute contract ids'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          if (instance.createdAt == CreationTime.Now) {
+            instance.contractId.isAbsolute shouldBe false
+            instance.contractId.isLocal shouldBe false
+          }
+        }
+      }
+      localOrAbsoluteCids.foreach { cid =>
+        withClue(cid.coid) {
+          inside(decode(cid, CreationTime.Now)) { case Left(DecodeError(errorMessage)) =>
+            errorMessage should include("'now' is not allowed for local and absolute")
+          }
+        }
+      }
+      // ... but 'now' is accepted for relative contract ids ...
+      inside(decode(relativeCid, CreationTime.Now)) { case Right(instance) =>
+        instance.createdAt shouldBe CreationTime.Now
+        instance.contractId shouldBe relativeCid
+      }
+      // ... and a concrete creation time is accepted for any contract id
+      allCids.foreach(cid => decode(cid, timestamp) shouldBe a[Right[?, ?]])
+    }
+
+    // Requirement: template ID of the contract key must match the template ID of the contract
+    "satisfy the requirement 'template id of the contract key must match the template id of the contract'" in {
+      assertNoException()
+      decoded.foreach { case (input, instance) =>
+        withClue(input) {
+          instance.contractKeyWithMaintainers.foreach(
+            _.globalKey.templateId shouldBe instance.templateId
+          )
+        }
+      }
+      // alice is the key maintainer, so she must not also be a non maintainer signatory
+      inside(
+        decode(
+          relativeCid,
+          timestamp,
+          nonMaintainerSignatories = Seq.empty,
+          keyMaintainers = Some(Seq("alice")),
+        )
+      ) { case Right(instance) =>
+        instance.contractKeyWithMaintainers.map(_.globalKey.templateId) shouldBe
+          Some(instance.templateId)
       }
     }
   }

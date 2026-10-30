@@ -55,15 +55,13 @@ sealed trait JsonApiConformanceBase
       TestInclusions,
       /* Env arg inclusions */
   ) = {
-    val participants = testParticipants
-    val adminParticipants = testAdminParticipants
     val config = Config.default.copy(
       verbose = true,
       timeoutScaleFactor = 3.0,
       reportOnFailuresOnly = false,
       jsonApiMode = useJson,
-      participantsEndpoints = participants,
-      participantsAdminEndpoints = adminParticipants,
+      participantsEndpoints = testParticipants,
+      participantsAdminEndpoints = testAdminParticipants,
       concurrentTestRuns = 4, // these tests run together with all other tests
       connectedSynchronizers = env.environment.config.sequencers.size,
     )

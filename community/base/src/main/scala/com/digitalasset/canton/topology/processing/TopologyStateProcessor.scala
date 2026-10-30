@@ -152,7 +152,6 @@ class TopologyStateProcessorImpl private[processing] (
                 .map(_.authorizingLongTermKey)}"
           )
         case (ValidatedTopologyTransaction(tx, Some(r), _), idx) =>
-          // TODO(i19737): we need to emit a security alert, if the rejection is due to a malicious broadcast
           logger.info(
             s"Rejected transaction ${idx + 1}/$ln ${tx.hash} at ts=$effective, signedBy=${tx.signatures
                 .map(_.authorizingLongTermKey)} due to $r"
@@ -384,14 +383,9 @@ class TopologyStateProcessorImpl private[processing] (
       // subsequently activate the given transaction
       tx_mergedProposalSignatures <- EitherT.right(mergeWithPendingProposal(effective, txA))
       (isMerge, tx_deduplicatedAndMerged) = mergeSignatures(tx_inStore, tx_mergedProposalSignatures)
-      _ <- topologyMappingChecks.checkTransaction(
-        effective,
-        tx_deduplicatedAndMerged,
-        tx_inStore,
-        relaxChecksForBackwardsCompatibility,
-      )
       _ <-
-        // we potentially merge the transaction with the currently active if this is just a signature update
+        // we potentially merge the transaction with the currently active transaction,
+        // if this is just a signature update.
         // now, check if the serial is monotonically increasing
         if (isMerge) {
           EitherTUtil.unitUS[TopologyTransactionRejection]
@@ -400,6 +394,12 @@ class TopologyStateProcessorImpl private[processing] (
             serialIsMonotonicallyIncreasing(tx_inStore, tx_deduplicatedAndMerged).void
           )
         }
+      _ <- topologyMappingChecks.checkTransaction(
+        effective,
+        tx_deduplicatedAndMerged,
+        tx_inStore,
+        relaxChecksForBackwardsCompatibility,
+      )
       // we check if the transaction is properly authorized given the current topology state
       // if it is a proposal, then we demand that all signatures are appropriate (but
       // not necessarily sufficient)

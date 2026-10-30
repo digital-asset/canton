@@ -102,5 +102,22 @@ class CantonVersionTest extends AnyWordSpec with BaseTest {
       v("1.0.1-SNAPSHOT") > v("1.0.0") shouldBe true
 
     }
+
+    "support v31 topology mappings from every 3.7.0 pre-release on" in {
+      import ReleaseVersion.Feature.topologyMappingProtoV31.supported
+
+      Seq(
+        "3.7.0",
+        "3.7.0-SNAPSHOT",
+        "3.7.0-snapshot.20261022.20797.0.vd0a4e6f2",
+        "3.7.0-rc1",
+        "3.7.1",
+        "4.0.0",
+      ).foreach(raw => withClue(raw)(supported(Some(v(raw))) shouldBe true))
+      Seq("3.6.9", "3.6.9-SNAPSHOT", "3.6.99-snapshot.20261022.20797.0.vd0a4e6f2").foreach(raw =>
+        withClue(raw)(supported(Some(v(raw))) shouldBe false)
+      )
+      supported(None) shouldBe false
+    }
   }
 }

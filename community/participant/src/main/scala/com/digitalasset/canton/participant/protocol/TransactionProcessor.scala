@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
-import cats.syntax.bifunctor.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.base.error.{
   Alarm,
@@ -51,7 +50,10 @@ import com.digitalasset.canton.participant.protocol.validation.{
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  SubmissionAccounting,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
@@ -163,19 +165,17 @@ class TransactionProcessor(
       trafficCost: Long,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    trafficEnforcementBackendO match {
-      case Some(backend) =>
-        backend
-          .validateTraffic(
-            actAs = submissionParam.submitterInfo.actAs,
-            trafficCost = trafficCost,
-          )(traceContext)
-          .leftWiden[RpcError]
-      case None => EitherT.rightT(())
-    }
+    TrafficEnforcementBackend.registerIfEnabled(
+      trafficEnforcementBackendO,
+      submissionParam.submitterInfo.changeId,
+      submissionParam.submitterInfo.submissionId,
+      submissionParam.accounting,
+      trafficCost,
+    )(ErrorLoggingContext.fromTracedLogger(logger)(traceContext), ec)
 
   def submit(
       submitterInfo: SubmitterInfo,
+      accounting: SubmissionAccounting,
       transactionMeta: TransactionMeta,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
@@ -190,7 +190,13 @@ class TransactionProcessor(
     this
       .submit(
         TransactionProcessingSteps
-          .SubmissionParam(submitterInfo, transactionMeta, transaction, disclosedContracts),
+          .SubmissionParam(
+            submitterInfo,
+            transactionMeta,
+            transaction,
+            disclosedContracts,
+            accounting,
+          ),
         topologySnapshot,
       )
       .map { futRes =>
@@ -401,7 +407,7 @@ object TransactionProcessor {
     }
 
     @Explanation(
-      """This error occurs when a command is submitted while the system is performing a shutdown."""
+      """This error occurs when a command is submitted while the system is performing a shutdown or is passive."""
     )
     @Resolution(
       "Assuming that the participant will restart or failover eventually, retry in a couple of seconds."
@@ -409,10 +415,12 @@ object TransactionProcessor {
     object SubmissionDuringShutdown
         extends ErrorCode(
           id = "SUBMISSION_DURING_SHUTDOWN",
-          ErrorCategory.ContentionOnSharedResources,
+          ErrorCategory.TransientServerFailure,
         ) {
       final case class Rejection()
-          extends TransactionErrorImpl(cause = "Command submitted during shutdown.")
+          extends TransactionErrorImpl(
+            cause = "Command submitted during shutdown or while passive."
+          )
           with TransactionSubmissionError
     }
 

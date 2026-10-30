@@ -46,18 +46,19 @@ object Dependencies {
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.13.0"
-  lazy val checkerFramework_version = "4.2.2"
+  lazy val checkerFramework_version = "4.3.1"
   lazy val chimney_version = "1.4.0"
-  lazy val circe_version = "0.14.2"
+  lazy val circe_version = "0.14.17"
+  private val circe_generic_extras_version = "0.14.4"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "12.0.2"
-  // From https://github.com/googleapis/java-cloud-bom/tree/v26.85.0
-  // kms 2.97.0 and storage 2.70.0 are within the same compatibility matrix
+  // google-cloud-kms and google-cloud-storage share the same compatibility matrix:
+  // https://github.com/googleapis/google-cloud-java/blob/main/README.md
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val gcp_kms_version = "2.97.0"
-  lazy val gcp_storage_version = "2.70.0"
+  lazy val google_cloud_kms_version = "2.103.0"
+  lazy val google_cloud_storage_version = "2.76.0"
   lazy val zstd_version = "1.5.7-12"
   lazy val gson_version = "2.14.0"
   lazy val gson_fire_version = "1.9.0"
@@ -66,12 +67,16 @@ object Dependencies {
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "3.0.0"
-  lazy val magnolia_version = "1.1.10"
+  lazy val magnolia_version = "1.1.14"
   lazy val magnolifyScalacheck_version = "0.9.8"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.3.0"
   lazy val munit_version = "1.3.6"
+  private val opentelemetry_version = "1.67.0"
+  private val opentelemetry_alpha_version = "1.67.0-alpha"
+  private val otel_instrumentation_version = "2.33.0"
+  private val otel_instrumentation_alpha_version = "2.33.0-alpha"
   lazy val grpc_version = io_grpc_grpc_api.revision
 
   lazy val pekko_http_backend_version = "3.11.0"
@@ -127,7 +132,10 @@ object Dependencies {
   lazy val monocle_macro = "dev.optics" %% "monocle-macro" % monocle_version
 
   // ammonite requires the full scala version including patch number
-  lazy val ammonite = "com.lihaoyi" % "ammonite" % ammonite_version cross CrossVersion.full
+  lazy val ammonite = ("com.lihaoyi" % "ammonite" % ammonite_version)
+    .cross(CrossVersion.full)
+    .excludeAll(ExclusionRule().withOrganization("org.jline"))
+
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
 
   lazy val h2 = "com.h2database" % "h2" % h2_version
@@ -171,6 +179,47 @@ object Dependencies {
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
 
+  lazy val opentelemetry_instrumentation_grpc =
+    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % otel_instrumentation_alpha_version
+  // https://github.com/open-telemetry/opentelemetry-java-instrumentation/tree/main/instrumentation/hikaricp-3.0/library
+  lazy val opentelemetry_instrumentation_hikari =
+    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_instrumentation_api =
+    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api" % otel_instrumentation_version
+  lazy val opentelemetry_instrumentation_api_incubator =
+    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api-incubator" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_instrumentation_runtime =
+    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_semconv = "io.opentelemetry.semconv" % "opentelemetry-semconv" % "1.44.0"
+  lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
+  lazy val opentelemetry_api_incubator =
+    "io.opentelemetry" % "opentelemetry-api-incubator" % opentelemetry_alpha_version
+  lazy val opentelemetry_context =
+    "io.opentelemetry" % "opentelemetry-context" % opentelemetry_version
+  lazy val opentelemetry_exporter_common =
+    "io.opentelemetry" % "opentelemetry-exporter-common" % opentelemetry_version
+  lazy val opentelemetry_exporter_otlp =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp" % opentelemetry_version
+  lazy val opentelemetry_exporter_otlp_common =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp-common" % opentelemetry_version
+  lazy val opentelemetry_exporter_prometheus =
+    "io.opentelemetry" % "opentelemetry-exporter-prometheus" % opentelemetry_alpha_version
+  lazy val opentelemetry_exporter_sender_okhttp =
+    "io.opentelemetry" % "opentelemetry-exporter-sender-okhttp" % opentelemetry_version
+  lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
+  lazy val opentelemetry_sdk_common =
+    "io.opentelemetry" % "opentelemetry-sdk-common" % opentelemetry_version
+  lazy val opentelemetry_sdk_extension_autoconfigure_spi =
+    "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure-spi" % opentelemetry_version
+  lazy val opentelemetry_sdk_logs =
+    "io.opentelemetry" % "opentelemetry-sdk-logs" % opentelemetry_version
+  lazy val opentelemetry_sdk_metrics =
+    "io.opentelemetry" % "opentelemetry-sdk-metrics" % opentelemetry_version
+  lazy val opentelemetry_sdk_testing =
+    "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
+  lazy val opentelemetry_sdk_trace =
+    "io.opentelemetry" % "opentelemetry-sdk-trace" % opentelemetry_version
+
   lazy val pekko_projection_core =
     "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version
   lazy val pekko_projection_jdbc =
@@ -198,15 +247,15 @@ object Dependencies {
 
   lazy val scalatest_compatible = "org.scalatest" % "scalatest-compatible" % "3.2.20"
   lazy val scalatest_wordspec = "org.scalatest" %% "scalatest-wordspec" % "3.2.11"
-  lazy val scalatest_flatspec = "org.scalatest" %% "scalatest-flatspec" % "3.2.11"
+  lazy val scalatest_flatspec = "org.scalatest" %% "scalatest-flatspec" % "3.2.20"
   lazy val scalatest_shouldmatchers = "org.scalatest" %% "scalatest-shouldmatchers" % "3.2.11"
 
-  lazy val scalactic = "org.scalactic" %% "scalactic" % "3.2.11"
+  lazy val scalactic = "org.scalactic" %% "scalactic" % "3.2.20"
 
   // As an alternative to `mockito-scala`, available on Scala 3
   lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
 
-  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.11.1"
   lazy val junit_interface = "com.github.sbt" % "junit-interface" % "0.13.3"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
@@ -243,7 +292,7 @@ object Dependencies {
     "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val circe_generic_extras =
-    "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+    "io.circe" %% "circe-generic-extras" % circe_generic_extras_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
@@ -282,9 +331,10 @@ object Dependencies {
   lazy val aws_sts = "software.amazon.awssdk" % "sts" % aws_version
 
   // GCP SDK for Java API to encrypt/decrypt keys using GCP KMS
-  lazy val gcp_kms = "com.google.cloud" % "google-cloud-kms" % gcp_kms_version
+  lazy val google_cloud_kms = "com.google.cloud" % "google-cloud-kms" % google_cloud_kms_version
   // GCP SDK for Java API to read from GCP buckets (used in CN topology integration testing)
-  lazy val gcp_storage = "com.google.cloud" % "google-cloud-storage" % gcp_storage_version
+  lazy val google_cloud_storage =
+    "com.google.cloud" % "google-cloud-storage" % google_cloud_storage_version
 
   lazy val zstd = "com.github.luben" % "zstd-jni" % zstd_version
 
@@ -296,6 +346,9 @@ object Dependencies {
   // The codegen plugin generates stubs against io.grpc classes, so it tracks the grpc runtime
   // rather than carrying a pin of its own.
   lazy val protoc_gen_grpc_java = "io.grpc" % "protoc-gen-grpc-java" % grpc_api.revision
+  // sbt-protoc runs this generator inside sbt's JVM
+  lazy val protoc_gen_sbt =
+    "com.thesamet.scalapb" %% "protoc-gen" % protoc_gen.revision
 
   // We prevent library conflicts that new tapir creates / some tests fail
   val tapirExclusions = Seq(
@@ -346,7 +399,7 @@ object Dependencies {
   // Transcode dependencies
   lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
-  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.10.3"
+  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.11.8"
   lazy val semver = "org.semver4j" % "semver4j" % "6.0.0"
   lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
   lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version

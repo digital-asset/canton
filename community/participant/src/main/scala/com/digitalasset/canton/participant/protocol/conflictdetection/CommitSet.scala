@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.
   CreationCommit,
   UnassignmentCommit,
 }
+import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
@@ -63,6 +64,9 @@ final case class CommitSet(
   requireDisjoint(unassignments.keySet -> "unassignments", archivals.keySet -> "archivals")
   requireDisjoint(assignments.keySet -> "assignments", creations.keySet -> "creations")
 
+  def excludeForPartyOnboarding(stakeholders: Set[LfPartyId]): Boolean =
+    CommitSet.excludeForPartyOnboarding(hostedOnboardingPartiesO, stakeholders)
+
   override def prettyCompanion: PrettyPrintingCompanion[CommitSet] =
     CommitSet
 }
@@ -79,6 +83,19 @@ object CommitSet extends PrettyPrintingCompanion[CommitSet] {
   )
 
   val empty: CommitSet = CommitSet(Map.empty, Map.empty, Map.empty, Map.empty, Nil, None)
+
+  // Exclude contracts if there are onboarding hosted parties and all hosted contract stakeholders are onboarding.
+  // This filter excludes activeness changes whose hosted stakeholders are all onboarding parties and in such cases
+  // helps ensure that "fully" hosted non-stakeholder informees witness the corresponding change as a ledger effect
+  // rather than an ACS delta. AcsChangeFactory.contractActivenessChanged(cid) returning false causes the indexer to
+  // treat corresponding exercises and creates as witnessed events.
+  def excludeForPartyOnboarding(
+      hostedOnboardingPartiesO: Option[HostedOnboardingParties],
+      stakeholders: Set[LfPartyId],
+  ): Boolean =
+    hostedOnboardingPartiesO.fold(false)(
+      _.hostedPartiesIfAllOnboarding(stakeholders).nonEmpty
+    )
 
   /** Contract creation reference information needed for persistence and updating of in-memory state
     * when the associated transaction commits.
@@ -156,24 +173,85 @@ object CommitSet extends PrettyPrintingCompanion[CommitSet] {
       createdContracts: Map[LfContractId, GenContractInstance],
       crashAfterFailedValidation: Boolean,
       hostedOnboardingPartiesO: Option[HostedOnboardingParties],
+      activationsDeactivationsOrderO: Option[Map[LfContractId, Seq[ChangeType]]],
   )(implicit loggingContext: ErrorLoggingContext): CommitSet = {
-    if (!activenessResult.isSuccessful) {
-      SyncServiceAlarm
-        .Warn(s"Request $requestId with failed activeness check is approved.")
-        .report()
-      loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
-      if (crashAfterFailedValidation) {
-        throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
+    alarmIfActivenessCheckFailed(
+      activenessResult.isSuccessful,
+      activenessResult,
+      requestId,
+      requestDescription = "Request",
+      crashAfterFailedValidation,
+    )
+
+    // invariant checks only when `activationsDeactivationsOrderO` is not None, otherwise model conformance
+    // checks failed
+    activationsDeactivationsOrderO.foreach { operations =>
+      // Model conformance filters out the nodes whose hosted informees are all onboarding, so their
+      // contracts may be missing from `activationsDeactivationsOrderO`. These contracts are excluded
+      // from the checks, as AcsChangeSupport.fromCommitSet excludes them from the ACS change anyway.
+      createdContracts.foreach { case (cid, contract) =>
+        val opsO = operations.get(cid)
+
+        if (
+          !excludeForPartyOnboarding(hostedOnboardingPartiesO, contract.metadata.stakeholders) &&
+          !opsO.exists(_.contains(ChangeType.Activation))
+        ) {
+          loggingContext.warn(
+            s"Created contract $cid has no Activation in its operation history. " +
+              s"Operations: $opsO"
+          )
+        }
+      }
+
+      consumedInputsOfHostedParties.foreach { case (cid, stakeholders) =>
+        val opsO = operations.get(cid)
+
+        if (
+          !excludeForPartyOnboarding(hostedOnboardingPartiesO, stakeholders) &&
+          !opsO.flatMap(_.lastOption).contains(ChangeType.Deactivation)
+        ) {
+          loggingContext.warn(
+            s"Archived contract $cid does not have Deactivation as its last operation. " +
+              s"Operations: $opsO"
+          )
+        }
+      }
+
+      transient.foreach { case (cid, stakeholders) =>
+        if (!excludeForPartyOnboarding(hostedOnboardingPartiesO, stakeholders))
+          operations.get(cid) match {
+            case Some(ops)
+                if ops.contains(ChangeType.Activation) &&
+                  ops.contains(ChangeType.Deactivation) =>
+              ()
+
+            case opsO =>
+              loggingContext.warn(
+                s"Transient contract $cid does not have both an Activation and a " +
+                  s"Deactivation. Operations: $opsO"
+              )
+          }
       }
     }
 
-    val archivals = (consumedInputsOfHostedParties ++ transient).map {
-      case (cid, hostedStakeholders) =>
-        cid -> CommitSet.ArchivalCommit(hostedStakeholders)
-    }
+    val archivals = (consumedInputsOfHostedParties ++ transient)
+      .filter { case (cid, _) =>
+        activationsDeactivationsOrderO.flatMap(_.get(cid)).flatMap(_.lastOption) match {
+          // the last state change for that cid wins, regardless of whether it was preceded by
+          // activations / deactivations for that cid in the same transaction
+          case Some(ChangeType.Deactivation) => true
+          case Some(ChangeType.Activation) => false
+          // the order is unknown because model conformance failed: keep the archival
+          case None => true
+        }
+      }
+      .fmap(CommitSet.ArchivalCommit(_))
     val reassignmentCounter = ReassignmentCounter.Genesis
+
+    // All created contracts are kept, also when the last state change is a deactivation:
     val creations =
       createdContracts.fmap(c => CommitSet.CreationCommit(c.metadata, reassignmentCounter))
+
     CommitSet(
       archivals = archivals,
       creations = creations,
@@ -255,4 +333,19 @@ object CommitSet extends PrettyPrintingCompanion[CommitSet] {
       hostedOnboardingPartiesO = None,
     )
 
+  private[protocol] def alarmIfActivenessCheckFailed(
+      activenessResultIsSuccessful: Boolean,
+      activenessResult: ActivenessResult,
+      requestId: RequestId,
+      requestDescription: String,
+      crashAfterFailedValidation: Boolean,
+  )(implicit loggingContext: ErrorLoggingContext): Unit =
+    if (!activenessResultIsSuccessful) {
+      val message = s"$requestDescription $requestId with failed activeness check is approved."
+      SyncServiceAlarm.Warn(message).report()
+      loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
+      if (crashAfterFailedValidation) {
+        throw new RuntimeException(message)
+      }
+    }
 }

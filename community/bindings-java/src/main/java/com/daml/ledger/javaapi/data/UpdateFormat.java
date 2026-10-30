@@ -15,6 +15,8 @@ public final class UpdateFormat {
   @NonNull private final Optional<@NonNull EventFormat> includeReassignments;
   @NonNull private final Optional<@NonNull TopologyFormat> includeTopologyEvents;
 
+  @NonNull private final Optional<@NonNull TransactionFormat> includeTransactionsAndReassignments;
+
   public static UpdateFormat fromProto(TransactionFilterOuterClass.UpdateFormat protoFormat) {
     return new UpdateFormat(
         protoFormat.hasIncludeTransactions()
@@ -25,6 +27,10 @@ public final class UpdateFormat {
             : Optional.empty(),
         protoFormat.hasIncludeTopologyEvents()
             ? Optional.of(TopologyFormat.fromProto(protoFormat.getIncludeTopologyEvents()))
+            : Optional.empty(),
+        protoFormat.hasIncludeTransactionsAndReassignments()
+            ? Optional.of(
+                TransactionFormat.fromProto(protoFormat.getIncludeTransactionsAndReassignments()))
             : Optional.empty());
   }
 
@@ -37,6 +43,9 @@ public final class UpdateFormat {
         eventFormat -> builder.setIncludeReassignments(eventFormat.toProto()));
     includeTopologyEvents.ifPresent(
         topologyFormat -> builder.setIncludeTopologyEvents(topologyFormat.toProto()));
+    includeTransactionsAndReassignments.ifPresent(
+        transactionFormat ->
+            builder.setIncludeTransactionsAndReassignments(transactionFormat.toProto()));
     return builder.build();
   }
 
@@ -52,13 +61,31 @@ public final class UpdateFormat {
     return includeTopologyEvents;
   }
 
+  /**
+   * Shorthand for including both transactions in the given format and (un)assignments filtered by
+   * its event format. If set, {@link #getIncludeTransactions()} and {@link
+   * #getIncludeReassignments()} must be empty.
+   */
+  public Optional<@NonNull TransactionFormat> getIncludeTransactionsAndReassignments() {
+    return includeTransactionsAndReassignments;
+  }
+
   public UpdateFormat(
       @NonNull Optional<@NonNull TransactionFormat> includeTransactions,
       @NonNull Optional<@NonNull EventFormat> includeReassignments,
       @NonNull Optional<@NonNull TopologyFormat> includeTopologyEvents) {
+    this(includeTransactions, includeReassignments, includeTopologyEvents, Optional.empty());
+  }
+
+  public UpdateFormat(
+      @NonNull Optional<@NonNull TransactionFormat> includeTransactions,
+      @NonNull Optional<@NonNull EventFormat> includeReassignments,
+      @NonNull Optional<@NonNull TopologyFormat> includeTopologyEvents,
+      @NonNull Optional<@NonNull TransactionFormat> includeTransactionsAndReassignments) {
     this.includeTransactions = includeTransactions;
     this.includeReassignments = includeReassignments;
     this.includeTopologyEvents = includeTopologyEvents;
+    this.includeTransactionsAndReassignments = includeTransactionsAndReassignments;
   }
 
   @Override
@@ -70,7 +97,9 @@ public final class UpdateFormat {
         + includeReassignments
         + ", includeTopologyEvents="
         + includeTopologyEvents
-        + +'}';
+        + ", includeTransactionsAndReassignments="
+        + includeTransactionsAndReassignments
+        + '}';
   }
 
   @Override
@@ -80,11 +109,17 @@ public final class UpdateFormat {
     UpdateFormat that = (UpdateFormat) o;
     return Objects.equals(includeTransactions, that.includeTransactions)
         && Objects.equals(includeReassignments, that.includeReassignments)
-        && Objects.equals(includeTopologyEvents, that.includeTopologyEvents);
+        && Objects.equals(includeTopologyEvents, that.includeTopologyEvents)
+        && Objects.equals(
+            includeTransactionsAndReassignments, that.includeTransactionsAndReassignments);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(includeTransactions, includeReassignments, includeTopologyEvents);
+    return Objects.hash(
+        includeTransactions,
+        includeReassignments,
+        includeTopologyEvents,
+        includeTransactionsAndReassignments);
   }
 }

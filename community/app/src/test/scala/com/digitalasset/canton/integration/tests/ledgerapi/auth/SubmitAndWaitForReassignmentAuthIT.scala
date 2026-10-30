@@ -12,7 +12,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final class SubmitAndWaitForReassignmentAuthIT
     extends SyncServiceCallAuthTests
-    with SubmitDummyReassignment {
+    with SubmitDummyReassignment
+    with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -24,5 +25,10 @@ final class SubmitAndWaitForReassignmentAuthIT
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
   ): Future[Any] =
-    submitAndWaitForReassignment(context.token, getMainActorId, context.userId)
+    serviceCallWithAccountId(context, accountId = "")
+
+  override def serviceCallWithAccountId(context: ServiceCallContext, accountId: String)(implicit
+      env: TestConsoleEnvironment
+  ): Future[Any] =
+    submitAndWaitForReassignment(context.token, getMainActorId, context.userId, accountId)
 }

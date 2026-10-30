@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.admin.api.client.AdminApiResponseValidation
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -18,6 +19,8 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
@@ -37,16 +40,12 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
 }
-import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
+import com.digitalasset.canton.util.GrpcStreamingUtils
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.{
-  ProtoVersion,
-  ProtocolVersion,
-  ProtocolVersionValidation,
-  ReleaseVersion,
-}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ReleaseVersion}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.Context.CancellableContext
@@ -55,7 +54,7 @@ import io.grpc.{Context, ManagedChannel}
 
 import java.io.{ByteArrayInputStream, InputStream}
 import java.time.Instant
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 object TopologyAdminCommands {
@@ -105,8 +104,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListNamespaceDelegationResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -142,8 +141,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListDecentralizedNamespaceDefinitionResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -179,8 +178,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListOwnerToKeyMappingResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -213,8 +212,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListPartyToKeyMappingResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -250,8 +249,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListSynchronizerTrustCertificateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -287,8 +286,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListParticipantSynchronizerPermissionResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -323,8 +322,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListPartyHostingLimitsResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -359,8 +358,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListVettedPackagesResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -397,8 +396,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListPartyToParticipantResult.fromProtoV30(result))
           .leftMap(_.toString)
 
@@ -435,8 +434,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListSynchronizerParametersStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -472,8 +471,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListSequencingParametersStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -509,8 +508,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListMediatorSynchronizerStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -546,8 +545,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListSequencerSynchronizerStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -582,8 +581,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListLsuAnnouncementResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -621,8 +620,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListLsuSequencerConnectionSuccessorResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
@@ -648,8 +647,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.storeIds,
             "store_ids",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((storeId, field) => TopologyStoreId.fromProtoV30(storeId, field))
           .leftMap(_.message)
     }
@@ -928,7 +927,12 @@ object TopologyAdminCommands {
       ) =
         ProtoConverter
           .parseRequired(
-            SignedTopologyTransactions.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _),
+            SignedTopologyTransactions
+              .fromProtoV30(
+                AdminApiResponseValidation.Trusted,
+                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                _,
+              ),
             "result",
             response.result,
           )
@@ -979,8 +983,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListPartiesResult.fromProtoV30(result))
           .leftMap(_.toString)
 
@@ -1026,8 +1030,8 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.results,
             "results",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((result, _) => ListKeyOwnersResult.fromProtoV30(result))
           .leftMap(_.toString)
 
@@ -1066,11 +1070,12 @@ object TopologyAdminCommands {
         wrapV31: ProtoV31 => T,
     ): Either[String, T] = {
 
-      // TODO(#32231): Revise when the feature (signingKeyUsageProtoV31) is actually implemented.
-      // We force to v31 ONLY if v30 validation explicitly fails (e.g. a PartyToParticipant hosting state is NOMINATED or FREEZING)
+      // Use v31 if v30 cannot express the mapping (e.g. a PartyToParticipant hosting state is Nominated
+      // or Freezing), or if the server accepts v31: such a server rejects a v30 PartyToParticipant
+      // mapping while the party has hosting states that v30 cannot express.
       val useV31 = mapping
         .canBeSerializedTo(ProtoVersion(30))
-        .isLeft || ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion)
+        .isLeft || ReleaseVersion.Feature.topologyMappingProtoV31.supported(serverVersion)
 
       ProposalMappingSerializer[T](mapping)
         .attemptVersion(
@@ -1178,7 +1183,8 @@ object TopologyAdminCommands {
         topologySnapshot: ByteString,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
-    ) extends BaseWriteCommand[
+    )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
+        extends BaseWriteCommand[
           ImportTopologySnapshotRequest,
           ImportTopologySnapshotResponse,
           Unit,
@@ -1203,7 +1209,7 @@ object TopologyAdminCommands {
           service.withDeadline(null).importTopologySnapshot,
           bytes =>
             ImportTopologySnapshotRequest(
-              ByteString.copyFrom(bytes),
+              bytes,
               Some(store.toProtoV30),
               waitToBecomeEffective.map(_.toProtoPrimitive),
             ),
@@ -1218,7 +1224,8 @@ object TopologyAdminCommands {
         topologySnapshotStream: InputStream,
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
-    ) extends BaseWriteCommand[
+    )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
+        extends BaseWriteCommand[
           Unit,
           ImportTopologySnapshotV2Response,
           Unit,
@@ -1230,18 +1237,16 @@ object TopologyAdminCommands {
           service: TopologyManagerWriteServiceStub,
           request: Unit,
       ): Future[ImportTopologySnapshotV2Response] =
-        ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
-          GrpcStreamingUtils.streamToServer(
-            service.importTopologySnapshotV2,
-            bytes =>
-              ImportTopologySnapshotV2Request(
-                ByteString.copyFrom(bytes),
-                Some(store.toProtoV30),
-                waitToBecomeEffective.map(_.toProtoPrimitive),
-              ),
-            inputStream,
-          )
-        }
+        GrpcStreamingUtils.streamToServer(
+          service.importTopologySnapshotV2,
+          bytes =>
+            ImportTopologySnapshotV2Request(
+              bytes,
+              Some(store.toProtoV30),
+              waitToBecomeEffective.map(_.toProtoPrimitive),
+            ),
+          topologySnapshotStream,
+        )
 
       override protected def handleResponse(
           response: ImportTopologySnapshotV2Response
@@ -1278,10 +1283,15 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.transactions,
             "transactions",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           )((tx, _) =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
+            SignedTopologyTransaction
+              .fromProtoV30(
+                AdminApiResponseValidation.Trusted,
+                TopologyTransactionDeserializationContext(TopologyLimits.default),
+                tx,
+              )
           )
           .leftMap(_.message)
     }
@@ -1313,15 +1323,18 @@ object TopologyAdminCommands {
           .validateLengthThen(
             response.generatedTransactions,
             "generated_transactions",
-            ProtocolVersionValidation.AlwaysValidation,
-            ProtoValidation.MaxCollectionSize,
+            AdminApiResponseValidation.Trusted,
+            AdminApiResponseValidation.NoLengthLimit,
           ) { case (generatedTransaction, _) =>
             val serializedTransaction = generatedTransaction.serializedTransaction
             val serializedHash = generatedTransaction.transactionHash
             for {
               parsedTopologyTransaction <-
-                TopologyTransaction
-                  .fromByteString(ProtocolVersionValidation.AlwaysValidation, serializedTransaction)
+                TopologyTransaction.fromByteString(
+                  AdminApiResponseValidation.Trusted,
+                  TopologyTransactionDeserializationContext(TopologyLimits.default),
+                  serializedTransaction,
+                )
               // We don't really need the hash from the response here because we can re-build it from the deserialized
               // topology transaction. But users of the API without access to this code wouldn't be able to do that,
               // which is why the hash is returned by the API. Let's still verify that they match here.
@@ -1382,6 +1395,7 @@ object TopologyAdminCommands {
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
         serverVersion: Option[ReleaseVersion],
+        protocolVersion: Option[ProtocolVersion],
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -1405,6 +1419,7 @@ object TopologyAdminCommands {
                   change.toProto,
                   serial.map(_.value).getOrElse(0),
                   protoMapping,
+                  protocolVersion.map(_.toProtoPrimitive),
                 )
               ),
               mustFullyAuthorize = mustFullyAuthorize,
@@ -1429,7 +1444,8 @@ object TopologyAdminCommands {
         .flatMap(
           SignedTopologyTransaction
             .fromProtoV30(
-              ProtocolVersionValidation.AlwaysValidation,
+              AdminApiResponseValidation.Trusted,
+              TopologyTransactionDeserializationContext(TopologyLimits.default),
               _,
             )
             .leftMap(_.message)
@@ -1465,6 +1481,7 @@ object TopologyAdminCommands {
           store,
           waitToBecomeEffective,
           serverVersion,
+          protocolVersion = None,
         )
 
     }
@@ -1503,7 +1520,11 @@ object TopologyAdminCommands {
         .toRight("no transaction in response")
         .flatMap(
           SignedTopologyTransaction
-            .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
+            .fromProtoV30(
+              AdminApiResponseValidation.Trusted,
+              TopologyTransactionDeserializationContext(TopologyLimits.default),
+              _,
+            )
             .leftMap(_.message)
             .flatMap(tx =>
               tx.selectMapping[M]
@@ -1614,7 +1635,7 @@ object TopologyAdminCommands {
           .validate(
             response.uniqueIdentifier,
             "unique_identifier",
-            ProtocolVersionValidation.AlwaysValidation,
+            AdminApiResponseValidation.Trusted,
           )
           .leftMap(_.message)
           .flatMap { uniqueIdentifier =>

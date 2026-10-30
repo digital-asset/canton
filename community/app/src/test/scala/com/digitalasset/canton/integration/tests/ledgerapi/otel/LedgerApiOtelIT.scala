@@ -442,6 +442,7 @@ class LedgerApiOtelIT extends LedgerApiOtelITBase {
         ),
         includeReassignments = None,
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     )
 

@@ -3,9 +3,18 @@
 
 package com.digitalasset.canton.platform.component
 
+import com.daml.ledger.api.v2.transaction_filter.{
+  EventFormat as ProtoEventFormat,
+  Filters as ProtoFilters,
+  TransactionFormat as ProtoTransactionFormat,
+  TransactionShape as ProtoTransactionShape,
+  UpdateFormat as ProtoUpdateFormat,
+}
 import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
+import com.digitalasset.canton.ledger.api.validation.FormatValidator
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
+import com.digitalasset.canton.logging.NoLogging
 import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
@@ -320,6 +329,85 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       updatesWithSynchronizerParameters(
         6
       ).response.value.update.transaction.value.events.loneElement.getCreated.contractId shouldEqual create1._2.loneElement.contractId.coid
+    }
+  }
+
+  "update stream with UpdateFormat.include_transactions_and_reassignments" should {
+    def protoUpdateFormat(includeReassignments: Boolean) = {
+      val transactionFormat = ProtoTransactionFormat(
+        eventFormat = Some(
+          ProtoEventFormat(
+            filtersByParty = Map(dsoParty.value -> ProtoFilters(Nil)),
+            filtersForAnyParty = None,
+            verbose = false,
+          )
+        ),
+        transactionShape = ProtoTransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+      )
+      ProtoUpdateFormat(
+        includeTransactions = Option.when(!includeReassignments)(transactionFormat),
+        includeReassignments = None,
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Option.when(includeReassignments)(transactionFormat),
+      )
+    }
+
+    def validated(protoFormat: ProtoUpdateFormat): UpdateFormat =
+      FormatValidator.validate(protoFormat)(NoLogging).value
+
+    "include reassignments with the event format of the transactions if set and omit them otherwise" in {
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+      val create1 = creates(nextRecordTime, 10)(1)
+      ingestUpdates(create1)
+      ingestUpdateSync(
+        mkReassignmentAccepted(
+          dsoParty.value,
+          "upd-id-ra-include-reassignments-1",
+          withAcsChange = true,
+          create1._2,
+        )
+      )
+      val create2 = creates(nextRecordTime, 10)(1)
+      val rangeEnd = ingestUpdates(create2)
+
+      def updatesFor(updateFormat: UpdateFormat) =
+        index
+          .updates(
+            begin = rangeStart,
+            endAt = Some(rangeEnd),
+            updateFormat = updateFormat,
+            descendingOrder = false,
+            skipPruningChecks = false,
+          )
+          .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
+          .runWith(Sink.seq)
+          .futureValue
+
+      val withFlag = validated(protoUpdateFormat(includeReassignments = true))
+      val withoutFlag = validated(protoUpdateFormat(includeReassignments = false))
+
+      // the shorthand resolves to the same format as setting UpdateFormat.include_reassignments explicitly
+      withFlag shouldBe withoutFlag.copy(includeReassignments =
+        withoutFlag.includeTransactions.map(_.eventFormat)
+      )
+      withoutFlag.includeReassignments shouldBe None
+
+      val updatesWithFlag = updatesFor(withFlag)
+      updatesWithFlag.map(_.update.isReassignment) should contain theSameElementsInOrderAs Seq(
+        false,
+        true,
+        false,
+      )
+      updatesWithFlag(
+        1
+      ).update.reassignment.value.events.loneElement.event.assigned.value.createdEvent.value.contractId shouldEqual create1._2.loneElement.contractId.coid
+
+      val updatesWithoutFlag = updatesFor(withoutFlag)
+      updatesWithoutFlag.map(_.update.isReassignment) should contain theSameElementsInOrderAs Seq(
+        false,
+        false,
+      )
+      updatesWithoutFlag shouldBe updatesWithFlag.filterNot(_.update.isReassignment)
     }
   }
 }

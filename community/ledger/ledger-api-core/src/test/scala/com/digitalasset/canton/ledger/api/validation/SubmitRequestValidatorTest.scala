@@ -10,6 +10,11 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   HashingSchemeVersion as ApiHashingSchemeVersion,
 }
+import com.daml.ledger.api.v2.reassignment_commands.{
+  ReassignmentCommand,
+  ReassignmentCommands,
+  UnassignCommand,
+}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, TransactionFormat}
 import com.daml.ledger.api.v2.value.Value.Sum
@@ -19,12 +24,15 @@ import com.daml.ledger.api.v2.value.{
   TextMap as ApiTextMap,
   *,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.ApiMocks.{commandId, submissionId, userId, workflowId}
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.ReassignmentCommandsSizeConfig
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
 import com.digitalasset.canton.ledger.api.{ApiMocks, DisclosedContract, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.command.{
@@ -55,6 +63,7 @@ import java.time.{Instant, Duration as JDuration}
 class SubmitRequestValidatorTest
     extends AnyWordSpec
     with ValidatorTestUtils
+    with SizeLimitTestUtils
     with TableDrivenPropertyChecks
     with MockitoSugar
     with ArgumentMatchersSugar {
@@ -111,6 +120,7 @@ class SubmitRequestValidatorTest
       prefetchContractKeys = Seq.empty,
       disclosedContracts = Nil,
       tapsMaxPasses = None,
+      accountId = "",
     )
   }
 
@@ -199,6 +209,7 @@ class SubmitRequestValidatorTest
       packageMap = packageMap,
       prefetchKeys = prefetchKeys,
       tapsMaxPasses = None,
+      accountId = None,
     )
   }
 
@@ -318,6 +329,7 @@ class SubmitRequestValidatorTest
             estimateTrafficCost = None,
             tapsMaxPasses = None,
             hashingSchemeVersion = Some(ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V4),
+            accountId = "",
           ),
           currentLedgerTime = internal.ledgerTime,
           currentUtcTime = internal.submittedAt,
@@ -385,6 +397,32 @@ class SubmitRequestValidatorTest
           internal.maxDeduplicationDuration,
         ) shouldEqual Right(
           internal.emptyCommands.copy(synchronizerId = None)
+        )
+      }
+
+      "validate the accountId" in {
+        testedCommandValidator.validateCommands(
+          api.commands.withAccountId("acme/billing"),
+          internal.ledgerTime,
+          internal.submittedAt,
+          internal.maxDeduplicationDuration,
+        ) shouldEqual Right(
+          internal.emptyCommands.copy(accountId = Some(AccountId.tryCreate("acme/billing")))
+        )
+
+        requestMustFailWith(
+          request = testedCommandValidator.validateCommands(
+            api.commands.withAccountId("acme//billing"),
+            internal.ledgerTime,
+            internal.submittedAt,
+            internal.maxDeduplicationDuration,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field account_id: " +
+              "Invalid AccountId 'acme//billing': expected non-empty segments separated by '/', " +
+              "made of ASCII letters, digits, spaces, and @^$.!`-#+'~_|:()",
+          metadata = Map.empty,
         )
       }
 
@@ -750,6 +788,48 @@ class SubmitRequestValidatorTest
           metadata = Map.empty,
         )
       }
+    }
+
+    "validating reassignment commands" should {
+      val maxReassignmentCommands = 2
+      val commandsValidatorWithReassignmentCommandsLimit = new CommandsValidator(
+        validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
+      )(
+        sizeLimitsConfig = sizeLimitsConfig.copy(
+          publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+            reassignmentCommands = ReassignmentCommandsSizeConfig(
+              commandsSizeLimit = PositiveInt.tryCreate(maxReassignmentCommands)
+            )
+          )
+        )
+      )
+      val unassignCommand = ReassignmentCommand(
+        ReassignmentCommand.Command.UnassignCommand(
+          UnassignCommand(
+            contractId = contractId.coid,
+            source = api.synchronizerId,
+            target = "y::synchronizerId",
+            overrideSourceValidationPackageId = None,
+            overrideTargetValidationPackageId = None,
+          )
+        )
+      )
+      def reassignmentCommands(numberOfCommands: Int): ReassignmentCommands =
+        ReassignmentCommands(
+          workflowId = "workflowId",
+          userId = "userId",
+          commandId = "commandId",
+          submitter = api.submitter,
+          submissionId = "submissionId",
+          commands = Seq.fill(numberOfCommands)(unassignCommand),
+          accountId = "",
+        )
+
+      cardinalityLimit("commands", limit = maxReassignmentCommands)(numberOfCommands =>
+        commandsValidatorWithReassignmentCommandsLimit.validateReassignmentCommands(
+          reassignmentCommands(numberOfCommands)
+        )
+      )
     }
 
     "validating contractId values" should {

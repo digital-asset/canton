@@ -18,7 +18,9 @@ import com.daml.ledger.api.v2.update_service.{
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.platform.v1.page_tokens.UpdatesPageToken
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashBuilder, HashPurpose}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, InterfaceFilter, TemplateFilter}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.platform.config.UpdateServiceConfig
@@ -112,6 +114,7 @@ class UpdateServiceRequestValidatorTest
             )
           ),
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     )
 
@@ -141,6 +144,7 @@ class UpdateServiceRequestValidatorTest
           ),
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
       ),
     )
@@ -164,6 +168,7 @@ class UpdateServiceRequestValidatorTest
           ),
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
       ),
     )
@@ -196,6 +201,65 @@ class UpdateServiceRequestValidatorTest
             req.updateFormat.includeReassignments.value.verbose shouldEqual verbose
         }
 
+      }
+
+      "include no reassignments if include_transactions_and_reassignments is not set" in {
+        inside(UpdateServiceRequestValidator.validate(txReq, ledgerEnd)) { case Right(req) =>
+          req.updateFormat.includeReassignments shouldBe None
+        }
+      }
+
+      "include transactions and reassignments if include_transactions_and_reassignments is set" in {
+        val transactionFormat = txReq.updateFormat.value.includeTransactions.value
+        inside(
+          UpdateServiceRequestValidator.validate(
+            txReq.update(
+              _.updateFormat.optionalIncludeTransactions := None,
+              _.updateFormat.includeTransactionsAndReassignments := transactionFormat,
+            ),
+            ledgerEnd,
+          )
+        ) { case Right(req) =>
+          inside(UpdateServiceRequestValidator.validate(txReq, ledgerEnd)) {
+            case Right(reqWithTransactionsOnly) =>
+              req.updateFormat.includeTransactions shouldBe
+                reqWithTransactionsOnly.updateFormat.includeTransactions
+          }
+          req.updateFormat.includeReassignments shouldBe Some(
+            req.updateFormat.includeTransactions.value.eventFormat
+          )
+        }
+      }
+
+      "return the correct error if include_transactions_and_reassignments and include_reassignments are set" in {
+        val transactionFormat = txReq.updateFormat.value.includeTransactions.value
+        requestMustFailWith(
+          request = UpdateServiceRequestValidator.validate(
+            updatesReqBuilder(
+              transactionTemplateIdsO = None,
+              reassignmentsTemplateIdsO = Some(Seq(templateId)),
+            ).update(_.updateFormat.includeTransactionsAndReassignments := transactionFormat),
+            ledgerEnd,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: include_transactions_and_reassignments and include_reassignments cannot both be set",
+          metadata = Map.empty,
+        )
+      }
+
+      "return the correct error if include_transactions_and_reassignments and include_transactions are set" in {
+        val transactionFormat = txReq.updateFormat.value.includeTransactions.value
+        requestMustFailWith(
+          request = UpdateServiceRequestValidator.validate(
+            txReq.update(_.updateFormat.includeTransactionsAndReassignments := transactionFormat),
+            ledgerEnd,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: include_transactions_and_reassignments and include_transactions cannot both be set",
+          metadata = Map.empty,
+        )
       }
 
       "return the correct error without filters in the event format of transactions" in {
@@ -694,6 +758,56 @@ class UpdateServiceRequestValidatorTest
   "UpdateServiceRequestValidator.validateUpdatesPageRequest" should {
     val participant = Ref.ParticipantId.assertFromString("participant")
 
+    val invalidPageTokenErrorPrefix =
+      "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens " +
+        "used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with " +
+        "the same EventFormat settings, the same begin and end with the same Canton participant running " +
+        "the same Canton version. "
+    val differentVersionError =
+      invalidPageTokenErrorPrefix + "Next page token was generated by a different Canton version"
+    val differentParticipantError =
+      invalidPageTokenErrorPrefix + "Next page token was obtained from an other participant node"
+    val differentRequestError =
+      invalidPageTokenErrorPrefix + "Next page token was obtained with different request parameters"
+
+    /** Update format hash as calculated by Version = 1 (which did not include the
+      * includeTransactionsAndReassignments field)
+      */
+    def hashUpdateFormatV1[T <: HashBuilder](hashBuilder: T)(updateFormat: UpdateFormat): T =
+      hashBuilder
+        .addOptional(updateFormat.includeReassignments, UpdateFormatHashUtils.hashEventFormat)
+        .addOptional(updateFormat.includeTopologyEvents, UpdateFormatHashUtils.hashTopologyFormat)
+        .addOptional(updateFormat.includeTransactions, UpdateFormatHashUtils.hashTransactionFormat)
+
+    /** Request checksum as calculated by Version = 1 */
+    def requestChecksumV1(request: GetUpdatesPageRequest): ByteString =
+      PageTokenUtils.toChecksum(
+        Hash
+          .build(HashPurpose.UpdatesPageToken, HashAlgorithm.Sha256)
+          .addOptional(request.beginOffsetExclusive, _.addLong)
+          .addOptional(request.endOffsetInclusive, _.addLong)
+          .addOptional(request.maxPageSize, _.addInt)
+          .addOptional(request.updateFormat, hashUpdateFormatV1)
+          .addBool(request.descendingOrder)
+          .finish()
+      )
+
+    /** Page token as encoded by Version = 1 */
+    def encodeV1(
+        request: GetUpdatesPageRequest,
+        lowestPageOffsetExclusive: Long,
+        highestPageOffsetInclusive: Long,
+        participantId: Ref.ParticipantId,
+    ): UpdatesPageToken =
+      UpdatesPageToken(
+        lowestPageOffsetExclusive = lowestPageOffsetExclusive,
+        highestPageOffsetInclusive = highestPageOffsetInclusive,
+        version = 1,
+        participantIdChecksum = com.digitalasset.canton.ledger.api.messages.update.UpdatesPageToken
+          .participantChecksum(participantId),
+        requestChecksum = requestChecksumV1(request),
+      )
+
     def requestWithMatchingToken(
         beginOffsetExclusive: Option[Long],
         endOffsetInclusive: Option[Long],
@@ -790,7 +904,7 @@ class UpdateServiceRequestValidatorTest
       requestMustFailWith(
         result,
         code = INVALID_ARGUMENT,
-        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was generated by a different Canton version",
+        differentVersionError,
         Map.empty,
       )
     }
@@ -819,7 +933,7 @@ class UpdateServiceRequestValidatorTest
       requestMustFailWith(
         result,
         code = INVALID_ARGUMENT,
-        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was obtained from an other participant node",
+        differentParticipantError,
         Map.empty,
       )
     }
@@ -850,7 +964,76 @@ class UpdateServiceRequestValidatorTest
       requestMustFailWith(
         result,
         code = INVALID_ARGUMENT,
-        "INVALID_UPDATES_PAGE_TOKEN(8,0): The submitted command contains an invalid page token. Tokens used in GetUpdatesPage requests must be taken from a valid GetUpdatesPageResponse and used with the same EventFormat settings, the same begin and end with the same Canton participant running the same Canton version. Next page token was obtained with different request parameters",
+        differentRequestError,
+        Map.empty,
+      )
+    }
+
+    "reject request with page token obtained with a different include_transactions_and_reassignments field" in {
+      val updateFormat = buildUpdateFormat(Some(Seq(templateId)), None)
+      val updateFormatWithReassignments =
+        updateFormat.map(uf =>
+          uf.copy(
+            includeTransactions = None,
+            includeTransactionsAndReassignments = uf.includeTransactions,
+          )
+        )
+      val (requestInitial, _) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = updateFormatWithReassignments,
+        descendingOrder = false,
+      )
+      val (_, token) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = updateFormat,
+        descendingOrder = false,
+      )
+      val request = requestInitial.update(_.pageToken := token.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        differentRequestError,
+        Map.empty,
+      )
+    }
+
+    "reject request with page token issued with a previous token version" in {
+      val (requestInitial, _) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val previousVersionToken = encodeV1(
+        requestInitial,
+        lowestPageOffsetExclusive = 5L,
+        highestPageOffsetInclusive = 10L,
+        participant,
+      )
+      val request = requestInitial.update(_.pageToken := previousVersionToken.toByteString)
+
+      val result = UpdateServiceRequestValidator.validateUpdatesPageRequest(
+        req = request,
+        ledgerEnd = Some(Offset.tryFromLong(100L)),
+        participantId = participant,
+        updateServiceConfig = UpdateServiceConfig(),
+      )
+      requestMustFailWith(
+        result,
+        code = INVALID_ARGUMENT,
+        differentVersionError,
         Map.empty,
       )
     }

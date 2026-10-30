@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.Recipients.cc
 import com.digitalasset.canton.sequencing.protocol.RecipientsTest.*
 import com.digitalasset.canton.topology.ParticipantId
@@ -39,7 +38,7 @@ class RecipientsTest
     }
 
     "be preserved through serialization / deserialization" in {
-      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = testedSynchronizerLimits
 
       val proto = recipients.toProtoV30
       val fromProto = Recipients.fromProtoV30(
@@ -50,8 +49,8 @@ class RecipientsTest
       fromProto shouldBe Right(recipients)
     }
 
-    "deserialization checks the limits" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
-      val limits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+    "deserialization checks the limits" in {
+      val limits = testedSynchronizerLimits
 
       val t123 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP1, recP2, recP3))
 
@@ -114,6 +113,25 @@ class RecipientsTest
           "repeated field has 2 elements, exceeding the maximum of 1",
         )
       )
+
+      val res = Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxRecipientsPerEnvelope)
+          .replace(PositiveInt.tryCreate(4)),
+        proto,
+      )
+      if (testedProtocolVersion >= ProtocolVersion.newBoundsOnPV37)
+        res shouldBe Left(
+          InvariantViolation(
+            "recipients",
+            "number of distinct recipients of a single envelope exceeds maximum of 4",
+          )
+        )
+      else {
+        // Previous protocol versions do not check the number of distinct recipients
+        res.isRight shouldBe true
+      }
     }
 
     "store all recipients" in {

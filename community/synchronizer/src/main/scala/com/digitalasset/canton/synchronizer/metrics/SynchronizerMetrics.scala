@@ -419,6 +419,7 @@ object SequencerMetrics {
       case SubmissionRequestType.LsuSequencingTest => "send-test-lsu-sequencing"
       case SubmissionRequestType.TopUp => "send-topup"
       case SubmissionRequestType.TopUpMed => "send-topup-med"
+      case SubmissionRequestType.TopUpPreOnboarding => "send-topup-pre-onboarding"
       case SubmissionRequestType.TopologyTransaction => "send-topology"
       case SubmissionRequestType.TimeProof => "send-time-proof"
       case SubmissionRequestType.Unexpected(desc) =>

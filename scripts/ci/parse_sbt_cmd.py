@@ -89,6 +89,7 @@ def main() -> int:
     try:
         cmd = load_cmd(args.cmd, args.cmd_file)
     except OSError as exc:
+        # failure-surfaced: _fail() prints the message and returns the non-zero exit code 2
         return _fail(f"Unable to read --cmd-file '{args.cmd_file}': {exc}")
 
     if not cmd:
@@ -99,6 +100,7 @@ def main() -> int:
     try:
         tokens = parse_cmd(cmd)
     except ValueError as exc:
+        # failure-surfaced: _fail() prints the message and returns the non-zero exit code 2
         return _fail(str(exc))
 
     if output_file:
@@ -128,7 +130,7 @@ def self_test():
     print("All self-checks passed", file=sys.stderr)
 
 
-def _assert_parse_error(cmd: str, expected_substring: str):
+def _test_assert_parse_error(cmd: str, expected_substring: str):
     try:
         parse_cmd(cmd)
         assert False, f"Expected ValueError for command: {cmd!r}"
@@ -136,7 +138,7 @@ def _assert_parse_error(cmd: str, expected_substring: str):
         assert expected_substring in str(exc), f"Expected {expected_substring!r} in {exc!r}"
 
 
-def _assert_parse_args_error(argv, expected_substring: str):
+def _test_assert_parse_args_error(argv, expected_substring: str):
     stderr = io.StringIO()
     with contextlib.redirect_stderr(stderr):
         try:
@@ -155,7 +157,7 @@ def test_parse_args_accepts_cmd_file_only():
 
 
 def test_parse_args_rejects_cmd_and_cmd_file_together():
-    _assert_parse_args_error(
+    _test_assert_parse_args_error(
         ["--cmd-file", "/tmp/example-cmd.txt", "testOnly com.example.FooTest"],
         "CMD and --cmd-file are mutually exclusive.",
     )
@@ -172,23 +174,23 @@ def test_parse_cmd_accepts_quoted_group():
 
 
 def test_parse_cmd_rejects_control_operators():
-    _assert_parse_error('testOnly Foo && rm -rf /', 'shell control operators are not allowed')
+    _test_assert_parse_error('testOnly Foo && rm -rf /', 'shell control operators are not allowed')
 
 
 def test_parse_cmd_rejects_shell_metacharacters():
-    _assert_parse_error('testOnly Foo ;', 'shell metacharacters are not allowed')
+    _test_assert_parse_error('testOnly Foo ;', 'shell metacharacters are not allowed')
 
 
 def test_parse_cmd_rejects_parse_errors():
-    _assert_parse_error('testOnly "unterminated', 'shell-style parsing')
+    _test_assert_parse_error('testOnly "unterminated', 'shell-style parsing')
 
 
 def test_parse_cmd_rejects_empty_command():
-    _assert_parse_error('', 'must contain at least one sbt command token')
+    _test_assert_parse_error('', 'must contain at least one sbt command token')
 
 
 def test_parse_cmd_rejects_raw_newlines():
-    _assert_parse_error('testOnly Foo\nrm -rf /', 'newline characters are not allowed')
+    _test_assert_parse_error('testOnly Foo\nrm -rf /', 'newline characters are not allowed')
 
 
 def test_load_cmd_reads_command_from_cmd_file():

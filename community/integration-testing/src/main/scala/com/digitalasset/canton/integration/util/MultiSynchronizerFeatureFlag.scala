@@ -17,24 +17,10 @@ object MultiSynchronizerFeatureFlag {
       synchronizerId: SynchronizerId,
   ): Unit =
     participants.foreach { p =>
-      val currentFeatureFlags = p.topology.synchronizer_trust_certificates
-        .list(
-          store = Some(TopologyStoreId.Synchronizer(synchronizerId)),
-          filterUid = p.uid.toProtoPrimitive,
-        )
-        .loneElement
-        .item
-        .featureFlags
-
-      if (!currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)) {
-        p.topology.synchronizer_trust_certificates.propose(
-          p.id,
-          synchronizerId,
-          featureFlags =
-            currentFeatureFlags :+ ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
-        )
-      } else ()
-
+      p.synchronizers.feature_flags.add(
+        synchronizerId = synchronizerId,
+        flag = ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
+      )
       eventually() {
         p.topology.synchronizer_trust_certificates
           .list(
@@ -52,24 +38,10 @@ object MultiSynchronizerFeatureFlag {
       synchronizerId: SynchronizerId,
   ): Unit =
     participants.foreach { p =>
-      val currentFeatureFlags = p.topology.synchronizer_trust_certificates
-        .list(
-          store = Some(TopologyStoreId.Synchronizer(synchronizerId)),
-          filterUid = p.uid.toProtoPrimitive,
-        )
-        .loneElement
-        .item
-        .featureFlags
-
-      if (currentFeatureFlags.contains(ParticipantTopologyFeatureFlag.EnableMultiSynchronizer))
-        p.topology.synchronizer_trust_certificates.propose(
-          p.id,
-          synchronizerId,
-          featureFlags = currentFeatureFlags.filterNot(
-            _ == ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
-          ),
-        )
-      else ()
+      p.synchronizers.feature_flags.remove(
+        synchronizerId = synchronizerId,
+        flag = ParticipantTopologyFeatureFlag.EnableMultiSynchronizer,
+      )
       eventually() {
         p.topology.synchronizer_trust_certificates
           .list(

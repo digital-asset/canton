@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{Hash, Signature}
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HashingSchemeVersion
@@ -51,6 +52,8 @@ import java.util.UUID
   *   optional. Note that submissions rejected before phase-3 reinterpretation may carry no hash on
   *   their completion (rare topology-change races, e.g. acting parties reassigned between prepare
   *   and submission, or a mediator disabled mid-submission), so lookup-by-hash is best-effort.
+  * @param accountId
+  *   The traffic account the submission is charged to.
   */
 final case class SubmitterInfo(
     actAs: List[Ref.Party],
@@ -61,6 +64,7 @@ final case class SubmitterInfo(
     submissionId: Option[Ref.SubmissionId],
     externallySignedSubmission: Option[ExternallySignedSubmission],
     transactionHash: Option[Hash],
+    accountId: Option[AccountId],
 ) {
 
   /** The ID for the ledger change */
@@ -108,6 +112,7 @@ object SubmitterInfo {
           submissionId,
           externallySignedSubmission,
           transactionHash,
+          accountId,
         ) =>
       LoggingValue.Nested.fromEntries(
         "actAs " -> actAs,
@@ -118,6 +123,7 @@ object SubmitterInfo {
         "submissionId" -> submissionId,
         "externallySignedSubmission" -> externallySignedSubmission,
         "transactionHash" -> transactionHash.map(_.toHexString),
+        "accountId" -> accountId.map(_.unwrap),
       )
   }
 

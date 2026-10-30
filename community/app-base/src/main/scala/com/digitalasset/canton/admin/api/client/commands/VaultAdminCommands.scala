@@ -17,7 +17,7 @@ import com.digitalasset.canton.crypto.{PublicKeyWithName, v30 as cryptoprotoV30,
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.ManagedChannel
@@ -40,7 +40,6 @@ object VaultAdminCommands {
       filterName: String,
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-      serverVersion: Option[ReleaseVersion],
   ) extends BaseVaultAdminCommand[
         v30.ListMyKeysRequest,
         v30.ListMyKeysResponse,
@@ -58,11 +57,7 @@ object VaultAdminCommands {
                 fingerprint = filterFingerprint,
                 name = filterName,
                 purpose = filterPurpose.map(_.toProtoEnum).toSeq,
-                usageV30 =
-                  if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                    Seq()
-                  else
-                    serializedFilterUsage,
+                usageV30 = serializedFilterUsage,
               )
             ),
           )
@@ -94,7 +89,6 @@ object VaultAdminCommands {
       filterName: String,
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-      serverVersion: Option[ReleaseVersion] = None,
   ) extends BaseVaultAdminCommand[
         v30.ListPublicKeysRequest,
         v30.ListPublicKeysResponse,
@@ -112,11 +106,7 @@ object VaultAdminCommands {
                 fingerprint = filterFingerprint,
                 name = filterName,
                 purpose = filterPurpose.map(_.toProtoEnum).toSeq,
-                usageV30 =
-                  if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                    Seq()
-                  else
-                    serializedFilterUsage,
+                usageV30 = serializedFilterUsage,
               )
             ),
           )
@@ -186,7 +176,6 @@ object VaultAdminCommands {
       name: String,
       usage: NonEmpty[Set[SigningKeyUsage]],
       keySpec: Option[SigningKeySpec],
-      serverVersion: Option[ReleaseVersion],
   ) extends BaseVaultAdminCommand[
         v30.GenerateSigningKeyRequest,
         v30.GenerateSigningKeyResponse,
@@ -201,11 +190,7 @@ object VaultAdminCommands {
           v30.GenerateSigningKeyRequest(
             baseRequest = Some(baseRequest.toProtoV30),
             name = name,
-            usageV30 =
-              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                Seq()
-              else
-                serializedUsage,
+            usageV30 = serializedUsage,
             keySpec = keySpec.fold[cryptoprotoV30.SigningKeySpec](
               cryptoprotoV30.SigningKeySpec.SIGNING_KEY_SPEC_UNSPECIFIED
             )(_.toProtoEnum),
@@ -272,7 +257,6 @@ object VaultAdminCommands {
       kmsKeyId: String,
       usage: NonEmpty[Set[SigningKeyUsage]],
       name: String,
-      serverVersion: Option[ReleaseVersion],
   ) extends BaseVaultAdminCommand[
         v30.RegisterKmsSigningKeyRequest,
         v30.RegisterKmsSigningKeyResponse,
@@ -286,11 +270,7 @@ object VaultAdminCommands {
           v30.RegisterKmsSigningKeyRequest(
             baseRequest = Some(baseRequest.toProtoV30),
             kmsKeyId = kmsKeyId,
-            usageV30 =
-              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                Seq()
-              else
-                serializedUsage,
+            usageV30 = serializedUsage,
             name = name,
           )
         )

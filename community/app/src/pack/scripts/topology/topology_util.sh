@@ -170,26 +170,46 @@ EOF
 }
 # [end build_topology_transaction fn]
 
+# Protocol version for which the functions below build topology transactions by default. Its proto
+# version 30 is what they built in earlier releases, and synchronizers on protocol versions 36 and 37
+# accept it.
+DEFAULT_PROTOCOL_VERSION="36"
+
+# Explains which protocol version to pass, for the errors of the scripts and functions that take it
+PROTOCOL_VERSION_HELP="Pass the protocol version of the synchronizer that the topology transactions are for:
+  36 (default): builds v30 topology transactions, as earlier releases did. Synchronizers on protocol
+      versions 36 and 37 accept them; those on 37 do so only to ease the transition.
+  37: builds v31 topology transactions, the version added for protocol version 37. Synchronizers on
+      protocol version 36 reject them. Switch to 37 once your synchronizer runs protocol version 37.
+Higher values also build v31 topology transactions. For a later protocol version, use the scripts released
+with it, as it may add another topology version.
+In the Canton console, <participant>.synchronizers.list_connected() shows the protocol version at the end of the physical synchronizer ID, e.g. 37 in '...::37-0'."
+
 get_topology_version_number() {
-  local pv="$1"
-  # TODO(#35499): Cannot stay on dev PV for a proper release
-  if [ "$pv" = "dev" ]; then
+  local pv="${1:-}"
+  if [[ -z "$pv" ]]; then
+    echo "Error: missing protocol version. $PROTOCOL_VERSION_HELP" >&2
+    return 1
+  elif [[ "$pv" == "36" ]]; then
+    echo "30"
+  elif [[ "$pv" == "dev" || ( "$pv" =~ ^[0-9]+$ && "$pv" -ge 37 ) ]]; then
     echo "31"
   else
-    echo "30"
+    echo "Error: unsupported protocol version '$pv'. $PROTOCOL_VERSION_HELP" >&2
+    return 1
   fi
 }
 
 # Build a versioned transaction JSON.
 # Arguments:
 #   $1 - Base64 encoded transaction string
-#   $2 - Protocol version
+#   $2 - Protocol version of the synchronizer: 36 (default) or 37
 # [start build_versioned_transaction fn]
 build_versioned_transaction() {
   local data="$1"
-  local pv="${2:-30}"
+  local pv="${2:-$DEFAULT_PROTOCOL_VERSION}"
   local version
-  version=$(get_topology_version_number "$pv")
+  version=$(get_topology_version_number "$pv") || return 1
     cat <<EOF
 {
   "data": "$data",
@@ -299,15 +319,15 @@ sign_hash() {
 # Arguments:
 #   $1 - Mapping JSON string
 #   $2 - serial number
-#   $3 - protocol version
+#   $3 - protocol version of the synchronizer: 36 (default) or 37
 # [start serialize_topology_transaction_from_mapping_and_serial fn]
 serialize_topology_transaction_from_mapping_and_serial() {
   local mapping="$1"
   local serial="$2"
-  local pv="${3:-30}"
+  local pv="${3:-$DEFAULT_PROTOCOL_VERSION}"
   local transaction
   local version
-  version=$(get_topology_version_number "$pv")
+  version=$(get_topology_version_number "$pv") || return 1
   transaction=$(build_topology_transaction "$mapping" "$serial")
   json_to_serialized_versioned_message "$transaction" "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v${version}.TopologyTransaction" "$pv"
 }
@@ -316,16 +336,29 @@ serialize_topology_transaction_from_mapping_and_serial() {
 # Serialize a topology transaction to a versioned message in binary protobuf format.
 # Arguments:
 #   $1 - transaction as JSON
-#   $2 - protocol version
+#   $2 - protocol version of the synchronizer: 36 (default) or 37
 # [start serialize_topology_transaction fn]
 serialize_topology_transaction() {
   local transaction="$1"
-  local pv="${2:-30}"
+  local pv="${2:-$DEFAULT_PROTOCOL_VERSION}"
   local version
-  version=$(get_topology_version_number "$pv")
+  version=$(get_topology_version_number "$pv") || return 1
   json_to_serialized_versioned_message "$transaction" "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v${version}.TopologyTransaction" "$pv"
 }
 # [end serialize_topology_transaction fn]
+
+# Serialize a signed topology transaction to a versioned message in binary protobuf format.
+# Arguments:
+#   $1 - signed transaction as JSON
+# [start serialize_signed_topology_transaction fn]
+serialize_signed_topology_transaction() {
+  local signed_transaction="$1"
+  local data
+  # SignedTopologyTransaction uses the proto version 30 for all protocol versions
+  data=$(echo "$signed_transaction" | convert_json_to_bin "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.SignedTopologyTransaction" | encode_to_base64)
+  serialize_versioned_message "{\"data\": \"$data\", \"version\": \"30\"}"
+}
+# [end serialize_signed_topology_transaction fn]
 
 # Unwraps a serialized versioned message to JSON.
 # Arguments:
@@ -342,24 +375,39 @@ serialized_versioned_message_to_json() {
 }
 # [end serialized_versioned_message_to_json fn]
 
+# Serializes a versioned message in JSON representation (see build_versioned_transaction) to binary.
+# Arguments:
+#   $1 - versioned message JSON string
+# [start serialize_versioned_message fn]
+serialize_versioned_message() {
+  local versioned_message="$1"
+  # The data must be serialized before the version, as Canton does: the transaction hash is computed over these bytes,
+  # and Canton looks up a transaction by the hash of its own serialization when converting it to another proto version
+  echo "$versioned_message" | jq '{data}' | convert_json_to_bin \
+        "$BUF_PROTO_IMAGE" \
+        "com.digitalasset.canton.version.v1.UntypedVersionedMessage"
+  echo "$versioned_message" | jq '{version}' | convert_json_to_bin \
+        "$BUF_PROTO_IMAGE" \
+        "com.digitalasset.canton.version.v1.UntypedVersionedMessage"
+}
+# [end serialize_versioned_message fn]
+
 # Serializes a proto message in JSON representation to a versioned message.
 # Arguments:
 #   $1 - json message
 #   $2 - proto file containing the type of the inner message
 #   $3 - proto message type of the inner message
-#   $4 - protocol version
+#   $4 - protocol version of the synchronizer: 36 (default) or 37
 # [start json_to_serialized_versioned_message fn]
 json_to_serialized_versioned_message() {
   local json=$1
   local proto=$2
   local message_type=$3
-  local pv=${4:-30}
+  local pv=${4:-$DEFAULT_PROTOCOL_VERSION}
   # Serialize it to binary
   SERIALIZED_JSON_BASE64=$(echo "$json" | convert_json_to_bin "$proto"  "$message_type" | encode_to_base64)
-  versioned_transaction=$(build_versioned_transaction "$SERIALIZED_JSON_BASE64" "$pv")
-  echo "$versioned_transaction" | convert_json_to_bin \
-        "$BUF_PROTO_IMAGE" \
-        "com.digitalasset.canton.version.v1.UntypedVersionedMessage"
+  versioned_transaction=$(build_versioned_transaction "$SERIALIZED_JSON_BASE64" "$pv") || return 1
+  serialize_versioned_message "$versioned_transaction"
 }
 # [end json_to_serialized_versioned_message fn]
 

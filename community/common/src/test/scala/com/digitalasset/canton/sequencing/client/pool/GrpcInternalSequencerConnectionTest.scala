@@ -32,7 +32,7 @@ class GrpcInternalSequencerConnectionTest
       withConnection(responses) { (connection, listener) =>
         connection.start().valueOrFail("start connection")
 
-        listener.shouldStabilizeOn(SequencerConnectionState.Validated)
+        listener.shouldStabilizeOnState(SequencerConnectionState.Validated)
         connection.attributes shouldBe Some(correctConnectionAttributes)
 
         responses.assertAllResponsesSent()
@@ -54,7 +54,7 @@ class GrpcInternalSequencerConnectionTest
           {
             connection.start().valueOrFail("start connection")
 
-            listener.shouldStabilizeOn(SequencerConnectionState.Fatal(Some(errorMessage)))
+            listener.shouldStabilizeOnState(SequencerConnectionState.Fatal(Some(errorMessage)))
           },
           LogEntry.assertLogSeq(
             Seq(
@@ -87,7 +87,7 @@ class GrpcInternalSequencerConnectionTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionState.Fatal(Some(errorMessage)))
+            listener.shouldStabilizeOnState(SequencerConnectionState.Fatal(Some(errorMessage)))
             connection.attributes shouldBe None
           },
           LogEntry.assertLogSeq(
@@ -118,7 +118,7 @@ class GrpcInternalSequencerConnectionTest
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionState.Fatal(Some(errorMessage)))
+            listener.shouldStabilizeOnState(SequencerConnectionState.Fatal(Some(errorMessage)))
             connection.attributes shouldBe None
           },
           LogEntry.assertLogSeq(
@@ -150,7 +150,7 @@ class GrpcInternalSequencerConnectionTest
           loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
               connection.start().valueOrFail("start connection")
-              listener.shouldStabilizeOn(SequencerConnectionState.Fatal(Some(errorMessage)))
+              listener.shouldStabilizeOnState(SequencerConnectionState.Fatal(Some(errorMessage)))
               connection.attributes shouldBe None
             },
             LogEntry.assertLogSeq(
@@ -179,7 +179,7 @@ class GrpcInternalSequencerConnectionTest
         (connection, listener) =>
           connection.start().valueOrFail("start connection")
 
-          listener.shouldStabilizeOn(SequencerConnectionState.Validated)
+          listener.shouldStabilizeOnState(SequencerConnectionState.Validated)
           connection.attributes shouldBe Some(correctConnectionAttributes)
 
           responses.assertAllResponsesSent()
@@ -209,19 +209,19 @@ class GrpcInternalSequencerConnectionTest
       )
       withConnection(responses) { (connection, listener) =>
         connection.start().valueOrFail("start connection")
-        listener.shouldStabilizeOn(SequencerConnectionState.Validated)
+        listener.shouldStabilizeOnState(SequencerConnectionState.Validated)
         connection.attributes shouldBe Some(correctConnectionAttributes)
 
         listener.clear()
         connection.fail("test")
-        listener.shouldStabilizeOn(SequencerConnectionState.Stopped(Some("test")))
+        listener.shouldStabilizeOnState(SequencerConnectionState.Stopped(Some("test")))
         listener.clear()
 
         // A different identity triggers a warning and the connection never gets validated
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             connection.start().valueOrFail("start connection")
-            listener.shouldStabilizeOn(SequencerConnectionState.Fatal(Some(errorMessage)))
+            listener.shouldStabilizeOnState(SequencerConnectionState.Fatal(Some(errorMessage)))
             // Synchronizer info does not change
             connection.attributes shouldBe Some(correctConnectionAttributes)
           },

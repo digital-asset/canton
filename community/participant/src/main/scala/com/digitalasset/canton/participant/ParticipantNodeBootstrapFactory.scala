@@ -54,7 +54,10 @@ trait ParticipantNodeBootstrapFactory {
     snapshotDir = arguments.config.parameters.engine.snapshotDir,
     iterationsBetweenInterruptions =
       arguments.parameterConfig.engine.iterationsBetweenInterruptions,
-    transactionLimits = arguments.parameterConfig.engine.transactionLimits,
+    transactionLimits = interpretation.LimitConfig(
+      arguments.parameterConfig.engine.transactionLimits,
+      arguments.metrics.transactionNode,
+    ),
     paranoidMode = arguments.parameterConfig.engine.enableAdditionalConsistencyChecks,
     submissionPhaseLogging = arguments.parameterConfig.engine.submissionPhaseLogging,
     validationPhaseLogging = arguments.parameterConfig.engine.validationPhaseLogging,

@@ -14,7 +14,7 @@ import com.digitalasset.canton.connection.v30.GetApiInfoResponse
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, SynchronizerCrypto}
 import com.digitalasset.canton.health.{HealthElement, HealthListener}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasUnlessClosing, LifeCycle}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerConnectionPoolMetrics}
 import com.digitalasset.canton.networking.Endpoint
@@ -47,8 +47,10 @@ import com.digitalasset.canton.sequencing.client.{
   SequencedEventValidatorFactory,
   SequencerClientSubscriptionError,
 }
+import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.sequencing.{
   MaybeCompressedSerializedEvent,
+  SequencerConnectionPenaltyConfig,
   SequencerConnectionPoolDelays,
   SequencerConnections,
   SubscriptionLivenessLimits,
@@ -198,6 +200,8 @@ trait ConnectionPoolTestHelpers {
       trustThreshold: PositiveInt,
       expectedSynchronizerIdO: Option[PhysicalSynchronizerId] = None,
       poolDelays: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+      poolPenaltyConfig: SequencerConnectionPenaltyConfig =
+        SequencerConnectionPenaltyConfig.default,
       namePrefix: String = "test",
   ): SequencerConnectionPoolConfig = {
     val configs =
@@ -213,6 +217,7 @@ trait ConnectionPoolTestHelpers {
       minRestartConnectionDelay = poolDelays.minRestartDelay,
       maxRestartConnectionDelay = poolDelays.maxRestartDelay,
       warnConnectionValidationDelay = poolDelays.warnValidationDelay,
+      sequencerConnectionPenaltyConfig = poolPenaltyConfig,
       expectedPsidO = expectedSynchronizerIdO,
     )
   }
@@ -225,6 +230,8 @@ trait ConnectionPoolTestHelpers {
       expectedSynchronizerIdO: Option[PhysicalSynchronizerId] = None,
       testTimeouts: ProcessingTimeout = timeouts,
       poolDelays: SequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
+      poolPenaltyConfig: SequencerConnectionPenaltyConfig =
+        SequencerConnectionPenaltyConfig.default,
       blockValidation: Int => Boolean = _ => false,
       metrics: SequencerConnectionPoolMetrics = CommonMockMetrics.sequencerClient.connectionPool,
       metricsContext: MetricsContext = MetricsContext.Empty,
@@ -242,6 +249,7 @@ trait ConnectionPoolTestHelpers {
       trustThreshold,
       expectedSynchronizerIdO,
       poolDelays,
+      poolPenaltyConfig,
       namePrefix,
     )
 
@@ -383,10 +391,6 @@ protected object ConnectionPoolTestHelpers {
   lazy val correctStaticParametersResponse
       : Either[Exception, SequencerConnect.GetSynchronizerParametersResponse] = {
     val parameters = defaultStaticSynchronizerParameters.protoVersion match {
-      case ProtoVersion(30) =>
-        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V30(
-          defaultStaticSynchronizerParameters.toProtoV30
-        )
       case ProtoVersion(31) =>
         SequencerConnect.GetSynchronizerParametersResponse.Parameters.V31(
           defaultStaticSynchronizerParameters.toProtoV31
@@ -394,6 +398,10 @@ protected object ConnectionPoolTestHelpers {
       case ProtoVersion(32) =>
         SequencerConnect.GetSynchronizerParametersResponse.Parameters.V32(
           defaultStaticSynchronizerParameters.toProtoV32
+        )
+      case ProtoVersion(33) =>
+        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V33(
+          defaultStaticSynchronizerParameters.toProtoV33
         )
       case other => throw new IllegalStateException(s"Unexpected proto version: $other")
     }
@@ -439,13 +447,14 @@ protected object ConnectionPoolTestHelpers {
         member: Member,
         preSubscriptionEventO: Option[EventAndOrdinal],
         subscriptionHandlerFactory: SubscriptionHandlerFactory,
-        parent: HasUnlessClosing,
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
     ): SequencerSubscriptionWrapperImpl = {
       val eventValidationFactory = SequencedEventValidatorFactory.noValidation(
         synchronizerId = testSynchronizerId(1),
+        decompressionPolicyProvider = SequencedEventValidator.DecompressionPolicyProvider
+          .fixed(DecompressionPolicy.MaxValueUnsafe),
         warn = false,
       )
       val subscriptionHandler = subscriptionHandlerFactory.create(
@@ -461,7 +470,6 @@ protected object ConnectionPoolTestHelpers {
         member = member,
         startingTimestampO = None,
         handler = subscriptionHandler,
-        parent = parent,
         timeouts = timeouts,
         loggerFactory = loggerFactory,
       )
@@ -627,7 +635,7 @@ protected object ConnectionPoolTestHelpers {
     }
   }
 
-  protected class CreatedConnections {
+  class CreatedConnections {
     private val connectionsMap = TrieMap[Int, InternalSequencerConnection]()
     private val lock = new Mutex()
     def apply(index: Int): InternalSequencerConnection = connectionsMap.apply(index)
@@ -855,11 +863,14 @@ protected object ConnectionPoolTestHelpers {
     private val lock = new Mutex()
     private val statesBuffer = mutable.ArrayBuffer[element.State]()
 
-    def shouldStabilizeOn(state: element.State): Assertion =
-      // Check that we reach the given state, and remain on it
+    def shouldStabilizeOnState(state: element.State): Assertion =
+      shouldStabilizeOnAssertion(_ shouldBe state)
+
+    /** Check that we reach the given state assertion, and remain on it */
+    def shouldStabilizeOnAssertion(assertion: element.State => Assertion): Assertion =
       // The default 2 seconds is a bit short when machines are under heavy load
       eventuallyForever(timeUntilSuccess = 10.seconds) {
-        statesBuffer.last shouldBe state
+        assertion(statesBuffer.last)
       }
 
     def clear(): Unit = statesBuffer.clear()

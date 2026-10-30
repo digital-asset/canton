@@ -1,0 +1,41 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v33;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v31/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v32/participant_transaction.proto";
+import "scalapb/scalapb.proto";
+
+// Messages sent by a participant as part of the transaction protocol
+
+// Compared to v30: usage replaces the consumed boolean, to also support unpack-only input contracts.
+message InputContract {
+  bytes contract = 1; // Encoded ContractInstance
+  InputContractUsage usage = 2;
+}
+enum InputContractUsage {
+  INPUT_CONTRACT_USAGE_UNSPECIFIED = 0;
+  // Consumed in the core of the view.
+  INPUT_CONTRACT_USAGE_CONSUMED = 1;
+  // Activeness checked.
+  INPUT_CONTRACT_USAGE_USED = 2;
+  // Activeness unchecked.
+  INPUT_CONTRACT_USAGE_UNPACKED = 3;
+}
+// Compared to v32: core_inputs uses the InputContract defined in this package (adds usage enum).
+message ViewParticipantData {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.Salt salt = 1;
+  repeated v33.InputContract core_inputs = 2;
+  repeated v31.CreatedContract created_core = 3;
+  repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
+  repeated v31.ViewParticipantData.KeyResolutionWithMaintainers resolved_keys = 5;
+  v31.ActionDescription action_description = 6;
+  repeated v32.ViewExternalCallResult external_call_results = 7;
+  bool rolled_back = 8;
+}

@@ -293,7 +293,7 @@ class GrpcSequencerConnectServiceTest
 
     // --- handshake clientProtocolVersions size limit ---
 
-    "reject a handshake request that exceeds the clientProtocolVersions limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "reject a handshake request that exceeds the clientProtocolVersions limit" in {
       val env = new Env()
       val maxClientProtocolVersions = sequencerLimits.maxClientProtocolVersions.value
       val exceedingClientProtocolVersions =

@@ -81,9 +81,7 @@ class SecretKeyAdministration(
       filterName: String = "",
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-  ): Seq[PrivateKeyMetadata] = {
-    val nodeStatus = instance.health.status
-
+  ): Seq[PrivateKeyMetadata] =
     consoleEnvironment.run {
       adminCommand(
         VaultAdminCommands.ListMyKeys(
@@ -94,11 +92,9 @@ class SecretKeyAdministration(
           filterName = filterName,
           filterPurpose = filterPurpose,
           filterUsage = filterUsage,
-          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
-  }
 
   @Help.Summary("Generate new public/private key pair for signing and store it in the vault")
   @Help.Description(
@@ -123,8 +119,6 @@ class SecretKeyAdministration(
   ): SigningPublicKey =
     NonEmpty.from(usage) match {
       case Some(usageNE) =>
-        val nodeStatus = instance.health.status
-
         consoleEnvironment.run {
           adminCommand(
             VaultAdminCommands.GenerateSigningKey(
@@ -134,7 +128,6 @@ class SecretKeyAdministration(
               name = name,
               usage = usageNE,
               keySpec = keySpec,
-              serverVersion = nodeStatus.releaseVersion,
             )
           )
         }
@@ -182,8 +175,6 @@ class SecretKeyAdministration(
   ): SigningPublicKey =
     NonEmpty.from(usage) match {
       case Some(usageNE) =>
-        val nodeStatus = instance.health.status
-
         consoleEnvironment.run {
           adminCommand(
             VaultAdminCommands.RegisterKmsSigningKey(
@@ -193,7 +184,6 @@ class SecretKeyAdministration(
               kmsKeyId = kmsKeyId,
               usage = usageNE,
               name = name,
-              serverVersion = nodeStatus.releaseVersion,
             )
           )
         }
@@ -742,7 +732,6 @@ class GlobalSecretKeyAdministration(
 }
 
 class PublicKeyAdministration(
-    instance: InstanceReference,
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
 ) extends Helpful {
@@ -818,9 +807,7 @@ class PublicKeyAdministration(
       filterContext: String = "",
       filterPurpose: Set[KeyPurpose] = Set.empty,
       filterUsage: Set[SigningKeyUsage] = Set.empty,
-  ): Seq[PublicKeyWithName] = {
-    val nodeStatus = instance.health.status
-
+  ): Seq[PublicKeyWithName] =
     consoleEnvironment.run {
       adminCommand(
         VaultAdminCommands.ListPublicKeys(
@@ -831,11 +818,9 @@ class PublicKeyAdministration(
           filterName = filterContext,
           filterPurpose = filterPurpose,
           filterUsage = filterUsage,
-          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
-  }
 
   @Help.Summary("List active owners with keys for given search arguments")
   @Help.Description(
@@ -900,7 +885,7 @@ class KeyAdministrationGroup(
 ) extends Helpful {
 
   private lazy val publicAdmin =
-    new PublicKeyAdministration(instance, runner, consoleEnvironment)
+    new PublicKeyAdministration(runner, consoleEnvironment)
   private lazy val secretAdmin =
     new SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory)
 

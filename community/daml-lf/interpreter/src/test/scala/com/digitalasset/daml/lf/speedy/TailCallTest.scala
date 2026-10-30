@@ -6,6 +6,7 @@ package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Time
+import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SResult.SResultFinal
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -66,6 +67,7 @@ class TailCallTest
     // create the machine
     val machine = Speedy.UpdateMachine(
       compiledPackages = pkgs,
+      interpretationConfig = InterpretationConfig.DefaultForTesting,
       expr = pkgs.compiler.unsafeCompile(e),
       preparationTime = Time.Timestamp.Epoch,
       initialSeeding = InitialSeeding.NoSeed,

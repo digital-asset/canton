@@ -11,12 +11,14 @@ import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.google.protobuf.ByteString
 import com.google.rpc.error_details
 import com.google.rpc.error_details.RetryInfo
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import org.scalatest.*
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 import java.time.Duration
 
@@ -44,6 +46,7 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
   protected val dottedName = Ref.DottedName.assertFromString(includedTemplate)
   protected val refTemplateId = Ref.Identifier(packageId, templateQualifiedName)
   protected val refTemplateId2 = Ref.Identifier(packageId2, templateQualifiedName)
+  protected implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
 
   private val expectedTemplates = Set(
     Ref.NameTypeConRef(
@@ -122,4 +125,52 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
     retryInfoMetadata should contain allElementsOf retryDelay
   }
 
+}
+
+trait SizeLimitTestUtils extends AnyWordSpecLike with ValidatorTestUtils {
+
+  protected def cardinalityLimit(field: String, limit: Int, limitName: String = "limit")(
+      validate: Int => Either[StatusRuntimeException, ?]
+  ): Unit = {
+    s"accept $field with cardinality exactly equal to the $limitName" in {
+      validate(limit) shouldBe a[Right[?, ?]]
+    }
+    s"reject $field with cardinality exceeding the $limitName" in {
+      val exceedingLimit = limit + 1
+      requestMustFailWith(
+        request = validate(exceedingLimit),
+        code = Code.INVALID_ARGUMENT,
+        description = cardinalityLimitExceeded(field, actual = exceedingLimit, limit = limit),
+      )
+    }
+  }
+
+  protected def byteSizeLimit(field: String, limit: Int, limitName: String = "limit")(
+      validate: Int => Either[StatusRuntimeException, ?]
+  ): Unit = {
+    s"accept $field with number of bytes exactly equal to the $limitName" in {
+      validate(limit) shouldBe a[Right[?, ?]]
+    }
+    s"reject $field with number of bytes exceeding the $limitName" in {
+      requestMustFailWith(
+        request = validate(limit + 1),
+        code = Code.INVALID_ARGUMENT,
+        description = sizeLimitExceeded(field, actual = limit + 1, limit = limit),
+      )
+    }
+  }
+
+  protected def cardinalityLimitExceeded(field: String, actual: Int, limit: Int): String =
+    s"FIELD_CARDINALITY_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
+      s"repeated field has $actual elements, exceeding the maximum of $limit"
+
+  protected def sizeLimitExceeded(field: String, actual: Int, limit: Int): String =
+    s"FIELD_SIZE_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
+      s"Byte length for $field ($actual bytes) exceeds maximum limit of $limit bytes"
+
+  protected def parties(numberOfParties: Int): Seq[String] =
+    (1 to numberOfParties).map(i => s"party$i")
+
+  protected def bytes(numberOfBytes: Int): ByteString =
+    ByteString.copyFrom(Array.fill(numberOfBytes)(1.toByte))
 }

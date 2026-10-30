@@ -17,6 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.Submission
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationEvent,
   AuthorizationLevel,
   GenericTopologyEvent,
 }
@@ -62,6 +63,8 @@ import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, Topo
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  ParticipantPermission,
   SynchronizerParametersState,
   TopologyTransaction,
 }
@@ -231,6 +234,20 @@ class RunningDigestProcessorTest
 
   def mkTickSignaller(): TickSignaller =
     new LocalEventSignaller[TickListener, Offset]("subscriber", timeouts, loggerFactory)
+
+  /** A party with one onboarded host, so that the onboarding host does not violate the threshold.
+    */
+  private def partyHostingWhileOnboarding(party: LfPartyId)(
+      onboarded: ParticipantId,
+      onboarding: ParticipantId,
+  ): (LfPartyId, PartyInfo) =
+    party -> PartyInfo.forTesting(
+      PositiveInt.one,
+      Map(
+        onboarded -> ParticipantAttributes(ParticipantPermission.Submission),
+        onboarding -> ParticipantAttributes(ParticipantPermission.Submission, onboarding = true),
+      ),
+    )
 
   "RunningDigestProcessor" when {
 
@@ -753,8 +770,7 @@ class RunningDigestProcessorTest
           Onboarding(AuthorizationLevel.Submission),
         )
 
-        // mocked topology snapshot to verify that it is not being used.
-        val topologySnapshot = mock[TopologySnapshot]
+        val topologySnapshot = TestingTopology(topology = Map.empty).build().topologySnapshot()
         val toProcess =
           ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
         val rdp = mkRunningDigestProcessor()
@@ -769,7 +785,6 @@ class RunningDigestProcessorTest
         rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
 
         result.value.tryValue shouldBe PartyOnboardingToParticipant(bob, p3.toLf)
-        verifyZeroInteractions(topologySnapshot)
       }
 
       "handle the completion of a party onboarding on a remote participant" in {
@@ -805,7 +820,8 @@ class RunningDigestProcessorTest
           Revoked,
         )
 
-        val topologySnapshot = mock[TopologySnapshot]
+        val topologySnapshot =
+          TestingTopology(topology = Map(partyHosting(bob)(p3))).build().topologySnapshot()
         val toProcess =
           ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
 
@@ -821,7 +837,79 @@ class RunningDigestProcessorTest
         rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
 
         result.value.tryValue shouldBe PartyRemovedFromParticipant(bob, p3.toLf)
-        verifyZeroInteractions(topologySnapshot)
+      }
+
+      "ignore the removal of a party from a remote participant that is still onboarding it" in {
+        val event = PartyToParticipantAuthorization(bob, p3.toLf, Revoked)
+
+        val topologySnapshot =
+          TestingTopology(topology = Map(partyHostingWhileOnboarding(bob)(p2, onboarding = p3)))
+            .build()
+            .topologySnapshot()
+        val toProcess =
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
+
+        val rdp = mkRunningDigestProcessor()
+
+        Source
+          .single(toProcess)
+          .via(rdp.classification)
+          .runWith(Sink.seq)
+          .futureValue shouldBe empty
+      }
+
+      "ignore the removal of a party from the local participant that is still onboarding it" in {
+        val testingTopology =
+          TestingTopology(topology =
+            Map(
+              partyHostingWhileOnboarding(alice)(p2, onboarding = thisParticipant),
+              partyHosting(bob)(p2),
+            )
+          ).build()
+        val event = PartyToParticipantAuthorization(alice, thisParticipant.toLf, Revoked)
+
+        val toProcess =
+          ProcessingContext(
+            tp(2),
+            NotCheckpointFence(testingTopology.topologySnapshot(), tte(event)),
+          )
+
+        val rdp = mkRunningDigestProcessor(
+          indexService = mkIndexService((off(1), cid(1), Seq(alice, bob))),
+          partyTopology = testingTopology.getTopology().topology,
+        )
+
+        Source
+          .single(toProcess)
+          .via(rdp.classification)
+          .runWith(Sink.seq)
+          .futureValue shouldBe empty
+      }
+
+      "handle the transition from active to onboarding on a remote participant" in {
+        val event = PartyToParticipantAuthorization(
+          bob,
+          p3.toLf,
+          Onboarding(AuthorizationLevel.Submission),
+        )
+
+        val topologySnapshot =
+          TestingTopology(topology = Map(partyHosting(bob)(p3))).build().topologySnapshot()
+        val toProcess =
+          ProcessingContext(tp1_0, NotCheckpointFence(topologySnapshot, tte(event)))
+
+        val rdp = mkRunningDigestProcessor()
+
+        val result = Source
+          .single(toProcess)
+          .via(rdp.classification)
+          .runWith(Sink.seq)
+          .futureValue
+          .loneElement
+
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
+
+        result.value.tryValue shouldBe PartyRemovedFromParticipant(bob, p3.toLf)
       }
 
       "handle multiple topology changes at the same effective time" in {
@@ -955,7 +1043,7 @@ class RunningDigestProcessorTest
       }
 
       "handle adding a party to the local participant" in {
-        // simulates that completion of onboarding alice to p1
+        // simulates the completion of onboarding alice to p1
         val testingTopology = TestingTopology(topology =
           Map(
             partyHosting(alice)(p2),
@@ -1172,6 +1260,89 @@ class RunningDigestProcessorTest
             // finally the classification that triggers p1's digest update
             PartyAddedToParticipant(alice, p1.toLf),
           )
+        }
+      }
+
+      "handle offboarding of a party from the local participant" in {
+        // simulates the offboarding of alice from p1
+        val testingTopology = TestingTopology(topology =
+          Map(
+            partyHosting(alice)(p1, p2),
+            partyHosting(bob)(p2, p3),
+          )
+        ).build()
+
+        def classifyWithBatchSize(authorizationEvent: AuthorizationEvent) = {
+          val rdp = mkRunningDigestProcessor(
+            indexService = mkIndexService(
+              (off(1), cid(0), Seq(alice, bob))
+            ),
+            partyTopology = testingTopology.getTopology().topology,
+            counterpartyBatchSize = 1,
+            contractChangeClassificationBatchSize = 1,
+          )
+          val event = PartyToParticipantAuthorization(
+            alice,
+            p1.toLf,
+            authorizationEvent,
+          )
+
+          val toProcess =
+            ProcessingContext(
+              tp(3),
+              NotCheckpointFence(testingTopology.topologySnapshot(), tte(event)),
+            )
+
+          val result = Source
+            .single(toProcess)
+            .via(rdp.classification)
+            .runWith(Sink.seq)
+            .futureValue
+
+          rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe result
+            .map(_.recordTime.toMicros)
+            .max
+
+          val expectedContractsProcessed =
+            // Every party's active contracts are processed individually.
+            // So the number of processed contract changes is the sum of the stakeholder count over all contracts
+            2
+
+          rdp.metrics.runningDigestProcessor.localPartyChangeContractChanges.getValue shouldBe expectedContractsProcessed
+          rdp.metrics.runningDigestProcessor.localPartyChangeCounterparties.getValue shouldBe 2
+
+          result.map(_.value.tryValue)
+        }
+
+        forAll(Table("authorizationEvent", Onboarding(AuthorizationLevel.Submission), Revoked)) {
+          authorizationEvent =>
+            val classifications = classifyWithBatchSize(authorizationEvent)
+            classifications should contain theSameElementsAs Seq(
+              // first the classification that triggers p1's digest update,
+              PartyRemovedFromParticipant(alice, p1.toLf),
+
+              // cid0
+              ContractChangeBatch.tryCreate(
+                Map(alice -> Set(p2.toLf)),
+                ContractChange(
+                  stakeholders = Set(alice),
+                  locallyHostedStakeholders = Seq(alice),
+                  cid(0),
+                  rc,
+                  isActivation = false,
+                ),
+              ),
+              ContractChangeBatch.tryCreate(
+                Map(bob -> Set(p2.toLf, p3.toLf)),
+                ContractChange(
+                  stakeholders = Set(bob),
+                  locallyHostedStakeholders = Seq(alice),
+                  cid(0),
+                  rc,
+                  isActivation = false,
+                ),
+              ),
+            )
         }
       }
 

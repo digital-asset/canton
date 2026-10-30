@@ -7,9 +7,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, DbStorageMulti, DbStorageSingle}
-import com.digitalasset.canton.tea.projection.TeaProjectionFactory.ApplyDeltaSpanName
+import com.digitalasset.canton.tea.projection.TeaProjectionFactory.{
+  ApplyCompletionSpanName,
+  ApplyDeltaSpanName,
+}
 import com.digitalasset.canton.tea.projection.{
-  EventId,
+  CompletionAccountingPolicy,
   EventSource,
   ProjectionEvent,
   TeaProjectionFactory,
@@ -37,9 +40,9 @@ private[projection] class TeaDbProjectionFactory(
     dbStorage: DbStorage,
     override val loggerFactory: NamedLoggerFactory,
     store: TeaDbTrafficStore,
-    eventSource: EventSource,
     config: ProjectionConfig,
     override protected val metrics: TrafficEnforcementMetrics,
+    completionPolicy: CompletionAccountingPolicy,
     override val onEventCommitted: () => Unit = () => (),
 )(implicit system: ActorSystem[?], tracer: Tracer)
     extends TeaProjectionFactory
@@ -69,6 +72,7 @@ private[projection] class TeaDbProjectionFactory(
 
   def projection(
       projectionId: ProjectionId,
+      eventSource: EventSource,
       grpcSourceFactory: Option[Long] => Source[Traced[ProjectionEvent], ?],
   ): Behavior[ProjectionBehavior.Command] = ProjectionBehavior {
     SlickProjection
@@ -76,7 +80,7 @@ private[projection] class TeaDbProjectionFactory(
         projectionId = projectionId,
         sourceProvider = createSourceProvider(logger, projectionId, grpcSourceFactory),
         databaseConfig = slickProjectionDbConfig,
-        handler = () => eventHandler(projectionId),
+        handler = () => eventHandler(projectionId, eventSource),
       )
       .withStatusObserver(loggingObserver)
       .withRestartBackoff(
@@ -98,43 +102,59 @@ private[projection] class TeaDbProjectionFactory(
   // Runs sequentially for each event
   // Returns a DBIO that is run in the same transaction as the offset watermark bump,
   // giving exactly once semantics and crash recovery
-  private def eventHandler(projectionId: ProjectionId) = new SlickHandler[Traced[ProjectionEvent]] {
-    override def process(envelope: Traced[ProjectionEvent]): DBIO[Done] = {
-      val account = envelope.value.account
-      val event = envelope.value.event
-      implicit val traceContext: TraceContext = envelope.traceContext
+  private def eventHandler(projectionId: ProjectionId, eventSource: EventSource) =
+    new SlickHandler[Traced[ProjectionEvent]] {
+      override def process(envelope: Traced[ProjectionEvent]): DBIO[Done] = {
+        implicit val traceContext: TraceContext = envelope.traceContext
 
-      logger.debug(s"Persisting event ${envelope.value}")
+        logger.debug(s"Persisting event ${envelope.value}")
 
-      withSpanDBIO(ApplyDeltaSpanName) { implicit traceContext => span =>
-        setApplyDeltaSpanAttributes(span, envelope.value, eventSource)
-
-        // Classifies the exception so it can be reported under TRAFFIC_UPDATE_OUT_OF_BOUND.
-        val reject = TeaDbTrafficStore.rejection(account, event.deltaEvent.delta)
-
-        // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
-        // which will add the offset persistence to it and wrap the whole thing into a transaction
-        // to provide exactlyOnce semantics
-        store
-          .persistDeltaDBIO(
-            accountId = account,
-            eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
-            trafficDelta = event.deltaEvent.delta,
-            timestamp = event.deltaEvent.timestamp,
-            eventSource = eventSource,
-          )
-          .asTry
-          .flatMap {
-            case Success(_) => DBIO.successful(Done)
-            // Both branches fail the action, the difference is only that a rejected delta is reported
-            // under its own error code rather than as a raw JDBC failure.
-            // TODO(#35342): decide the failure policy for a rejected delta. Failing stalls the
-            //  projection, skipping the event drops the delta and needs a different transaction shape,
-            //  since the event row inserted above has to roll back while the offset bump commits.
-            case Failure(ex) if reject.isDefinedAt(ex) => DBIO.failed(reject(ex).asGrpcError)
-            case Failure(ex) => DBIO.failed(ex)
-          }
+        envelope.value match {
+          case topUps: ProjectionEvent.TopUps => applyDeltas(projectionId, eventSource, topUps)
+          case completion: ProjectionEvent.Completion =>
+            applyCompletion(projectionId, eventSource, completion)
+          case _: ProjectionEvent.Checkpoint => DBIO.successful(Done)
+        }
       }
     }
-  }
+
+  private def applyCompletion(
+      projectionId: ProjectionId,
+      eventSource: EventSource,
+      completion: ProjectionEvent.Completion,
+  )(implicit traceContext: TraceContext): DBIO[Done] =
+    withSpanDBIO(ApplyCompletionSpanName) { implicit traceContext => span =>
+      setApplyCompletionSpanAttributes(span, completion, eventSource)
+      store
+        .applyCompletionDBIO(
+          completion,
+          projectionId.id,
+          eventSource,
+          completionPolicy,
+        )
+        .asTry
+        .flatMap {
+          case Success(decision) =>
+            // None means a replayed completion, which we already reported.
+            decision.foreach(recordCompletion(span, _))
+            DBIO.successful(Done)
+          case Failure(ex) =>
+            recordCompletionFailure(span)
+            DBIO.failed(ex)
+        }
+    }
+
+  private def applyDeltas(
+      projectionId: ProjectionId,
+      eventSource: EventSource,
+      topUps: ProjectionEvent.TopUps,
+  )(implicit traceContext: TraceContext): DBIO[Done] =
+    DBIO
+      .seq(topUps.deltasWithEventIds(projectionId.id).map { case (accountDelta, eventId) =>
+        withSpanDBIO(ApplyDeltaSpanName) { implicit traceContext => span =>
+          setApplyDeltaSpanAttributes(span, topUps, accountDelta, eventSource)
+          store.persistProjectedDeltaDBIO(accountDelta, eventId, eventSource, topUps.timestamp)
+        }
+      }*)
+      .map(_ => Done)
 }

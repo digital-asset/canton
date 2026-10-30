@@ -20,6 +20,7 @@ import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.AutomaticAssignment
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -85,6 +86,7 @@ sealed trait TickRequestIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => synchronizerTimeTrackerConfig),
@@ -98,7 +100,7 @@ sealed trait TickRequestIntegrationTest
       .withSetup { implicit env =>
         import env.*
 
-        runOnAllInitializedSynchronizersForAllOwners((owner, synchronizer) =>
+        runOnAllInitializedSynchronizersForAllOwners { (owner, synchronizer) =>
           owner.topology.synchronizer_parameters
             .propose_update(
               synchronizer.synchronizerId,
@@ -107,12 +109,17 @@ sealed trait TickRequestIntegrationTest
                 mediatorReactionTimeout = mediatorReactionTimeout,
                 reconciliationInterval = reconciliationInterval,
                 ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-                // Disable automatic assignments
-                assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero,
                 trafficControl =
                   Option.when(synchronizer.synchronizerId == daId.logical)(trafficControlParameters),
               ),
             )
+        }
+        // Disable automatic assignments
+        initializedSynchronizers.values.foreach(synchronizer =>
+          AutomaticAssignment.disable(
+            synchronizer.synchronizerOwners,
+            synchronizer.synchronizerId,
+          )
         )
         // Fill up base rate on DA synchronizer to allow the participants to connect
         environment.simClock.value.advance(Duration.ofSeconds(1))

@@ -400,6 +400,7 @@ class GrpcSynchronizerRegistry(
                 config.sequencerConnections.submissionRequestAmplification,
                 config.sequencerConnections.sequencerConnectionPoolDelays,
                 config.sequencerConnections.subscriptionLivenessLimits,
+                config.sequencerConnections.sequencerConnectionPenaltyConfig,
               )
               .leftMap(error =>
                 SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencers

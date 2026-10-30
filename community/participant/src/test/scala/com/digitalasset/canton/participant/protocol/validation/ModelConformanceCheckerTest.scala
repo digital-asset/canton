@@ -20,6 +20,7 @@ import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByPainter
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.{
   EngineAbortStatus,
   GetEngineAbortStatus,
@@ -55,7 +56,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractHasher, ContractValidator, RoseTree, TestEngine}
-import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion}
+import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -125,6 +126,7 @@ class ModelConformanceCheckerTest
       LoggingConfig(),
       useLegacyContractIdVersionV11 = false,
       loggerFactory,
+      CommonMockMetrics.transactionViewMetrics,
     ).transactionTreeFactory
 
   private val exampleFactory = new ExampleFactory(testEngine)
@@ -722,7 +724,7 @@ class ModelConformanceCheckerTest
 
     val underTest: ModelConformanceChecker = buildUnderTest()
 
-    "fail with vetting error" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "fail with vetting error" in {
       val example = exampleFactory.multiReaderCreate()
 
       // Here we only vet packages for the alice (acting party) on participant 1. The root view package
@@ -836,6 +838,7 @@ class ModelConformanceCheckerTest
       submissionId = None,
       externallySignedSubmission = None,
       transactionHash = None,
+      accountId = None,
     )
 
     val contractOfId
@@ -858,7 +861,7 @@ class ModelConformanceCheckerTest
           contractOfId = contractOfId,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
-          protocolLimits = defaultProtocolLimits,
+          protocolLimits = testedTransactionLimits,
         )
     ).value
 

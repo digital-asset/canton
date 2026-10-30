@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.SequencerAlias
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeDouble, NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   ComponentHealthState,
@@ -31,7 +31,11 @@ import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionConfig
-import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
+import com.digitalasset.canton.sequencing.{
+  GrpcSequencerConnection,
+  SequencerConnectionPenaltyConfig,
+  SequencerConnections,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
@@ -125,7 +129,10 @@ trait SequencerConnectionPool extends FlagCloseable with HasCloseContext with Na
   /** Obtain a number of connections from the pool. The set of returned connections has the
     * following properties:
     *   - it contains at most one connection per sequencer ID
-    *   - the sequencer IDs represented are picked at random at every call
+    *   - the sequencer IDs represented are those with the lowest penalties (see
+    *     `SequencerConnection.increasePenalty`), with ties broken at random at every call
+    *   - if the penalties are disabled in the configuration, the sequencer IDs are chosen at random
+    *     at every call
     *   - it may contain less than the requested number of connections if the current pool contents
     *     cannot satisfy the requirements
     *   - it excludes connections for sequencer IDs provided in `excluded`
@@ -169,6 +176,9 @@ trait SequencerConnectionPool extends FlagCloseable with HasCloseContext with Na
 
   @VisibleForTesting
   def contents: Map[SequencerId, Set[SequencerConnection]]
+
+  @VisibleForTesting
+  def connectionPenalties: Map[SequencerId, NonNegativeDouble]
 }
 
 object SequencerConnectionPool {
@@ -188,6 +198,8 @@ object SequencerConnectionPool {
     *   The maximum duration after which a failed connection is restarted.
     * @param warnConnectionValidationDelay
     *   The duration after which a warning is issued if a started connection still fails validation.
+    * @param sequencerConnectionPenaltyConfig
+    *   Configuration for the sequencer penalty mechanism.
     * @param expectedPsidO
     *   If provided, defines the synchronizer to which the connections are expected to connect. If
     *   empty, the synchronizer will be determined as soon as [[trustThreshold]]-many connections
@@ -199,6 +211,7 @@ object SequencerConnectionPool {
       minRestartConnectionDelay: NonNegativeFiniteDuration,
       maxRestartConnectionDelay: NonNegativeFiniteDuration,
       warnConnectionValidationDelay: NonNegativeFiniteDuration,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
       expectedPsidO: Option[PhysicalSynchronizerId] = None,
   ) extends PrettyPrintingFromCompanion {
     // TODO(i24780): when persisting, use com.digitalasset.canton.version.Invariant machinery for validation
@@ -261,6 +274,7 @@ object SequencerConnectionPool {
       param("minRestartConnectionDelay", _.minRestartConnectionDelay),
       param("maxRestartConnectionDelay", _.maxRestartConnectionDelay),
       param("warnConnectionValidationDelay", _.warnConnectionValidationDelay),
+      param("sequencerConnectionPenaltyConfig", _.sequencerConnectionPenaltyConfig),
       paramIfDefined("expectedPsidO", _.expectedPsidO),
     )
 
@@ -325,6 +339,7 @@ object SequencerConnectionPool {
           sequencerConnections.sequencerConnectionPoolDelays.maxRestartDelay,
         warnConnectionValidationDelay =
           sequencerConnections.sequencerConnectionPoolDelays.warnValidationDelay,
+        sequencerConnectionPenaltyConfig = sequencerConnections.sequencerConnectionPenaltyConfig,
       )
     }
 

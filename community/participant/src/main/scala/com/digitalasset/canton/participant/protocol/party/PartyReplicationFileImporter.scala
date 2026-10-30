@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.protocol.party
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -32,7 +34,7 @@ import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.concurrent.{ExecutionContext, blocking}
 import scala.util.control.NonFatal
 
 /** The party replication file importer imports a party's active contracts on a specific
@@ -82,17 +84,6 @@ class PartyReplicationFileImporter(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
 
-    // Helper to pipe EitherT errors into the Pekko Stream future
-    def toFuture[T](resET: EitherT[FutureUnlessShutdown, String, T]): Future[T] =
-      resET.value
-        .flatMap(
-          _.fold(
-            err => FutureUnlessShutdown.failed[T](ImportFailedException(err)),
-            res => FutureUnlessShutdown.pure(res),
-          )
-        )
-        .failOnShutdownToAbortException("importAcsSnapshot")
-
     // Note: We process the file from the beginning upon every invocation.
     val numContractsImported = new AtomicLong(0L)
 
@@ -100,62 +91,58 @@ class PartyReplicationFileImporter(
     val doneF = acsReader
       .grouped(TargetParticipantAcsPersistence.contractsToRequestEachTime.unwrap)
       .mapAsync(1) { contracts =>
-        toFuture(
-          for {
-            _ <- EitherT.liftF[FutureUnlessShutdown, String, Unit](awaitTestInterceptor())
-            _ = logger.info(
-              s"About to import contracts starting at ordinal ${numContractsImported.get}"
-            )
-            contractsNE <- EitherT.fromEither[FutureUnlessShutdown](
-              NonEmpty.from(contracts).toRight("Grouped ACS must be nonempty")
-            )
+        val eitherT = for {
+          _ <- EitherT.liftF[FutureUnlessShutdown, String, Unit](awaitTestInterceptor())
+          _ = logger.info(
+            s"About to import contracts starting at ordinal ${numContractsImported.get}"
+          )
+          contractsNE <- EitherT.fromEither[FutureUnlessShutdown](
+            NonEmpty.from(contracts).toRight("Grouped ACS must be nonempty")
+          )
 
-            // Read the checkpoint reached so far to know where to resume from
-            currentProgress <- EitherT.fromEither[FutureUnlessShutdown](
-              replicationProgressState
-                .getAcsReplicationProgress(requestId)
-                .toRight(s"Party replication $requestId is unexpectedly unknown")
-            )
+          // Read the checkpoint reached so far to know where to resume from
+          currentProgress <- EitherT.fromEither[FutureUnlessShutdown](
+            replicationProgressState
+              .getAcsReplicationProgress(requestId)
+              .toRight(s"Party replication $requestId is unexpectedly unknown")
+          )
 
-            // Import the chunk
-            checkpoint <- acsReplicationContractHandler.handleContracts(
-              contractsNE,
-              AcsTransferCheckpoint(
-                currentProgress.processedContractCount,
-                currentProgress.nextPersistenceCounter,
-              ),
-              synchronizerId,
-            )
+          // Import the chunk
+          checkpoint <- acsReplicationContractHandler.handleContracts(
+            contractsNE,
+            AcsTransferCheckpoint(
+              currentProgress.processedContractCount,
+              currentProgress.nextPersistenceCounter,
+            ),
+            synchronizerId,
+          )
 
-            // Update the state incrementally after every chunk (= checkpoint)
-            _ <- replicationProgressState.updateAcsReplicationProgress(
-              requestId,
-              AcsReplicationStatus.EphemeralFileImporterProgress(
-                checkpoint.processedContractCount,
-                checkpoint.nextPersistenceCounter,
-                acsHashO = None,
-                fullyProcessedAcs = false,
-                this,
-              ),
-            )
-          } yield numContractsImported.set(checkpoint.processedContractCount.unwrap)
-        )
+          // Update the state incrementally after every chunk (= checkpoint)
+          _ <- replicationProgressState.updateAcsReplicationProgress(
+            requestId,
+            AcsReplicationStatus.EphemeralFileImporterProgress(
+              checkpoint.processedContractCount,
+              checkpoint.nextPersistenceCounter,
+              acsHashO = None,
+              fullyProcessedAcs = false,
+              this,
+            ),
+          )
+        } yield numContractsImported.set(checkpoint.processedContractCount.unwrap)
+        eitherT.value.unwrap
       }
-      .runWith(Sink.ignore)
+      // Stop on the first error or AbortedDueToShutdown
+      .dropWhile(!_.forall(_.isLeft))
+      .runWith(Sink.headOption)
 
     for {
       // Translate exceptions back to EitherT:
-      // - recoverFromAbortException safely extracts the private AbortedDueToShutdownException
-      // - We then map the successful completion to Right(())
-      // - We use FutureUnlessShutdown's built-in .recover to catch stream failures and turn them into Lefts
+      // We use FutureUnlessShutdown's built-in .recover to catch stream failures and turn them into Lefts
       _ <- EitherT(
-        FutureUnlessShutdown
-          .recoverFromAbortException(doneF)
-          .map[Either[String, Unit]](_ => Right(()))
-          .recover {
-            case ImportFailedException(msg) => Outcome(Left(msg))
-            case NonFatal(ex) => Outcome(Left(ex.getMessage))
-          }
+        FutureUnlessShutdown(doneF.map(_.sequence.map(_.getOrElse(Either.unit)))).recover {
+          case NonFatal(ex) =>
+            Outcome(Left(ex.getMessage))
+        }
       )
 
       finalProgress <- EitherT.fromEither[FutureUnlessShutdown](

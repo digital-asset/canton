@@ -65,7 +65,7 @@ object TestRunner {
 }
 
 final class TestRunner(availableTests: AvailableTests, config: Config) {
-  private val configuredTests = new ConfiguredTests(availableTests, config)
+  private val configuredTests = ConfiguredTests(availableTests, config)
 
   private implicit val resourceManagementExecutionContext: ExecutionContext =
     ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor())
@@ -91,10 +91,10 @@ final class TestRunner(availableTests: AvailableTests, config: Config) {
     reportLogBuilder.addOne('\n')
     val addReportLineToLogEntry: String => Unit = reportLogBuilder.addAll(_).addOne('\n')
 
-    val res = runInternal(reporterPrintln = addReportLineToLogEntry)
+    val (res, _) = runInternal(reporterPrintln = addReportLineToLogEntry)
     // Log the full report at info level
     logger.info(reportLogBuilder.result())
-    res._1
+    res
   }
 
   private def runInternal(

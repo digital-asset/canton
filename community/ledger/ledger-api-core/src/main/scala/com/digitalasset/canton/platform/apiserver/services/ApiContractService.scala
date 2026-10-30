@@ -11,7 +11,11 @@ import com.daml.ledger.api.v2.contract_service.{
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.FieldValidator
+import com.digitalasset.canton.ledger.api.validation.ContractServiceRequestValidator.GetContractRequest as ValidatedGetContractRequest
+import com.digitalasset.canton.ledger.api.validation.{
+  ContractServiceRequestValidator,
+  LedgerApiSizeLimitsConfig,
+}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -32,7 +36,7 @@ final class ApiContractService(
     ledgerApiContractStore: LedgerApiContractStore,
     lfValueTranslation: LfValueTranslation,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, sizeLimitsConfig: LedgerApiSizeLimitsConfig)
     extends ContractServiceGrpc.ContractService
     with GrpcApiService
     with NamedLogging {
@@ -40,17 +44,16 @@ final class ApiContractService(
   override def getContract(request: GetContractRequest): Future[GetContractResponse] = {
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
-    (for {
-      contractId <- FieldValidator.requireContractId(request.contractId, "contract_id")
-      queryingParties <- FieldValidator.requireParties(request.queryingParties.toSet)
-    } yield {
-      ledgerApiContractStore
-        .lookupPersisted(contractId)
-        .flatMap(toApiResult(queryingParties, contractId))
-    }).fold(
-      t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
-      identity,
-    )
+    ContractServiceRequestValidator
+      .validateGetContractRequest(request)
+      .fold(
+        t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
+        { case ValidatedGetContractRequest(contractId, queryingParties) =>
+          ledgerApiContractStore
+            .lookupPersisted(contractId)
+            .flatMap(toApiResult(queryingParties, contractId))
+        },
+      )
   }
 
   private def toApiResult(

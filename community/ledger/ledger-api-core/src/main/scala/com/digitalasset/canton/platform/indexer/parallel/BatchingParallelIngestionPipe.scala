@@ -11,28 +11,30 @@ import scala.concurrent.Future
 
 object BatchingParallelIngestionPipe {
 
-  def apply[In, InBatch, DbBatch](
-      submissionBatchSize: Long,
+  def apply[In, InBatch, DbElem, DbBatch, OutBatch](
+      submissionBatchSize: Int,
       inputMappingParallelism: Int,
       contractReInsertion: Iterable[In] => Future[Iterable[In]],
       inputMapper: Iterable[In] => Future[InBatch],
       seqMapperZero: InBatch,
       seqMapper: (InBatch, InBatch) => InBatch,
       dbPrepareParallelism: Int,
-      dbPrepare: InBatch => Future[InBatch],
-      batchingParallelism: Int,
-      batcher: InBatch => Future[DbBatch],
-      ingestingParallelism: Int,
+      dbPrepare: InBatch => Future[Vector[DbElem]],
+      ingestionParallelism: Int,
+      ingestionMaxBatchSize: Int,
+      ingestionMinBatchSize: Int,
+      batcher: Iterable[DbElem] => Future[DbBatch],
+      batcherCostFn: DbElem => Long,
       ingester: DbBatch => Future[DbBatch],
-      maxTailerBatchSize: Int,
-      ingestTail: Vector[DbBatch] => Future[Vector[DbBatch]],
-  ): Flow[In, DbBatch, NotUsed] =
+      tailConflateFlow: Flow[DbBatch, OutBatch, NotUsed],
+      ingestTail: OutBatch => Future[OutBatch],
+  ): Flow[In, OutBatch, NotUsed] =
     // The stream coming from ReadService, involves deserialization and translation to Update-s
     Flow[In]
       // Batching plus mapping to Database DTOs encapsulates all the CPU intensive computation of the ingestion. Executed in parallel.
       .via(
         BatchN.forMaxConcurrency(
-          maxBatchSize = submissionBatchSize.toInt,
+          maxBatchSize = submissionBatchSize,
           maxBatchCount = inputMappingParallelism,
         )
       )
@@ -43,15 +45,21 @@ object BatchingParallelIngestionPipe {
       .drop(1) // remove the zero element from the beginning of the stream
       .async
       .mapAsync(dbPrepareParallelism)(dbPrepare)
-      // Mapping to Database specific representation, encapsulates all database specific preparation of the data. Executed in parallel.
       .async
-      .mapAsync(batchingParallelism)(batcher)
+      .mapConcat(identity)
+      .via(
+        BatchN(
+          maxBatchSize = ingestionMaxBatchSize,
+          maxBatchCount = ingestionParallelism,
+          minBatchSize = ingestionMinBatchSize,
+          costFn = batcherCostFn,
+        )
+      )
+      .mapAsync(ingestionParallelism)(batcher)
       // Inserting data into the database. Almost no CPU load here, threads are executing SQL commands over JDBC, and waiting for the result. This defines the parallelism on the SQL database side, same amount of PostgreSQL Backend processes will do the ingestion work.
-      .async
-      .mapAsync(ingestingParallelism)(ingester)
+      .mapAsync(ingestionParallelism)(ingester)
       // Batching data for throttled ledger-end update in database
-      .batch(maxTailerBatchSize.toLong, Vector(_))(_ :+ _)
+      .via(tailConflateFlow)
       // Updating ledger-end and related data in database (this stage completion demarcates the consistent point-in-time)
       .mapAsync(1)(ingestTail)
-      .mapConcat(identity)
 }

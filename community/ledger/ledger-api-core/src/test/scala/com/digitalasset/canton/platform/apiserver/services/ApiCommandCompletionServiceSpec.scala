@@ -12,6 +12,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.auth.services.CommandCompletionServiceAuthorization
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.participant.state.index.IndexCompletionsService
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -58,6 +59,7 @@ class ApiCommandCompletionServiceSpec
   private implicit val resourceContext: ResourceContext = ResourceContext(executionContext)
 
   private val metrics = LedgerApiServerMetrics.ForTesting
+  private implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
 
   private val party1 = Ref.Party.assertFromString("alice")
   private val party2 = Ref.Party.assertFromString("bob")

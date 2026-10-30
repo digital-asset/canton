@@ -311,6 +311,7 @@ final class SingleParticipantTestContext private[participant] (
           otherConfirmingParticipantUids = Seq(),
           confirmationThreshold = 1,
           observingParticipantUids = Seq(),
+          protocolVersion = None,
         )
       )
     } yield onboardingTransactions
@@ -617,6 +618,7 @@ final class SingleParticipantTestContext private[participant] (
           eventFormat = request.eventFormat,
           maxPageSize = Some(size),
           pageToken = token,
+          includeIncompleteReassignments = request.includeIncompleteReassignments,
         )
       )
       .flatMap { response =>
@@ -681,32 +683,49 @@ final class SingleParticipantTestContext private[participant] (
       templateIds: Seq[Identifier] = Seq.empty,
       interfaceFilters: Seq[(Identifier, IncludeInterfaceView)] = Seq.empty,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): GetActiveContractsRequest =
     GetActiveContractsRequest(
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat(verbose, parties, templateIds, interfaceFilters)),
       streamContinuationToken = None,
+      includeIncompleteReassignments = includeIncompleteReassignments,
     )
 
   override def activeContractsWithVariants(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
-    activeContractsByTemplateIdWithVariants(Seq.empty, parties, activeAtOffsetO, verbose)
+    activeContractsByTemplateIdWithVariants(
+      templateIds = Seq.empty,
+      parties = parties,
+      activeAtOffsetO = activeAtOffsetO,
+      verbose = verbose,
+      includeIncompleteReassignments = includeIncompleteReassignments,
+    )
 
   override def activeContracts(
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long] = None,
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
-    activeContractsByTemplateId(Seq.empty, parties, activeAtOffsetO, verbose)
+    activeContractsByTemplateId(
+      templateIds = Seq.empty,
+      parties = parties,
+      activeAtOffsetO = activeAtOffsetO,
+      verbose = verbose,
+      includeIncompleteReassignments = includeIncompleteReassignments,
+    )
 
   override def activeContractsByTemplateId(
       templateIds: Seq[Identifier],
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     for {
       activeAtOffset <- activeAtOffsetO match {
@@ -719,6 +738,7 @@ final class SingleParticipantTestContext private[participant] (
           activeAtOffset,
           templateIds,
           verbose = verbose,
+          includeIncompleteReassignments = includeIncompleteReassignments,
         )
       )
     } yield acs
@@ -728,6 +748,7 @@ final class SingleParticipantTestContext private[participant] (
       parties: Option[Seq[Party]],
       activeAtOffsetO: Option[Long],
       verbose: Boolean = true,
+      includeIncompleteReassignments: Boolean = false,
   ): Future[Vector[CreatedEvent]] =
     for {
       activeAtOffset <- activeAtOffsetO match {
@@ -740,6 +761,7 @@ final class SingleParticipantTestContext private[participant] (
           activeAtOffset,
           templateIds,
           verbose = verbose,
+          includeIncompleteReassignments = includeIncompleteReassignments,
         )
       )
     } yield acs
@@ -861,6 +883,7 @@ final class SingleParticipantTestContext private[participant] (
           includeTransactions = Some(transactionFormat),
           includeReassignments = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
       ),
       descendingOrder = false,
@@ -908,6 +931,7 @@ final class SingleParticipantTestContext private[participant] (
           includeTransactions = transactionFormatO,
           includeReassignments = reassignmentsFormatO,
           includeTopologyEvents = includeTopologyTransactions,
+          includeTransactionsAndReassignments = None,
         )
       ),
       descendingOrder = descendingOrder,
@@ -1122,6 +1146,7 @@ final class SingleParticipantTestContext private[participant] (
                 Some(transactionFormat(parties = partiesList, transactionShape = LedgerEffects)),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             )
           ),
         )
@@ -1156,6 +1181,7 @@ final class SingleParticipantTestContext private[participant] (
             ),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
       )
@@ -1182,6 +1208,7 @@ final class SingleParticipantTestContext private[participant] (
             ),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
       )
@@ -1203,6 +1230,7 @@ final class SingleParticipantTestContext private[participant] (
                 Some(ParticipantAuthorizationTopologyFormat(parties.map(_.getValue)))
               )
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
       )
@@ -1220,6 +1248,7 @@ final class SingleParticipantTestContext private[participant] (
                 Some(transactionFormat(parties = partiesList, transactionShape = LedgerEffects)),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             )
           ),
         )
@@ -1253,6 +1282,7 @@ final class SingleParticipantTestContext private[participant] (
             ),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
       )
@@ -1274,6 +1304,7 @@ final class SingleParticipantTestContext private[participant] (
                 Some(ParticipantAuthorizationTopologyFormat(parties.map(_.getValue)))
               )
             ),
+            includeTransactionsAndReassignments = None,
           )
         ),
       )
@@ -1515,6 +1546,7 @@ final class SingleParticipantTestContext private[participant] (
       estimateTrafficCost = estimateTrafficCost,
       tapsMaxPasses = None,
       hashingSchemeVersion = Some(HashingSchemeVersion.HASHING_SCHEME_VERSION_V2),
+      accountId = "",
     )
 
   override def executeSubmissionRequest(
@@ -1539,6 +1571,7 @@ final class SingleParticipantTestContext private[participant] (
       userId = userId,
       hashingSchemeVersion = HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
       minLedgerTime = None,
+      accountId = "",
     )
   }
 

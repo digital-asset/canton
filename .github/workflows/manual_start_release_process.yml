@@ -1,0 +1,70 @@
+name: Manual Start Release Process
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  validate_ref:
+    name: Validate release ref
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail for unsupported refs
+        env:
+          REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          if [[ "$REF" != "refs/heads/main" && ! "$REF" =~ ^refs/heads/release-line-[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::This workflow can only be started from main or a release-line branch matching release-line-X.Y. Current ref: $REF"
+            exit 1
+          fi
+
+  manual_start_release_process:
+    name: Start the release process
+    if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
+    uses: ./.github/workflows/_run_propose_script.yml
+    needs: [pick_runner, validate_ref]
+    permissions:
+      contents: write
+      pull-requests: write
+    secrets: inherit
+    with:
+      script_argument: create_release_pr
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - pick_runner
+      - validate_ref
+      - manual_start_release_process
+    if: |
+      always() &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}
+      runner: >-
+        ${{
+          case(
+            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
+            github.repository == 'digital-asset/canton', 'digital-asset-canton',
+            'ubuntu-latest'
+          )
+        }}

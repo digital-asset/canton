@@ -849,7 +849,16 @@ sealed trait ManualLogicalSynchronizerUpgrade[Req <: ManualLsuRequest]
         )
 
       case LogicalSynchronizerUpgrade.NewConfig(config) =>
-        EitherT.pure(config.copy(psid = Some(successorPsid)))
+        val predecessorDisableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+          .get(currentPsid)
+          .exists(_.config.disableAuthorizedStoreDispatching)
+        EitherT.pure(
+          config.copy(
+            psid = Some(successorPsid),
+            disableAuthorizedStoreDispatching =
+              config.disableAuthorizedStoreDispatching || predecessorDisableAuthorizedStoreDispatching,
+          )
+        )
     }
 
 }
@@ -1131,9 +1140,15 @@ class UncheckedLateLogicalSynchronizerUpgrade(
       _ <- synchronizerConnectionConfigStore.get(successorPsid) match {
         case Left(_: UnknownPsid) =>
           logger.info(s"Storing synchronizer connection config for $successorPsid")
+          val predecessorDisableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+            .get(currentPsid)
+            .exists(_.config.disableAuthorizedStoreDispatching)
           synchronizerConnectionConfigStore
             .put(
-              request.successorConfig,
+              request.successorConfig.copy(disableAuthorizedStoreDispatching =
+                request.successorConfig.disableAuthorizedStoreDispatching ||
+                  predecessorDisableAuthorizedStoreDispatching
+              ),
               SynchronizerConnectionConfigStore.Active,
               KnownPhysicalSynchronizerId(successorPsid),
               Some(

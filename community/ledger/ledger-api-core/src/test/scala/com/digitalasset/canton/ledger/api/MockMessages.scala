@@ -42,6 +42,7 @@ object MockMessages {
       packageIdSelectionPreference = Nil,
       prefetchContractKeys = Nil,
       tapsMaxPasses = None,
+      accountId = "",
     )
 
   val reassignmentCommands: ReassignmentCommands =
@@ -52,6 +53,7 @@ object MockMessages {
       commandId = commandId,
       submissionId = "",
       commands = Nil,
+      accountId = "",
     )
 
   val submitRequest: SubmitRequest = SubmitRequest(Some(commands))

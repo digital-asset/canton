@@ -28,6 +28,7 @@ import com.digitalasset.canton.http.json.v2.Endpoints.{
   TracedInput,
   createProtoRef,
   v2Endpoint,
+  v2WebsocketEndpoint,
 }
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{
@@ -295,6 +296,7 @@ final case class JsCommands(
     packageIdSelectionPreference: Seq[String] = Seq.empty,
     prefetchContractKeys: Seq[js.PrefetchContractKey] = Seq.empty,
     tapsMaxPasses: Option[Int] = None,
+    accountId: Option[String] = None,
 )
 
 object JsCommandService extends DocumentationEndpoints {
@@ -302,6 +304,8 @@ object JsCommandService extends DocumentationEndpoints {
   import JsCommandServiceCodecs.*
 
   private lazy val commands = v2Endpoint.in(sttp.tapir.stringToPath("commands"))
+  private lazy val commandsWebsocket =
+    v2WebsocketEndpoint.in(sttp.tapir.stringToPath("commands"))
 
   val submitAndWaitForTransactionEndpoint = commands.post
     .in(sttp.tapir.stringToPath("submit-and-wait-for-transaction"))
@@ -337,7 +341,7 @@ object JsCommandService extends DocumentationEndpoints {
       .protoRef(command_submission_service.CommandSubmissionServiceGrpc.METHOD_SUBMIT_REASSIGNMENT)
 
   val completionStreamEndpoint =
-    commands.get
+    commandsWebsocket.get
       .in(sttp.tapir.stringToPath("completions"))
       .out(
         webSocketBody[
@@ -364,7 +368,7 @@ object JsCommandService extends DocumentationEndpoints {
       .inStreamListParamsAndDescription()
 
   val commandCompletionsEndpoint =
-    commands.get
+    commandsWebsocket.get
       .in(sttp.tapir.stringToPath("command-completions"))
       .out(
         webSocketBody[

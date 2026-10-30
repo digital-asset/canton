@@ -16,10 +16,18 @@ import com.digitalasset.canton.config.ConfigErrors.{
   SubstitutionError,
 }
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.config.ExtensionServiceAuthConfig
+import com.digitalasset.canton.platform.config.{
+  TopUpConfig,
+  TrafficAccountingConfig,
+  TrafficEnforcementServerConfig,
+}
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
@@ -156,6 +164,51 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  "the traffic accounting top-up configuration" should {
+
+    def damlTopUp(cfg: TrafficAccountingConfig): Option[TopUpConfig.DamlCredit] =
+      Some(cfg.trafficEnforcementServer).flatMap {
+        case internal: TrafficEnforcementServerConfig.Internal =>
+          Some(internal.topUp).collect { case damlCredit: TopUpConfig.DamlCredit => damlCredit }
+      }
+
+    "default to disabled" in {
+      val config = loadFiles(Seq(simpleConfPath)).value
+      config.participants.values.map(cfg =>
+        damlTopUp(cfg.trafficAccounting)
+      ) should contain only None
+    }
+
+    "load the Daml credit top-up" in {
+      val config =
+        loadFiles(Seq(simpleConfPath, "traffic-accounting-daml-top-up.conf")).value
+      val participant = config.participants.get(InstanceName.tryCreate("participant1")).value
+      damlTopUp(participant.trafficAccounting) shouldBe Some(
+        TopUpConfig.DamlCredit(
+          paymasters = NonEmpty(
+            Set,
+            PartyId.tryFromProtoPrimitive("paymaster::1220aa"),
+            PartyId.tryFromProtoPrimitive("paymaster::1220bb"),
+          ),
+          initialOffsetBeginExclusive = Some(42L),
+        )
+      )
+    }
+
+    "reject a Daml credit top-up without paymasters" in {
+      val result =
+        loggerFactory.assertLogs(
+          loadFiles(
+            Seq(simpleConfPath, "invalid-configs/traffic-accounting-empty-paymasters.conf")
+          ),
+          _.errorMessage should (include("traffic-accounting-empty-paymasters.conf") and include(
+            "paymasters"
+          )),
+        )
+      result.left.value shouldBe a[GenericConfigError.Error]
+    }
+  }
+
   // test that fails because of using env variable substitution with a non-existent env variable
   "the undefined-env-var configuration" should {
 
@@ -241,6 +294,70 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
 
       config.participants.keySet shouldBe Set(InstanceName.tryCreate("participant1"))
     }
+  }
+
+  "the ledger api size limits configuration" should {
+
+    def withSizeLimits(sizeLimits: String)(
+        check: Either[CantonConfigError, LedgerApiSizeLimitsConfig] => Assertion
+    ): Unit =
+      File.usingTemporaryFile("size-limits", ".conf") { overrideFile =>
+        overrideFile.writeText(
+          s"canton.participants.participant1.ledger-api.size-limits { $sizeLimits }"
+        )
+        check(
+          CantonConfig
+            .parseAndLoad(Seq(simpleConf.toJava, overrideFile.toJava), defaultPorts = None)
+            .map(_.participantsByString("participant1").ledgerApi.sizeLimits)
+        )
+      }
+
+    "keep the default limits for the limits that are not set" in withSizeLimits(
+      "public-lapi-size-config.completion-stream-request.parties-size-limit = 10"
+    ) { result =>
+      val sizeLimits = result.value.publicLapiSizeConfig
+      val defaultSizeLimits = LedgerApiSizeLimitsConfig().publicLapiSizeConfig
+
+      sizeLimits.completionStreamRequest.partiesSizeLimit shouldBe PositiveInt.tryCreate(10)
+      sizeLimits.copy(completionStreamRequest = defaultSizeLimits.completionStreamRequest) shouldBe
+        defaultSizeLimits
+    }
+
+    "apply a shared limit to the linked limits that are not set" in withSizeLimits(
+      """shared-size-config.completions-request-parties-size-limit = 5
+        |public-lapi-size-config.completion-stream-request.parties-size-limit = 10""".stripMargin
+    ) { result =>
+      val sizeLimits = result.value
+      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, sharedSizeConfig) =>
+        sharedSizeConfig.completionsRequestPartiesSizeLimit shouldBe PositiveInt.tryCreate(5)
+      }
+      sizeLimits.publicLapiSizeConfig.getCompletionsRequest.partiesSizeLimit shouldBe
+        PositiveInt.tryCreate(5)
+      // the message-specific limit that is set takes over the shared limit
+      sizeLimits.publicLapiSizeConfig.completionStreamRequest.partiesSizeLimit shouldBe
+        PositiveInt.tryCreate(10)
+    }
+
+    "reject an invalid shared limit" in loggerFactory.assertLogs(
+      withSizeLimits("shared-size-config.completions-request-parties-size-limit = -1") {
+        _.left.value shouldBe a[GenericConfigError.Error]
+      },
+      _.errorMessage should include("shared-size-config.completions-request-parties-size-limit"),
+    )
+
+    "reject an unknown key for PublicLapiSizeConfig" in loggerFactory.assertLogs(
+      withSizeLimits("public-lapi-size-config.completion-stream-request.this-is-not-a-key = 10") {
+        _.left.value shouldBe a[GenericConfigError.Error]
+      },
+      _.errorMessage should include("this-is-not-a-key"),
+    )
+
+    "reject an unknown shared key" in loggerFactory.assertLogs(
+      withSizeLimits("shared-size-config.this-is-not-a-key = 10") {
+        _.left.value shouldBe a[GenericConfigError.Error]
+      },
+      _.errorMessage should include("this-is-not-a-key"),
+    )
   }
 
   "load with multiple config files" should {
@@ -760,7 +877,18 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           ),
           "deprecated path",
         )
-      )
+      ) ++ Seq(
+        "enable-deprecated-endpoints-34",
+        "enable-deprecated-parameters-34",
+        "enable-deprecated-endpoints-35",
+      ).map { flag =>
+        (
+          (_: LogEntry).message should include(
+            s"Config path 'features.deprecated.$flag' is deprecated since 3.7.0"
+          ),
+          s"deprecated path 'features.deprecated.$flag'",
+        )
+      }
       loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
         {
           val parsed = CantonConfig.parseAndLoad(

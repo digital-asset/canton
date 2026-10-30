@@ -181,6 +181,7 @@ class ToxiproxyParticipantMultiSequencerConnectivityTest
                   submissionRequestAmplification = sc.submissionRequestAmplification,
                   sequencerConnectionPoolDelays = sc.sequencerConnectionPoolDelays,
                   subscriptionLivenessLimits = sc.subscriptionLivenessLimits,
+                  sequencerConnectionPenaltyConfig = sc.sequencerConnectionPenaltyConfig,
                 )
                 .getOrElse(fail("Must succeed increasing threshold to 4 with 4 sequencers"))
             )

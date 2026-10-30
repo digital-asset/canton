@@ -7,6 +7,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
@@ -63,6 +64,15 @@ object ConsensusCertificate {
 }
 
 object PrepareCertificate {
+
+  def apply(
+      prePrepare: SignedMessage[PrePrepare],
+      prepares: Seq[SignedMessage[Prepare]],
+  ): PrepareCertificate = {
+    // sort the prepares to ensure that the order is deterministic and consistent across different nodes
+    val sortedPrepares = prepares.sorted
+    new PrepareCertificate(prePrepare, sortedPrepares)
+  }
   def fromProto(
       prepareCertificate: v30.PrepareCertificate,
       actualSender: Option[BftNodeId],
@@ -70,14 +80,14 @@ object PrepareCertificate {
     for {
       prePrepare <- ProtoConverter
         .parseRequired(
-          SignedMessage.fromProto(v30.ConsensusMessage)(
+          SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
             PrePrepare.fromProtoConsensusMessage(actualSender, _)
           ),
           "prePrepare",
           prepareCertificate.prePrepare,
         )
       prepares <- prepareCertificate.prepares.traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage)(
+        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
           Prepare.fromProtoConsensusMessage(actualSender, _)
         )
       )
@@ -88,6 +98,15 @@ object CommitCertificate {
   implicit val ordering: Ordering[Commit] =
     Ordering.by(commit => (commit.from, commit.localTimestamp))
 
+  def apply(
+      prePrepare: SignedMessage[PrePrepare],
+      commits: Seq[SignedMessage[Commit]],
+  ): CommitCertificate = {
+    // sort the commits to ensure that the order is deterministic and consistent across different nodes
+    val sortedCommits = commits.sorted
+    new CommitCertificate(prePrepare, sortedCommits)
+  }
+
   def fromProto(
       commitCertificate: v30.CommitCertificate,
       actualSender: Option[BftNodeId],
@@ -95,14 +114,14 @@ object CommitCertificate {
     for {
       prePrepare <- ProtoConverter
         .parseRequired(
-          SignedMessage.fromProto(v30.ConsensusMessage)(
+          SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
             PrePrepare.fromProtoConsensusMessage(actualSender, _)
           ),
           "prePrepare",
           commitCertificate.prePrepare,
         )
       commits <- commitCertificate.commits.traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage)(
+        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
           Commit.fromProtoConsensusMessage(actualSender, _)
         )
       )

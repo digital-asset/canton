@@ -796,6 +796,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
             ),
             None,
             None,
+            includeTransactionsAndReassignments = None,
           ),
         )
         .flatMap(_.createEvents.toSeq.loneElement.templateId.map(_.packageId))
@@ -823,6 +824,7 @@ class SystematicTopologyAwareUpgradingIntegrationTest
               ),
               None,
               None,
+              includeTransactionsAndReassignments = None,
             ),
           )
           .flatMap(_.createEvents.toSeq.loneElement.templateId.map(_.packageId))

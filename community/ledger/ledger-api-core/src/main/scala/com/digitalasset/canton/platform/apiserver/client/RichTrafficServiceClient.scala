@@ -4,8 +4,11 @@
 package com.digitalasset.canton.platform.apiserver.client
 
 import cats.data.EitherT
+import com.digitalasset.base.error.RpcError
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.error.GenericCantonRpcError
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -23,19 +26,19 @@ import com.digitalasset.canton.networking.grpc.{
 }
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.*
+import com.digitalasset.canton.tea.v1.SubmissionAccountingServiceGrpc.SubmissionAccountingServiceStub
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.inprocess.InProcessChannelBuilder
+import io.grpc.protobuf.StatusProto
 import io.grpc.{ManagedChannel, StatusRuntimeException}
 
-import scala.annotation.unused
-import scala.concurrent.ExecutionContext
-
 /** gRPC client to the external traffic service used for local traffic enforcement operations by the
-  * participant node.
+  * participant node. It talks to both the `TrafficService` and the participant-internal
+  * `SubmissionAccountingService` over one channel.
   *
   * As part of the proxied traffic service operations, this client handles retries with timeouts and
-  * logging. It does not normalize failures: both methods return the raw `GrpcError`, and the caller
+  * logging. It does not normalize failures: all methods return the raw `GrpcError`, and the caller
   * is responsible for passing it through `normalizeTeaError` before it reaches a Ledger API client.
   *
   * @param channel
@@ -57,11 +60,13 @@ class RichTrafficServiceClient(
   private val client: GrpcClient[TrafficServiceStub] =
     GrpcClient.create(managedChannel, TrafficServiceGrpc.stub)
 
+  private val submissionAccountingClient: GrpcClient[SubmissionAccountingServiceStub] =
+    GrpcClient.create(managedChannel, SubmissionAccountingServiceGrpc.stub)
+
   def getAccount(
       request: GetAccountRequest
   )(implicit
-      traceContext: TraceContext,
-      @unused ec: ExecutionContext,
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, GrpcError, GetAccountResponse] =
     CantonGrpcUtil.sendGrpcRequest(client, serverName)(
       _.getAccount(request),
@@ -75,8 +80,7 @@ class RichTrafficServiceClient(
   def updateAccount(
       request: UpdateAccountRequest
   )(implicit
-      traceContext: TraceContext,
-      @unused ec: ExecutionContext,
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, GrpcError, UpdateAccountResponse] =
     CantonGrpcUtil.sendGrpcRequest(client, serverName)(
       _.updateAccount(request),
@@ -87,19 +91,31 @@ class RichTrafficServiceClient(
       retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
     )
 
-  def pruneEvents(
-      request: PruneEventsRequest
-  )(implicit
-      traceContext: TraceContext,
-      @unused ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, GrpcError, PruneEventsResponse] =
+  def prune(
+      request: PruneRequest
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, GrpcError, PruneResponse] =
     CantonGrpcUtil.sendGrpcRequest(client, serverName)(
-      _.pruneEvents(request),
-      requestDescription = "prune-events",
+      _.prune(request),
+      requestDescription = "prune",
       timeout = timeouts.network.duration,
       logger = logger,
       logPolicy = RichTrafficServiceClient.doNotLogRefusedRequests,
       // Response is not idempotent, so we don't retry. The traffic service will log the error and the caller can retry if they want.
+      retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
+    )
+
+  def registerSubmission(
+      request: RegisterSubmissionRequest
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, GrpcError, RegisterSubmissionResponse] =
+    CantonGrpcUtil.sendGrpcRequest(submissionAccountingClient, serverName)(
+      _.registerSubmission(request),
+      requestDescription = "register-submission",
+      timeout = accountLookupTimeout.duration,
+      logger = logger,
+      logPolicy = RichTrafficServiceClient.doNotLogTeaErrors,
+      // Even a bare UNAVAILABLE can arrive after TEA stored the submission, so a retry could report a false conflict.
       retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
     )
 }
@@ -144,6 +160,31 @@ object RichTrafficServiceClient {
             .asGrpcError
       }
 
+  /** Like [[normalizeTeaError]], but returns an `RpcError` so submissions can return a `Left`
+    * instead of failing the future. The normalized gRPC status stays unchanged.
+    */
+  private[apiserver] def normalizeTeaErrorToRpcError(
+      error: GrpcError
+  )(implicit errorLoggingContext: ErrorLoggingContext): RpcError = {
+    val normalized = normalizeTeaError(error)
+    DecodedCantonError.fromStatusRuntimeException(normalized) match {
+      case Right(decoded) =>
+        GenericCantonRpcError(
+          code = decoded.code,
+          context = decoded.context,
+          cause = decoded.cause,
+          resources = decoded.resources,
+          correlationId = decoded.correlationId,
+          traceId = decoded.traceId,
+          asGrpcStatus = StatusProto.fromThrowable(normalized),
+          asGrpcError = normalized,
+        )
+      case Left(_) =>
+        LedgerApiErrors.InternalError
+          .Generic(s"Error in submitting request to traffic service:\n$error")
+    }
+  }
+
   /** A refused request is the caller's mistake, and the traffic service already logged it where it
     * was raised, so the participant doesn't need to log it again at ERROR. This only holds while
     * the server is in-process and logs into the same file.
@@ -159,6 +200,18 @@ object RichTrafficServiceClient {
         case _: GrpcError.GrpcClientError => ()
         case other => other.log(logger)
       }
+    }
+
+  /** Like [[doNotLogRefusedRequests]], but also skips TEA's business rejections such as
+    * `InsufficientBalance` and `CorrelationConflict`, which TEA already logged.
+    *
+    * TODO(#34917): same caveat as [[doNotLogRefusedRequests]].
+    */
+  private[client] val doNotLogTeaErrors: CantonGrpcUtil.GrpcLogPolicy =
+    new CantonGrpcUtil.GrpcLogPolicy {
+      override def log(error: GrpcError, logger: TracedLogger)(implicit
+          traceContext: TraceContext
+      ): Unit = if (isFromTrafficService(error)) () else error.log(logger)
     }
 
   def toInternalServer(

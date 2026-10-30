@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementMetrics,
 }
 import com.digitalasset.canton.tea.projection.{
+  CompletionAccountingPolicy,
   TeaProjectionFactory,
   TeaProjectionTest,
   TeaTrafficStore,
@@ -27,6 +28,9 @@ class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaP
   // deduplication.
   override protected def offsetsArePersisted: Boolean = false
 
+  // The in-memory handler applies the deltas of an event one by one.
+  override protected def deltasAreAppliedAtomically: Boolean = false
+
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend = {
     implicit val ec: ExecutionContext = system.executionContext
     val memoryStore = new TeaMemoryTrafficStore(loggerFactory)
@@ -37,8 +41,8 @@ class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaP
         metricsFactory = metricsFactory,
       )(MetricsContext.Empty)
       override val store: TeaTrafficStore = memoryStore
-      override def newProjection(): TeaProjectionFactory =
-        new TeaMemoryProjectionFactory(loggerFactory, memoryStore, metrics)
+      override def newProjection(policy: CompletionAccountingPolicy): TeaProjectionFactory =
+        new TeaMemoryProjectionFactory(loggerFactory, memoryStore, metrics, policy)
     }
   }
 

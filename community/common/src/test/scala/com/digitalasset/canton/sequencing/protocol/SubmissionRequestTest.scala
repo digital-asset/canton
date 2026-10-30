@@ -69,7 +69,7 @@ final class SubmissionRequestTest extends BaseTestWordSpec {
         ),
       )
 
-      val aggregationIds = differentRequests.map(_.aggregationId(TestHash))
+      val aggregationIds = differentRequests.map(_.aggregationId(TestHash, testedProtocolVersion))
       aggregationIds.distinct.size shouldBe differentRequests.size
 
     }
@@ -90,7 +90,7 @@ final class SubmissionRequestTest extends BaseTestWordSpec {
         requests.distinct.size shouldBe requests.size
         requests.size shouldBe >(1)
 
-        val aggregationIds = requests.map(_.aggregationId(TestHash))
+        val aggregationIds = requests.map(_.aggregationId(TestHash, testedProtocolVersion))
         aggregationIds.distinct.size shouldBe 1
       }
 

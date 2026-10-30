@@ -15,12 +15,7 @@ import com.digitalasset.canton.console.{
   LocalMediatorReference,
 }
 import com.digitalasset.canton.health.{HttpHealthServer, LivenessHealthService}
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-  UseSharedStorage,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres, UseSharedStorage}
 import com.digitalasset.canton.integration.tests.*
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -30,35 +25,28 @@ import com.digitalasset.canton.integration.{
   IsolatedEnvironments,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.sync.{ConnectedSynchronizer, SyncEphemeralState}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.{DelayedSequencerClient, SequencerClient}
-import com.digitalasset.canton.synchronizer.block.*
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.ReferenceSequencerDriverFactory
-import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, SynchronizerAlias}
-import com.google.protobuf.ByteString
+import io.grpc.ManagedChannel
 import io.grpc.health.v1.health.HealthCheckResponse.ServingStatus
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
-import io.grpc.{ManagedChannel, ServerServiceDefinition}
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.http.scaladsl.Http
 import org.apache.pekko.http.scaladsl.model.HttpRequest
 import org.apache.pekko.http.scaladsl.unmarshalling.Unmarshal
-import org.apache.pekko.stream.scaladsl.Source
-import org.apache.pekko.stream.{KillSwitch, Materializer}
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 
+import scala.concurrent.Await
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 trait HealthReportingTestHelper
@@ -470,127 +458,6 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
   }
 }
 
-class HealthReportingNodeReferenceIntegrationTestPostgres
-    extends HealthReportingIndividualNodeTest {
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
-      loggerFactory
-    ) {
-      override protected val driverFactory: ReferenceSequencerDriverFactory =
-        new SequencerHealthDriverTestFactory
-    }
-  )
-  setupPlugins(new UsePostgres(loggerFactory))
-
-  override lazy val environmentDefinition: EnvironmentDefinition =
-    baseEnvironmentDefinition
-
-  "participant should detect unhealthy sequencer when driver is unhealthy" in { implicit env =>
-    import env.*
-
-    val seq1Config = env.actualConfig.sequencersByString(sequencer1.name)
-    val activeParticipant = waitUntilOneActive(participant1, participant2)
-    val activeConfig = env.actualConfig.participantsByString(activeParticipant.name)
-
-    bootstrapSynchronizer
-
-    withHealthStubs(
-      Seq(
-        activeConfig.monitoring.grpcHealthServer.value,
-        seq1Config.publicApi,
-      )
-    ) {
-      case Seq(
-            par,
-            seq,
-          ) =>
-        // Bootstrap the synchronizer and connect the participant
-        bootstrapSynchronizer
-
-        // Make sure the sequencer is serving
-        checkServing(seq, httpHealthConfig = Some(seq1Config))
-        checkServing(
-          seq,
-          httpHealthConfig = Some(seq1Config),
-          CantonGrpcUtil.sequencerHealthCheckServiceName,
-        )
-
-        // Connect to synchronizer and ping to make sure it's working
-        activeParticipant.synchronizers.connect_local(sequencer1, synchronizerAlias)
-        activeParticipant.health.wait_for_initialized()
-        activeParticipant.health.ping(activeParticipant)
-
-        checkContainsState[ComponentHealthState.Ok](activeParticipant, DbStorage.healthName)
-        checkContainsState[ComponentHealthState.Ok](
-          activeParticipant,
-          ConnectedSynchronizer.healthName,
-        )
-        checkContainsState[ComponentHealthState.Ok](
-          activeParticipant,
-          SyncEphemeralState.healthName,
-        )
-        checkContainsState[ComponentHealthState.Ok](
-          activeParticipant,
-          SequencerClient.healthName,
-        )
-
-        eventually() {
-          checkLivenessServing(par, httpHealthConfig = Some(activeConfig))
-          checkServing(par, httpHealthConfig = Some(activeConfig))
-        }
-
-        loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          {
-            // Set the driver health to unhealthy
-            SequencerHealthDriverTestFactory.healthOverride = Some(
-              Future.successful(
-                SequencerDriverHealthStatus(isActive = false, Some("Testing driver unhealthy"))
-              )
-            )
-
-            clue("sequencer is not serving") {
-              eventually() {
-                checkNotServing(seq)
-                checkNotServing(
-                  seq,
-                  service = CantonGrpcUtil.sequencerHealthCheckServiceName,
-                )
-              }
-            }
-
-            clue("participant sequencer client is in failed state") {
-              eventually() {
-                checkContainsState[ComponentHealthState.Failed](
-                  activeParticipant,
-                  SequencerClient.healthName,
-                )
-              }
-            }
-          },
-          LogEntry.assertLogSeq(
-            mustContainWithClue =
-              // TODO(i28761): Subscription should warn after it is lost
-              Seq(
-                (
-                  _.warningMessage should include("Sequencer is unhealthy"),
-                  "expected sequencer is not health",
-                )
-              ),
-            // The sequencer disconnects all members (not just the participant under test) once it
-            // becomes unhealthy, so the mediator can be caught mid-bootstrap and log this side
-            // error from its execution queue. It is not a symptom of the behaviour under test.
-            mayContain = Seq(
-              _.errorMessage should include(
-                "will not run because of failure of previous task"
-              )
-            ),
-          ),
-        )
-
-    }
-  }
-}
-
 class HealthReportingNodeBftOrderingIntegrationTestPostgres
     extends HealthReportingIndividualNodeTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -598,64 +465,4 @@ class HealthReportingNodeBftOrderingIntegrationTestPostgres
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     baseEnvironmentDefinition
-}
-
-object SequencerHealthDriverTestFactory {
-  @volatile
-  var healthOverride: Option[Future[SequencerDriverHealthStatus]] = None
-}
-
-// NOTE: This driver factory derives its health state from a singleton mutable variable.
-// It is used to toggle off the health signal at will during the test.
-// DO NOT USE this class in any other test. It is public because its loaded reflectively by the `ServiceLoader`.
-class SequencerHealthDriverTestFactory extends ReferenceSequencerDriverFactory {
-
-  private val delegate = new ReferenceSequencerDriverFactory
-
-  override def name: String = "reference-health-test" // Avoids clashes with other tests
-
-  override def create(
-      config: ConfigType,
-      nonStandardConfig: Boolean,
-      timeProvider: TimeProvider,
-      firstBlockHeight: Option[Long],
-      synchronizerId: String,
-      sequencerId: String,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext, materializer: Materializer): SequencerDriver = {
-    val driver = delegate.create(
-      config,
-      nonStandardConfig,
-      timeProvider,
-      firstBlockHeight,
-      synchronizerId,
-      sequencerId,
-      loggerFactory,
-    )
-
-    new SequencerDriver {
-      override def firstBlockHeight: Long = SequencerDriver.DefaultInitialBlockHeight
-
-      override def adminServices: Seq[ServerServiceDefinition] = driver.adminServices
-      override def acknowledge(acknowledgement: ByteString)(implicit
-          traceContext: TraceContext
-      ): Future[Unit] = driver.acknowledge(acknowledgement)
-      override def send(request: ByteString, submissionId: String, senderId: String)(implicit
-          traceContext: TraceContext
-      ): Future[Unit] =
-        driver.send(request, submissionId, senderId)
-      override def subscribe()(implicit
-          traceContext: TraceContext
-      ): Source[RawLedgerBlock, KillSwitch] = driver.subscribe()
-      override def sequencingTime(implicit
-          traceContext: TraceContext
-      ): Future[Option[Long]] =
-        driver.sequencingTime
-      override def health(implicit
-          traceContext: TraceContext
-      ): Future[SequencerDriverHealthStatus] =
-        SequencerHealthDriverTestFactory.healthOverride.getOrElse(driver.health)
-      override def close(): Unit = driver.close()
-    }
-  }
 }

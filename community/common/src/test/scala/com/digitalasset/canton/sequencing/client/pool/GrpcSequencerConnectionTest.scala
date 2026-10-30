@@ -33,12 +33,18 @@ class GrpcSequencerConnectionTest
       withConnection(responses) { (internalConnection, listener) =>
         internalConnection.start().valueOrFail("start connection")
 
-        listener.shouldStabilizeOn(SequencerConnectionState.Validated)
+        listener.shouldStabilizeOnState(SequencerConnectionState.Validated)
         internalConnection.attributes shouldBe Some(correctConnectionAttributes)
 
         val connection =
           internalConnection
-            .buildUserConnection(authConfig, testMember, testCrypto, wallClock)
+            .buildUserConnection(
+              authConfig,
+              testMember,
+              testCrypto,
+              wallClock,
+              penaltyModifier = SequencerPenaltyModifier.noOp,
+            )
             .valueOrFail("make authenticated")
 
         val acknowledgeRequest = AcknowledgeRequest(member, wallClock.now, testedProtocolVersion)

@@ -387,7 +387,7 @@ class DigestConsistencyCheckProcessorImpl(
       traceContext: TraceContext
   ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
 
-    // TODO(#35929) Change the filter back to all after fixing all the tests and the logic
+    // TODO(#36573) Change the filter to `all` when we fix the discrepancy
     val checkpointsFilter = Some(
       // We know the list (all - party hosting) is not empty
       NonEmptyUtil.fromUnsafe(CheckpointType.all - CheckpointType.PartyHostingChange)

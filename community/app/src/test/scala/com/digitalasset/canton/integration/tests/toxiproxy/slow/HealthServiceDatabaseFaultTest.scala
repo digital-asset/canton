@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.toxiproxy.slow
 
 import com.digitalasset.canton
+import com.digitalasset.canton.admin.api.client.data.ComponentHealthState
 import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{
@@ -28,7 +29,11 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
+import com.digitalasset.canton.participant.sync.{ConnectedSynchronizer, SyncEphemeralState}
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.sequencing.client.SequencerClient
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
@@ -135,6 +140,26 @@ trait HealthServiceSequencerDatabaseFaultTest extends HealthServiceDatabaseFault
     // Setting `dbTimeout` here sets the `connectionTimeout` parameter when building the Postgres config
     SequencerToPostgres(s"sequencer1-to-postgres", "sequencer1", dbTimeout = 2000L)
 
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2S2M2_Manual
+      .withSetup { implicit env =>
+        import env.*
+        sequencer1.start()
+        mediator1.start()
+        mediator2.start()
+        participant1.start()
+        participant2.start()
+        bootstrapSynchronizer(mediator1)
+      }
+      .addConfigTransforms(
+        ConfigTransforms.addMonitoringEndpointAllNodes*
+      )
+      .withTeardown { _ =>
+        ToxiproxyHelpers.removeAllProxies(
+          toxiproxyPlugin.runningToxiproxy.controllingToxiproxyClient
+        )
+      }
+
   // Lower `failedToFatalDelay` so it triggers quickly
   protected lazy val lowerFailedToFatalDelay: ConfigTransform =
     ConfigTransforms.modifyAllStorageConfigs {
@@ -183,6 +208,93 @@ trait HealthServiceSequencerDatabaseFaultTest extends HealthServiceDatabaseFault
     }
   }
 
+  "participant should detect unhealthy sequencer when sequencer database is unhealthy" in {
+    implicit env =>
+      import env.*
+
+      val seq1Config = env.actualConfig.sequencersByString(sequencer1.name)
+      val activeParticipant = waitUntilOneActive(participant1, participant2)
+      val activeConfig = env.actualConfig.participantsByString(activeParticipant.name)
+
+      bootstrapSynchronizer
+
+      withHealthStubs(
+        Seq(
+          activeConfig.monitoring.grpcHealthServer.value,
+          seq1Config.publicApi,
+        )
+      ) {
+        case Seq(
+              par,
+              seq,
+            ) =>
+          // Bootstrap the synchronizer and connect the participant
+          bootstrapSynchronizer
+
+          // Make sure the sequencer is serving
+          checkServing(seq, httpHealthConfig = Some(seq1Config))
+          checkServing(
+            seq,
+            httpHealthConfig = Some(seq1Config),
+            CantonGrpcUtil.sequencerHealthCheckServiceName,
+          )
+
+          // Connect to synchronizer and ping to make sure it's working
+          activeParticipant.synchronizers.connect_local(sequencer1, synchronizerAlias)
+          activeParticipant.health.wait_for_initialized()
+          activeParticipant.health.ping(activeParticipant)
+
+          checkContainsState[ComponentHealthState.Ok](activeParticipant, DbStorage.healthName)
+          checkContainsState[ComponentHealthState.Ok](
+            activeParticipant,
+            ConnectedSynchronizer.healthName,
+          )
+          checkContainsState[ComponentHealthState.Ok](
+            activeParticipant,
+            SyncEphemeralState.healthName,
+          )
+          checkContainsState[ComponentHealthState.Ok](
+            activeParticipant,
+            SequencerClient.healthName,
+          )
+
+          eventually() {
+            checkLivenessServing(par, httpHealthConfig = Some(activeConfig))
+            checkServing(par, httpHealthConfig = Some(activeConfig))
+          }
+
+          loggerFactory.suppressWarningsAndErrors {
+            // make the sequencer unhealthy by cutting off its connection to the database
+            val proxy =
+              toxiproxyPlugin.runningToxiproxy
+                .getProxy(proxyConf.name)
+                .value
+                .underlying
+            val toxic = proxy.toxics().timeout("db-con-timeout", ToxicDirection.UPSTREAM, 1000)
+
+            clue("sequencer is not serving") {
+              eventually() {
+                checkNotServing(seq)
+                checkNotServing(
+                  seq,
+                  service = CantonGrpcUtil.sequencerHealthCheckServiceName,
+                )
+              }
+            }
+
+            clue("participant sequencer client is in failed state") {
+              eventually() {
+                checkContainsState[ComponentHealthState.Failed](
+                  activeParticipant,
+                  SequencerClient.healthName,
+                )
+              }
+            }
+
+            toxic.remove()
+          }
+      }
+  }
 }
 
 class HealthServiceParticipantFaultBftOrderingIntegrationTestPostgres

@@ -170,6 +170,19 @@ message Right {
   // Its utility is predominantly for users that act on behalf of many parties.
   message CanActAsAnyParty {}
 
+  message CanDebitTrafficFrom {
+    // The right to debit traffic from this local traffic account.
+    //
+    // An account id is one or more non-empty segments joined by "/", at most 255 characters in total.
+    // Segment characters are ASCII letters, digits, space, and any of @ ^ $ . ! ` - # + ' ~ _ | : ( )
+    //
+    // Required
+    string account_id = 1;
+  }
+
+  // The right of a user to debit traffic from any account.
+  message CanDebitTrafficFromAnyAccount {}
+
   // Required
   oneof kind {
     // The user can administer the participant node.
@@ -188,6 +201,10 @@ message Right {
     CanExecuteAsAnyParty can_execute_as_any_party = 7;
     // The user can act as any party on a participant.
     CanActAsAnyParty can_act_as_any_party = 8;
+    // The user can debit traffic from a specific account.
+    CanDebitTrafficFrom can_debit_traffic_from = 9;
+    // The user can debit traffic from any account.
+    CanDebitTrafficFromAnyAccount can_debit_traffic_from_any_account = 10;
   }
 }
 

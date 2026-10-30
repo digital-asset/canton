@@ -85,6 +85,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.{
+  MemberLifeCycleStatus,
   PayloadId,
   SequencerMemberId,
   SequencerStore,
@@ -96,6 +97,7 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitManager,
   SequencerTrafficStatus,
 }
+import com.digitalasset.canton.synchronizer.sequencing.traffic.TrafficPurchasedManager
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficPurchasedStore
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -533,7 +535,7 @@ class BlockSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
     submission
-      .aggregationId(cryptoApi.pureCrypto)
+      .aggregationId(cryptoApi.pureCrypto, protocolVersion)
       .leftMap { err =>
         AggregateSubmissionInvalidRule.apply(
           s"Failed to compute aggregation ID for submission with id ${submission.messageId}: $err"
@@ -693,7 +695,12 @@ class BlockSequencer(
         req.member,
         req.timestamp,
       )
-      _ <- FutureUnlessShutdown.outcomeF(blockOrderer.acknowledge(signedAcknowledgeRequest))
+      _ <- EitherTUtil.toFutureUnlessShutdown(
+        blockOrderer
+          .acknowledge(signedAcknowledgeRequest)
+          .leftMap(_.toGrpcError)
+          .mapK(FutureUnlessShutdown.outcomeK)
+      )
       _ <- FutureUnlessShutdown.outcomeF(waitForAcknowledgementF)
     } yield ()
   }
@@ -1154,8 +1161,24 @@ class BlockSequencer(
           s"The provided serial value $serial is too low. Latest serial used by this member is $maxSerialO"
         ),
       )
+      registeredMemberO <- EitherT.liftF(dbSequencerStore.lookupMember(member))
+      // Traffic can only be pre-purchased for a member that is not yet registered from PV37 onwards:
+      // below that, an `Onboarding` member cannot be represented in the v30 sequencer snapshot and would
+      // be silently turned into a disabled member when onboarding a new sequencer.
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        registeredMemberO.isDefined || TrafficPurchasedManager.isPrePurchaseSupported(
+          protocolVersion
+        ),
+        TrafficControlErrors.TrafficPurchasedRequestAsyncSendFailed
+          .Error(
+            s"""Traffic was purchased for a member that is not registered on the synchronizer, " +
+               |which is only supported from protocol version 37 onwards.""".stripMargin
+          ): TrafficControlError,
+      )
+      isActive = registeredMemberO.exists(_.status == MemberLifeCycleStatus.Active)
       _ <- trafficPurchasedSubmissionHandler.sendTrafficPurchasedRequest(
         member,
+        isActive,
         serial,
         totalTrafficPurchased,
         sequencerClient,

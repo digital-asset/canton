@@ -47,6 +47,8 @@ final class CommandsValidator(
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
     validateDisclosedContracts: ValidateDisclosedContracts = ValidateDisclosedContracts,
     topologyAwarePackageSelectionEnabled: Boolean = false,
+)(implicit
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig
 ) {
 
   import FieldValidator.*
@@ -82,6 +84,7 @@ final class CommandsValidator(
       )
       prefetchKeys <- validatePrefetchContractKeys(prepareRequest.prefetchContractKeys)
       tapsMaxPasses <- validateTapsMaxPasses(prepareRequest.tapsMaxPasses)
+      accountId <- optionalAccountId(prepareRequest.accountId, "account_id")
     } yield Commands(
       // Not used for external submissions
       workflowId = None,
@@ -110,6 +113,7 @@ final class CommandsValidator(
           packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
       tapsMaxPasses = tapsMaxPasses,
+      accountId = accountId,
     )
 
   def validateCommands(
@@ -146,6 +150,7 @@ final class CommandsValidator(
       )
       prefetchKeys <- validatePrefetchContractKeys(commands.prefetchContractKeys)
       tapsMaxPasses <- validateTapsMaxPasses(commands.tapsMaxPasses)
+      accountId <- optionalAccountId(commands.accountId, "account_id")
     } yield Commands(
       workflowId = workflowId,
       userId = userId,
@@ -171,6 +176,7 @@ final class CommandsValidator(
           packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
       tapsMaxPasses = tapsMaxPasses,
+      accountId = accountId,
     )
 
   def validateReassignmentCommands(
@@ -185,6 +191,12 @@ final class CommandsValidator(
       submissionId <- requireSubmissionId(reassignmentCommands.submissionId, "submission_id")
       workflowId <- validateOptional(Some(reassignmentCommands.workflowId).filter(_.nonEmpty))(
         requireWorkflowId(_, "workflow_id")
+      )
+      accountId <- optionalAccountId(reassignmentCommands.accountId, "account_id")
+      _ <- validateCardinality(
+        values = reassignmentCommands.commands,
+        fieldName = "commands",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.reassignmentCommands.commandsSizeLimit,
       )
       reassignmentCommands <- reassignmentCommands.commands.traverse {
         _.command match {
@@ -212,11 +224,21 @@ final class CommandsValidator(
               sourceSynchronizerId <- requireSynchronizerId(unassignCommand.value.source, "source")
               targetSynchronizerId <- requireSynchronizerId(unassignCommand.value.target, "target")
               cid <- requireContractId(unassignCommand.value.contractId, "contract_id")
+              overrideSourceValidationPkgId <- optionalPackageId(
+                unassignCommand.value.overrideSourceValidationPackageId,
+                "override_source_validation_package_id",
+              )
+              overrideTargetValidationPkgId <- optionalPackageId(
+                unassignCommand.value.overrideTargetValidationPackageId,
+                "override_target_validation_package_id",
+              )
             } yield Right(
               submission.UnassignCommand(
                 sourceSynchronizerId = Source(sourceSynchronizerId),
                 targetSynchronizerId = Target(targetSynchronizerId),
                 contractId = cid,
+                overrideSourceValidationPkgId = overrideSourceValidationPkgId,
+                overrideTargetValidationPkgId = overrideTargetValidationPkgId,
               )
             )
         }
@@ -228,6 +250,7 @@ final class CommandsValidator(
       submissionId = submissionId,
       workflowId = workflowId,
       reassignmentCommands = reassignmentCommands,
+      accountId = accountId,
     )
 
   def validateLedgerTime(

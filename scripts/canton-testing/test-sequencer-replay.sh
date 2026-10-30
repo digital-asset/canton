@@ -66,17 +66,17 @@ echo "***** Running Sequencer Replay Test..."
 
 terminate-subprocesses
 
-# Bypass missing trader metrics for replay runs
+# Bypass missing metrics for replay runs
 export KNOWN_MISSING_FAILED_TRADER_METRICS="true"
 export KNOWN_MISSING_MEDIATOR_METRICS="true"
 export KNOWN_MISSING_PARTICIPANT_METRICS="true"
 export KNOWN_MISSING_TX_METRICS="true"
 
-#We only have mediator logs
+# We only have sequencer logs
 export COMMON_LOG_FILE="$SYNCHRONIZERS_LOG_FILE"
 
-# Mediator replay is quite fast
+# Sequencer replay is quite fast
 export UPDATES_LOAD_METRICS_FILE="sequencer1.daml.sequencer.block.events.csv"
 export UPDATES_LOAD_METRICS_FILTER_PATTERN="participant.*send-confirmation-response"
 
-compute-and-publish-metrics.sh 0 100
+compute-and-publish-metrics.sh 10 95

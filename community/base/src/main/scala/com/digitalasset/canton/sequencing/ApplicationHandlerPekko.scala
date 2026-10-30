@@ -11,11 +11,9 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, O
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
   ApplicationHandlerError,
   ApplicationHandlerException,
-  ApplicationHandlerPassive,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope}
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
@@ -169,10 +167,6 @@ class ApplicationHandlerPekko[F[+_], Context](
   ): UnlessShutdown[ApplicationHandlerError] = {
     val sync = if (syncProcessing) "Synchronous" else "Asynchronous"
     error match {
-      case PassiveInstanceException(reason) =>
-        logger.warn(s"$sync event processing stopped because instance became passive")
-        Outcome(ApplicationHandlerPassive(reason))
-
       case _ if closeContext.context.isClosing =>
         logger.info(
           s"$sync event processing failed for event batch with sequencing timestamps $firstTimestamp to $lastTimestamp, most likely due to an ongoing shutdown",

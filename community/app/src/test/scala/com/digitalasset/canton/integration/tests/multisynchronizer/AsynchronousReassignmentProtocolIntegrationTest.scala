@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -14,7 +13,11 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multisynchronizer.AsynchronousReassignmentProtocolIntegrationTest.DelayFirstConfirmationResponsePolicy
-import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
+import com.digitalasset.canton.integration.util.{
+  AutomaticAssignment,
+  EntitySyntax,
+  PartiesAllocator,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -31,7 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicyWithoutTraceContext,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
+import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
 
 import scala.collection.mutable
 import scala.concurrent.Promise
@@ -72,6 +75,7 @@ final class AsynchronousReassignmentProtocolIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
@@ -83,17 +87,8 @@ final class AsynchronousReassignmentProtocolIntegrationTest
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         // Disable automatic assignment so that we really control it
-        def disableAutomaticAssignment(
-            sequencer: LocalSequencerReference
-        ): Unit =
-          sequencer.topology.synchronizer_parameters
-            .propose_update(
-              sequencer.synchronizer_id,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-
-        disableAutomaticAssignment(sequencer1)
-        disableAutomaticAssignment(sequencer2)
+        AutomaticAssignment.disable(Seq(sequencer1), sequencer1.synchronizer_id)
+        AutomaticAssignment.disable(Seq(sequencer2), sequencer2.synchronizer_id)
 
         val alice = "alice"
         val bob = "bob"

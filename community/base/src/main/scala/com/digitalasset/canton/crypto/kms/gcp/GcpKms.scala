@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsError.*
+import com.digitalasset.canton.crypto.kms.gcp.GcpKms.defaultDestroyScheduledDurationInSecs
 import com.digitalasset.canton.crypto.kms.gcp.audit.GcpRequestResponseLogger
 import com.digitalasset.canton.crypto.kms.{
   Kms,
@@ -44,7 +45,7 @@ import com.google.cloud.kms.v1.{
   GetPublicKeyRequest,
 }
 import com.google.common.util.concurrent.MoreExecutors
-import com.google.protobuf.ByteString
+import com.google.protobuf.{ByteString, Duration}
 import io.grpc.ManagedChannelBuilder
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.openssl.PEMParser
@@ -216,6 +217,9 @@ class GcpKms(
             gcp.CryptoKey
               .newBuilder()
               .setPurpose(keyPurpose)
+              .setDestroyScheduledDuration(
+                Duration.newBuilder().setSeconds(defaultDestroyScheduledDurationInSecs).build()
+              )
               .setVersionTemplate(
                 gcp.CryptoKeyVersionTemplate
                   .newBuilder()
@@ -746,6 +750,8 @@ class GcpKms(
 }
 
 object GcpKms extends Kms.SupportedSchemes {
+
+  val defaultDestroyScheduledDurationInSecs: Long = 24L * 60L * 60L // 24h
 
   val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
     NonEmpty.mk(

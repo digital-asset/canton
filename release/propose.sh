@@ -235,6 +235,16 @@ push_to_remote() {
   run "Pushing branch" "$_GIT" push -q --set-upstream "$REMOTE" "$branch"
 }
 
+pr_exists_for_branch() {
+  local -r branch=$1
+
+  if [[ -z "${_HUB:-}" ]] || ! command -v "${_HUB}" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  "${_HUB}" pr list --head "$branch" --base main --state open --limit 20 2>/dev/null | grep -q .
+}
+
 # actions required by all commands to ensure we're locally in a good place
 preflight() {
   ensure_workspace_clean
@@ -346,8 +356,14 @@ finish_release_process() {
 
   # Update main
   update_branch="update-main-for-${release_version}"
-  run "Creating update branch for main" "$_GIT" branch "$update_branch" "$REMOTE/main"
-  # By side effect this checks out the update branch - so we're already on it when we cherry pick checksums
+
+  if "$_GIT" ls-remote --exit-code --heads "$REMOTE" "$update_branch" >/dev/null 2>&1; then
+    info "Remote branch [$update_branch] already exists, reusing it"
+    run "Checkout existing update branch" "$_GIT" checkout -B "$update_branch" "$REMOTE/$update_branch"
+  else
+    info "Creating new update branch [$update_branch] from remote main"
+    run "Checking out update branch" "$_GIT" checkout -b "$update_branch" "$REMOTE/main"
+  fi
   copy_release_notes_to_main_update_branch "$release_version" "$update_branch"
 
   # Sync both SQL and checksums directly from the tag
@@ -357,7 +373,11 @@ finish_release_process() {
 
   # Create final update PR targeting main
   if [[ ! -z "$CI" ]]; then
-    create_update_pr_on_main "$release_version" "$update_branch"
+    if pr_exists_for_branch "$update_branch"; then
+      info "Open PR for [$update_branch] already exists, skipping duplicate PR creation"
+    else
+      create_update_pr_on_main "$release_version" "$update_branch"
+    fi
   fi
 }
 
@@ -407,16 +427,24 @@ snapshot_release() {
 copy_release_notes_to_main_update_branch() {
   local -r release_version=$1
   local -r update_branch=$2
-  echo "$release_version"
-  notes="${REPO_ROOT}/release-notes/${release_version}.md"
-  info "Copying release notes $notes to main via branch $update_branch"
-  # copy current release notes into a separate file
-  cp $notes tmp.md
+  local -r notes="${REPO_ROOT}/release-notes/${release_version}.md"
+  info "Copying release notes from tag [$CIRCLE_TAG] to main via branch [$update_branch]"
+
   run "Checking out the update branch" "$_GIT" checkout "$update_branch"
-  # Move back release notes to their original file
-  mv tmp.md $notes
-  "$_GIT" add $notes
-  "$_GIT" commit -m "release-line-notes: added $release_version notes to main"
+
+  if ! "$_GIT" cat-file -e "${CIRCLE_TAG}:release-notes/${release_version}.md" 2>/dev/null; then
+    err "Release notes file release-notes/${release_version}.md not found in tag [$CIRCLE_TAG]"
+    exit 1
+  fi
+
+  "$_GIT" show "${CIRCLE_TAG}:release-notes/${release_version}.md" > "$notes"
+
+  if [[ -n $("$_GIT" status --porcelain -- "$notes") ]]; then
+    "$_GIT" add "$notes"
+    "$_GIT" commit -m "release-line-notes: added $release_version notes to main"
+  else
+    info "No release-note changes to commit for [$update_branch]"
+  fi
 }
 
 create_release_line() {

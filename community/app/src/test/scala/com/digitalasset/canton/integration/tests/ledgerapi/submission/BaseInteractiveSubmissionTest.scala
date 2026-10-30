@@ -242,6 +242,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
             ),
             None,
             None,
+            includeTransactionsAndReassignments = None,
           ),
         )
         .value
@@ -290,6 +291,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
           preparedTransaction,
           HashingSchemeVersion.V2,
           tentativeLedgerEffectiveTime = LfTimestamp.now(),
+          accountId = None,
         )
       )(executionContext, LoggingContextWithTrace.ForTesting, implicitly[ErrorLoggingContext])
       .futureValue

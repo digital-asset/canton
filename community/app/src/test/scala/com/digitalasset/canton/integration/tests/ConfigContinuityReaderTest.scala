@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.ConfigErrors.{
 }
 import com.digitalasset.canton.integration.tests.ConfigContinuityReaderTest.Transforms
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization
-import com.digitalasset.canton.version.ReleaseVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -73,8 +73,14 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.participants.participant1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
         "canton.sequencers.sequencer1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
         "canton.mediators.mediator1.sequencer-client.enable-immediate-sync-rejection-send-tracker-cleanup",
-        // only exists in 3.6 until #35924 is forward-ported to main
-        "canton.participants.participant1.features.deprecated",
+      )
+    ),
+    (3, 8, 0) -> Transforms(
+      Seq(
+        // only exists in 3.7, re-enables the endpoints deprecated in 3.7
+        "canton.participants.participant1.features.deprecated.enable-deprecated-endpoints-37",
+        // replaced by the explicit top-up config in #36795
+        "canton.participants.participant1.traffic-accounting.traffic-enforcement-server.projection.top-up-paymasters",
       )
     ),
   )
@@ -108,10 +114,10 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
 
           val parsedConfig = ConfigFactory.parseFile(initialConfigFile.toJava)
           val updatedConfig = makeParsable(parsedConfig, releaseVersion)
-            // Value in the config (34) is not supported anymore
+            // Old value in the config is not supported anymore
             .withValue(
               "canton.participants.participant1.parameters.minimum-protocol-version",
-              ConfigValueFactory.fromAnyRef(35),
+              ConfigValueFactory.fromAnyRef(ProtocolVersion.latest.v),
             )
 
           transformedConfigFile.write(

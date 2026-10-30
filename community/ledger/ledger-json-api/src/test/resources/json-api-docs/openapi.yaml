@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: JSON Ledger API HTTP endpoints
-  version: 3.7.0-SNAPSHOT
+  version: 3.8.0-SNAPSHOT
 paths:
   /v2/commands/submit-and-wait:
     post:
@@ -2346,7 +2346,8 @@ paths:
     get:
       description: |-
         Get account state for a given account ID.
-        Permissioned only to users having ActAs or ExecuteAs rights for the party ID associated with the account ID.
+        Permissioned to users with CanDebitTrafficFrom for the account ID, CanDebitTrafficFromAnyAccount,
+        ActAsAnyParty, ExecuteAsAnyParty, or ActAs or ExecuteAs rights for the party with the same ID.
 
         NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
       operationId: getV2TrafficAccountsAccount-id
@@ -2414,20 +2415,25 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/traffic/events/prune:
+  /v2/traffic/prune:
     post:
       description: |-
-        Prune events from the event log that are older than a given timestamp.
+        Prune events from the event log, submission correlations, and uncharged completions that are older than a given timestamp.
+        Submission correlations record the account each submission is charged to.
+        Uncharged completions record completions with a positive cost that weren't charged to any account.
         Permissioned only to Ledger API admin users.
+        The timestamp must be at least the participant's max deduplication duration in the past
+        (7 days by default), otherwise the request is rejected with TRAFFIC_UNSAFE_TO_PRUNE.
         WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+        WARNING: If a submission's correlation is pruned before its completion arrives, the submission is NOT debited.
 
         NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
-      operationId: postV2TrafficEventsPrune
+      operationId: postV2TrafficPrune
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PruneEventsRequest'
+              $ref: '#/components/schemas/PruneRequest'
         required: true
       responses:
         '200':
@@ -2435,7 +2441,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PruneEventsResponse'
+                $ref: '#/components/schemas/PruneResponse'
         '400':
           description: 'Invalid value, Invalid value for: body'
           content:
@@ -2743,6 +2749,42 @@ components:
       description: |-
         The right of a user to authorize commands as any party on a participant.
         Its utility is predominantly for users that act on behalf of many parties.
+      type: object
+    CanDebitTrafficFrom:
+      title: CanDebitTrafficFrom
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          $ref: '#/components/schemas/CanDebitTrafficFrom1'
+    CanDebitTrafficFrom1:
+      title: CanDebitTrafficFrom
+      type: object
+      required:
+      - accountId
+      properties:
+        accountId:
+          description: |-
+            The right to debit traffic from this local traffic account.
+
+            An account id is one or more non-empty segments joined by "/", at most 255 characters in total.
+            Segment characters are ASCII letters, digits, space, and any of @ ^ $ . ! ` - # + ' ~ _ | : ( )
+
+            Required
+          type: string
+    CanDebitTrafficFromAnyAccount:
+      title: CanDebitTrafficFromAnyAccount
+      description: The right of a user to debit traffic from any account.
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          $ref: '#/components/schemas/CanDebitTrafficFromAnyAccount1'
+    CanDebitTrafficFromAnyAccount1:
+      title: CanDebitTrafficFromAnyAccount
+      description: The right of a user to debit traffic from any account.
       type: object
     CanExecuteAs:
       title: CanExecuteAs
@@ -4239,6 +4281,17 @@ components:
           type: array
           items:
             type: string
+        protocolVersion:
+          description: |-
+            The protocol version to create the topology transactions for, so that clients that only read topology
+            transactions of an older protocol version can read them, e.g. 36 on a synchronizer with protocol version 37.
+            Must be the synchronizer's protocol version or a lower one whose topology transactions the synchronizer admits:
+            from protocol version 37 on, a synchronizer admits those of protocol version 36.
+            Defaults to the synchronizer's protocol version.
+
+            Optional
+          type: integer
+          format: int32
     GenerateExternalPartyTopologyResponse:
       title: GenerateExternalPartyTopologyResponse
       description: Response message with topology transactions and the multi-hash
@@ -4266,8 +4319,8 @@ components:
           description: |-
             The serialized topology transactions which need to be signed and submitted as part of the allocate party process
             Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
-            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
-            supported by the synchronizer.
+            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` for the requested
+            protocol version, or for the synchronizer's protocol version if none is requested.
 
             Required: must be non-empty
           type: array
@@ -4334,13 +4387,21 @@ components:
             The page token only works if subsequent requests:
 
             - are executed on the same participant,
-            - use the same active_at_offset and event_format,
+            - use the same active_at_offset, event_format and include_incomplete_reassignments,
             - and the participant's store was not pruned to after the active_at_offset.
 
             If not specified, the first page of the active contracts snapshot will be returned.
 
             Optional: can be empty
           type: string
+        includeIncompleteReassignments:
+          description: |-
+            If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+            based on the specified event_format.
+            If this flag is set to false, Incomplete Reassignments will be omitted.
+
+            Optional
+          type: boolean
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       type: object
@@ -4375,13 +4436,22 @@ components:
 
             - subsequent request must be executed on the same participant with the same version of canton,
             - subsequent request must have the same active_at_offset,
-            - subsequent request must have the same event_format
+            - subsequent request must have the same event_format,
+            - subsequent request must have the same include_incomplete_reassignments
             - and the participant must not have been pruned after the active_at_offset.
 
             If not specified, the whole active contracts snapshot will be returned.
 
             Optional: can be empty
           type: string
+        includeIncompleteReassignments:
+          description: |-
+            If this flag is true, the IncompleteAssigned and IncompleteUnassigned events will be included in the stream
+            based on the specified event_format.
+            If this flag is set to false, Incomplete Reassignments will be omitted.
+
+            Optional
+          type: boolean
     GetCompletionByHashRequest:
       title: GetCompletionByHashRequest
       type: object
@@ -5038,8 +5108,8 @@ components:
             The interface that a matching contract must implement.
             The ``interface_id`` needs to be valid: corresponding interface should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -5370,6 +5440,19 @@ components:
             Optional
           type: integer
           format: int32
+        accountId:
+          description: |-
+            The account to charge for this submission when traffic accounting is enabled.
+            Must have one or more non-empty segments separated by ``/``, with at most 255 characters total.
+            Segments allow UserIdString characters plus spaces, so every valid party id is also valid.
+            If empty, use the only acting party's account. With multiple acting parties, charge no account
+            or reject the submission, depending on the participant configuration.
+            With Ledger API authorization enabled, the user needs ``CanDebitTrafficFrom(account_id)``,
+            ``CanDebitTrafficFromAnyAccount``, or an act-as or execute-as right for a party with the same id.
+            ``CanActAsAnyParty`` and ``CanExecuteAsAnyParty`` allow any account, even if it isn't a party.
+
+            Optional
+          type: string
     JsContractEntry:
       title: JsContractEntry
       description: |-
@@ -5502,6 +5585,15 @@ components:
             events will only be returned if the submitting party is hosted on this node.
 
             Optional
+        accountId:
+          description: |-
+            The account to charge for execution. It can be different from the one checked during preparation.
+            Party signatures don't cover this field.
+            Uses the same format, fallback, and required rights as ``Commands.account_id``.
+            The fallback uses the acting parties from the prepared transaction.
+
+            Optional
+          type: string
     JsExecuteSubmissionAndWaitForTransactionResponse:
       title: JsExecuteSubmissionAndWaitForTransactionResponse
       type: object
@@ -5578,6 +5670,15 @@ components:
             should be scheduled to executed within the window allowed by synchronizer.
 
             Optional
+        accountId:
+          description: |-
+            The account to charge for execution. It can be different from the one checked during preparation.
+            Party signatures don't cover this field.
+            Uses the same format, fallback, and required rights as ``Commands.account_id``.
+            The fallback uses the acting parties from the prepared transaction.
+
+            Optional
+          type: string
     JsExecuteSubmissionRequest:
       title: JsExecuteSubmissionRequest
       type: object
@@ -5641,6 +5742,15 @@ components:
             should be scheduled to executed within the window allowed by synchronizer.
 
             Optional
+        accountId:
+          description: |-
+            The account to charge for execution. It can be different from the one checked during preparation.
+            Party signatures don't cover this field.
+            Uses the same format, fallback, and required rights as ``Commands.account_id``.
+            The fallback uses the acting parties from the prepared transaction.
+
+            Optional
+          type: string
     JsGetActiveContractsPageResponse:
       title: JsGetActiveContractsPageResponse
       type: object
@@ -5990,6 +6100,14 @@ components:
           - HASHING_SCHEME_VERSION_V2
           - HASHING_SCHEME_VERSION_V3
           - HASHING_SCHEME_VERSION_V4
+        accountId:
+          description: |-
+            The account used for the estimated cost check during preparation.
+            Not stored in the prepared transaction, so execution can use a different account.
+            Uses the same format, fallback, and required rights as ``Commands.account_id``.
+
+            Optional
+          type: string
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'
@@ -6422,6 +6540,18 @@ components:
         properties:
           CanActAsAnyParty:
             $ref: '#/components/schemas/CanActAsAnyParty'
+      - type: object
+        required:
+        - CanDebitTrafficFrom
+        properties:
+          CanDebitTrafficFrom:
+            $ref: '#/components/schemas/CanDebitTrafficFrom'
+      - type: object
+        required:
+        - CanDebitTrafficFromAnyAccount
+        properties:
+          CanDebitTrafficFromAnyAccount:
+            $ref: '#/components/schemas/CanDebitTrafficFromAnyAccount'
       - type: object
         required:
         - CanExecuteAs
@@ -7152,28 +7282,44 @@ components:
           $ref: '#/components/schemas/UnknownFieldSet'
         valueDecoded:
           type: string
-    PruneEventsRequest:
-      title: PruneEventsRequest
+    PruneRequest:
+      title: PruneRequest
       type: object
       required:
       - beforeOrAt
       properties:
         beforeOrAt:
           description: |-
-            The timestamp before which events should be pruned.
-            Events with a timestamp less than or equal to this value will be pruned.
+            The timestamp before which events, submission correlations, and uncharged completions should be pruned.
+            Events, submission correlations, and uncharged completions with a timestamp less than or equal to this value will be pruned.
 
             Required
           type: string
-    PruneEventsResponse:
-      title: PruneEventsResponse
+    PruneResponse:
+      title: PruneResponse
       type: object
       required:
       - prunedEventCount
+      - prunedCorrelationCount
+      - prunedUnchargedCompletionCount
       properties:
         prunedEventCount:
           description: |-
             The number of events that were pruned.
+
+            Required
+          type: integer
+          format: int32
+        prunedCorrelationCount:
+          description: |-
+            The number of submission correlations that were pruned.
+
+            Required
+          type: integer
+          format: int32
+        prunedUnchargedCompletionCount:
+          description: |-
+            The number of uncharged completions that were pruned.
 
             Required
           type: integer
@@ -7254,6 +7400,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReassignmentCommand'
+        accountId:
+          description: |-
+            The account to charge for this reassignment when traffic accounting is enabled.
+            Uses the same format and required rights as ``Commands.account_id``.
+            If empty, the participant charges the submitter's account.
+
+            Optional
+          type: string
     ReassignmentCost:
       title: ReassignmentCost
       description: |-
@@ -7597,8 +7751,8 @@ components:
             A template for which the payload should be included in the response.
             The ``template_id`` needs to be valid: corresponding template should be defined in
             one of the available packages at the time of the query.
-            Both package-name and package-id reference formats for the identifier are supported.
-            Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+            Only package-name reference format for the identifier is supported.
+            Note: The package-id reference identifier format was removed in version 3.5.
 
             Required
           type: string
@@ -7819,6 +7973,19 @@ components:
 
             Required
           type: string
+        overrideSourceValidationPackageId:
+          description: |-
+            The package id used to validate the contract on the source synchronizer.
+
+            Optional
+          type: string
+        overrideTargetValidationPackageId:
+          description: |-
+            The package id used to validate the contract on the target synchronizer. This
+            package id will also become the representative package id used in the created event.
+
+            Optional
+          type: string
     UnassignedEvent:
       title: UnassignedEvent
       description: Records that a contract has been unassigned, and it becomes unusable
@@ -7893,7 +8060,8 @@ components:
           description: |-
             Assignment exclusivity
             Before this time (measured on the target synchronizer), only the submitter of the unassignment can initiate the assignment
-            Defined for reassigning participants.
+            Defined for reassigning participants, up to protocol version 36.
+            Starting with protocol version 37, it is not set: any stakeholder can submit the assignment as soon as the unassignment is completed.
 
             Optional
           type: string
@@ -8003,10 +8171,7 @@ components:
         accountId:
           description: |-
             The account ID whose account to update.
-
-            NOTE: Currently, the account ID is tied to and identified by a party ID.
-            This constraint is expected to be removed in a future release, allowing for user-defined
-            account IDs that are not necessarily tied to a specific party.
+            Uses the same format as `GetAccountRequest.account_id`.
 
             Required
           type: string
@@ -8066,6 +8231,16 @@ components:
           description: |-
             Include topology events in streams.
             If unset no topology events are emitted in the stream.
+
+            Optional
+        includeTransactionsAndReassignments:
+          $ref: '#/components/schemas/TransactionFormat'
+          description: |-
+            Include both Daml transactions and (un)assignments in streams.
+            Shorthand for setting include_transactions to this format and include_reassignments
+            to its event_format.
+            The (un)assignments in the result take the shape TRANSACTION_SHAPE_ACS_DELTA.
+            If set, include_transactions and include_reassignments must be unset.
 
             Optional
     UpdateIdentityProviderConfigRequest:

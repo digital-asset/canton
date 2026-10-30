@@ -35,6 +35,7 @@ create_pull_request() {
   local -r labels="$2"        # comma separated list of labels to apply to the PR
   local -r description="$3"   # description to use for the PR in Github. The first line will automatically become the title.
   local -r base=$4
+  local -r review_team="${OWNER}/canton-release-owners"
   local url
 
   echo "$1 / $2 / $3"
@@ -43,16 +44,24 @@ create_pull_request() {
   if hub_installed ; then
     debug "Creating PR for [$branch] with labels [$labels]"
 
-    if ! url=$("$_HUB" pull-request -b "$base" -h "$branch" -r "DACH-NY/canton-release-owners" -l "$labels" --message="$description"); then
+    if ! url=$("$_HUB" pull-request -b "$base" -h "$branch" -r "$review_team" -l "$labels" --message="$description"); then
       # if hub fails to create the pull request (typically due to being misconfigured) fall back on just suggesting the pull request
-      warn "Failed to create pull request with 'hub' so falling back on the github UI"
+      warn "Failed to create pull request with 'hub'. The PR may already exist, so please check for an open PR before rerunning."
       suggest_pull_request "$branch" "$base"
+      if [[ -n "${CI:-}" ]]; then
+        err "Failed to create pull request with 'hub' in CI. Failing the job."
+        exit 1
+      fi
     else
       info "Created pull request [$url]"
       try_open_url "$url"
     fi
   else
     suggest_pull_request "$branch" "$base"
+    if [[ -n "${CI:-}" ]]; then
+      err "'hub' is not installed in CI. Failing the job."
+      exit 1
+    fi
   fi
 }
 
@@ -122,11 +131,12 @@ EOM
 suggest_pull_request() {
   local -r branch=$1
   local -r base=$2
+  local -r review_team="${OWNER}/canton-release-owners"
 
   warn "Install 'hub' to automatically create the pull request: https://hub.github.com/"
 
-  info "Please create the pull request yourself and include the release owner group as a reviewer (canton-release-owners)"
-  try_open_url "https://github.com/DACH-NY/canton/compare/$base...$branch?expand=1"
+  info "Please create the pull request yourself and include the release owner group as a reviewer (${review_team})"
+  try_open_url "https://github.com/${OWNER}/${REPO}/compare/$base...$branch?expand=1"
 }
 
 create_update_pr_on_main() {

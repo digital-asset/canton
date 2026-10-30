@@ -183,6 +183,7 @@ class PreIssConsensusModuleTest
           .segmentModuleRefFactory(
             new SegmentState(
               Segment(myId, NonEmpty(Seq, BlockNumber.First)), // fake
+              segmentIndex = 0,
               epochState.epoch,
               clock,
               completedBlocks = Seq.empty,

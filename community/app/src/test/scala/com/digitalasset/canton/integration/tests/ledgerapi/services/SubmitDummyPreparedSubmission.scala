@@ -28,6 +28,7 @@ trait SubmitDummyPreparedSubmission extends SubmitDummyCommand {
   protected def dummyPrepareSubmissionRequest(
       party: String,
       userId: String,
+      accountId: String = "",
   ): PrepareSubmissionRequest =
     PrepareSubmissionRequest(
       userId = userId,
@@ -47,11 +48,13 @@ trait SubmitDummyPreparedSubmission extends SubmitDummyCommand {
       estimateTrafficCost = None,
       tapsMaxPasses = None,
       hashingSchemeVersion = None,
+      accountId = accountId,
     )
 
   protected def dummyExecuteSubmissionRequest(
       userId: String,
       preparedSubmission: PrepareSubmissionResponse,
+      accountId: String = "",
   ): ExecuteSubmissionRequest =
     ExecuteSubmissionRequest(
       preparedTransaction = preparedSubmission.preparedTransaction,
@@ -63,32 +66,36 @@ trait SubmitDummyPreparedSubmission extends SubmitDummyCommand {
       userId = userId,
       hashingSchemeVersion = preparedSubmission.hashingSchemeVersion,
       minLedgerTime = None,
+      accountId = accountId,
     )
 
   protected def prepareSubmission(
       token: Option[String],
       party: String,
       userId: String,
+      accountId: String = "",
   ): Future[PrepareSubmissionResponse] =
     stub(InteractiveSubmissionServiceGrpc.stub(channel), token)
-      .prepareSubmission(dummyPrepareSubmissionRequest(party, userId))
+      .prepareSubmission(dummyPrepareSubmissionRequest(party, userId, accountId))
 
   protected def executeSubmission(
       token: Option[String],
       userId: String,
       preparedSubmission: PrepareSubmissionResponse,
+      accountId: String = "",
   ): Future[ExecuteSubmissionResponse] =
     stub(InteractiveSubmissionServiceGrpc.stub(channel), token)
-      .executeSubmission(dummyExecuteSubmissionRequest(userId, preparedSubmission))
+      .executeSubmission(dummyExecuteSubmissionRequest(userId, preparedSubmission, accountId))
 
   protected def executeSubmissionAndWait(
       token: Option[String],
       userId: String,
       preparedSubmission: PrepareSubmissionResponse,
+      accountId: String = "",
   ): Future[ExecuteSubmissionAndWaitResponse] =
     stub(InteractiveSubmissionServiceGrpc.stub(channel), token)
       .executeSubmissionAndWait(
-        dummyExecuteSubmissionRequest(userId, preparedSubmission)
+        dummyExecuteSubmissionRequest(userId, preparedSubmission, accountId)
           .transformInto[ExecuteSubmissionAndWaitRequest]
       )
 
@@ -96,10 +103,11 @@ trait SubmitDummyPreparedSubmission extends SubmitDummyCommand {
       token: Option[String],
       userId: String,
       preparedSubmission: PrepareSubmissionResponse,
+      accountId: String = "",
   ): Future[ExecuteSubmissionAndWaitForTransactionResponse] =
     stub(InteractiveSubmissionServiceGrpc.stub(channel), token)
       .executeSubmissionAndWaitForTransaction(
-        dummyExecuteSubmissionRequest(userId, preparedSubmission)
+        dummyExecuteSubmissionRequest(userId, preparedSubmission, accountId)
           .into[ExecuteSubmissionAndWaitForTransactionRequest]
           .withFieldConst(_.transactionFormat, None)
           .transform

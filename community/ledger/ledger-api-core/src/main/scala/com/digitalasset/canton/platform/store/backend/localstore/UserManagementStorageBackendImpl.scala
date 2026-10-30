@@ -9,9 +9,12 @@ import com.daml.ledger.api.v2.admin.user_management_service.Right
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
 import com.digitalasset.canton.platform.store.backend.common.{ComposableQuery, QueryStrategy}
 import com.digitalasset.canton.platform.{LedgerString, Party, UserId}
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.user.UserRight.{
   CanActAs,
   CanActAsAnyParty,
+  CanDebitTrafficFrom,
+  CanDebitTrafficFromAnyAccount,
   CanExecuteAs,
   CanExecuteAsAnyParty,
   CanReadAs,
@@ -51,10 +54,10 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
       }
   }
 
-  private val UserRightParser: RowParser[(Int, Option[String], Long)] =
-    int("user_right") ~ str("for_party").? ~ long("granted_at") map {
-      case userRight ~ forParty ~ grantedAt =>
-        (userRight, forParty, grantedAt)
+  private val UserRightParser: RowParser[(Int, Option[String], Option[String], Long)] =
+    int("user_right") ~ str("for_party").? ~ str("account_id").? ~ long("granted_at") map {
+      case userRight ~ forParty ~ accountId ~ grantedAt =>
+        (userRight, forParty, accountId, grantedAt)
     }
 
   private val IntParser0: RowParser[Int] =
@@ -214,7 +217,8 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
   override def userRightExists(internalId: Int, right: UserRight)(
       connection: Connection
   ): Boolean = {
-    val (userRight: Int, forParty: Option[Party]) = fromUserRight(right)
+    val (userRight: Int, forParty: Option[Party], accountId: Option[String]) =
+      fromUserRight(right)
 
     import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
     val res: Seq[?] =
@@ -225,7 +229,10 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
                AND
                ur.user_right = $userRight
                AND
-               ur.for_party ${isForPartyPredicate(forParty)}""".asVectorOf(IntParser0)(connection)
+               ur.for_party ${isNullOrEqualPredicate(forParty)}
+               AND
+               ur.account_id ${isNullOrEqualPredicate(accountId)}"""
+        .asVectorOf(IntParser0)(connection)
     assert(res.sizeIs <= 1)
     res.sizeIs == 1
   }
@@ -233,14 +240,16 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
   override def addUserRight(internalId: Int, right: UserRight, grantedAt: Long)(
       connection: Connection
   ): Unit = {
-    val (userRight: Int, forParty: Option[Party]) = fromUserRight(right)
+    val (userRight: Int, forParty: Option[Party], accountId: Option[String]) =
+      fromUserRight(right)
     val _ =
       SQL"""
-         INSERT INTO lapi_user_rights (user_internal_id, user_right, for_party, granted_at)
+         INSERT INTO lapi_user_rights (user_internal_id, user_right, for_party, account_id, granted_at)
          VALUES (
             $internalId,
             $userRight,
             ${forParty: Option[String]},
+            $accountId,
             $grantedAt
          )
          """.executeUpdate()(connection)
@@ -251,15 +260,16 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
   )(connection: Connection): Set[UserManagementStorageBackend.DbUserRight] = {
     val rec =
       SQL"""
-         SELECT ur.user_right, ur.for_party, ur.granted_at
+         SELECT ur.user_right, ur.for_party, ur.account_id, ur.granted_at
          FROM lapi_user_rights ur
          WHERE ur.user_internal_id = $internalId
          """.asVectorOf(UserRightParser)(connection)
-    rec.map { case (userRight, forPartyRaw, grantedAt) =>
+    rec.map { case (userRight, forPartyRaw, accountIdRaw, grantedAt) =>
       UserManagementStorageBackend.DbUserRight(
         makeUserRight(
           value = userRight,
           partyRaw = forPartyRaw,
+          accountIdRaw = accountIdRaw,
         ),
         grantedAt = grantedAt,
       )
@@ -269,7 +279,8 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
   override def deleteUserRight(internalId: Int, right: UserRight)(
       connection: Connection
   ): Boolean = {
-    val (userRight: Int, forParty: Option[Party]) = fromUserRight(right)
+    val (userRight: Int, forParty: Option[Party], accountId: Option[String]) =
+      fromUserRight(right)
 
     import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
     val updatedRowCount: Int =
@@ -280,7 +291,9 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
             AND
             ur.user_right = $userRight
             AND
-            ur.for_party ${isForPartyPredicate(forParty)}
+            ur.for_party ${isNullOrEqualPredicate(forParty)}
+            AND
+            ur.account_id ${isNullOrEqualPredicate(accountId)}
            """.executeUpdate()(connection)
     updatedRowCount == 1
   }
@@ -289,32 +302,46 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
     SQL"SELECT count(*) AS user_rights_count from lapi_user_rights WHERE user_internal_id = $internalId"
       .as(SqlParser.int("user_rights_count").single)(connection)
 
-  private def makeUserRight(value: Int, partyRaw: Option[String]): UserRight = {
+  private def makeUserRight(
+      value: Int,
+      partyRaw: Option[String],
+      accountIdRaw: Option[String],
+  ): UserRight = {
     val partyO = dbStringToPartyString(partyRaw)
-    (value, partyO) match {
-      case (Right.PARTICIPANT_ADMIN_FIELD_NUMBER, None) => ParticipantAdmin
-      case (Right.CAN_ACT_AS_FIELD_NUMBER, Some(party)) => CanActAs(party)
-      case (Right.CAN_READ_AS_FIELD_NUMBER, Some(party)) => CanReadAs(party)
-      case (Right.CAN_EXECUTE_AS_FIELD_NUMBER, Some(party)) => CanExecuteAs(party)
-      case (Right.IDENTITY_PROVIDER_ADMIN_FIELD_NUMBER, None) => IdentityProviderAdmin
-      case (Right.CAN_READ_AS_ANY_PARTY_FIELD_NUMBER, None) => CanReadAsAnyParty
-      case (Right.CAN_EXECUTE_AS_ANY_PARTY_FIELD_NUMBER, None) => CanExecuteAsAnyParty
-      case (Right.CAN_ACT_AS_ANY_PARTY_FIELD_NUMBER, None) => CanActAsAnyParty
+    (value, partyO, accountIdRaw) match {
+      case (Right.PARTICIPANT_ADMIN_FIELD_NUMBER, None, None) => ParticipantAdmin
+      case (Right.CAN_ACT_AS_FIELD_NUMBER, Some(party), None) => CanActAs(party)
+      case (Right.CAN_READ_AS_FIELD_NUMBER, Some(party), None) => CanReadAs(party)
+      case (Right.CAN_EXECUTE_AS_FIELD_NUMBER, Some(party), None) => CanExecuteAs(party)
+      case (Right.IDENTITY_PROVIDER_ADMIN_FIELD_NUMBER, None, None) => IdentityProviderAdmin
+      case (Right.CAN_READ_AS_ANY_PARTY_FIELD_NUMBER, None, None) => CanReadAsAnyParty
+      case (Right.CAN_EXECUTE_AS_ANY_PARTY_FIELD_NUMBER, None, None) => CanExecuteAsAnyParty
+      case (Right.CAN_ACT_AS_ANY_PARTY_FIELD_NUMBER, None, None) => CanActAsAnyParty
+      case (Right.CAN_DEBIT_TRAFFIC_FROM_FIELD_NUMBER, None, Some(accountId)) =>
+        CanDebitTrafficFrom(AccountId.tryCreate(accountId))
+      case (Right.CAN_DEBIT_TRAFFIC_FROM_ANY_ACCOUNT_FIELD_NUMBER, None, None) =>
+        CanDebitTrafficFromAnyAccount
       case _ =>
-        throw new RuntimeException(s"Could not convert ${(value, partyO)} to a user right.")
+        throw new RuntimeException(
+          s"Could not convert ${(value, partyO, accountIdRaw)} to a user right."
+        )
     }
   }
 
-  private def fromUserRight(right: UserRight): (Int, Option[Party]) =
+  private def fromUserRight(right: UserRight): (Int, Option[Party], Option[String]) =
     right match {
-      case ParticipantAdmin => (Right.PARTICIPANT_ADMIN_FIELD_NUMBER, None)
-      case IdentityProviderAdmin => (Right.IDENTITY_PROVIDER_ADMIN_FIELD_NUMBER, None)
-      case CanActAs(party) => (Right.CAN_ACT_AS_FIELD_NUMBER, Some(party))
-      case CanReadAs(party) => (Right.CAN_READ_AS_FIELD_NUMBER, Some(party))
-      case CanReadAsAnyParty => (Right.CAN_READ_AS_ANY_PARTY_FIELD_NUMBER, None)
-      case CanExecuteAs(party) => (Right.CAN_EXECUTE_AS_FIELD_NUMBER, Some(party))
-      case CanExecuteAsAnyParty => (Right.CAN_EXECUTE_AS_ANY_PARTY_FIELD_NUMBER, None)
-      case CanActAsAnyParty => (Right.CAN_ACT_AS_ANY_PARTY_FIELD_NUMBER, None)
+      case ParticipantAdmin => (Right.PARTICIPANT_ADMIN_FIELD_NUMBER, None, None)
+      case IdentityProviderAdmin => (Right.IDENTITY_PROVIDER_ADMIN_FIELD_NUMBER, None, None)
+      case CanActAs(party) => (Right.CAN_ACT_AS_FIELD_NUMBER, Some(party), None)
+      case CanReadAs(party) => (Right.CAN_READ_AS_FIELD_NUMBER, Some(party), None)
+      case CanReadAsAnyParty => (Right.CAN_READ_AS_ANY_PARTY_FIELD_NUMBER, None, None)
+      case CanExecuteAs(party) => (Right.CAN_EXECUTE_AS_FIELD_NUMBER, Some(party), None)
+      case CanExecuteAsAnyParty => (Right.CAN_EXECUTE_AS_ANY_PARTY_FIELD_NUMBER, None, None)
+      case CanActAsAnyParty => (Right.CAN_ACT_AS_ANY_PARTY_FIELD_NUMBER, None, None)
+      case CanDebitTrafficFrom(accountId) =>
+        (Right.CAN_DEBIT_TRAFFIC_FROM_FIELD_NUMBER, None, Some(accountId.unwrap))
+      case CanDebitTrafficFromAnyAccount =>
+        (Right.CAN_DEBIT_TRAFFIC_FROM_ANY_ACCOUNT_FIELD_NUMBER, None, None)
       case _ =>
         throw new RuntimeException(s"Could not recognize user right: $right.")
     }
@@ -327,10 +354,10 @@ object UserManagementStorageBackendImpl extends UserManagementStorageBackend {
   ): Option[IdentityProviderId.Id] =
     raw.map(LedgerString.assertFromString).map(IdentityProviderId.Id.apply)
 
-  private def isForPartyPredicate(forParty: Option[Party]): ComposableQuery.CompositeSql = {
+  private def isNullOrEqualPredicate(value: Option[String]): ComposableQuery.CompositeSql = {
     import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
-    forParty.fold(cSQL"IS NULL") { party =>
-      cSQL"= ${party: String}"
+    value.fold(cSQL"IS NULL") { v =>
+      cSQL"= $v"
     }
   }
 

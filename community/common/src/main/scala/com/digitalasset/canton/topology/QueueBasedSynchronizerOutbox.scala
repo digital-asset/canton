@@ -257,6 +257,12 @@ class QueueBasedSynchronizerOutbox(
             observed,
             "Did not observe transactions in target synchronizer store.",
           )
+          // Log transactions rejected by the synchronizer.
+          _ = FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+            logRejectedTransactions(notPresent, targetStore),
+            level = Level.WARN,
+            failureMessage = "Failed to log rejected transactions",
+          )
           _ <- EitherT.right[String](
             FutureUnlessShutdown.lift(synchronizerOutboxQueue.completeCycle())
           )

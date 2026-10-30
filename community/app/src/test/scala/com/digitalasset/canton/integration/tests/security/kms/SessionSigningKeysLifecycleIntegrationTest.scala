@@ -6,9 +6,8 @@ package com.digitalasset.canton.integration.tests.security.kms
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.{KmsConfig, SessionSigningKeysConfig}
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase.mockKmsDriverConfig
 import com.digitalasset.canton.integration.{
@@ -24,12 +23,14 @@ trait SessionSigningKeysLifecycleIntegrationTest
     with SharedEnvironment
     with KmsCryptoIntegrationTestBase {
 
-  /** Short test-only configuration: durations are small enough to trigger key rotation and validity
-    * edge cases.
+  /** Short test-only configuration: keep key validity above the sequencing offset plus cutoff so
+    * signing can tolerate the full validity interval while still exercising key rotation. Else, the
+    * signer falls back to the long-term key when a known signing interval cannot fit within the
+    * configured session-key validity.
     */
   private val sessionSigningKeysConfig: SessionSigningKeysConfig = SessionSigningKeysConfig(
     enabled = true,
-    keyValidityDuration = config.PositiveFiniteDuration.ofSeconds(10),
+    keyValidityDuration = config.PositiveFiniteDuration.ofSeconds(20),
     toleranceShiftDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
     cutOffDuration = config.NonNegativeFiniteDuration.ofSeconds(2),
     keyEvictionPeriod = config.PositiveFiniteDuration.ofMinutes(1),
@@ -131,6 +132,6 @@ class MockKmsDriverSessionSigningKeysLifecycleIntegrationTestPostgres
   setupPlugins(
     withAutoInit = true,
     storagePlugin = Some(new UsePostgres(loggerFactory)),
-    sequencerPlugin = new UseReferenceBlockSequencer[Postgres](loggerFactory),
+    sequencerPlugin = new UseBftSequencer(loggerFactory),
   )
 }

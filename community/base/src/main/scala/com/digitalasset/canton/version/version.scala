@@ -107,6 +107,17 @@ package object version {
       ValueClass <: HasRepresentativeProtocolVersion
   ] = VersioningCompanionMemoization2F[Either[String, *], ValueClass, ValueClass]
 
+  type VersioningCompanionContextMemoizationE[
+      ValueClass <: HasRepresentativeProtocolVersion,
+      Context,
+  ] = VersioningCompanionContextMemoization2F[
+    Either[String, *],
+    ValueClass,
+    Context,
+    ValueClass,
+    Unit,
+  ]
+
   type VersioningCompanionMemoization2E[
       ValueClass <: HasRepresentativeProtocolVersion,
       DeserializedValueClass <: HasRepresentativeProtocolVersion,
@@ -177,8 +188,8 @@ object Errors {
       details: Option[String],
   ): Nothing =
     throw new IllegalStateException(
-      s"Cannot serialize instance of $name with $versionKind $version" + details.fold("")(str =>
-        s": $str"
-      )
+      s"Cannot get versioning entry of instance of $name with $versionKind $version" + details.fold(
+        ""
+      )(str => s": $str")
     )
 }

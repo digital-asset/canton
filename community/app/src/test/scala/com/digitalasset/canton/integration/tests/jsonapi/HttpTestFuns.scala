@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 }
 import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.console.LocalParticipantReference
+import com.digitalasset.canton.http.json.v2.Endpoints
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
 import com.digitalasset.canton.http.{HttpService, Party, UserId}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.*
@@ -20,6 +21,7 @@ import io.circe.parser.{decode, parse}
 import io.circe.syntax.EncoderOps
 import io.circe.{Decoder, Json}
 import org.apache.pekko.http.scaladsl.model.*
+import org.apache.pekko.http.scaladsl.model.headers.{Cookie, Origin}
 import org.apache.pekko.http.scaladsl.model.ws.{
   Message,
   TextMessage,
@@ -170,11 +172,33 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
   protected def websocket(
       uri: Uri,
       jwt: Jwt,
+  ): Flow[Message, Message, Future[WebSocketUpgradeResponse]] =
+    websocketFlow(WebSocketRequest(uri, subprotocol = validSubprotocol(jwt)))
+
+  protected def websocketWithCookieAuth(
+      uri: Uri,
+      jwt: Jwt,
+      origin: Option[Origin] = None,
+  ): Flow[Message, Message, Future[WebSocketUpgradeResponse]] =
+    websocketFlow(
+      WebSocketRequest(
+        uri,
+        extraHeaders =
+          List[HttpHeader](Cookie(Endpoints.jwtCookieName, jwt.value)) ++ origin.toList,
+        subprotocol = Some(wsProtocol),
+      )
+    )
+
+  /** Opens a websocket with exactly the given request (only the scheme is adjusted to the TLS
+    * setting), so tests can control which authentication material is sent.
+    */
+  protected def websocketFlow(
+      request: WebSocketRequest
   ): Flow[Message, Message, Future[WebSocketUpgradeResponse]] = {
     val http = Http()
     val scheme = if (useTls) "wss" else "ws"
     http.webSocketClientFlow(
-      request = WebSocketRequest(uri.copy(scheme = scheme), subprotocol = validSubprotocol(jwt)),
+      request = request.copy(uri = request.uri.copy(scheme = scheme)),
       connectionContext =
         if (useTls)
           cachedClientContext(clientTlsConfig)

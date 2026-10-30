@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.auth.services.StateServiceAuthorization.{
   getActiveContractsClaims,
   getActiveContractsPageClaims,
+  getConnectedSynchronizersClaims,
 }
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
@@ -45,15 +46,9 @@ final class StateServiceAuthorization(
   override def getConnectedSynchronizers(
       request: GetConnectedSynchronizersRequest
   ): Future[GetConnectedSynchronizersResponse] =
-    if (request.party.isEmpty)
-      authorizer.rpc(service.getConnectedSynchronizers)(RequiredClaim.Public())(request)
-    else
-      authorizer.rpc(service.getConnectedSynchronizers)(
-        RequiredClaim.AdminOrIdpAdminOrOperateAsParty(Seq(request.party)),
-        RequiredClaim.MatchIdentityProviderId(
-          Lens.unit[GetConnectedSynchronizersRequest].identityProviderId
-        ),
-      )(request)
+    authorizer.rpc(service.getConnectedSynchronizers)(
+      getConnectedSynchronizersClaims(request)*
+    )(request)
 
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] =
     authorizer.rpc(service.getLedgerEnd)(RequiredClaim.Public())(request)
@@ -88,4 +83,18 @@ object StateServiceAuthorization {
     request.eventFormat.toList.flatMap(
       RequiredClaims.eventFormatClaims[GetActiveContractsPageRequest]
     )
+
+  val identityProviderIdForGetConnectedSynchronizersL
+      : Lens[GetConnectedSynchronizersRequest, String] =
+    Lens.unit[GetConnectedSynchronizersRequest].identityProviderId
+
+  def getConnectedSynchronizersClaims(
+      request: GetConnectedSynchronizersRequest
+  ): List[RequiredClaim[GetConnectedSynchronizersRequest]] =
+    if (request.party.isEmpty) List(RequiredClaim.Public())
+    else
+      List(
+        RequiredClaim.AdminOrIdpAdminOrOperateAsParty(Seq(request.party)),
+        RequiredClaim.MatchIdentityProviderId(identityProviderIdForGetConnectedSynchronizersL),
+      )
 }

@@ -45,8 +45,6 @@ run_sbt_command_on_machine:
             --env "MACHINE=1" \
             --env "SBT_OPTS=-Xmx$EXECUTOR_JVM_HEAP_SIZE" \
             --env MAX_CONCURRENT_SBT_TEST_TASKS \
-            --env ARTIFACTORY_USER \
-            --env ARTIFACTORY_PASSWORD \
             --env CANTON_PROTOCOL_VERSION \
             --security-opt seccomp=unconfined \
             << parameters.additional_docker_args >> \

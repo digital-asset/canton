@@ -29,10 +29,14 @@ import com.digitalasset.canton.http.LfValue
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.ParticipantReferenceOps
-import com.digitalasset.canton.integration.util.GrpcServices.StateService
+import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.{
+  AdminCommandOps,
+  ParticipantReferenceOps,
+}
+import com.digitalasset.canton.integration.util.GrpcServices.{StateService, UpdateService}
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
+  AutomaticAssignment,
   HasCommandRunnersHelpers,
   HasReassignmentCommandsHelpers,
 }
@@ -52,7 +56,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Party, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.TestEngine
-import com.digitalasset.canton.{BaseTest, ReassignmentCounter, config}
+import com.digitalasset.canton.{BaseTest, ReassignmentCounter}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder
@@ -90,6 +94,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         // Ensure reassignments are not tripped up by some participants being a little behind.
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -110,12 +115,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
 
         // Disable automatic assignment so that we really control it
         synchronizers.foreach { case (synchronizerId, owners) =>
-          owners.foreach(
-            _.topology.synchronizer_parameters.propose_update(
-              synchronizerId = synchronizerId,
-              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-            )
-          )
+          AutomaticAssignment.disable(owners, synchronizerId)
         }
 
         for {
@@ -843,6 +843,231 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
       IouSyntax.archive(participant1)(contract.contract, party)
     }
 
+    "honor the includeIncompleteReassignments flag" in { implicit env =>
+      import env.*
+      val party = party1a
+
+      val activeContract = create(daId, party, party)
+      val reassignedContract = create(daId, party, party)
+
+      val (out, _) = unassign(
+        cid = reassignedContract.cid,
+        source = daId,
+        target = acmeId,
+        submittingParty = party.toLf,
+        participantOverride = Some(participant1),
+      )
+      val ledgerEnd = participant1.ledger_api.state.end()
+      val ourContractIds =
+        Set(activeContract.createdEvent.contractId, reassignedContract.createdEvent.contractId)
+      def ours(entries: Seq[proto.state_service.GetActiveContractsResponse]) =
+        entries.filter(r =>
+          r.contractEntry.activeContract
+            .flatMap(_.createdEvent)
+            .orElse(r.contractEntry.incompleteUnassigned.flatMap(_.createdEvent))
+            .orElse(
+              r.contractEntry.incompleteAssigned
+                .flatMap(_.assignedEvent)
+                .flatMap(_.createdEvent)
+            )
+            .exists(ce => ourContractIds.contains(ce.contractId))
+        )
+      def entryKind(r: proto.state_service.GetActiveContractsResponse) =
+        r.contractEntry match {
+          case ContractEntry.ActiveContract(ac) =>
+            "active" -> ac.createdEvent.value.contractId
+          case ContractEntry.IncompleteUnassigned(iu) =>
+            "incompleteUnassigned" -> iu.createdEvent.value.contractId
+          case ContractEntry.IncompleteAssigned(ia) =>
+            "incompleteAssigned" -> ia.assignedEvent.value.createdEvent.value.contractId
+          case ContractEntry.Empty => fail("unexpected empty contract entry")
+        }
+
+      val withIncomplete = Set(
+        "active" -> activeContract.createdEvent.contractId,
+        "incompleteUnassigned" -> reassignedContract.createdEvent.contractId,
+      )
+      val withoutIncomplete = Set("active" -> activeContract.createdEvent.contractId)
+
+      // GetActiveContracts stream
+      def stream(includeIncompleteReassignments: Boolean) =
+        participant1
+          .runStreamingLapiAdminCommand(
+            StateService.getActiveContracts(
+              proto.state_service.GetActiveContractsRequest(
+                activeAtOffset = ledgerEnd,
+                eventFormat = Some(getEventFormat(List(party.toLf))),
+                streamContinuationToken = None,
+                includeIncompleteReassignments = includeIncompleteReassignments,
+              )
+            )
+          )
+          .tryResult
+
+      ours(stream(includeIncompleteReassignments = true)).map(entryKind).toSet shouldBe
+        withIncomplete
+      ours(stream(includeIncompleteReassignments = false)).map(entryKind).toSet shouldBe
+        withoutIncomplete
+
+      // GetActiveContractsPage, iterating over all pages with page size 1
+      def allPages(includeIncompleteReassignments: Boolean) = {
+        def request(pageToken: Option[com.google.protobuf.ByteString]) =
+          proto.state_service.GetActiveContractsPageRequest(
+            activeAtOffset = Some(ledgerEnd),
+            eventFormat = Some(getEventFormat(List(party.toLf))),
+            maxPageSize = Some(1),
+            pageToken = pageToken,
+            includeIncompleteReassignments = includeIncompleteReassignments,
+          )
+        @annotation.tailrec
+        def loop(
+            pageToken: Option[com.google.protobuf.ByteString],
+            acc: Vector[proto.state_service.GetActiveContractsResponse],
+        ): Vector[proto.state_service.GetActiveContractsResponse] = {
+          val page = participant1
+            .runLapiAdminCommand(StateService.getActiveContractsPage(request(pageToken)))
+            .tryResult
+          page.activeContracts.size should be <= 1
+          val newAcc = acc ++ page.activeContracts
+          page.nextPageToken match {
+            case Some(next) => loop(Some(next), newAcc)
+            case None => newAcc
+          }
+        }
+        loop(None, Vector.empty)
+      }
+
+      ours(allPages(includeIncompleteReassignments = true)).map(entryKind).toSet shouldBe
+        withIncomplete
+      ours(allPages(includeIncompleteReassignments = false)).map(entryKind).toSet shouldBe
+        withoutIncomplete
+
+      // Cleaning
+      val (_, _) = submitAssignments(out, party, Some(participant1))
+      IouSyntax.archive(participant1)(activeContract.contract, party)
+      IouSyntax.archive(participant1)(reassignedContract.contract, party)
+    }
+
+    "honor the UpdateFormat.include_transactions_and_reassignments field in update streams" in {
+      implicit env =>
+        import env.*
+        val party = party1a
+        val beginOffset = participant1.ledger_api.state.end()
+
+        val contract = create(daId, party, party)
+        val (out, _) = unassign(
+          cid = contract.cid,
+          source = daId,
+          target = acmeId,
+          submittingParty = party.toLf,
+          participantOverride = Some(participant1),
+        )
+        val (in, _) = submitAssignments(out, party, Some(participant1))
+        val endOffset = participant1.ledger_api.state.end()
+
+        val eventFormat = getEventFormat(List(party.toLf))
+        val transactionFormat = proto.transaction_filter.TransactionFormat(
+          eventFormat = Some(eventFormat),
+          transactionShape = proto.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+        )
+        def updateFormat(
+            includeTransactions: Boolean,
+            includeReassignments: Boolean,
+            includeTransactionsAndReassignments: Boolean,
+        ) =
+          proto.transaction_filter.UpdateFormat(
+            includeTransactions = Option.when(includeTransactions)(transactionFormat),
+            includeReassignments = Option.when(includeReassignments)(eventFormat),
+            includeTopologyEvents = None,
+            includeTransactionsAndReassignments =
+              Option.when(includeTransactionsAndReassignments)(transactionFormat),
+          )
+        def updates(updateFormat: proto.transaction_filter.UpdateFormat) =
+          participant1.runStreamingLapiAdminCommand(
+            UpdateService.getUpdates(
+              proto.update_service.GetUpdatesRequest(
+                beginExclusive = beginOffset,
+                endInclusive = Some(endOffset),
+                updateFormat = Some(updateFormat),
+                descendingOrder = false,
+              )
+            )
+          )
+        def kinds(responses: Seq[proto.update_service.GetUpdatesResponse]) =
+          responses.map(_.update).collect {
+            case proto.update_service.GetUpdatesResponse.Update.Transaction(tx) =>
+              "transaction" -> tx.updateId
+            case proto.update_service.GetUpdatesResponse.Update.Reassignment(r) =>
+              "reassignment" -> r.updateId
+          }
+
+        val withShorthand = updates(
+          updateFormat(
+            includeTransactions = false,
+            includeReassignments = false,
+            includeTransactionsAndReassignments = true,
+          )
+        ).tryResult
+        val transactionsOnly = updates(
+          updateFormat(
+            includeTransactions = true,
+            includeReassignments = false,
+            includeTransactionsAndReassignments = false,
+          )
+        ).tryResult
+        val explicit = updates(
+          updateFormat(
+            includeTransactions = true,
+            includeReassignments = true,
+            includeTransactionsAndReassignments = false,
+          )
+        ).tryResult
+
+        kinds(withShorthand).map(_._1) shouldBe Seq("transaction", "reassignment", "reassignment")
+        kinds(withShorthand).collect { case ("reassignment", id) => id } shouldBe Seq(
+          out.updateId,
+          in.updateId,
+        )
+        // the shorthand is equivalent to setting both UpdateFormat.include_transactions and
+        // UpdateFormat.include_reassignments
+        // (offset checkpoints are timing dependent, hence excluded from the comparison)
+        def withoutCheckpoints(responses: Seq[proto.update_service.GetUpdatesResponse]) =
+          responses.filterNot(_.update.isOffsetCheckpoint)
+        withoutCheckpoints(withShorthand) shouldBe withoutCheckpoints(explicit)
+        // with include_transactions only, only the transaction is returned
+        kinds(transactionsOnly) shouldBe kinds(withShorthand).filter(_._1 == "transaction")
+
+        // combining the shorthand with include_transactions or include_reassignments is rejected
+        inside(
+          updates(
+            updateFormat(
+              includeTransactions = true,
+              includeReassignments = false,
+              includeTransactionsAndReassignments = true,
+            )
+          )
+        ) { case error: GenericCommandError =>
+          error.cause should include(
+            "include_transactions_and_reassignments and include_transactions cannot both be set"
+          )
+        }
+        inside(
+          updates(
+            updateFormat(
+              includeTransactions = false,
+              includeReassignments = true,
+              includeTransactionsAndReassignments = true,
+            )
+          )
+        ) { case error: GenericCommandError =>
+          error.cause should include(
+            "include_transactions_and_reassignments and include_reassignments cannot both be set"
+          )
+        }
+
+        IouSyntax.archive(participant1)(contract.contract, party)
+    }
+
     "return an error if validAt is bigger than ledgerEnd" in { implicit env =>
       import env.*
       val bigOffset = Long.MaxValue
@@ -854,6 +1079,7 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
               activeAtOffset = bigOffset,
               eventFormat = Some(getEventFormat(List(party1a.toLf))),
               streamContinuationToken = None,
+              includeIncompleteReassignments = false,
             )
           )
         )

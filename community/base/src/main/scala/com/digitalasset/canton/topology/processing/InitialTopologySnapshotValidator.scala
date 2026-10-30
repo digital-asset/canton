@@ -4,15 +4,14 @@
 package com.digitalasset.canton.topology.processing
 
 import cats.data.EitherT
+import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout, TopologyConfig}
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.CryptoPureApi
-import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
-import com.digitalasset.canton.topology.processing.InitialTopologySnapshotValidator.MergeTx
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.{
@@ -21,7 +20,6 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.transaction.checks.RequiredTopologyMappingChecks
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
@@ -29,13 +27,17 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MonadUtil.syntax.*
+import com.digitalasset.canton.util.PekkoUtil
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.nonempty.NonEmpty
+import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.{Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, RunnableGraph, Sink, Source}
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.collection.mutable
-import scala.concurrent.ExecutionContext
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.*
 
 /** Validates an initial topology snapshot by:
   *
@@ -51,29 +53,23 @@ import scala.concurrent.ExecutionContext
   * Also compares the computed effective time with the effective provided in the snapshot.
   *
   * Any inconsistency between the topology snapshot and the outcome of the validation is reported.
-  *
-  * @param cleanupTopologySnapshot
-  *   if true, then we will clean up the topology snapshot (used for hard migration to clean up the
-  *   genesis state)
   */
 class InitialTopologySnapshotValidator(
     pureCrypto: CryptoPureApi,
     store: TopologyStore[TopologyStoreId],
-    topologyCacheAggregatorConfig: BatchAggregatorConfig,
+    batchingConfig: BatchingConfig,
     topologyConfig: TopologyConfig,
     staticSynchronizerParameters: Option[StaticSynchronizerParameters],
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     override val loggerFactory: NamedLoggerFactory,
-    cleanupTopologySnapshot: Boolean = false,
 )(implicit ec: ExecutionContext, materializer: Materializer)
     extends NamedLogging {
 
-  private val storeIsEmpty = new AtomicBoolean(false)
   protected val stateProcessor: TopologyStateProcessor =
     TopologyStateProcessor.forInitialSnapshotValidation(
       store,
-      topologyCacheAggregatorConfig,
+      batchingConfig.topologyCacheAggregator,
       topologyConfig,
       lookup =>
         new RequiredTopologyMappingChecks(
@@ -99,78 +95,196 @@ class InitialTopologySnapshotValidator(
     */
   final def validateAndApplyInitialTopologySnapshot(
       initialSnapshot: GenericStoredTopologyTransactions
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    validateAndApplyInitialTopologySnapshot(Source(initialSnapshot.result))
+
+  final def validateAndApplyInitialTopologySnapshot(
+      initialSnapshotSource: Source[GenericStoredTopologyTransaction, NotUsed]
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val finalSnapshot =
-      if (cleanupTopologySnapshot) preprocessInitialSnapshot(initialSnapshot) else initialSnapshot
+    val lastUpdate = new AtomicLong(System.nanoTime())
+
+    def runGraph(
+        graph: RunnableGraph[Future[Option[UnlessShutdown[Unit]]]]
+    ): FutureUnlessShutdown[Unit] = {
+      lastUpdate.set(System.nanoTime())
+
+      FutureUnlessShutdown(
+        PekkoUtil
+          .runSupervised(
+            graph,
+            "initial-topology-bulk-insert",
+            (doneF: Future[?]) => doneF.isCompleted,
+          )
+          .map {
+            case Some(UnlessShutdown.AbortedDueToShutdown) => UnlessShutdown.AbortedDueToShutdown
+            case _ => UnlessShutdown.Outcome(())
+          }
+      )
+    }
+
+    def emitProgress(lastUpdate: AtomicLong)(tx: GenericStoredTopologyTransaction)(implicit
+        traceContext: TraceContext
+    ): Unit = {
+      val now = System.nanoTime()
+      val last = lastUpdate.get()
+      if (TimeUnit.NANOSECONDS.toSeconds(now - last) >= 15 && lastUpdate.compareAndSet(last, now)) {
+        logger.info(
+          s"Progressed topology download to sequenced=${tx.sequenced}, validFrom=${tx.validFrom.value})"
+        )
+        lastUpdate.set(now)
+      }
+    }
+
+    val sourceWithCheckedTimestamps = initialSnapshotSource
+      // ensure that the stream is ordered with monotonically increasing sequenced times, otherwise the
+      // groupAdjacentBy yields unexpected batches of topology transactions
+      .statefulMap(() => (SequencedTime.MinValue, EffectiveTime.MinValue))(
+        { case ((prevTimestamp, prevValidFrom), current) =>
+          if (current.sequenced < prevTimestamp)
+            throw new IllegalArgumentException(
+              s"Received non-monotonic sequenced times. previous=$prevTimestamp, current: ${current.sequenced} from event $current"
+            )
+          if (current.validFrom < prevValidFrom)
+            throw new IllegalArgumentException(
+              s"Received non-monotonic effective times. previous=$prevValidFrom, current: ${current.validFrom} from event $current"
+            )
+          if (prevValidFrom != current.validFrom && prevTimestamp == current.sequenced)
+            throw new IllegalArgumentException(
+              s"Received different effective times for the same sequenced time: previous=$prevValidFrom, current: ${current.validFrom} from event $current"
+            )
+
+          if (prevValidFrom == current.validFrom && prevTimestamp != current.sequenced)
+            throw new IllegalArgumentException(
+              s"Received different sequenced times for the same effective time: previous=$prevTimestamp, current: ${current.sequenced} from event $current"
+            )
+
+          ((current.sequenced, current.validFrom), current)
+        },
+        onComplete = _ => None,
+      )
+
     if (!topologyConfig.validateInitialTopologySnapshot) {
       logger.info("Skipping initial topology snapshot validation")
-      EitherT.right(store.bulkInsert(finalSnapshot))
-    } else {
-      val groupedBySequencedTime: Seq[
-        (
-            (SequencedTime, EffectiveTime),
-            Seq[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]],
-        )
-      ] = finalSnapshot.result
-        // process transactions from the same timestamp at once
-        .groupBy(stored => (stored.sequenced, stored.validFrom))
-        .toSeq
-        // ensure that the groups of transactions come in the correct order
-        .sortBy { case (timestamps, _) => timestamps }
 
-      logger.info(
-        s"Validating ${finalSnapshot.result.size}/${initialSnapshot.result.size} transactions to initialize the topology store ${store.storeId} with ${groupedBySequencedTime.size} sequencer times"
-      )
+      val directInsertGraph =
+        sourceWithCheckedTimestamps
+          // TODO(#34655): pass a close context to this method and add a killswitch here that gets pulled on close
+          //               (be careful to cleanup the "scheduling" of pulling the killswitch in via OnShutdownRunner, ...)
+          // NOTE: bulkInsert numbers the transactions with the same validFrom from 0 in every call,
+          // so never split them across calls
+          .groupedAdjacentBy(_.sequenced)
+          .groupedWeighted(batchingConfig.maxTopologyUpdateBatchSize.value.toLong)(_.size.toLong)
+          .map(_.flatten)
+          .mapAsyncUS(1) { txs =>
+            txs.headOption.foreach(emitProgress(lastUpdate))
+            store.bulkInsert(StoredTopologyTransactions(txs))
+          }
+          .toMat(Sink.lastOption)(Keep.right)
+
       for {
         _ <- EitherT.right(store.deleteAllData())
-        // set to true to bypass loading from store during genesis validation
-        _ = storeIsEmpty.set(true)
-        _ <-
-          groupedBySequencedTime.sequentialTraverse_ { case ((sequenced, validFrom), storedTxs) =>
-            processTransactionsAtSequencedTime(sequenced, validFrom, storedTxs, storeIsEmpty.get())
-              .map { res =>
-                // after the first batch, the store is no longer empty
-                storeIsEmpty.set(false)
-                res
+        _ <- EitherT.right(runGraph(directInsertGraph))
+      } yield ()
+    } else {
+      logger.info(
+        s"Validating transactions to initialize the topology store ${store.storeId}"
+      )
+
+      val validatingGraph =
+        sourceWithCheckedTimestamps
+          // TODO(#34655): pass a close context to this method and add a killswitch here that gets pulled on close
+          //               (be careful to cleanup the "scheduling" of pulling the killswitch in via OnShutdownRunner, ...)
+          .groupedAdjacentBy(_.sequenced)
+          .async
+          .mapAsync(1) { txs =>
+            val txsNonEmpty = NonEmpty
+              .from(txs)
+              .getOrElse(
+                throw new IllegalStateException("Grouped transactions should never be empty")
+              )
+
+            emitProgress(lastUpdate)(txsNonEmpty.head1)
+
+            processTransactionsAtSequencedTime(
+              txsNonEmpty.head1.sequenced,
+              txsNonEmpty.head1.validFrom,
+              txs,
+            )
+              // transform AbortedDueToShutdown to an exception that is
+              // later recovered. We don't use mapAsyncAndDrainUS, because we want to stop as soon
+              // as possible after finding an error and we don't care about fully processing in-flight messages
+              .failOnShutdownToAbortException(
+                s"process topology transaction at ${txsNonEmpty.head1.sequenced}"
+              )
+              .map { _ =>
+                txsNonEmpty
               }
           }
-        _ = logger.info(
-          s"Import validated and completed, verifying now that the result matches the imported snapshot."
-        )
-        // this comparison of the input and output topology snapshots serves as a security guard/barrier
-        mismatch <-
-          EitherT
-            .right(
-              Source(finalSnapshot.result)
+          .async
+          .statefulMapAsync((SequencedTime.MinValue, 0 /* numTransactions */ )) {
+            case ((fromExclusive, numTransactions), batch) =>
+              val updatedCount = numTransactions + batch.size
+              // only log a progress update if the new count crossed another 1k transactions step
+              if (numTransactions / 1000 < updatedCount / 1000)
+                logger.info(
+                  s"Validated $updatedCount topology transactions to initialize the topology store ${store.storeId}"
+                )
+
+              val lastSequencedTime = batch.last1.sequenced
+
+              // this comparison of the input and output topology snapshots serves as a security guard/barrier
+              Source(batch)
                 .zip(
-                  store.findEssentialStateAtSequencedTime(
-                    SequencedTime.MaxValue,
+                  store.findEssentialStateInInterval(
+                    fromExclusiveO = fromExclusive.some,
+                    toInclusive = lastSequencedTime,
                     includeRejected = true,
                   )
                 )
                 .zipWithIndex
                 .dropWhile { case ((fromInitial, fromStore), _) =>
                   // we don't do a complete == comparison, because the snapshot might contain transactions with superfluous
-                  // signatures that are now filtered out. As long as the hash, validFrom, validUntil, isProposal and rejection status
+                  // signatures that are now filtered out. Also, due to the streaming processing, the stored transactions
+                  // are now checked before the successor serial is processed, therefore validUntil cannot be checked either.
+                  //
+                  // As long as the hash, validFrom, isProposal and rejection status
                   // (i.e. just checking whether both transactions are rejected or not without looking at the concrete reasons)
                   // agree between initial and stored topology transaction, we accept the result.
                   equalIgnoringSignaturesAndRejectionReasonDetails(fromInitial, fromStore)
                 }
-                runWith (Sink.headOption)
-            )
-            .mapK(FutureUnlessShutdown.outcomeK)
+                // stop after the first mismatch
+                .runWith(Sink.headOption)
+                .map(((lastSequencedTime, updatedCount), _))
+          }
+          // only propagate actual mismatches to the main stream
+          .collect { case Some(mismatch) => mismatch }
+
+      for {
+        _ <- EitherT.right(store.deleteAllData())
+        _ = lastUpdate.set(System.nanoTime())
+        validationResult = PekkoUtil
+          .runSupervised(
+            validatingGraph.toMat(Sink.headOption)(Keep.right),
+            "initial-topology-validation",
+            (doneF: Future[?]) => doneF.isCompleted,
+            reportExceptionAtInfo = UnlessShutdown.isAbortedDueToShutdownException,
+          )
+        mismatch <- EitherT.right(
+          // restore AbortedDueToShutdown from the exception to go back to EitherT[FutureUnlessShutdown, ...]
+          FutureUnlessShutdown.recoverFromAbortException(validationResult)
+        )
         _ <- EitherT.fromEither[FutureUnlessShutdown](
           mismatch
             .map { case ((fromInitial, fromStore), idx) =>
               s"""Mismatch between transactions at index $idx from the initial snapshot and the topology store:
-           |Initial: $fromInitial (hash=${fromInitial.hash})
-           |Store:   $fromStore (hash=${fromStore.hash})""".stripMargin
+                 |Initial: $fromInitial (hash=${fromInitial.hash})
+                 |Store:   $fromStore (hash=${fromStore.hash})""".stripMargin
             }
             .toLeft(())
         )
       } yield {
         logger.info(
-          s"Successfully validated and imported ${finalSnapshot.result.size} topology transactions into the topology store ${store.storeId}."
+          s"Successfully validated and imported topology transactions into the topology store ${store.storeId}."
         )
       }
     }
@@ -187,7 +301,7 @@ class InitialTopologySnapshotValidator(
     case StoredTopologyTransaction(
           b.sequenced,
           b.validFrom,
-          b.validUntil,
+          _ignoreValidUntil,
           SignedTopologyTransaction(
             b.transaction.transaction,
             _ignoreSignatures,
@@ -201,113 +315,21 @@ class InitialTopologySnapshotValidator(
     case _ => false
   }
 
-  /** Fix the initial snapshot from mainnet
-    *
-    * In the older times, we had to deduplicate and merge transactions here as they were merged in
-    * the state processor. This is no longer the case. We just process and store the transactions as
-    * we receive them. However, the topology state on mainnet as of 3.3 became dirty due to a bug
-    * which threw away the signatures added after the transaction became active. The state was
-    * correct, but just the signatures were dropped.
-    * https://github.com/DACH-NY/canton-network-internal/issues/2116
-    *
-    * These transactions are fixed here now by just aggregating all signatures for the same
-    * transaction hash for the non-proposals.
-    */
-  private def preprocessInitialSnapshot(
-      initialSnapshot: GenericStoredTopologyTransactions
-  )(implicit traceContext: TraceContext): GenericStoredTopologyTransactions = {
-    val cleaned = mutable.ArrayBuffer.newBuilder[MergeTx]
-    val previous = mutable.Map.empty[TxHash, MergeTx]
-    initialSnapshot.result.zipWithIndex
-      .filter { case (tx, idx) =>
-        if (tx.transaction.isProposal && tx.validUntil.nonEmpty) {
-          logger.info(s"Dropping completed proposal at idx=$idx $tx")
-          false
-        } else true
-      }
-      .foreach { case (stored, idx) =>
-        // do not modify rejected transactions or proposals
-        if (stored.rejectionReason.nonEmpty || stored.transaction.isProposal) {
-          if (stored.transaction.isProposal) {
-            require(
-              !previous.contains(stored.hash),
-              s"At $idx, found proposal after another transaction with the same hash: " + stored + s" vs pending=${previous
-                  .get(stored.hash)}",
-            )
-          }
-          cleaned.addOne(MergeTx(idx, stored))
-        } else {
-          // merge signatures from previous occurrences of the same transaction
-          previous.get(stored.hash) match {
-            case Some(existing) if existing.tx != stored =>
-              require(
-                existing.newValidUntil.get().contains(stored.validFrom),
-                s"At $idx, replace tx does not overlap: $existing vs $stored",
-              )
-              val txWithMergedSignatures = stored.copy(transaction =
-                stored.transaction.addSignatures(existing.tx.transaction.signatures)
-              )
-              if (
-                txWithMergedSignatures.transaction.signatures != existing.tx.transaction.signatures
-              ) {
-                logger.debug(
-                  s"At $idx, merging at ${stored.validFrom} from ${existing.tx.validFrom}(idx=${existing.idx}) existing signatures by ${(existing.tx.transaction.signatures -- stored.transaction.signatures)
-                      .map(_.authorizingLongTermKey)} into\n  $txWithMergedSignatures"
-                )
-                val mergeTxWithNewSignatures = MergeTx(idx, txWithMergedSignatures)
-                previous.put(txWithMergedSignatures.hash, mergeTxWithNewSignatures).discard
-                cleaned.addOne(mergeTxWithNewSignatures)
-              } else {
-                logger.debug(
-                  s"At $idx, no new signatures to merge at ${stored.validFrom} from ${existing.tx.validFrom}, therefore dropping new and overriding valid until of existing: $stored"
-                )
-                existing.newValidUntil.set(stored.validUntil).discard
-              }
-            case Some(duplicate) =>
-              logger.info(s"At $idx, ignoring observed duplicate transaction: $duplicate")
-            case None =>
-              val mergeTx = MergeTx(idx, stored)
-              previous.put(stored.hash, mergeTx).discard
-              cleaned.addOne(mergeTx)
-          }
-        }
-      }
-    StoredTopologyTransactions(cleaned.result().map(_.adjusted).toSeq)
-
-  }
-
   private def processTransactionsAtSequencedTime(
       sequenced: SequencedTime,
       effectiveTime: EffectiveTime,
       storedTxs: Seq[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]],
-      storeIsEmpty: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
-    EitherT
-      .right(
-        stateProcessor
-          .validateAndApplyAuthorization(
-            sequenced,
-            effectiveTime,
-            storedTxs.map(_.transaction),
-            expectFullAuthorization = false,
-            // when validating the initial snapshot, missing signing key signatures are only
-            // acceptable, if the transaction was part of the genesis topology snapshot
-            relaxChecksForBackwardsCompatibility =
-              sequenced.value == SignedTopologyTransaction.InitialTopologySequencingTime,
-            storeIsEmpty = storeIsEmpty,
-          )
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    stateProcessor
+      .validateAndApplyAuthorization(
+        sequenced,
+        effectiveTime,
+        storedTxs.map(_.transaction),
+        expectFullAuthorization = false,
+        // when validating the initial snapshot, missing signing key signatures are only
+        // acceptable, if the transaction was part of the genesis topology snapshot
+        relaxChecksForBackwardsCompatibility =
+          sequenced.value == SignedTopologyTransaction.InitialTopologySequencingTime,
       )
       .map(_ => ())
-
-}
-
-object InitialTopologySnapshotValidator {
-  private final case class MergeTx(idx: Int, tx: GenericStoredTopologyTransaction) {
-    val newValidUntil: AtomicReference[Option[EffectiveTime]] = new AtomicReference(tx.validUntil)
-    def adjusted: GenericStoredTopologyTransaction = if (tx.validUntil == newValidUntil.get()) tx
-    else
-      tx.copy(
-        validUntil = newValidUntil.get()
-      )
-  }
 }

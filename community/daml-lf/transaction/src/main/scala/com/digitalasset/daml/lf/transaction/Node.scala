@@ -9,6 +9,8 @@ import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.value.*
 import com.digitalasset.daml.lf.value.Value.ContractId
 
+import scala.Ordering.Implicits.*
+
 /** Result of an external call made during contract execution.
   *
   * External calls are deterministic function calls to extension services that are recorded in the
@@ -173,6 +175,43 @@ object Node {
 
     override def informeesOfNode: Set[Party] = signatories | actingParties
     override def requiredAuthorizers: Set[Party] = actingParties
+
+    def isUnpack: Boolean =
+      actingParties.isEmpty && signatories.isEmpty && stakeholders.isEmpty && version >= SerializationVersion.VDev
+  }
+
+  object Unpack {
+
+    def apply(
+        coid: ContractId,
+        packageName: PackageName,
+        templateId: TypeConId,
+        interfaceId: Option[TypeConId],
+        version: SerializationVersion,
+    ): Fetch = {
+      require(version >= SerializationVersion.VDev)
+      Fetch(
+        coid = coid,
+        packageName = packageName,
+        templateId = templateId,
+        actingParties = Set.empty,
+        signatories = Set.empty,
+        stakeholders = Set.empty,
+        keyOpt = None,
+        byKey = false,
+        interfaceId = interfaceId,
+        version = version,
+      )
+    }
+
+    def unapply(
+        node: Node
+    ): Option[(ContractId, PackageName, TypeConId, Option[TypeConId], SerializationVersion)] =
+      node match {
+        case node: Fetch if node.isUnpack =>
+          Some((node.coid, node.packageName, node.templateId, node.interfaceId, node.version))
+        case _ => None
+      }
   }
 
   /** Denotes a transaction node for an exercise. We remember the `children` of this `NodeExercises`

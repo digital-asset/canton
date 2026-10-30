@@ -41,6 +41,7 @@ import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordO
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.{
+  AcsCommitmentLimits,
   LocalRejectError,
   RequestAndRootHashMessage,
   RequestId,
@@ -432,16 +433,27 @@ trait MessageDispatcherTest {
     val legacyCommitment =
       SignedProtocolMessage.from(legacyRawCommitment, dummySignature)
 
-    val rawCommitment = AcsCommitment.create(
-      psid,
-      DefaultTestIdentities.participant4.toLf,
-      DefaultTestIdentities.participant1.toLf,
-      CommitmentPeriod
-        .tryCreate(CantonTimestamp.ofEpochSecond(5), CantonTimestamp.ofEpochSecond(15)),
-      Digest.hashDigest(ByteString.empty).getCryptographicEvidence,
-      testedProtocolVersion,
-    )
-    val commitment = AcsCommitmentProtocolMessage(rawCommitment, dummySignature)
+    // AcsCommitment is a PV36+ feature (PV35 uses LegacyAcsCommitment).
+    // Hardcoding v36 instead of testedProtocolVersion prevents AcsCommitmentProtocolMessage.create from
+    // attempting to serialize AcsCommitment under PV35, which throws an UnsupportedOperationException.
+    val rawCommitment = AcsCommitment
+      .create(
+        psid,
+        DefaultTestIdentities.participant4.toLf,
+        DefaultTestIdentities.participant1.toLf,
+        CommitmentPeriod
+          .tryCreate(CantonTimestamp.ofEpochSecond(5), CantonTimestamp.ofEpochSecond(15)),
+        Digest.hashDigest(ByteString.empty).getCryptographicEvidence,
+        ProtocolVersion.v36,
+      )
+      .value
+    val commitment = AcsCommitmentProtocolMessage
+      .create(
+        rawCommitment,
+        dummySignature,
+        AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+      )
+      .value
 
     def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
       MediatorReject.tryCreate(

@@ -58,7 +58,7 @@ object SequencingSubmissionCost
   override def name: String = "SequencingSubmissionCost"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.SequencingSubmissionCost)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(v30.SequencingSubmissionCost)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )

@@ -90,6 +90,7 @@ trait LedgerApiParticipantPruningTest
     ),
     includeReassignments = None,
     includeTopologyEvents = None,
+    includeTransactionsAndReassignments = None,
   )
 
   // single participant environment to focus on ledger api server pruning rather than acs canton commitments

@@ -19,9 +19,10 @@ on:
         required: true
       GCLOUD_SERVICE_KEY:
         required: true
-      AWS_ACCESS_KEY_ID:
+      AWS_RELEASE_ACCESS_KEY_ID:
         required: true
-      AWS_SECRET_ACCESS_KEY:
+        description: AWS key allowed to write to s3://canton-public-releases, separate from the KMS testing key
+      AWS_RELEASE_SECRET_ACCESS_KEY:
         required: true
       AWS_SESSION_TOKEN:
         required: false
@@ -64,8 +65,8 @@ jobs:
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_RELEASE_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_RELEASE_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
@@ -143,6 +144,15 @@ jobs:
         if: steps.guards.outputs.result != 'true'
         shell: bash
         run: mkdir -p /tmp/canton/data-continuity-dumps
+
+      - name: Allow automatic protocol version selection
+        if: steps.guards.outputs.result != 'true'
+        env:
+          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
+        run: |
+          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+          echo "Canton will select the protocol version automatically"
+        shell: bash
 
       - name: Run data continuity dump tests
         if: steps.guards.outputs.result != 'true'

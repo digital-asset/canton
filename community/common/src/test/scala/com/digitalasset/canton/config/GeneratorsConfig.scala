@@ -29,6 +29,14 @@ object GeneratorsConfig {
     Gen.choose(1, Long.MaxValue).map(PositiveLong.tryCreate)
   )
 
+  // Refined Double
+  implicit val nonNegativeDoubleArb: Arbitrary[NonNegativeDouble] = Arbitrary(
+    Gen.choose(0.0, Double.MaxValue).map(NonNegativeDouble.tryCreate)
+  )
+  implicit val positiveDoubleArb: Arbitrary[PositiveDouble] = Arbitrary(
+    Gen.choose(Double.MinPositiveValue, Double.MaxValue).map(PositiveDouble.tryCreate)
+  )
+
   implicit val string68Arb: Arbitrary[String68] = Arbitrary(
     Generators.lengthLimitedStringGen(String68)
   )

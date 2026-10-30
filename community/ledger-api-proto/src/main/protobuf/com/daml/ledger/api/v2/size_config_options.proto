@@ -1,0 +1,21 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.daml.ledger.api.v2;
+
+import "google/protobuf/descriptor.proto";
+
+option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+option java_outer_classname = "SizeConfigOptionsOuterClass";
+option java_package = "com.daml.ledger.api.v2";
+
+// Custom options used by the size-config code generator (community/size-config-gen).
+extend google.protobuf.FieldOptions {
+  // Requests a size-limit configuration parameter for a field that is not repeated, map or bytes
+  // (e.g. a string or a message field). Repeated, map and bytes fields always get one.
+  //
+  // Optional
+  optional bool size_limit = 51000;
+}

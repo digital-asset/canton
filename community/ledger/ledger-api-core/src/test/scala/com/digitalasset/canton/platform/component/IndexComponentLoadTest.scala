@@ -5,6 +5,9 @@ package com.digitalasset.canton.platform.component
 
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.testing.InMemoryMetricsFactory.InMemoryTimer
+import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -31,6 +34,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   Update,
 }
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
@@ -59,6 +63,14 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   */
 @Ignore
 class IndexComponentLoadTest extends IndexComponentLoadTestBase {
+
+  override val ledgerApiServerMetrics: LedgerApiServerMetrics =
+    new LedgerApiServerMetrics(
+      new LedgerApiServerHistograms(prefix = MetricName("IndexComponentTest"))(
+        new HistogramInventory
+      ),
+      InMemoryMetricsFactory,
+    )
 
   it should "Index assign/unassign updates" in {
     val nextRecordTime = nextRecordTimeFactory()
@@ -203,6 +215,11 @@ class IndexComponentLoadTest extends IndexComponentLoadTestBase {
       ),
     )
   }
+
+  it should "Measure the ingestion utilization with various update sizes" ignore {
+    weightedBatchingFixture()
+    printIngestionMetrics()
+  }
 }
 
 trait IndexComponentLoadTestBase
@@ -304,6 +321,7 @@ trait IndexComponentLoadTestBase
         activeAt = ledgerEndOffset,
         rangeInfo = AcsRangeInfo.empty,
         configOverrides = None,
+        includeIncompleteReassignments = true,
       )
       .zipWithIndex
       .runWith(Sink.last)
@@ -339,6 +357,7 @@ trait IndexComponentLoadTestBase
           Some(pageSize.toLong),
         ),
         configOverrides = None,
+        includeIncompleteReassignments = true,
       )
       .runWith(Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]])
       .flatMap { page =>
@@ -467,6 +486,58 @@ trait IndexComponentLoadTestBase
       ingestionIteration()
       logger.warn(s"ingestion iteration: $i finished")
     }
+  }
+
+  protected def weightedBatchingFixture(
+      passes: Int = 1,
+      txsCreatedThenArchived: Int = 2023,
+      txsCreatedNotArchived: Int = 23,
+      txsNoDbDto: Int = 800,
+      txSizeMean: Int = 400,
+      actionName: String = "ingesting",
+  ): Unit = {
+    val nextRecordTime: () => CantonTimestamp = nextRecordTimeFactory()
+    val createPayloadLengthFromTo = (13, 58)
+    val archiveArgumentPayloadLengthFromTo = (13, 38)
+    val archiveResultPayloadLengthFromTo = (13, 58)
+    logger.warn(s"start preparing updates...")
+    val allUpdates = (1 to passes).toVector
+      .flatMap(_ =>
+        createsArchivesAndNoDbDtoUpdates(
+          nextRecordTime = nextRecordTime,
+          txsCreatedThenArchived = txsCreatedThenArchived,
+          txsCreatedNotArchived = txsCreatedNotArchived,
+          txsNoDbDto = txsNoDbDto,
+          txSizeMean = txSizeMean,
+          createPayloadLengthFromTo = createPayloadLengthFromTo,
+          archiveArgumentPayloadLengthFromTo = archiveArgumentPayloadLengthFromTo,
+          archiveResultPayloadLengthFromTo = archiveResultPayloadLengthFromTo,
+        )
+      )
+    logger.warn(s"prepared ${allUpdates.size} updates")
+    indexUpdates(allUpdates, actionName = actionName)
+    logger.warn(s"ingestion finished")
+  }
+
+  protected def printIngestionMetrics(): Unit = {
+    val values = ledgerApiServerMetrics.indexer.ingestion.executionTimer
+      .asInstanceOf[InMemoryTimer]
+      .data
+      .recordedValues
+    val executionTimeSamples = values.values.flatten
+    val min = executionTimeSamples.min
+    val max = executionTimeSamples.max
+    val avg = executionTimeSamples.sum / executionTimeSamples.size
+    val cnt = executionTimeSamples.size
+    val stddev = math
+      .sqrt(
+        executionTimeSamples.map(t => (t - avg) * (t - avg)).sum.toDouble
+          / executionTimeSamples.size
+      )
+      .toLong
+    logger.warn(s"Ingestion execution time samples (seconds): min = ${seconds(
+        min
+      )}, max = ${seconds(max)}, avg = ${seconds(avg)}, stddev = ${seconds(stddev)}, count = $cnt")
   }
 
   protected def withReporter[UpdateT, ResultT, Out](

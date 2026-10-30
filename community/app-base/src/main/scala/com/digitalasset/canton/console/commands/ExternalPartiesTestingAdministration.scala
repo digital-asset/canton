@@ -293,6 +293,9 @@ private[canton] class ExternalPartiesTestingAdministration(
     * @param namespaceThreshold
     *   Threshold of the decentralized namespace. Only used when decentralizedNamespaceOwners is non
     *   empty.
+    * @param protocolVersion
+    *   The protocol version to create the topology transactions for, if not the synchronizer's.
+    *   Only for a party with a single key and no decentralized namespace.
     */
   @VisibleForTesting // Ensures external parties are created only in tests
   private[canton] def onboarding_transactions(
@@ -306,6 +309,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       decentralizedNamespaceOwners: Set[Namespace] = Set.empty,
       namespaceThreshold: PositiveInt = PositiveInt.one,
       preferredHashingSchemeVersion: HashingSchemeVersion = HashingSchemeVersion.V2,
+      protocolVersion: Option[ProtocolVersion] = None,
   ): EitherT[FutureUnlessShutdown, String, (OnboardingTransactions, ExternalParty)] = {
     // In the simple case of a non-decentralized party with a single key we can use the generate endpoint
     if (decentralizedNamespaceOwners.isEmpty && keysCount == PositiveInt.one) {
@@ -328,6 +332,7 @@ private[canton] class ExternalPartiesTestingAdministration(
           otherConfirmingParticipantIds = additionalConfirming,
           confirmationThreshold = confirmationThreshold.toNonNegative,
           observingParticipantIds = observing,
+          protocolVersion = protocolVersion,
         )
         centralizedPTP <- EitherT.fromOption[FutureUnlessShutdown](
           onboardingTransactions.topologyTransactions.flatMap {
@@ -354,6 +359,11 @@ private[canton] class ExternalPartiesTestingAdministration(
       )
     } else {
       for {
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          protocolVersion.isEmpty,
+          (),
+          "A protocol version can only be requested for a party with a single key and namespace",
+        )
         synchronizerId <- EitherT
           .fromEither[FutureUnlessShutdown](
             lookupOrDetectActivePsid(synchronizer)

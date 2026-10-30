@@ -52,9 +52,53 @@ final class GeneratorsProtocol(
       topologyChangeDelay <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
       enableTransparencyChecks <- Arbitrary.arbitrary[Boolean]
       serial <- Arbitrary.arbitrary[NonNegativeInt]
-      synchronizerLimits <- GeneratorsVersion.defaultValueGen(
+
+      allLimits <- GeneratorsVersion.defaultValueGen(
         protocolVersion,
         StaticSynchronizerParameters.defaultSynchronizerLimitsUntil,
+      )
+      maxSignaturesPerEnvelope =
+        StaticSynchronizerParameters.defaultMaxSignaturesPerEnvelopeLimitUntil
+          .orValue(allLimits.transactionProtocolLimits.maxSignaturesPerEnvelope, protocolVersion)
+      maxQuorumSize =
+        StaticSynchronizerParameters.defaultMaxQuorumSizeUntil
+          .orValue(allLimits.transactionProtocolLimits.maxQuorumSize, protocolVersion)
+      transactionProtocolLimits = allLimits.transactionProtocolLimits.copy(
+        maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
+        maxQuorumSize = maxQuorumSize,
+      )
+      topologyLimitsV32 = StaticSynchronizerParameters.defaultTopologyLimitsUntil
+        .orValue(allLimits.topologyLimits, protocolVersion)
+      topologyLimits = topologyLimitsV32.copy(
+        maxVettedPackagesPerParticipant =
+          StaticSynchronizerParameters.defaultMaxVettedPackagesPerParticipantUntil
+            .orValue(topologyLimitsV32.maxVettedPackagesPerParticipant, protocolVersion),
+        maxSequencersPerSynchronizer =
+          StaticSynchronizerParameters.defaultMaxSequencersPerSynchronizerUntil
+            .orValue(topologyLimitsV32.maxSequencersPerSynchronizer, protocolVersion),
+        maxMediatorsPerGroup = StaticSynchronizerParameters.defaultMaxMediatorsPerGroupUntil
+          .orValue(topologyLimitsV32.maxMediatorsPerGroup, protocolVersion),
+        maxSignaturesPerTransaction =
+          StaticSynchronizerParameters.defaultMaxSignaturesPerTransactionUntil
+            .orValue(topologyLimitsV32.maxSignaturesPerTransaction, protocolVersion),
+        maxTransactionHashesPerMultiSignature =
+          StaticSynchronizerParameters.defaultMaxTransactionHashesPerMultiSignatureUntil
+            .orValue(topologyLimitsV32.maxTransactionHashesPerMultiSignature, protocolVersion),
+        maxTransactionsPerBroadcast =
+          StaticSynchronizerParameters.defaultMaxTransactionsPerBroadcastUntil
+            .orValue(topologyLimitsV32.maxTransactionsPerBroadcast, protocolVersion),
+        maxEndpointsPerSequencerConnection =
+          StaticSynchronizerParameters.defaultMaxEndpointsPerSequencerConnectionUntil
+            .orValue(topologyLimitsV32.maxEndpointsPerSequencerConnection, protocolVersion),
+      )
+
+      acsCommitmentLimits = StaticSynchronizerParameters.defaultAcsCommitmentLimitsUntil
+        .orValue(allLimits.acsCommitmentLimits, protocolVersion)
+
+      synchronizerLimits = allLimits.copy(
+        transactionProtocolLimits = transactionProtocolLimits,
+        topologyLimits = topologyLimits,
+        acsCommitmentLimits = acsCommitmentLimits,
       )
       parameters = StaticSynchronizerParameters
         .create(

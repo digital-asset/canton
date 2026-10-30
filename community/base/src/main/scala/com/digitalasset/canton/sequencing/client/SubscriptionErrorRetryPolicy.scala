@@ -14,7 +14,7 @@ import scala.reflect.ClassTag
   * their own policy which can consider error types they have defined.
   */
 trait SubscriptionErrorRetryPolicy {
-  def retryOnError(subscriptionError: SubscriptionError, receivedItems: Boolean)(implicit
+  def retryOnError(subscriptionError: SubscriptionError)(implicit
       traceContext: TraceContext
   ): Boolean
 
@@ -30,15 +30,15 @@ trait SubscriptionErrorRetryPolicy {
 abstract class CheckedSubscriptionErrorRetryPolicy[SE <: SubscriptionError](implicit
     classTag: ClassTag[SE]
 ) extends SubscriptionErrorRetryPolicy {
-  override def retryOnError(error: SubscriptionError, receivedItems: Boolean)(implicit
+  override def retryOnError(error: SubscriptionError)(implicit
       traceContext: TraceContext
   ): Boolean =
     error match {
-      case expectedError: SE => retryInternal(expectedError, receivedItems)
+      case expectedError: SE => retryInternal(expectedError)
       case unexpectedType => sys.error(s"Unexpected error type: $unexpectedType")
     }
 
-  protected def retryInternal(error: SE, receivedItems: Boolean)(implicit
+  protected def retryInternal(error: SE)(implicit
       traceContext: TraceContext
   ): Boolean
 }
@@ -47,7 +47,7 @@ object SubscriptionErrorRetryPolicy {
 
   /** Never retry on any error */
   def never: SubscriptionErrorRetryPolicy = new SubscriptionErrorRetryPolicy {
-    override def retryOnError(subscriptionError: SubscriptionError, receivedItems: Boolean)(implicit
+    override def retryOnError(subscriptionError: SubscriptionError)(implicit
         traceContext: TraceContext
     ): Boolean = false
   }

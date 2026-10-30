@@ -131,9 +131,8 @@ final class DbStorageSingle private (
       }
     )
 
-  override def runJdbcWrite[T](
-      traceContext: TraceContext,
-      body: Connection => T,
+  override def runJdbcWrite[T](body: Connection => T)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[T] =
     run("pure-jdbc-writing", "", 0)(
       FutureUnlessShutdown.outcomeF(

@@ -60,7 +60,9 @@ object TimeProof extends PrettyPrintingCompanion[TimeProof] {
   )
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def fromEvent(event: OrdinarySequencedEvent[Batch[Envelope[?]]]): Either[String, TimeProof] =
+  private def fromEvent(
+      event: OrdinarySequencedEvent[Batch[Envelope[?]]]
+  ): Either[String, TimeProof] =
     for {
       deliver <- PartialFunction
         .condOpt(event.signedEvent.content) { case deliver: Deliver[Batch[Envelope[?]]] =>
@@ -112,6 +114,9 @@ object TimeProof extends PrettyPrintingCompanion[TimeProof] {
       // we intentionally ask for an empty event to be sequenced to observe the time.
       // this means we can safely share this event without mentioning other recipients.
       batch = Batch.empty(client.protocolVersion),
+      // the inner message is empty so we don't need to provide a snapshot approximation and
+      // can let the sequencer client retrieve the latest snapshot itself.
+      currentSnapshotApproximation = None,
       timestamps = SendRequestTimestamps(
         approximateTimestampForSigning = client.clock.now,
         maxSequencingTime = client.clock.now.plus(timeProofRequestExpiry.unwrap),

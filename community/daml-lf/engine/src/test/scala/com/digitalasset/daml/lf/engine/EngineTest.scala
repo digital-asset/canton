@@ -19,7 +19,12 @@ import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Error.{Interpretation as IErr, Validation as VErr}
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.Error.Dev.Limit
-import com.digitalasset.daml.lf.interpretation.{ExecutionMode, InterpretationConfig, Limits}
+import com.digitalasset.daml.lf.interpretation.{
+  ExecutionMode,
+  InterpretationConfig,
+  LimitConfig,
+  Limits,
+}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
@@ -118,7 +123,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         prefetchKeys = Seq.empty,
       )
       .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -134,7 +139,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       val Right((rtx, newMeta)) =
         reinterpret(
           engine = suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           submitters = Set(party),
           nodes = stx.roots,
           tx = stx,
@@ -160,7 +165,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           meta.preparationTime,
           submissionSeed,
           contractIdVersion,
-          InterpretationConfig.Default,
+          InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
       validated match {
@@ -224,7 +229,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -244,7 +249,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
         val Right((rtx, _)) =
           reinterpret(
             suffixStrictEngine,
-            interpretationConfig = InterpretationConfig.Default,
+            interpretationConfig = InterpretationConfig.DefaultForTesting,
             signatories.map(_._2),
             stx.roots,
             stx,
@@ -269,7 +274,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
             meta.preparationTime,
             submissionSeed,
             contractIdVersion,
-            InterpretationConfig.Default,
+            InterpretationConfig.DefaultForTesting,
           )
           .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         validated match {
@@ -293,7 +298,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
             participantId = participant,
             preparationTime = let,
             contractIdVersion = contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default,
+            interpretationConfig = InterpretationConfig.DefaultForTesting,
             submissionSeed = submissionSeed,
           )
           .consume(lookupHandler())
@@ -314,7 +319,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           preparationTime = let,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           submissionSeed = submissionSeed,
         )
 
@@ -355,7 +360,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         }
@@ -370,7 +375,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -383,7 +388,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           Set(party),
           stx.roots,
           stx,
@@ -406,7 +411,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
       validated match {
@@ -437,7 +442,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
                 preparationTime = let,
                 seeding = seeding,
                 contractIdVersion = contractIdVersion,
-                interpretationConfig = InterpretationConfig.Default,
+                interpretationConfig = InterpretationConfig.DefaultForTesting,
                 metricPlugins = newMetricPlugins(),
               )
               .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -455,7 +460,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
                 preparationTime = let,
                 seeding = seeding,
                 contractIdVersion = contractIdVersion,
-                interpretationConfig = InterpretationConfig.Default,
+                interpretationConfig = InterpretationConfig.DefaultForTesting,
                 metricPlugins = newMetricPlugins(),
               )
               .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -471,7 +476,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           metricPlugins = newMetricPlugins(),
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -484,7 +489,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           metricPlugins = newMetricPlugins(),
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -535,7 +540,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               preparationTime = let,
               seeding = InitialSeeding.TransactionSeed(txSeed),
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         }
@@ -557,7 +562,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           Set(party),
           stx.roots,
           stx,
@@ -580,7 +585,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
       validated match {
@@ -807,7 +812,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         prefetchKeys = Seq.empty,
       )
       .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -828,7 +833,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
         preparationTime = preparationTime,
         seeding = InitialSeeding.TransactionSeed(txSeed),
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
       )
       .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
 
@@ -844,7 +849,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           Set(bob),
           stx.transaction.roots,
           stx,
@@ -1006,7 +1011,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         }
@@ -1078,7 +1083,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               txMeta.preparationTime,
               let,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         isReplayedBy(fetchTx, reinterpreted) shouldBe Right(())
@@ -1141,7 +1146,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
             let,
             let,
             contractIdVersion,
-            interpretationConfig = InterpretationConfig.Default,
+            interpretationConfig = InterpretationConfig.DefaultForTesting,
           )
           .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
 
@@ -1169,7 +1174,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -1236,7 +1241,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(contracts, lookupPackage, lookupKey))
@@ -1292,7 +1297,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, PartialFunction.empty))
@@ -1319,7 +1324,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               metaData.preparationTime,
               submissionSeed,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(PartialFunction.empty, lookupPackage, PartialFunction.empty))
             .left
@@ -1343,7 +1348,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
 
       reinterpret(
         suffixStrictEngine,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
         Set(party),
         nids,
         stx,
@@ -1449,7 +1454,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = hash("wrongly-typed contract"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(contracts, lookupPackage, lookupKey))
@@ -1570,7 +1575,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = hash("ill-formed contract"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(contracts, lookupPackage, lookupKey))
@@ -1694,7 +1699,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = hash("contract with trailing nones"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(
@@ -1850,7 +1855,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
           participantId = participant,
           submissionSeed = hash("contract auth"),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(
@@ -1945,8 +1950,8 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
       .preprocessApiCommands(Map.empty, ImmArray(command))
       .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
     res shouldBe a[Right[?, ?]]
-    val limits = Limits.Lenient.copy(choiceAuthorizers = 1)
-    val engineWithLimits = newEngine(executionMode, limits = limits)
+    val limitConfig = LimitConfig(Limits.Lenient.copy(choiceAuthorizers = 1), None)
+    val engineWithLimits = newEngine(executionMode, limitConfig = limitConfig)
     val contractInst =
       TransactionBuilder.fatContractInstanceWithDummyDefaults(
         version = defaultSerializationVersion,
@@ -1975,7 +1980,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
                   preparationTime = let,
                   seeding = seeding,
                   contractIdVersion = contractIdVersion,
-                  interpretationConfig = InterpretationConfig.Default,
+                  interpretationConfig = InterpretationConfig.DefaultForTesting,
                 )
                 .consume(lookupHandler(lookUpContractInst, lookupPackage, lookupKey))
             }
@@ -1988,7 +1993,7 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
               choiceName,
               choiceArg,
               submitters,
-              limits.choiceAuthorizers,
+              limitConfig.limits.choiceAuthorizers,
             )
           )
         }
@@ -2046,7 +2051,7 @@ abstract class EngineTestKey(
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -2099,7 +2104,7 @@ abstract class EngineTestKey(
               preparationTime = let,
               seeding = seeding,
               contractIdVersion = contractIdVersion,
-              interpretationConfig = InterpretationConfig.Default,
+              interpretationConfig = InterpretationConfig.DefaultForTesting,
             )
             .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
         }
@@ -2113,7 +2118,7 @@ abstract class EngineTestKey(
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -2127,7 +2132,7 @@ abstract class EngineTestKey(
       val Right((rtx, _)) =
         reinterpret(
           suffixStrictEngine,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           Set(alice),
           stx.roots,
           stx,
@@ -2152,7 +2157,7 @@ abstract class EngineTestKey(
           let,
           submissionSeed,
           contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
       validated match {
@@ -2200,7 +2205,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, lookupKey))
 
@@ -2240,7 +2245,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
 
@@ -2382,7 +2387,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, lookupKey))
 
@@ -2411,7 +2416,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, lookupKey))
 
@@ -2460,7 +2465,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, lookupKey))
 
@@ -2523,7 +2528,7 @@ abstract class EngineTestKey(
           participantId = participant,
           submissionSeed = seed,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
           prefetchKeys = Seq.empty,
         )
         .consume(lookupHandler(lookupContract, lookupPackage, lookupKey))
@@ -2555,7 +2560,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(PartialFunction.empty, lookupPackage, lookupKey))
 
@@ -2624,7 +2629,7 @@ abstract class EngineTestKey(
           preparationTime = let,
           seeding = seeding,
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(
           lookupHandler(
@@ -2689,7 +2694,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContractMap, lookupPackage, lookupKey))
 
@@ -2755,7 +2760,7 @@ abstract class EngineTestKey(
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
-          interpretationConfig = InterpretationConfig.Default,
+          interpretationConfig = InterpretationConfig.DefaultForTesting,
         )
         .consume(lookupHandler(lookupContractMap, lookupPackage, lookupKey))
 
@@ -2874,7 +2879,7 @@ class EngineTestExceptions(
         preparationTime = let,
         seeding = seeding,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = InterpretationConfig.DefaultForTesting,
       )
       .consume(lookupHandler(contracts, allExceptionsPkgs, lookupKey))
   }
@@ -3170,13 +3175,13 @@ class EngineTestHelpers(
   def newEngine(
       executionMode: ExecutionMode,
       requireCidSuffixes: Boolean = false,
-      limits: interpretation.Limits = interpretation.Limits.Lenient,
+      limitConfig: interpretation.LimitConfig = interpretation.LimitConfig.Off,
   ) =
     new Engine(
       EngineConfig(
         allowedLanguageVersions = language.LanguageVersion.allLfVersions,
         forbidLocalContractIds = requireCidSuffixes,
-        transactionLimits = limits,
+        transactionLimits = limitConfig,
         executionMode = executionMode,
       ),
       loggerFactory,

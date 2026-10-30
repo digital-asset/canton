@@ -7,6 +7,7 @@ import cats.implicits.toBifunctorOps
 import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfTimestamp
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator.{
   AnnotationsSizeExceededError,
@@ -17,6 +18,7 @@ import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.api.{SubmissionId, WorkflowId}
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.{
   ParticipantId,
   PhysicalSynchronizerId,
@@ -24,6 +26,10 @@ import com.digitalasset.canton.topology.{
   PartyId as TopologyPartyId,
 }
 import com.digitalasset.canton.user.IdentityProviderId
+import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.validation.ProtoValidation.{validateLength, validateSeqLength}
+import com.digitalasset.canton.validation.ValidationParam
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Party, TypeConRef}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -53,6 +59,23 @@ object FieldValidator {
   ): Either[StatusRuntimeException, Ref.Party] =
     if (s.isEmpty) Left(missingField(fieldName))
     else Ref.Party.fromString(s).left.map(invalidField(fieldName, _))
+
+  def requireAccountId(
+      s: String,
+      fieldName: String,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, AccountId] =
+    if (s.isEmpty) Left(missingField(fieldName))
+    else AccountId.create(s).left.map(invalidField(fieldName, _))
+
+  def optionalAccountId(
+      s: String,
+      fieldName: String,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Option[AccountId]] =
+    validateOptional(OptionUtil.emptyStringAsNone(s))(requireAccountId(_, fieldName))
 
   def requirePartyField(s: String, fieldName: String)(implicit
       errorLoggingContext: ErrorLoggingContext
@@ -110,6 +133,45 @@ object FieldValidator {
           party <- requireParty(partyTxt)
         } yield parties + party
     }
+
+  def validateCardinality(
+      values: Seq[Any],
+      fieldName: String,
+      limit: PositiveInt,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Unit] =
+    validateSeqLength(
+      seq = values,
+      field = fieldName,
+      pvv = ProtocolVersionValidation.AlwaysValidation,
+      maxLength = ValidationParam(ProtocolVersion.minimum -> limit),
+    )
+      .bimap(
+        protoDeserializationError =>
+          cardinalityLimitExceeded(
+            protoDeserializationError.message
+          ),
+        _ => (),
+      )
+
+  def validateByteSizeLimit(
+      bytes: ByteString,
+      fieldName: String,
+      limit: PositiveInt,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Unit] =
+    validateLength(
+      bytes = bytes,
+      field = fieldName,
+      pvv = ProtocolVersionValidation.AlwaysValidation,
+      maxLength = ValidationParam(ProtocolVersion.minimum -> limit),
+    )
+      .bimap(
+        protoDeserializationError => sizeLimitExceeded(protoDeserializationError.message),
+        _ => (),
+      )
 
   def requireUserId(
       s: String,
@@ -249,6 +311,17 @@ object FieldValidator {
   ): Either[StatusRuntimeException, ContractId] =
     if (s.isEmpty) Left(missingField(fieldName))
     else ContractId.fromString(s).left.map(invalidField(fieldName, _))
+
+  def optionalPackageId(
+      s: Option[String],
+      fieldName: String,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Option[Ref.PackageId]] =
+    s match {
+      case None => Right(None)
+      case Some(value) => requirePackageId(value, fieldName).map(Some(_))
+    }
 
   def requireNonEmpty[M[_] <: Iterable[?], T](
       s: M[T],

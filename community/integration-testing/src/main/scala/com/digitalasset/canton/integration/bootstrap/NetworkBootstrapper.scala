@@ -166,6 +166,10 @@ object NetworkTopologyDescription {
       identityTransactions: Option[
         Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
       ] = None,
+      mediatorThreshold: PositiveInt = PositiveInt.one,
+      overrideMediatorToSequencers: Option[
+        Map[MediatorReference, MediatorSequencersConfiguration]
+      ] = None,
   ): NetworkTopologyDescription =
     NetworkTopologyDescription(
       synchronizerName = synchronizerAlias.unwrap,
@@ -175,8 +179,8 @@ object NetworkTopologyDescription {
       mediators,
       staticSynchronizerParameters,
       SubmissionRequestAmplification.NoAmplification,
-      None,
-      PositiveInt.one,
+      overrideMediatorToSequencers,
+      mediatorThreshold,
       identityTransactions,
     )
 

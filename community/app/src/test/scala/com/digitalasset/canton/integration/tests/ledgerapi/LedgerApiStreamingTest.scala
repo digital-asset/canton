@@ -66,6 +66,7 @@ class LedgerApiStreamingTest extends CommunityIntegrationTest with SharedEnviron
     ),
     None,
     None,
+    includeTransactionsAndReassignments = None,
   )
 
   registerPlugin(new UseH2(loggerFactory))
@@ -293,6 +294,7 @@ class LedgerApiStreamingTest extends CommunityIntegrationTest with SharedEnviron
                         ),
                         includeReassignments = None,
                         includeTopologyEvents = None,
+                        includeTransactionsAndReassignments = None,
                       )
                     ),
                     descendingOrder = false,

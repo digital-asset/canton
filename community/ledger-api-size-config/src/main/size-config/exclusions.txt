@@ -1,0 +1,53 @@
+# Messages of the Ledger API protos for which no size-limit config class is generated.
+# One fully-qualified proto message name per line; everything after '#' is a comment.
+# Only messages in com.daml.ledger.api.v2, .v2.admin and .v2.interactive
+# are generated at all.
+
+# com.daml.ledger.api.v2
+com.daml.ledger.api.v2.ArchivedEvent
+com.daml.ledger.api.v2.Completion
+com.daml.ledger.api.v2.CreatedEvent
+com.daml.ledger.api.v2.ExercisedEvent
+com.daml.ledger.api.v2.GetActiveContractsPageResponse
+com.daml.ledger.api.v2.GetActiveContractsResponse
+com.daml.ledger.api.v2.GetCompletionByHashResponse
+com.daml.ledger.api.v2.GetConnectedSynchronizersResponse
+com.daml.ledger.api.v2.GetJwksResponse
+com.daml.ledger.api.v2.GetLedgerEndResponse
+com.daml.ledger.api.v2.GetPackageResponse
+com.daml.ledger.api.v2.GetUpdatesPageResponse
+com.daml.ledger.api.v2.ListPackagesResponse
+com.daml.ledger.api.v2.ListVettedPackagesResponse
+com.daml.ledger.api.v2.OffsetCheckpoint
+com.daml.ledger.api.v2.Reassignment
+com.daml.ledger.api.v2.TopologyTransaction
+com.daml.ledger.api.v2.Transaction
+com.daml.ledger.api.v2.UnassignedEvent
+com.daml.ledger.api.v2.VettedPackages
+
+# com.daml.ledger.api.v2.admin
+com.daml.ledger.api.v2.admin.CommandStatus
+com.daml.ledger.api.v2.admin.CommandUpdates
+com.daml.ledger.api.v2.admin.GenerateExternalPartyTopologyResponse
+com.daml.ledger.api.v2.admin.GeneratePartyTopologyUpdateResponse
+com.daml.ledger.api.v2.admin.GetCommandStatusResponse
+com.daml.ledger.api.v2.admin.GetPartiesResponse
+com.daml.ledger.api.v2.admin.GrantUserRightsResponse
+com.daml.ledger.api.v2.admin.ListIdentityProviderConfigsResponse
+com.daml.ledger.api.v2.admin.ListKnownPackagesResponse
+com.daml.ledger.api.v2.admin.ListKnownPartiesResponse
+com.daml.ledger.api.v2.admin.ListUserRightsResponse
+com.daml.ledger.api.v2.admin.ListUsersResponse
+com.daml.ledger.api.v2.admin.RevokeUserRightsResponse
+
+# com.daml.ledger.api.v2.interactive
+com.daml.ledger.api.v2.interactive.CostEstimation
+com.daml.ledger.api.v2.interactive.GetPreferredPackagesResponse
+com.daml.ledger.api.v2.interactive.PrepareSubmissionResponse
+com.daml.ledger.api.v2.interactive.ReassignmentCost
+com.daml.ledger.api.v2.interactive.DamlTransaction
+com.daml.ledger.api.v2.interactive.DamlTransaction.NodeSeed
+com.daml.ledger.api.v2.interactive.GlobalKeyWithMaintainers
+com.daml.ledger.api.v2.interactive.Metadata.InputContract
+com.daml.ledger.api.v2.interactive.Metadata.GlobalKeyMappingEntry
+com.daml.ledger.api.v2.interactive.GlobalKey

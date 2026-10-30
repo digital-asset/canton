@@ -9,8 +9,11 @@ import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator
 import com.digitalasset.canton.ledger.api.validation.CompletionServiceRequestValidator.GetCompletionsStreamRequest
+import com.digitalasset.canton.ledger.api.validation.{
+  CompletionServiceRequestValidator,
+  LedgerApiSizeLimitsConfig,
+}
 import com.digitalasset.canton.ledger.participant.state.index.IndexCompletionsService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
@@ -43,6 +46,7 @@ final class ApiCommandCompletionService(
     esf: ExecutionSequencerFactory,
     mat: Materializer,
     executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends StreamingServiceLifecycleManagement
     with NamedLogging {
 

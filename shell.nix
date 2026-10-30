@@ -41,7 +41,7 @@ pkgs.mkShell {
     oras
     pigz
     postgresql_18
-    (python3.withPackages (pkgs: [ pkgs.datadog pkgs.sphinx pkgs.sphinx-rtd-theme pkgs.sphinx-togglebutton pkgs.sphinx-copybutton pkgs.sphinx-tabs pkgs.sphinxcontrib-mermaid pkgs.pip pkgs.setuptools pkgs.cryptography pkgs.grpcio-tools pkgs.protobuf pkgs.pandas pkgs.dash pkgs.plotly pkgs.roman pkgs.pyyaml pkgs.pytest ]))
+    (python3.withPackages (pkgs: [ pkgs.datadog pkgs.sphinx pkgs.sphinx-rtd-theme pkgs.sphinx-togglebutton pkgs.sphinx-copybutton pkgs.sphinx-tabs pkgs.sphinxcontrib-mermaid pkgs.pip pkgs.setuptools pkgs.cryptography pkgs.grpcio-tools pkgs.protobuf pkgs.roman pkgs.pyyaml pkgs.pytest pkgs.pandas ]))
     ripgrep
     ruff
     openssh

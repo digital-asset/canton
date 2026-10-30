@@ -85,6 +85,7 @@ class JsonRequestTimeoutTest
             ),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,

@@ -9,12 +9,18 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeDouble,
+  NonNegativeInt,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.health.HealthQuasiComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.sequencing.SequencerConnectionPenaltyConfig
 import com.digitalasset.canton.sequencing.client.pool.Connection.ConnectionConfig
 import com.digitalasset.canton.sequencing.client.pool.SequencerConnectionPool.{
   SequencerConnectionPoolConfig,
@@ -27,6 +33,7 @@ import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.nonempty.NonEmpty
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContextExecutor
 
@@ -115,9 +122,13 @@ class DirectSequencerConnectionPool(
     ) -> directConnection.attributes.sequencerId
   )
 
+  @VisibleForTesting
   override val contents: Map[SequencerId, Set[SequencerConnection]] = Map(
     sequencerId -> Set(directConnection)
   )
+
+  @VisibleForTesting
+  override def connectionPenalties: Map[SequencerId, NonNegativeDouble] = Map.empty
 
   override def isThresholdStillReachable(
       threshold: PositiveInt,
@@ -146,5 +157,6 @@ object DirectSequencerConnectionPool {
     minRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
     maxRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
     warnConnectionValidationDelay = NonNegativeFiniteDuration.Zero,
+    sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
   )
 }

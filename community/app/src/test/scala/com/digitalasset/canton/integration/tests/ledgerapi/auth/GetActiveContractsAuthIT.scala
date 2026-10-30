@@ -31,6 +31,7 @@ final class GetActiveContractsAuthIT extends SuperReaderServiceCallAuthTests {
             activeAtOffset = 0,
             eventFormat = context.eventFormat.orElse(Some(eventFormat(getMainActorId))),
             streamContinuationToken = None,
+            includeIncompleteReassignments = false,
           ),
           _,
         )

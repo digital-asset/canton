@@ -41,7 +41,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.sync.SyncServiceError
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceBecamePassive
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.PassiveReplica
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
@@ -170,8 +169,6 @@ trait ReplicatedParticipantTestSetup extends ReplicatedNodeHelper {
       if (afterFailure)
         List(
           "Closing resilient sequencer subscription because instance became passive",
-          SyncServiceBecamePassive.id,
-          "disconnected because participant became passive",
           "Now retrying operation", // The failover may trigger retries. The retries may drag on when the participant is already passive.
           "DbStorage instance is not active: Connection pool is not active",
           "Locked connection was lost, trying to rebuild",
@@ -403,9 +400,9 @@ trait ReplicatedParticipantTest
       // former active replica should now be passive and reject write requests
       failPassivePing(activeParticipantReplica, participant3)
 
-      // Fail over again
+      // Fail over again, back to the replica that was active before, keeping the traffic accounting
       passiveParticipantReplica.replication.set_passive()
-      activePing(activeParticipantReplica, participant3)
+      pingAndCheckTraffic(activeParticipantReplica, participant3)
       failPassivePing(passiveParticipantReplica, participant3)
     }
 

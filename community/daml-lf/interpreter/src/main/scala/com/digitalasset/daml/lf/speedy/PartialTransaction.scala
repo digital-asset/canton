@@ -400,6 +400,21 @@ private[speedy] case class PartialTransaction(
     }
   }
 
+  def insertUnpack(
+      coid: Value.ContractId,
+      contract: ContractInfo,
+      optLocation: Option[Location],
+  ): PartialTransaction = {
+    val node = Node.Unpack(
+      coid = coid,
+      packageName = contract.packageName,
+      templateId = contract.templateId,
+      version = SerializationVersion.VDev,
+      interfaceId = None,
+    )
+    insertLeafNode(node, SerializationVersion.VDev, optLocation, csmJournal)
+  }
+
   def insertFetch(
       coid: Value.ContractId,
       contract: ContractInfo,

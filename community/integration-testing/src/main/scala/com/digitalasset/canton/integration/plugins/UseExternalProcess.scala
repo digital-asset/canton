@@ -93,6 +93,7 @@ class UseExternalProcess(
       config: NodeConfig,
       releasePathO: Option[ReleasePath] = None,
       failOnUnknownConfigKeys: Boolean = true,
+      configOverrides: Map[String, String] = Map.empty,
   ): Seq[String] = {
     val command = releasePathO match {
       case Some(ReleasePath(binaryPath)) =>
@@ -113,10 +114,14 @@ class UseExternalProcess(
         )
       else Nil
 
+    val configOverrideFlags = configOverrides.toSeq.flatMap { case (key, value) =>
+      Seq("-C", s"$key=$value")
+    }
+
     command ++ cantonInvocationArgs(
       logFile(name, config).toString,
       configFile(name, config).toString,
-    ) ++ additionalConfigFlags
+    ) ++ additionalConfigFlags ++ configOverrideFlags
   }
 
   def configureAndStore(
@@ -315,6 +320,54 @@ class UseExternalProcess(
       instanceName: String,
       releasePath: ReleasePath,
       failOnUnknownConfigKeys: Boolean,
+  ): Unit =
+    start(instanceName, releasePath, failOnUnknownConfigKeys, configOverrides = Map.empty)
+
+  /** Start a specific Canton version
+    * @param instanceName
+    *   Name of the instance.
+    * @param releasePath
+    *   Path to the binary.
+    * @param failOnUnknownConfigKeys
+    *   If true, fail if the config contains unknown keys.
+    * @param configOverrides
+    *   Config values passed on the command line, on top of the config file of the instance.
+    */
+  def start(
+      instanceName: String,
+      releasePath: ReleasePath,
+      failOnUnknownConfigKeys: Boolean,
+      configOverrides: Map[String, String],
+  ): Unit =
+    replaceAndStart(
+      instanceName,
+      Some(releasePath),
+      failOnUnknownConfigKeys = failOnUnknownConfigKeys,
+      configOverrides = configOverrides,
+    )
+
+  /** Start the Canton version of the classpath
+    * @param instanceName
+    *   Name of the instance.
+    * @param configOverrides
+    *   Config values passed on the command line, on top of the config file of the instance.
+    */
+  def startCurrentVersion(
+      instanceName: String,
+      configOverrides: Map[String, String] = Map.empty,
+  ): Unit =
+    replaceAndStart(
+      instanceName,
+      releasePathO = None,
+      failOnUnknownConfigKeys = true,
+      configOverrides = configOverrides,
+    )
+
+  private def replaceAndStart(
+      instanceName: String,
+      releasePathO: Option[ReleasePath],
+      failOnUnknownConfigKeys: Boolean,
+      configOverrides: Map[String, String],
   ): Unit = {
     val nodeConfig = config(instanceName)
     val nameInConfig = instanceNameInConfig(instanceName)
@@ -325,8 +378,9 @@ class UseExternalProcess(
       makeCommand(
         nameInConfig,
         nodeConfig,
-        Some(releasePath),
+        releasePathO,
         failOnUnknownConfigKeys = failOnUnknownConfigKeys,
+        configOverrides = configOverrides,
       ),
       addEnvironment,
       nodeConfig,

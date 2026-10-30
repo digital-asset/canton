@@ -37,4 +37,6 @@ export SYNCHRONIZER_HA=false
 export BATCH_SIZE=10
 test-full-system.sh
 
+export KNOWN_MISSING_SEQUENCER_BLOCK_METRICS="true"
+
 compute-and-publish-metrics.sh 30 90

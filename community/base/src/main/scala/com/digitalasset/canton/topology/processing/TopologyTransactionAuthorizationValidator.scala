@@ -128,7 +128,7 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
     *     caches for NSD, IDD, and DND
     *   - if this validation is run to determine a final verdict, as is the case for processing
     *     topology transactions coming from the synchronizer, automatically clear the proposal flag
-    *     for transactions with sufficent authorizing signatures.
+    *     for transactions with sufficient authorizing signatures.
     */
   private def processTransaction(
       toValidate: GenericSignedTopologyTransaction,

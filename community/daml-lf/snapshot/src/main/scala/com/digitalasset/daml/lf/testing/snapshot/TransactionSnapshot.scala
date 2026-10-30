@@ -22,7 +22,6 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   Node,
   SubmittedTransaction as SubmittedTx,
-  TransactionOuterClass as TxOuterClass,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -64,6 +63,9 @@ final case class TransactionSnapshot(
       new TxNodeCount,
     )
 
+  // TODO(36899) Replay with the recorded interpretation config. Until then, use the dev config.
+  private[this] val interpretationConfig = InterpretationConfig.Dev
+
   def replay(): Either[Error, Speedy.Metrics] =
     engine
       .replayAndCollectMetrics(
@@ -74,7 +76,7 @@ final case class TransactionSnapshot(
         preparationTime = preparationTime,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = interpretationConfig,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))
@@ -90,7 +92,7 @@ final case class TransactionSnapshot(
         preparationTime = preparationTime,
         submissionSeed = submissionSeed,
         contractIdVersion = contractIdVersion,
-        interpretationConfig = InterpretationConfig.Default,
+        interpretationConfig = interpretationConfig,
         metricPlugins = metricPlugins,
       )
       .consume(lookupHandler(contracts, pkgs, contractKeys))
@@ -152,7 +154,7 @@ private[snapshot] object TransactionSnapshot {
     var result = Set.empty[String]
 
     def decodeTx(txEntry: Snapshot.TransactionEntry): SubmittedTx = {
-      val protoTx = TxOuterClass.Transaction.parseFrom(txEntry.getRawTransaction)
+      val protoTx = Snapshot.Transaction.parseFrom(txEntry.getRawTransaction)
       TxCoder
         .decodeTransaction(protoTx)
         .fold(
@@ -282,7 +284,7 @@ private[snapshot] object TransactionSnapshot {
     }
 
     def decodeTx(txEntry: Snapshot.TransactionEntry): SubmittedTx = {
-      val protoTx = TxOuterClass.Transaction.parseFrom(txEntry.getRawTransaction)
+      val protoTx = Snapshot.Transaction.parseFrom(txEntry.getRawTransaction)
       TxCoder
         .decodeTransaction(protoTx)
         .fold(

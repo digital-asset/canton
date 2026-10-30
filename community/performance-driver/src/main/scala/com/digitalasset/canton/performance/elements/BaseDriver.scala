@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event.Event.Event.{Archived, Created, Exercised}
 import com.daml.ledger.api.v2.reassignment.{Reassignment, ReassignmentEvent}
 import com.daml.ledger.api.v2.transaction.Transaction
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.{Contract, ContractId}
@@ -219,7 +220,12 @@ abstract class BaseDriver(
         logger.debug("Starting fetching of active contracts")
         ledgerClient.stateService.getLedgerEndOffset().flatMap { offset =>
           ledgerClient.stateService
-            .getActiveContracts(eventFormat = format, validAtOffset = offset, token = None)
+            .getActiveContracts(
+              eventFormat = format,
+              validAtOffset = offset,
+              token = None,
+              includeIncompleteReassignments = false,
+            )
             .map { acs =>
               logger.debug(s"Fetching of active contracts took ${LoggerUtil
                   .roundDurationForHumans(Duration.fromNanos(System.nanoTime() - started))}")
@@ -246,7 +252,11 @@ abstract class BaseDriver(
           new ResilientLedgerSubscription(
             makeSource = subscribeOffset =>
               ledgerClient.updateService
-                .getUpdatesSource(subscribeOffset, format),
+                .getUpdatesSource(
+                  begin = subscribeOffset,
+                  eventFormat = format,
+                  transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+                ),
             consumingFlow = BaseDriver.buildGraph(myDriver),
             subscriptionName = "PerformanceRunner",
             startOffset = offset,
@@ -465,8 +475,12 @@ abstract class BaseDriver(
           }
         case Right(status) =>
           DecodedCantonError.fromGrpcStatus(status) match {
-            case Right(err) =>
+            case Right(err) if err.isRetryable =>
               logger.info(s"Failed to submit $reference with commandId=$commandId due to $err")
+            case Right(err) =>
+              logger.info(
+                s"Failed to submit $reference with commandId=$commandId due to non-retryable $err"
+              )
             case Left(_) =>
               logger.error(
                 s"Failed to submit $reference with commandId=$commandId due to $status"
@@ -513,6 +527,7 @@ abstract class BaseDriver(
             packageIdSelectionPreference = Nil,
             prefetchContractKeys = Nil,
             tapsMaxPasses = None,
+            accountId = "",
           )
         )
 

@@ -169,6 +169,7 @@ final case class JsPrepareSubmissionRequest(
     tapsMaxPasses: Option[Int] = None,
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion =
       interactive_submission_service.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
+    accountId: Option[String] = None,
 )
 
 final case class JsPrepareSubmissionResponse(
@@ -187,6 +188,7 @@ final case class JsExecuteSubmissionRequest(
     userId: String = "",
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion,
     minLedgerTime: Option[MinLedgerTime] = None,
+    accountId: Option[String] = None,
 )
 
 final case class JsExecuteSubmissionAndWaitRequest(
@@ -197,6 +199,7 @@ final case class JsExecuteSubmissionAndWaitRequest(
     userId: String = "",
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion,
     minLedgerTime: Option[MinLedgerTime] = None,
+    accountId: Option[String] = None,
 )
 
 final case class JsExecuteSubmissionAndWaitForTransactionRequest(
@@ -208,6 +211,7 @@ final case class JsExecuteSubmissionAndWaitForTransactionRequest(
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion,
     minLedgerTime: Option[MinLedgerTime] = None,
     transactionFormat: Option[TransactionFormat] = None,
+    accountId: Option[String] = None,
 )
 
 final case class JsExecuteSubmissionAndWaitForTransactionResponse(

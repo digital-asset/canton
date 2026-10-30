@@ -129,6 +129,17 @@ public final class User {
           // since this is a singleton so far we simply ignore the actual object
           right = CanExecuteAsAnyParty.INSTANCE;
           break;
+        case CAN_ACT_AS_ANY_PARTY:
+          // since this is a singleton so far we simply ignore the actual object
+          right = CanActAsAnyParty.INSTANCE;
+          break;
+        case CAN_DEBIT_TRAFFIC_FROM:
+          right = new CanDebitTrafficFrom(proto.getCanDebitTrafficFrom().getAccountId());
+          break;
+        case CAN_DEBIT_TRAFFIC_FROM_ANY_ACCOUNT:
+          // since this is a singleton so far we simply ignore the actual object
+          right = CanDebitTrafficFromAnyAccount.INSTANCE;
+          break;
         default:
           throw new IllegalArgumentException("Unrecognized user right case: " + kindCase.name());
       }
@@ -243,6 +254,57 @@ public final class User {
         return UserManagementServiceOuterClass.Right.newBuilder()
             .setCanExecuteAsAnyParty(
                 UserManagementServiceOuterClass.Right.CanExecuteAsAnyParty.getDefaultInstance())
+            .build();
+      }
+    }
+
+    public static final class CanActAsAnyParty extends Right {
+      // empty private constructor, singleton object
+      private CanActAsAnyParty() {}
+
+      // not built lazily on purpose, close to no overhead here
+      public static final CanActAsAnyParty INSTANCE = new CanActAsAnyParty();
+
+      @Override
+      UserManagementServiceOuterClass.Right toProto() {
+        return UserManagementServiceOuterClass.Right.newBuilder()
+            .setCanActAsAnyParty(
+                UserManagementServiceOuterClass.Right.CanActAsAnyParty.getDefaultInstance())
+            .build();
+      }
+    }
+
+    public static final class CanDebitTrafficFrom extends Right {
+      public final String accountId;
+
+      public CanDebitTrafficFrom(String accountId) {
+        this.accountId = accountId;
+      }
+
+      @Override
+      UserManagementServiceOuterClass.Right toProto() {
+        return UserManagementServiceOuterClass.Right.newBuilder()
+            .setCanDebitTrafficFrom(
+                UserManagementServiceOuterClass.Right.CanDebitTrafficFrom.newBuilder()
+                    .setAccountId(this.accountId))
+            .build();
+      }
+    }
+
+    public static final class CanDebitTrafficFromAnyAccount extends Right {
+      // empty private constructor, singleton object
+      private CanDebitTrafficFromAnyAccount() {}
+
+      // not built lazily on purpose, close to no overhead here
+      public static final CanDebitTrafficFromAnyAccount INSTANCE =
+          new CanDebitTrafficFromAnyAccount();
+
+      @Override
+      UserManagementServiceOuterClass.Right toProto() {
+        return UserManagementServiceOuterClass.Right.newBuilder()
+            .setCanDebitTrafficFromAnyAccount(
+                UserManagementServiceOuterClass.Right.CanDebitTrafficFromAnyAccount
+                    .getDefaultInstance())
             .build();
       }
     }

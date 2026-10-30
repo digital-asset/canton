@@ -14,7 +14,7 @@ import com.daml.ledger.api.v2.value.Value.Sum.Party
 import com.daml.ledger.api.v2.value.{RecordField, Value}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
   CommandFailure,
@@ -52,15 +52,17 @@ import org.slf4j.event.Level
 
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
+import scala.util.Try
 
 /** Objective: Test the negotiation of party replication via the AcsReplication.daml workflow.
   *
   * Setup:
-  *   - 3 participants: the first two host the party to replicate and the third one doesn't for
-  *     negative testing
-  *   - 4 sequencers: sequencer2 and sequencer3 are connected to both participants 1 and 2 (see
-  *     connectivityMap), and only sequencer1, sequencer2, and sequencer4 support channels (see
-  *     selectivelyEnablePartyReplicationOnSequencers).
+  *   - 4 participants: the first two host the party to replicate and the third one doesn't for
+  *     negative testing. The fourth participant hosts the party but shares no channel-capable
+  *     sequencer with the other participants.
+  *   - 6 sequencers: sequencer2 and sequencer3 are connected to both participants 1 and 2 (see
+  *     connectivityMap), and only sequencer1, sequencer2, sequencer4, sequencer5 and sequencer 6
+  *     support channels (see selectivelyEnableSequencerChannels).
   */
 sealed trait OnlinePartyReplicationNegotiationTest
     extends CommunityIntegrationTest
@@ -74,6 +76,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
       participant1 -> Seq(sequencer1, sequencer2, sequencer3),
       participant2 -> Seq(sequencer2, sequencer3, sequencer4),
       participant3 -> Seq(sequencer1, sequencer2, sequencer3),
+      participant4 -> Seq(sequencer3, sequencer5, sequencer6),
     )
   }
 
@@ -110,8 +113,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
   private val channelServiceNotImplementedWarning =
     "GrpcServiceUnavailable: UNIMPLEMENTED/Method not found: .*SequencerChannelService/Ping"
 
-  private val validOnPRIdS = Hash
+  // Generate a unique replication request ID to prevent collisions and rejections across happy-path tests.
+  private def validOnPRId(salt: String): String = Hash
     .build(HashPurpose.OnlinePartyReplicationId, HashAlgorithm.Sha256)
+    .addString(salt)
     .finish()
     .toHexString
 
@@ -120,8 +125,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(
-        numParticipants = 3,
-        numSequencers = 4,
+        numParticipants = 4,
+        numSequencers = 6,
         numMediators = 1,
       )
       .addConfigTransforms(
@@ -139,7 +144,8 @@ sealed trait OnlinePartyReplicationNegotiationTest
           NetworkTopologyDescription(
             daName,
             synchronizerOwners = Seq[InstanceReference](mediator1),
-            sequencers = Seq(sequencer1, sequencer2, sequencer3, sequencer4),
+            sequencers =
+              Seq(sequencer1, sequencer2, sequencer3, sequencer4, sequencer5, sequencer6),
             mediators = Seq(mediator1),
             synchronizerThreshold = PositiveInt.one,
           )
@@ -183,7 +189,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
         alice = participant1.parties.enable(
           aliceName,
-          synchronizeParticipants = Seq(participant2),
+          synchronizeParticipants = Seq(participant2, participant4),
         )
       }
 
@@ -216,7 +222,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
         )
       }
 
-      // to be used later to query topology events for verification
+      // to be used later to query ledger transactions for verification
       val replicationStartTpOffset = targetParticipant.ledger_api.state.end()
       val replicationStartSpOffset = sourceParticipant.ledger_api.state.end()
 
@@ -279,7 +285,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
               }
               .flatten
               .loneElement
-            accept.choice shouldBe "Accept"
+            accept.choice shouldBe M.acsreplication.AcsReplicationProposal.CHOICE_Accept.name
             accept.consuming shouldBe true
             accept.contractId shouldBe createProposal.contractId
             accept.actingParties shouldBe Seq(
@@ -314,6 +320,23 @@ sealed trait OnlinePartyReplicationNegotiationTest
         logger.info(s"SP status: $spStatus")
         assert(tpStatus.hasCompleted, "Target participant must complete")
         assert(spStatus.hasCompleted, "Source participant must complete")
+
+        val acsReplicationTpStatus =
+          targetParticipant.parties.get_acs_replication_status(addPartyRequestId)
+        val acsReplicationSpStatus =
+          sourceParticipant.parties.get_acs_replication_status(addPartyRequestId)
+        assert(
+          acsReplicationTpStatus.hasCompleted,
+          "Target participant must complete ACS replication",
+        )
+        assert(
+          acsReplicationSpStatus.hasCompleted,
+          "Source participant must complete ACS replication",
+        )
+        acsReplicationSpStatus.ptpTopologyTransaction.value shouldEqual
+          acsReplicationTpStatus.ptpTopologyTransaction.value
+        acsReplicationTpStatus.replicationProgress.value.fullyProcessedAcs shouldBe true
+        acsReplicationTpStatus.replicationProgress.value.processedContractCount shouldBe NonNegativeLong.zero
 
         val tpLapiStatus = targetParticipant.ledger_api.parties.get_add_party_status(
           alice,
@@ -445,6 +468,77 @@ sealed trait OnlinePartyReplicationNegotiationTest
       val synchronizerId = participantWithParty.synchronizers.list_connected().head.synchronizerId
 
       import scala.concurrent.duration.*
+
+      def enableFreshParty(label: String): PartyId =
+        participant1.parties.enable(
+          s"party-$label",
+          synchronizeParticipants = Seq(participant2, participant4),
+        )
+
+      /** Creates an ACS replication proposal contract directly via the Ledger API of the target
+        * participant, bypassing the Daml admin workflow, so that malformed proposals reach the
+        * participants' proposal validation instead of being rejected upon `add_party_async`.
+        */
+      def createProposalDirectly(
+          requestId: String,
+          partyId: String,
+          sourceParticipant: LocalParticipantReference,
+          targetParticipant: LocalParticipantReference,
+          sequencerUids: Seq[String],
+          timestamp: CantonTimestamp,
+      ): Unit = {
+        val proposal = new M.acsreplication.AcsReplicationProposal(
+          requestId,
+          partyId,
+          sourceParticipant.adminParty.toProtoPrimitive,
+          targetParticipant.adminParty.toProtoPrimitive,
+          sequencerUids.asJava,
+          timestamp.toInstant,
+          M.acsreplication.ParticipantPermission.CONFIRMATION,
+          "online-party-replication",
+        )
+        targetParticipant.ledger_api.commands
+          .submit(
+            actAs = Seq(targetParticipant.adminParty),
+            commands = proposal.create.commands.asScala.toSeq
+              .map(LedgerClientUtils.javaCodegenToScalaProto),
+            synchronizerId = Some(daId),
+          )
+          .discard
+      }
+
+      // Test the party replication proposal parser by directly creating malformed contracts
+      // rather than the daml workflow so that the errors are not already caught upon proposal
+      // submission.
+      def testParsingError(
+          log: String,
+          warningRegex: String,
+          sourceParticipant: LocalParticipantReference = participantWithParty,
+          targetParticipant: LocalParticipantReference = participantWithoutParty,
+          sequencerStringUids: Seq[String] = Seq(sequencer2.id.uid.toProtoPrimitive),
+          partyIdString: Option[String] = None,
+          timestamp: CantonTimestamp = dummyTimestamp,
+          partyReplicationIdS: Option[String] = None,
+      ): Unit =
+        clue(log) {
+          val requestId = partyReplicationIdS.getOrElse(validOnPRId(log))
+          val partyId = partyIdString.getOrElse(enableFreshParty(log).toProtoPrimitive)
+          loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+            createProposalDirectly(
+              requestId,
+              partyId,
+              sourceParticipant,
+              targetParticipant,
+              sequencerStringUids,
+              timestamp,
+            ),
+            // Both participants should log warnings for parsing errors.
+            forExactly(2, _)(_.warningMessage should include regex warningRegex),
+            timeUntilSuccess = 2.seconds,
+          )
+          assertNoActiveContracts()
+        }
+
       // Test the party replication agreement response by directly creating malformed contracts
       // rather than the daml workflow so that the errors are not already caught upon proposal
       // submission.
@@ -454,60 +548,67 @@ sealed trait OnlinePartyReplicationNegotiationTest
           sourceParticipant: LocalParticipantReference = participantWithParty,
           targetParticipant: LocalParticipantReference = participantWithoutParty,
           sequencerStringUids: Seq[String] = Seq(sequencer2.id.uid.toProtoPrimitive),
-          partyIdString: String = alice.toProtoPrimitive,
           timestamp: CantonTimestamp = dummyTimestamp,
-          partyReplicationIdS: String = validOnPRIdS,
+          partyReplicationIdS: Option[String] = None,
       ): Unit =
-        clue(log)(
+        clue(log) {
+          val requestId = partyReplicationIdS.getOrElse(validOnPRId(log))
+          val partyId = enableFreshParty(log).toProtoPrimitive
           loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-            {
-              val proposal = new M.acsreplication.AcsReplicationProposal(
-                partyReplicationIdS,
-                partyIdString,
-                sourceParticipant.adminParty.toProtoPrimitive,
-                targetParticipant.adminParty.toProtoPrimitive,
-                sequencerStringUids.asJava,
-                timestamp.toInstant,
-                M.acsreplication.ParticipantPermission.CONFIRMATION,
-                "online-party-replication",
+            createProposalDirectly(
+              requestId,
+              partyId,
+              sourceParticipant,
+              targetParticipant,
+              sequencerStringUids,
+              timestamp,
+            ),
+            logEntries => {
+              // The proposal contract was created directly, bypassing the Daml workflow,
+              // so we expect the target participant to log a warning.
+              forExactly(1, logEntries)(
+                _.warningMessage should include regex "Received an ACS replication proposal created outside the target participant"
               )
-              targetParticipant.ledger_api.commands
-                .submit(
-                  actAs = Seq(targetParticipant.adminParty),
-                  commands = proposal.create.commands.asScala.toSeq
-                    .map(LedgerClientUtils.javaCodegenToScalaProto),
-                  synchronizerId = Some(daId),
-                )
-                .discard
+              forExactly(1, logEntries)(_.warningMessage should include regex warningRegex)
             },
-            forExactly(1, _)(_.warningMessage should include regex warningRegex),
             timeUntilSuccess = 2.seconds,
           )
-        )
+          assertNoActiveContracts()
+          eventually(10.seconds) {
+            val adminApiStatus = sourceParticipant.parties.get_add_party_status(requestId)
+            adminApiStatus.errorO
+              .getOrElse(
+                fail(
+                  s"Expected SP status to be failed (error must be present) (${sourceParticipant.toProtoPrimitive})"
+                )
+              )
+              .message should include regex warningRegex withClue s"errorO message must match the regex $warningRegex (${sourceParticipant.toProtoPrimitive})"
+            adminApiStatus.hasCompleted shouldBe true
+            // The contract was not created via the Daml workflow, so the target participant
+            // cannot track its state, and get_add_party_status always fails for an unknown requestId.
+            if (targetParticipant != sourceParticipant) {
+              loggerFactory.suppressErrors {
+                assert(
+                  Try(targetParticipant.parties.get_add_party_status(requestId)).isFailure,
+                  s"get_add_party_status(...) should fail on target participant",
+                )
+              }
+            }
+          }
+        }
 
       def testProposalExceptionOnEmptySequencerUids(log: String) =
-        clue(log)(
+        clue(log) {
+          val partyId = enableFreshParty(log).toProtoPrimitive
           loggerFactory.assertThrowsAndLogs[CommandFailure](
-            {
-              val proposal = new M.acsreplication.AcsReplicationProposal(
-                validOnPRIdS,
-                alice.toProtoPrimitive,
-                participantWithParty.adminParty.toProtoPrimitive,
-                participantWithParty2.adminParty.toProtoPrimitive,
-                Seq.empty.asJava,
-                dummyTimestamp.toInstant,
-                M.acsreplication.ParticipantPermission.CONFIRMATION,
-                "online-party-replication",
-              )
-              participantWithParty2.ledger_api.commands
-                .submit(
-                  actAs = Seq(participantWithParty2.adminParty),
-                  commands = proposal.create.commands.asScala.toSeq
-                    .map(LedgerClientUtils.javaCodegenToScalaProto),
-                  synchronizerId = Some(daId),
-                )
-                .discard
-            },
+            createProposalDirectly(
+              validOnPRId(log),
+              partyId,
+              participantWithParty,
+              participantWithParty2,
+              Seq.empty,
+              dummyTimestamp,
+            ),
             logEntry => {
               logEntry.errorMessage should (include(
                 "Interpretation error: Error: User failure:"
@@ -519,7 +620,30 @@ sealed trait OnlinePartyReplicationNegotiationTest
               )
             },
           )
-        )
+          assertNoActiveContracts()
+        }
+
+      def assertNoActiveContracts(): Unit =
+        // Check that all proposals were either archived (rejected) or never created.
+        Seq(participantWithParty, participantWithParty2, participantWithoutParty).foreach {
+          participant =>
+            clue(s"participant ${participant.name}: ") {
+              eventually() {
+                val proposals = participant.ledger_api.state.acs
+                  .of_all(filterTemplates =
+                    Seq(
+                      TemplateId.fromIdentifier(
+                        AcsReplicationAdminWorkflow.proposalTemplatePkgName
+                      ),
+                      TemplateId.fromIdentifier(
+                        AcsReplicationAdminWorkflow.agreementTemplatePkgName
+                      ),
+                    )
+                  )
+                proposals shouldBe Seq.empty
+              }
+            }
+        }
 
       def findLatestPtpTopologyTimestamp(participant: LocalParticipantReference): CantonTimestamp =
         CantonTimestamp
@@ -532,25 +656,25 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
           .value
 
-      testAgreementError(
+      testParsingError(
         "bad-party-id-format",
         "Invalid partyId .*Invalid unique identifier .* with missing namespace",
-        partyIdString = "bad-party-id",
+        partyIdString = Some("bad-party-id"),
       )
 
-      testAgreementError(
+      testParsingError(
         "bad-acs-replication-id",
         "Invalid ACS replication id: .*Failed to parse hex string: bad-party-replication-id",
-        partyReplicationIdS = "bad-party-replication-id",
+        partyReplicationIdS = Some("bad-party-replication-id"),
       )
 
-      testAgreementError(
+      testParsingError(
         "empty-acs-replication-id",
         "Empty ACS replication id",
-        partyReplicationIdS = "",
+        partyReplicationIdS = Some(""),
       )
 
-      testAgreementError(
+      testParsingError(
         "bad-sequencer-uid-format",
         "Invalid unique identifier .* with missing namespace",
         sequencerStringUids = Seq("bad-sequencer-uid"),
@@ -578,27 +702,158 @@ sealed trait OnlinePartyReplicationNegotiationTest
         sourceParticipant = participantWithParty,
         targetParticipant = participantWithParty,
       )
+  }
 
-      // Check that all proposals have been archived, i.e. rejected
-      Seq(participantWithParty, participantWithParty2, participantWithoutParty).foreach {
-        participant =>
-          clue(s"participant ${participant.name}: ") {
-            eventually() {
-              val proposals = participant.ledger_api.state.acs
-                .of_all(filterTemplates =
-                  Seq(
-                    TemplateId.fromIdentifier(
-                      AcsReplicationAdminWorkflow.proposalTemplatePkgName
-                    ),
-                    TemplateId.fromIdentifier(
-                      AcsReplicationAdminWorkflow.agreementTemplatePkgName
-                    ),
-                  )
-                )
-              proposals shouldBe Seq.empty
+  "Handle replication proposal rejections" onlyRunWith ProtocolVersion.dev in { implicit env =>
+    import env.*
+    // The only sequencer shared by both (sequencer3) does not support channels.
+    val (sourceParticipant, targetParticipant) = (participant1, participant4)
+
+    val serial = targetParticipant.topology.party_to_participant_mappings
+      .list(daId, filterParty = alice.filterString)
+      .head
+      .context
+      .serial
+      .tryAdd(1)
+
+    val partyOwners = Seq[LocalInstanceReference](sourceParticipant)
+    partyOwners.foreach(
+      _.topology.party_to_participant_mappings
+        .propose_delta(
+          party = alice,
+          adds = Seq((targetParticipant, ParticipantPermission.Confirmation)),
+          store = daId,
+          serial = Some(serial),
+          requiresPartyToBeOnboarded = true,
+        )
+    )
+    eventually() {
+      partyOwners.foreach(
+        _.topology.party_to_participant_mappings
+          .list(daId, filterParty = alice.filterString, proposals = true)
+          .flatMap(_.item.participants.map(_.participantId)) should contain allElementsOf Seq(
+          sourceParticipant.id,
+          targetParticipant.id,
+        )
+      )
+    }
+
+    // to be used later to query ledger transactions for verification
+    val replicationStartTpOffset = targetParticipant.ledger_api.state.end()
+    val replicationStartSpOffset = sourceParticipant.ledger_api.state.end()
+
+    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+      {
+        val addPartyRequestId =
+          clue("Initiate add party async")(
+            targetParticipant.parties.add_party_async(
+              party = alice,
+              synchronizerId = daId,
+              sourceParticipant = sourceParticipant,
+              serial = serial,
+              participantPermission = ParticipantPermission.Confirmation,
+            )
+          )
+
+        def partyToReplicate(create: CreatedEvent) = create.createArguments
+          .getOrElse(fail("missing arguments record"))
+          .fields
+          .collect { case RecordField("partyId", Some(Value(Party(partyId)))) =>
+            partyId
+          }
+          .loneElement
+
+        // Wait for rejection due to missing sequencer channel support.
+        Seq(
+          (sourceParticipant, replicationStartSpOffset),
+          (targetParticipant, replicationStartTpOffset),
+        ).foreach { case (participant, offset) =>
+          clue(s"Checking participant ${participant.name}: ") {
+            eventually(timeUntilSuccess = 1.minute) {
+              val txs = participant.ledger_api.updates.transactions(
+                Set(participant.adminParty),
+                completeAfter = 10,
+                timeout = config.NonNegativeDuration.ofSeconds(3),
+                transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+                beginOffsetExclusive = offset,
+              )
+
+              // The TP asks the SP to replicate Alice via proposal
+              val createProposal = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+                tx.events.collect {
+                  case Event(Created(event))
+                      if event.templateId.contains(
+                        AcsReplicationAdminWorkflow.proposalTemplate
+                      ) =>
+                    event
+                }
+              }.loneElement
+              val party = partyToReplicate(createProposal)
+              createProposal.signatories shouldBe Seq(
+                targetParticipant.adminParty.toProtoPrimitive
+              )
+              party shouldBe alice.toProtoPrimitive
+
+              // The SP rejects the party replication proposal
+              val reject = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+                tx.events.collect {
+                  case Event(Exercised(event))
+                      if event.templateId.contains(
+                        AcsReplicationAdminWorkflow.proposalTemplate
+                      ) =>
+                    event
+                }
+              }.loneElement
+              reject.choice shouldBe M.acsreplication.AcsReplicationProposal.CHOICE_Reject.name
+              reject.consuming shouldBe true
+              reject.contractId shouldBe createProposal.contractId
+              reject.actingParties shouldBe Seq(
+                sourceParticipant.adminParty.toProtoPrimitive
+              )
             }
           }
-      }
+        }
+
+        // Assert replication has failed
+        eventually(timeUntilSuccess = 30.seconds) {
+          val spStatus = sourceParticipant.parties.get_add_party_status(addPartyRequestId)
+          spStatus.errorO
+            .getOrElse(fail("Expected SP status to be failed (error must be present)"))
+            .message should include regex "No sequencers .* support channels"
+          spStatus.hasCompleted shouldBe true
+
+          val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+          tpStatus.errorO
+            .getOrElse(fail("Expected TP status to be failed (error must be present)"))
+            .message should include regex "No sequencers .* support channels"
+          tpStatus.hasCompleted shouldBe true
+
+          val spLapiStatus = sourceParticipant.ledger_api.parties.get_add_party_status(
+            alice,
+            daId,
+            targetParticipant.id,
+          )
+          assert(
+            spLapiStatus.current == LapiPartyReplicationStatus.State.STATE_FAILED,
+            "LAPI SP status must be failed",
+          )
+
+          val tpLapiStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+            alice,
+            daId,
+            targetParticipant.id,
+          )
+          assert(
+            tpLapiStatus.current == LapiPartyReplicationStatus.State.STATE_FAILED,
+            "LAPI TP status must be failed",
+          )
+        }
+      },
+      // At least one participant should log a warning about missing sequencer channel support.
+      forExactly(2, _)(
+        _.warningMessage should include regex "No sequencers .* support channels"
+      ),
+    )
   }
 }
 

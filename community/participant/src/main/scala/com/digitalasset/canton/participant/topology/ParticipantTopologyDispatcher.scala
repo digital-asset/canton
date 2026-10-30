@@ -198,7 +198,7 @@ class ParticipantTopologyDispatcher(
               SynchronizerTrustCertificate(
                 participantId,
                 logicalSynchronizerId,
-                requiredFeatureFlagsForPV.toSeq,
+                requiredFeatureFlagsForPV,
               ),
               serial = None,
               signingKeys = Seq.empty,
@@ -257,6 +257,7 @@ class ParticipantTopologyDispatcher(
       client: SynchronizerTopologyClientWithInit,
       sequencerClient: SequencerClient,
       timeTracker: SynchronizerTimeTracker,
+      disableAuthorizedStoreDispatching: Boolean,
   ): ParticipantTopologyDispatcherHandle = {
     val synchronizerLoggerFactory =
       loggerFactory.append("psid", sequencerClient.psid.toString)
@@ -299,25 +300,35 @@ class ParticipantTopologyDispatcher(
           // to the synchronizers map. The topology manager for the authorized store
           // dynamically looks up all registered store-based outboxes and notifies them of
           // new transactions.
-          storeBasedSynchronizerOutbox = new StoreBasedSynchronizerOutbox(
-            synchronizerAlias = synchronizerAlias,
-            memberId = participantId,
-            handle = handle,
-            targetClient = client,
-            authorizedStore = manager.store,
-            targetStore = state.topologyStore,
-            timeouts = timeouts,
-            loggerFactory = loggerFactory,
-            crypto = SynchronizerCrypto(crypto, state.staticSynchronizerParameters),
-            topologyConfig = topologyConfig,
-            futureSupervisor = futureSupervisor,
+          storeBasedSynchronizerOutboxO = Option.unless(disableAuthorizedStoreDispatching)(
+            new StoreBasedSynchronizerOutbox(
+              synchronizerAlias = synchronizerAlias,
+              memberId = participantId,
+              handle = handle,
+              targetClient = client,
+              authorizedStore = manager.store,
+              targetStore = state.topologyStore,
+              timeouts = timeouts,
+              loggerFactory = loggerFactory,
+              crypto = SynchronizerCrypto(crypto, state.staticSynchronizerParameters),
+              topologyConfig = topologyConfig,
+              futureSupervisor = futureSupervisor,
+            )
           )
           psid = client.psid
           _ = ErrorUtil.requireState(
             !synchronizers.contains(psid),
             s"topology pusher for $psid already exists",
           )
-          outboxes = NonEmpty(Seq, queueBasedSynchronizerOutbox, storeBasedSynchronizerOutbox)
+          _ = if (disableAuthorizedStoreDispatching)
+            logger.info(
+              s"Not pushing the authorized store to $synchronizerAlias, as the onboarding transactions were provided at registration"
+            )
+          outboxes = NonEmpty(
+            Seq,
+            queueBasedSynchronizerOutbox,
+            storeBasedSynchronizerOutboxO.toList*
+          )
           _ = synchronizers += psid -> outboxes
 
           // attach the queue-based outbox to the SynchronizerTopologyManager.
@@ -450,7 +461,7 @@ private class SynchronizerOnboardingOutbox(
           ): SynchronizerRegistryError,
         )
       )
-      wrongVersion = applicable.filterNot(_.transaction.isEquivalentTo(protocolVersion))
+      wrongVersion = applicable.filterNot(_.transaction.isAdmissibleFor(protocolVersion))
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         Either.cond(
           wrongVersion.isEmpty,

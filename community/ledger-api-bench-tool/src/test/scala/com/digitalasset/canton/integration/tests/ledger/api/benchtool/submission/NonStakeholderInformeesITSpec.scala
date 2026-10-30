@@ -54,7 +54,8 @@ class NonStakeholderInformeesITSpec
         userIds = List.empty,
       )
       val (apiServices, allocatedParties, fooSubmission) = benchtoolFooSubmissionFixture(
-        submissionConfig
+        submissionConfig,
+        maxInFlightCommands = 10,
       ).futureValue
       fooSubmission.performSubmission(submissionConfig = submissionConfig).futureValue
       val (ledgerEffectsResults_divulgee0, acsDeltaResults_divulgee0) = observeAllTemplatesForParty(
@@ -115,7 +116,7 @@ class NonStakeholderInformeesITSpec
             acsDeltaResults_divulgee0.numberOfConsumingExercisesPerTemplateName("Foo1")
           cp(
             discard(
-              ledgerEffectsFoo1 shouldBe 13 withClue "number of Foo1 consuming events visible to divulgee0 on ledger effects transactions stream"
+              ledgerEffectsFoo1 shouldBe 10 withClue "number of Foo1 consuming events visible to divulgee0 on ledger effects transactions stream"
             )
           )
           cp(
@@ -132,7 +133,7 @@ class NonStakeholderInformeesITSpec
         val acsDeltaFoo1 = acsDeltaResults_divulgee1.numberOfCreatesPerTemplateName("Foo1")
         // This assertion will fail once in ~37k test executions with number of observed items being 0
         // because for 100 instances and 10% chance of divulging to divulgee1, divulgee1 won't be disclosed any contracts once in 1/(0.9**100) ~= 37649
-        cp(discard(ledgerEffectsFoo1 shouldBe 9))
+        cp(discard(ledgerEffectsFoo1 shouldBe 8))
         cp(discard(acsDeltaFoo1 shouldBe 0))
         val divulger = ledgerEffectsResults_divulgee1.numberOfCreatesPerTemplateName("Divulger")
         cp(discard(divulger shouldBe 4))
@@ -144,7 +145,7 @@ class NonStakeholderInformeesITSpec
         val acsDeltaFoo1 = acsDeltaResults_observer0.numberOfCreatesPerTemplateName("Foo1")
         cp(discard(ledgerEffectsFoo1 shouldBe 100))
         // Approximately 10% of contracts is created and archived in the same transaction and thus omitted from the acs delta transactions stream
-        cp(discard(acsDeltaFoo1 shouldBe 87))
+        cp(discard(acsDeltaFoo1 shouldBe 90))
         val divulger = ledgerEffectsResults_observer0.numberOfCreatesPerTemplateName("Divulger")
         cp(discard(divulger shouldBe 0))
       }

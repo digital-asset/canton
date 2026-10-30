@@ -21,6 +21,7 @@ import com.digitalasset.canton.sequencing.client.TestSequencerSubscriptionFactor
   Failure,
 }
 import com.digitalasset.canton.sequencing.client.TestSubscriptionError.UnretryableError
+import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OrderedBucketMergeHub.{
@@ -69,6 +70,8 @@ class SequencerAggregatorPekkoTest
   private def mkAggregatorPekko(
       validator: SequencedEventValidator = SequencedEventValidator.noValidation(
         DefaultTestIdentities.physicalSynchronizerId,
+        SequencedEventValidator.DecompressionPolicyProvider
+          .fixed(DecompressionPolicy.MaxValueUnsafe),
         warn = false,
       )
   )(implicit fixture: FixtureParam): SequencerAggregatorPekko =

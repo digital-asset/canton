@@ -1,0 +1,19 @@
+name: Setup GCP credentials for GAR
+description: Prepare a temporary Google credentials file for GAR publishing
+
+inputs:
+  gac_json:
+    description: GCP service account key JSON for GAR
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare GAR credentials file
+      shell: bash
+      env:
+        GAC_JSON: ${{ inputs.gac_json }}
+      run: |
+        key=$(mktemp)
+        printf '%s' "$GAC_JSON" > "$key"
+        echo "GOOGLE_CREDENTIALS_FILE=$key" >> "$GITHUB_ENV"

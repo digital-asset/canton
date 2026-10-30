@@ -27,7 +27,7 @@ ALLOWED_DELEGATION_RESTRICTIONS=($(gunzip -c "$BUF_PROTO_IMAGE" | jq '.file[]
 
 # Function to display usage information
 usage() {
-  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> --output <prefix>"
+  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> [--protocol-version <36|37>] --output <prefix>"
   echo
   echo "Arguments:"
   echo "  --root-delegation              Optional. Set if the delegation is a self signed root delegation."
@@ -58,6 +58,19 @@ usage() {
   echo "                                 The script will attempt to automatically detect the key specification"
   echo "                                 from the public key. This flag can be used to override it or provide it if"
   echo "                                 automatic detection fails."
+  echo "  --protocol-version <36|37>     Optional. Protocol version for which the certificate is prepared:"
+  echo "                                   - 36 (default): builds the certificate as a v30 topology transaction, as"
+  echo "                                     earlier releases did. Use it while any synchronizer that the node"
+  echo "                                     connects to runs protocol version 36. Synchronizers on protocol"
+  echo "                                     version 37 accept it too, but only to ease the transition."
+  echo "                                   - 37: builds it as a v31 topology transaction, the version added for"
+  echo "                                     protocol version 37, which synchronizers on protocol version 36 reject."
+  echo "                                     Prefer it once all of them run 37, as the certificate is meant to last."
+  echo "                                 Higher values also build a v31 topology transaction. For a later protocol"
+  echo "                                 version, use the scripts released with it, as it may add another topology"
+  echo "                                 version."
+  echo "                                 A node can't convert the certificate to another protocol version, as it"
+  echo "                                 doesn't have the offline root key."
   echo "  --output <prefix>              Required. Output prefix for the generated files."
   echo
   echo "Description:"
@@ -77,6 +90,7 @@ TARGET_KEY_SPEC=""
 ROOT_KEY_SPEC=""
 DELEGATION_RESTRICTIONS=""
 REVOKE_INTERMEDIATE_DELEGATION=""
+PROTOCOL_VERSION="36"
 RESTRICTIONS_LIST=()
 
 # Parse arguments
@@ -88,6 +102,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --intermediate-delegation)
+      INTERMEDIATE_DELEGATION="true"
       DELEGATION_RESTRICTIONS='"can_sign_all_but_namespace_delegations": {}'
       shift
       ;;
@@ -103,11 +118,20 @@ while [[ $# -gt 0 ]]; do
         RESTRICTIONS_LIST+=("TOPOLOGY_MAPPING_CODE_$restriction")
       done
   # Join the restrictions into a JSON array
+  # sorted by enum value and deduplicated, as Canton serializes them: the transaction hash is computed over these bytes
+  SORTED_RESTRICTIONS=$(gunzip -c "$BUF_PROTO_IMAGE" | jq -c '[.file[]
+      | select(.name == "com/digitalasset/canton/protocol/v30/topology.proto")
+      | .messageType[]
+      | select(.name == "Enums")
+      | .enumType[]
+      | select(.name == "TopologyMappingCode")
+      | .value[]
+      | select(.name | IN($ARGS.positional[]))]
+      | sort_by(.number)
+      | map(.name)' --args "${RESTRICTIONS_LIST[@]}")
   DELEGATION_RESTRICTIONS=$(cat <<EOF
 "can_sign_specific_mapings": {
-  "mappings": [
-    $(IFS=','; echo "\"${RESTRICTIONS_LIST[*]}\"" | sed 's/,/","/g')
-  ]
+  "mappings": $SORTED_RESTRICTIONS
 }
 EOF
 )
@@ -195,6 +219,10 @@ EOF
       esac
       shift 2
       ;;
+    --protocol-version)
+      PROTOCOL_VERSION="$2"
+      shift 2
+      ;;
     --output)
       OUTPUT="$2"
       if [[ -z "$OUTPUT" ]]; then
@@ -209,6 +237,12 @@ EOF
       ;;
   esac
 done
+
+# Ensure the protocol version is supported
+if ! get_topology_version_number "$PROTOCOL_VERSION" &>/dev/null; then
+  err "Error: Unsupported protocol version '$PROTOCOL_VERSION'. Use 36 or 37."
+  usage
+fi
 
 # Ensure only one of --root-delegation or --delegation-restrictions is set
 if [[ "$ROOT_DELEGATION" == "true" && ${#RESTRICTIONS_LIST[@]} -gt 0 ]]; then
@@ -259,7 +293,7 @@ echo "== Preparing Certificate =="
 if [[ -n "$REVOKE_INTERMEDIATE_DELEGATION" ]]; then
   TRANSACTION_TYPE="Revocation"
   # The transaction to be revoked is expected to be a serialized versioned "TopologyTransaction"
-  if ! TRANSACTION_TO_REVOKE=$(serialized_versioned_message_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v30.TopologyTransaction" < "$REVOKE_INTERMEDIATE_DELEGATION"); then
+  if ! TRANSACTION_TO_REVOKE=$(versioned_topology_transaction_to_json < "$REVOKE_INTERMEDIATE_DELEGATION"); then
     echo "Error: Failed to import canton delegation to be revoked: $REVOKE_INTERMEDIATE_DELEGATION"
     echo "Please ensure this is a valid namespaced delegation obtained from a Canton node."
     exit 1
@@ -331,7 +365,7 @@ fi
 
 echo "Namespace $TRANSACTION_TYPE Transaction: $NAMESPACE_TRANSACTION"
 # Serialize transaction and output it to a file
-serialize_topology_transaction "$NAMESPACE_TRANSACTION" > "$OUTPUT.prep"
+serialize_topology_transaction "$NAMESPACE_TRANSACTION" "$PROTOCOL_VERSION" > "$OUTPUT.prep"
 echo "Namespace $TRANSACTION_TYPE Transaction written to $OUTPUT.prep"
 # Compute the transaction hash and output it to a file
 compute_topology_transaction_hash < "$OUTPUT.prep" > "$OUTPUT.hash"

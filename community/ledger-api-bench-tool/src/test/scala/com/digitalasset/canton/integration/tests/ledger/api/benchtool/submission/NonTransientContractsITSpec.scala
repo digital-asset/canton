@@ -11,6 +11,7 @@ import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.{EventsObserver, ObservedEvents}
+import org.scalatest.time.{Minutes, Span}
 import org.scalatest.{AppendedClues, Checkpoints, EitherValues, OptionValues}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -24,6 +25,11 @@ class NonTransientContractsITSpec
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+
+  // The average duration is around 100-110s, so let's give it some margin for a slowdown
+  // We can't increase `maxInFlightCommands` in `benchtoolFooSubmissionFixture`,
+  // because submission has to be sequential.
+  override implicit lazy val patienceConfig: PatienceConfig = PatienceConfig(Span(3, Minutes))
 
   "benchtool" should {
     "submit non-transient contracts" in { env =>
@@ -55,6 +61,10 @@ class NonTransientContractsITSpec
         ),
       )
       (for {
+        // Submission must stay sequential (the fixture default of 1 in-flight command): with
+        // `allowNonTransientContracts` a consuming exercise targets the key of a contract created by
+        // an *earlier* command, so submitting concurrently can exercise a key that is not committed
+        // yet and fail with CONTRACT_KEY_NOT_FOUND.
         (apiServices, allocatedParties, submission) <- benchtoolFooSubmissionFixture(
           submissionConfig
         )
@@ -78,8 +88,8 @@ class NonTransientContractsITSpec
         val transientContracts = createAndConsumeOffsetPairs.count {
           case (createOffset, archiveOffset) => createOffset == archiveOffset
         }
-        cp(discard(nonTransientContracts shouldBe 47))
-        cp(discard(transientContracts shouldBe 16))
+        cp(discard(nonTransientContracts shouldBe 57))
+        cp(discard(transientContracts shouldBe 17))
         // sanity check:
         cp(
           discard(

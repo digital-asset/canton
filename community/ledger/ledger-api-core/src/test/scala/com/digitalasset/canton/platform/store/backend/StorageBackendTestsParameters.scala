@@ -38,7 +38,7 @@ private[backend] trait StorageBackendTestsParameters
       )
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.ledgerEnd) shouldBe LedgerEnd.beforeBegin
     val someSynchronizerIdInterned =
       backend.stringInterningSupport.synchronizerId.internalize(
@@ -165,7 +165,7 @@ private[backend] trait StorageBackendTestsParameters
   }
 
   it should "store and retrieve post processing end correctly" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(backend.parameter.postProcessingEnd) shouldBe None
     executeSql(backend.parameter.updatePostProcessingEnd(Some(offset(10))))
     executeSql(backend.parameter.postProcessingEnd) shouldBe Some(offset(10))
@@ -228,7 +228,7 @@ private[backend] trait StorageBackendTestsParameters
   it should "fail if there is no corresponding string interning entry for persited clean synchronizer index" in {
     executeSql(
       backend.parameter
-        .initializeParameters(StorageBackendTestValues.someIdentityParams, loggerFactory)
+        .initializeParameters(StorageBackendTestValues.someIdentityParams)
     )
     val ledgerEnd = LedgerEnd(
       lastOffset = offset(10),
@@ -256,7 +256,7 @@ private[backend] trait StorageBackendTestsParameters
   it should "fail if  corresponding string interning entry for persited clean synchronizer index has party prefix" in {
     executeSql(
       backend.parameter
-        .initializeParameters(StorageBackendTestValues.someIdentityParams, loggerFactory)
+        .initializeParameters(StorageBackendTestValues.someIdentityParams)
     )
     val ledgerEnd = LedgerEnd(
       lastOffset = offset(10),

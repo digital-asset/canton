@@ -58,7 +58,7 @@ class StartableStoppableLedgerApiDependentServices(
     clock: Clock,
     registry: CantonMutableHandlerRegistry,
     adminTokenDispenser: CantonAdminTokenDispenser,
-    // TODO(#35267) Try to find a way to completely remove replicators from here
+    // TODO(#36539) Try to find a way to completely remove replicators from here
     partyReplicatorEvalO: Option[Eval[PartyReplicator]],
     acsReplicatorEvalO: Option[Eval[AcsReplicator]],
     ledgerApiStore: Eval[LedgerApiStore],
@@ -176,6 +176,7 @@ class StartableStoppableLedgerApiDependentServices(
                   new GrpcPartyManagementService(
                     participantId,
                     partyReplicatorO,
+                    acsReplicatorO,
                     syncService,
                     internalIndexService,
                     topologyLookup,

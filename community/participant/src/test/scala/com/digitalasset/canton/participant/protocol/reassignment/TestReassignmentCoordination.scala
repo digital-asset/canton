@@ -79,7 +79,7 @@ private[reassignment] object TestReassignmentCoordination {
       ): Option[StaticSynchronizerParameters] = Some(
         BaseTest.defaultStaticSynchronizerParametersWith(
           topologyChangeDelay = NonNegativeFiniteDuration.Zero,
-          testedProtocolVersion,
+          protocolVersion = testedProtocolVersion,
         )
       )
 

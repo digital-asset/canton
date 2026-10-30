@@ -24,6 +24,7 @@ trait SubmitDummyReassignment extends TestCommands { self: ServiceCallWithMainAc
   private def dummyReassignmentCommands(
       party: String,
       userId: String,
+      accountId: String,
   ): ReassignmentCommands =
     ReassignmentCommands(
       workflowId = "",
@@ -41,29 +42,34 @@ trait SubmitDummyReassignment extends TestCommands { self: ServiceCallWithMainAc
                 "synchronizer1::12209bffe879cda98fa69f7bab97e002705cdb927b11d53c41f0b78b4c07a72a7a7a",
               target =
                 "synchronizer2::12209bffe879cda98fa69f7bab97e002705cdb927b11d53c41f0b78b4c07a72a7a7b",
+              overrideSourceValidationPackageId = None,
+              overrideTargetValidationPackageId = None,
             )
           )
         )
       ),
+      accountId = accountId,
     )
 
   protected def dummySubmitReassignmentRequest(
       party: String,
       userId: String,
+      accountId: String = "",
   ): SubmitReassignmentRequest =
     SubmitReassignmentRequest(
       reassignmentCommands = Some(
-        dummyReassignmentCommands(party, userId)
+        dummyReassignmentCommands(party, userId, accountId)
       )
     )
 
   protected def dummySubmitAndWaitForReassignmentRequest(
       party: String,
       userId: String,
+      accountId: String = "",
   ): SubmitAndWaitForReassignmentRequest =
     SubmitAndWaitForReassignmentRequest(
       reassignmentCommands = Some(
-        dummyReassignmentCommands(party, userId)
+        dummyReassignmentCommands(party, userId, accountId)
       ),
       eventFormat = None,
     )
@@ -72,16 +78,20 @@ trait SubmitDummyReassignment extends TestCommands { self: ServiceCallWithMainAc
       token: Option[String],
       party: String,
       userId: String,
+      accountId: String = "",
   ): Future[SubmitReassignmentResponse] =
     stub(CommandSubmissionServiceGrpc.stub(channel), token)
-      .submitReassignment(dummySubmitReassignmentRequest(party, userId))
+      .submitReassignment(dummySubmitReassignmentRequest(party, userId, accountId))
 
   protected def submitAndWaitForReassignment(
       token: Option[String],
       party: String,
       userId: String,
+      accountId: String = "",
   ): Future[SubmitAndWaitForReassignmentResponse] =
     stub(CommandServiceGrpc.stub(channel), token)
-      .submitAndWaitForReassignment(dummySubmitAndWaitForReassignmentRequest(party, userId))
+      .submitAndWaitForReassignment(
+        dummySubmitAndWaitForReassignmentRequest(party, userId, accountId)
+      )
 
 }

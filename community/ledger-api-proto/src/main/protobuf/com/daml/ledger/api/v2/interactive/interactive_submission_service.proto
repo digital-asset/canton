@@ -10,6 +10,7 @@ import "com/daml/ledger/api/v2/crypto.proto";
 import "com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto";
 import "com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto";
 import "com/daml/ledger/api/v2/package_reference.proto";
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "com/daml/ledger/api/v2/transaction.proto";
 import "com/daml/ledger/api/v2/transaction_filter.proto";
 import "com/daml/ledger/api/v2/value.proto";
@@ -260,6 +261,13 @@ message PrepareSubmissionRequest {
   //
   // Optional
   optional uint32 taps_max_passes = 18;
+
+  // The account used for the estimated cost check during preparation.
+  // Not stored in the prepared transaction, so execution can use a different account.
+  // Uses the same format, fallback, and required rights as ``Commands.account_id``.
+  //
+  // Optional
+  string account_id = 19;
 }
 
 // [docs-entry-start: HashingSchemeVersion]
@@ -384,6 +392,14 @@ message ExecuteSubmissionRequest {
   //
   // Optional
   MinLedgerTime min_ledger_time = 8;
+
+  // The account to charge for execution. It can be different from the one checked during preparation.
+  // Party signatures don't cover this field.
+  // Uses the same format, fallback, and required rights as ``Commands.account_id``.
+  // The fallback uses the acting parties from the prepared transaction.
+  //
+  // Optional
+  string account_id = 9;
 }
 
 message ExecuteSubmissionResponse {}
@@ -444,6 +460,14 @@ message ExecuteSubmissionAndWaitRequest {
   //
   // Optional
   MinLedgerTime min_ledger_time = 8;
+
+  // The account to charge for execution. It can be different from the one checked during preparation.
+  // Party signatures don't cover this field.
+  // Uses the same format, fallback, and required rights as ``Commands.account_id``.
+  // The fallback uses the acting parties from the prepared transaction.
+  //
+  // Optional
+  string account_id = 9;
 }
 
 message ExecuteSubmissionAndWaitResponse {
@@ -524,6 +548,14 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   //
   // Optional
   TransactionFormat transaction_format = 9;
+
+  // The account to charge for execution. It can be different from the one checked during preparation.
+  // Party signatures don't cover this field.
+  // Uses the same format, fallback, and required rights as ``Commands.account_id``.
+  // The fallback uses the acting parties from the prepared transaction.
+  //
+  // Optional
+  string account_id = 10;
 }
 
 message ExecuteSubmissionAndWaitForTransactionResponse {
@@ -563,7 +595,7 @@ message PreparedTransaction {
   // Daml Transaction representing the ledger effect if executed. See below
   //
   // Required
-  DamlTransaction transaction = 1;
+  DamlTransaction transaction = 1 [(size_limit) = true];
   // Metadata context necessary to execute the transaction
   //
   // Required

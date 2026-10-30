@@ -983,7 +983,7 @@ class OutputModuleTest
               Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
               EpochNumber.First,
             )
-          ).map(x => BatchId.from(x) -> x),
+          ).map(x => BatchId.from(x, logger)(implicitly, TraceContext.empty) -> x),
         )
       val nextBlockData =
         CompleteBlockData(
@@ -1779,7 +1779,7 @@ class OutputModuleTest
           Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
           EpochNumber.First,
         )
-      val batchId = BatchId.from(batch)
+      val batchId = BatchId.from(batch, logger)(implicitly, TraceContext.empty)
       val orderedBlockForOutput = anOrderedBlockForOutput(batchIds = Seq(batchId))
       val orderingBlock = OrderingBlock(orderedBlockForOutput.orderedBlock.batchRefs)
       val blockNumber = orderedBlockForOutput.orderedBlock.metadata.blockNumber
@@ -2069,7 +2069,7 @@ class OutputModuleTest
           Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
           EpochNumber.First,
         )
-      val batchId = BatchId.from(batch)
+      val batchId = BatchId.from(batch, logger)(implicitly, TraceContext.empty)
 
       // Watermark: blocks at or below this are stale (their normal removal already happened before
       //  `previousStoredBlock` advanced), blocks above it are still legitimately in flight.
@@ -2514,7 +2514,7 @@ class OutputModuleTest
           Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
           epochNumber,
         )
-      ).map(x => BatchId.from(x) -> x),
+      ).map(x => BatchId.from(x, logger)(implicitly, TraceContext.empty) -> x),
     )
 
   private def capturingBftOrderingMetrics(
@@ -2638,7 +2638,7 @@ class OutputModuleTest
       epochStoreReader,
       blockSubscription,
       metrics,
-      SynchronizerLimits.defaultFor(synchronizerProtocolVersion),
+      testedSynchronizerLimits,
       availabilityRef,
       consensusRef,
       mempoolRef,

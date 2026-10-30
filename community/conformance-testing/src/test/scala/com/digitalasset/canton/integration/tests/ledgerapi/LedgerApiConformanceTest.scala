@@ -7,7 +7,7 @@ import com.daml.ledger.api.testtool.runner.AvailableTests
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
@@ -64,24 +64,19 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnvironments {
 
   protected def connectedSynchronizersCount: Int
-
   // ensure ledger api conformance tests have less noisy neighbours
   protected override def numPermits: PositiveInt = PositiveInt.tryCreate(2)
   /*
     When running the ProtocolContinuityConformance test, the protocol version can be different
     from the `testedProtocolVersion`.
+
+    Participants connect to all sequencers (local and remote) of the synchronizer, with a trust
+    threshold requiring all of them to deliver the same events.
    */
   protected def setupLedgerApiConformanceEnvironment(
       env: TestConsoleEnvironment
   ): Unit = {
     import env.*
-
-    require(
-      (env.environment.config.sequencers.size + env.environment.config.remoteSequencers.size)
-        == connectedSynchronizersCount
-    )
-
-    implicit val e: TestConsoleEnvironment = env
 
     sequencer1_.topology.synchronizer_parameters.propose_update(
       daId,
@@ -96,7 +91,15 @@ trait LedgerApiConformanceBase extends CommunityIntegrationTest with IsolatedEnv
         ),
     )
 
-    participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
+    val allSequencers = sequencers.all
+    participants.all.foreach(
+      _.synchronizers.connect_local_bft(
+        sequencers = allSequencers,
+        synchronizerAlias = daName,
+        sequencerTrustThreshold = PositiveInt.tryCreate(allSequencers.size),
+        sequencerLivenessMargin = NonNegativeInt.zero,
+      )
+    )
 
     participants.all.foreach(_.resources.set_resource_limits(ResourceLimits.noLimit))
   }

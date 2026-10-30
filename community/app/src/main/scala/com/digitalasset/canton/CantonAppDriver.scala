@@ -25,7 +25,7 @@ import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.JarResourceUtils
-import com.digitalasset.canton.version.ReleaseVersion
+import com.digitalasset.canton.version.{InterpretationConfig, ProtocolVersion, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import com.sun.management.GarbageCollectionNotificationInfo
 import com.typesafe.config.ConfigFactory
@@ -36,6 +36,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import javax.management.openmbean.CompositeData
 import javax.management.{NotificationEmitter, NotificationListener}
+import scala.collection.immutable.ListMap
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
@@ -55,14 +56,27 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
   protected def additionalVersions: Map[String, String] = Map.empty
 
   protected def printVersion(): Unit =
-    (Map(
+    (Seq(
       "Canton" -> BuildInfo.version,
       "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
       "Stable Canton protocol versions" -> BuildInfo.stableProtocolVersions.toString(),
       "Preview Canton protocol versions" -> BuildInfo.betaProtocolVersions.toString(),
+      "Compatible LF versions" -> compatibleLfVersions.toString(),
     ) ++ additionalVersions) foreach { case (name, version) =>
       Console.out.println(s"$name: $version")
     }
+
+  // A ListMap so that the protocol versions print in order
+  private def compatibleLfVersions: ListMap[String, List[String]] =
+    ListMap.from(
+      (BuildInfo.stableProtocolVersions ++ BuildInfo.betaProtocolVersions).map(pv =>
+        pv -> InterpretationConfig
+          .forProtocolVersion(ProtocolVersion.tryCreate(pv))
+          .allowedLanguageVersions
+          .reverse
+          .map(_.pretty)
+      )
+    )
 
   protected def logAppVersion(): Unit =
     logger.info(s"Starting Canton version ${ReleaseVersion.current}")

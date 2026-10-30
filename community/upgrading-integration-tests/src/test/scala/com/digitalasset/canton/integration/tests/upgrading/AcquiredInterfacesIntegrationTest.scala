@@ -626,6 +626,7 @@ class AcquiredInterfacesIntegrationTest extends CommunityIntegrationTest with Sh
       ),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
   private implicit class JavaIdentifierOps(val identifier: data.Identifier) {
     def toScalaProto: ScalaPbIdentifier = ScalaPbIdentifier.fromJavaProto(identifier.toProto)

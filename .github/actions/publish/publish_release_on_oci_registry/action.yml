@@ -1,0 +1,31 @@
+name: Publish release on OCI registry
+description: Publish release artifacts to the OCI registry
+
+inputs:
+  release_suffix:
+    description: Release version suffix
+    required: true
+  nightly_release:
+    description: Whether this is a nightly release
+    required: false
+    default: "false"
+  gcloud_service_key:
+    description: GCP service account key JSON used for registry auth
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare OCI auth path
+      shell: bash
+      run: |
+        echo "DPM_REGISTRY_AUTH=$HOME/.docker/config.json" >> "$GITHUB_ENV"
+
+    - name: Publish to OCI registry
+      uses: ./.github/actions/nix/nix_run
+      env:
+        GAC_JSON: ${{ inputs.gcloud_service_key }}
+        IS_NIGHTLY_RELEASE: ${{ inputs.nightly_release }}
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+      with:
+        command: scripts/ci/publish-to-oci.sh

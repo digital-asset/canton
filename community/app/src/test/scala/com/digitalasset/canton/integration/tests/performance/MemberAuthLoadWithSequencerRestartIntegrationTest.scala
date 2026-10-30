@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.performance
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
@@ -55,6 +54,10 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
             .focus(_.enableAmplificationImprovements) // should be true anyway
             .replace(true)
         ),
+      )
+      .updateTestingConfig(
+        _.focus(_.participantsWithoutLapiVerification)
+          .replace(Set("participant1", "participant2"))
       )
       .withSetup { implicit env =>
         import env.*
@@ -138,22 +141,23 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
       },
       forEvery(_)(
         acceptableLogMessageExt(
-          Seq(
+          additional = Seq(
             // some requests may fail submission
             "Is the server running? Did you configure the server",
             // some topology transactions must be retried
             "failed the following topology transaction",
             // can happen if a connection in the pool is in a stopped state, which can occur during sequencer restarts
             "Connection is not started",
+            // The performance runner wraps this error in a "Failed to submit" warning.
+            "UNKNOWN_CONTRACT_SYNCHRONIZERS",
           ),
-          Seq(),
+          additionalNonRetryable = Seq(),
         )
       ),
     )
   }
 }
 
-@UnstableTest // TODO(i30285): remove this once the test is no longer flaky
 class MemberAuthLoadWithSequencerRestartIntegrationTestPostgres
     extends MemberAuthLoadWithSequencerRestartIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))

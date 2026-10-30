@@ -190,11 +190,24 @@ final class RepairService(
       ignoreAlreadyPurged: Boolean,
       forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
+    val eventMode = RepairLedgerApiEventMode.fromParameters(parameters)
+    val modeDescription = eventMode match {
+      case RepairLedgerApiEventMode.Reassignments =>
+        "All Ledger API Reassignments (Unassign events)"
+      case RepairLedgerApiEventMode.ByReassignmentCounter =>
+        "Standard (Archive events for zero reassignment counter, Unassign events otherwise)"
+    }
     logger.info(
       s"Purging ${contractIds.length} contracts from $synchronizerAlias with ignoreAlreadyPurged=$ignoreAlreadyPurged. " +
-        s"Mode: ${if (parameters.enableAllLedgerApiReassignments) "Alpha Multi Synchronizer (Unassignment)"
-          else "Standard (Archive Transaction)"}"
+        s"Mode: $modeDescription"
     )
+
+    // In the ByReassignmentCounter mode, we emit a Transaction or a Reassignment or both each with its
+    // own repair counter. Archives go to the Transaction and Unassigns go to the Reassignment.
+    val repairCountersToAllocate = eventMode match {
+      case RepairLedgerApiEventMode.ByReassignmentCounter => PositiveInt.tryCreate(2)
+      case RepairLedgerApiEventMode.Reassignments => PositiveInt.one
+    }
 
     helpers.runConsecutiveAndAwaitUS(
       "repair.purge",
@@ -210,6 +223,7 @@ final class RepairService(
             synchronizerId,
             repairIndexer,
             forceRepairWhenTopologyTransactionAtLedgerEnd,
+            repairCountersToAllocate,
           )
 
           contractStates <- EitherT.right[String](
@@ -230,101 +244,68 @@ final class RepairService(
             contract.contractId -> contract
           }.toMap
 
-          toc = repair.tryExactlyOneTimeOfRepair.toToc
+          // Times of repair used for the transaction carrying the Archive events (first) and the
+          // reassignment carrying the Unassign events (last). Both are the same unless in the
+          // ByReassignmentCounter mode.
+          archiveTimeOfRepair = repair.firstTimeOfRepair
+          unassignTimeOfRepair = TimeOfRepair(repair.timestamp, repair.repairCounters.last1)
+
+          tocFor = (reassignmentCounter: ReassignmentCounter) =>
+            if (eventMode.useReassignmentEvent(reassignmentCounter)) unassignTimeOfRepair.toToc
+            else archiveTimeOfRepair.toToc
+
+          operationsE <- EitherT.fromEither[FutureUnlessShutdown](
+            contractIds
+              .zip(contractStates)
+              .foldMapM { case (cid, acsStatus) =>
+                val storedContract = storedContracts.get(cid)
+                computePurgeOperations(tocFor, eventMode, ignoreAlreadyPurged)(
+                  cid,
+                  acsStatus,
+                  storedContract,
+                )
+                  .map { case PurgeOperations(missingPurge, upstream) =>
+                    (upstream.toList, missingPurge.toList)
+                  }
+              }
+          )
+
+          (contractsToPublishUpstream, missingPurges) = operationsE
+
+          // Update the stores
+          _ <- repair.synchronizer.persistentState.activeContractStore
+            .purgeContracts(missingPurges)
+            .toEitherTWithNonaborts
+            .leftMap(e => s"Failed to purge contracts $missingPurges in ActiveContractStore: $e")
+
+          (contractsToUnassign, contractsToArchive) = contractsToPublishUpstream.partition {
+            case (_, reassignmentCounter) => eventMode.useReassignmentEvent(reassignmentCounter)
+          }
+
+          // Publish purged contracts via the indexer to the ledger api.
+          _ <-
+            if (contractsToArchive.nonEmpty)
+              EitherTUtil.rightUS[String, Unit](
+                publishArchivedEvent(
+                  contractsToArchive,
+                  repair,
+                  archiveTimeOfRepair.repairCounter,
+                  repairIndexer,
+                )
+              )
+            else EitherTUtil.unitUS[String]
 
           _ <-
-            if (parameters.enableAllLedgerApiReassignments) {
-              for {
-                operationsE <- EitherT.fromEither[FutureUnlessShutdown](
-                  contractIds
-                    .zip(contractStates)
-                    .foldMapM { case (cid, acsStatus) =>
-                      val storedContract = storedContracts.get(cid)
-                      computePurgeOperations(toc, ignoreAlreadyPurged)(
-                        cid,
-                        acsStatus,
-                        storedContract,
-                      )
-                        .map { case PurgeOperations(missingPurge, missingAssignment, upstream) =>
-                          (upstream.toList, missingPurge.toList, missingAssignment.toList)
-                        }
-                    }
+            if (contractsToUnassign.nonEmpty)
+              EitherTUtil.rightUS[String, Unit](
+                publishUnassignedEvent(
+                  contractsToUnassign,
+                  repair,
+                  unassignTimeOfRepair.repairCounter,
+                  repairIndexer,
                 )
-
-                (contractToDeactivateUpstream, missingPurges, missingAssignments) = operationsE
-
-                // Update the stores
-                _ <- repair.synchronizer.persistentState.activeContractStore
-                  .purgeContracts(missingPurges)
-                  .toEitherTWithNonaborts
-                  .leftMap(e =>
-                    s"Failed to purge contracts $missingAssignments in ActiveContractStore: $e"
-                  )
-
-                _ <- repair.synchronizer.persistentState.activeContractStore
-                  .assignContracts(missingAssignments)
-                  .toEitherTWithNonaborts
-                  .leftMap(e =>
-                    s"Failed to assign contracts $missingAssignments in ActiveContractStore: $e"
-                  )
-
-                // Publish purged contracts via the indexer to the ledger api.
-                _ <- EitherTUtil.rightUS[String, Unit](
-                  publishUnassignedEvent(contractToDeactivateUpstream, repair, repairIndexer)
-                )
-              } yield ()
-
-            } else {
-              for {
-                updateId <- EitherT.rightT[FutureUnlessShutdown, String](randomUpdateId(syncCrypto))
-
-                operationsE <- EitherT.fromEither[FutureUnlessShutdown](
-                  contractIds
-                    .zip(contractStates)
-                    .foldMapM { case (cid, acsStatus) =>
-                      val storedContract = storedContracts.get(cid)
-                      computePurgeOperations(toc, ignoreAlreadyPurged)(
-                        cid,
-                        acsStatus,
-                        storedContract,
-                      )
-                        .map { case PurgeOperations(missingPurge, missingAssignment, upstream) =>
-                          // Extract only the contract from upstream, discard the reassignment counter
-                          val contracts = upstream.map(_._1).toList
-                          (contracts, missingPurge.toList, missingAssignment.toList)
-                        }
-                    }
-                )
-
-                (contractsToPublishUpstream, missingPurges, missingAssignments) = operationsE
-
-                // Update the stores
-                _ <- repair.synchronizer.persistentState.activeContractStore
-                  .purgeContracts(missingPurges)
-                  .toEitherTWithNonaborts
-                  .leftMap(e =>
-                    s"Failed to purge contracts $missingAssignments in ActiveContractStore: $e"
-                  )
-
-                _ <- repair.synchronizer.persistentState.activeContractStore
-                  .assignContracts(missingAssignments)
-                  .toEitherTWithNonaborts
-                  .leftMap(e =>
-                    s"Failed to assign contracts $missingAssignments in ActiveContractStore: $e"
-                  )
-
-                // Commit and publish purged contracts via the indexer to the ledger api.
-                _ <- EitherTUtil.rightUS[String, Unit](
-                  writeContractsPurgedEvent(
-                    contractsToPublishUpstream,
-                    updateId,
-                    repair,
-                    repairIndexer,
-                  )
-                )
-              } yield ()
-            }
-
+              )
+            else EitherTUtil.unitUS[String]
         } yield ()).mapK(FutureUnlessShutdown.failOnShutdownToAbortExceptionK("purgeContracts"))
       },
     )
@@ -595,13 +576,22 @@ final class RepairService(
     )
   }
 
-  /** For the given contract, returns the operations (purge, assignment) to perform
+  /** For the given contract, returns the operations (purge) to perform
+    * @param tocFor
+    *   Time of change to use for the internal stores, given the reassignment counter of the
+    *   contract used for the Ledger API event
+    * @param eventMode
+    *   Whether the purge of an active contract is published as an Unassigned or an Archive event
     * @param acsStatus
     *   Status of the contract
     * @param storedContractO
     *   Instance of the contract
     */
-  private def computePurgeOperations(toc: TimeOfChange, ignoreAlreadyPurged: Boolean)(
+  private def computePurgeOperations(
+      tocFor: ReassignmentCounter => TimeOfChange,
+      eventMode: RepairLedgerApiEventMode,
+      ignoreAlreadyPurged: Boolean,
+  )(
       cid: LfContractId,
       acsStatus: Option[ActiveContractStore.Status],
       storedContractO: Option[GenContractInstance],
@@ -612,7 +602,7 @@ final class RepairService(
       Either.cond(
         ignoreAlreadyPurged,
         PurgeOperations.empty,
-        s"Contract $cid cannot be purged: $reason. Set ignoreAlreadyPurged = true to skip non-existing contracts.",
+        s"Contract $cid cannot be purged: $reason. Set ignoreAlreadyPurged = true to skip it.",
       )
 
     // Not checking that the participant hosts a stakeholder as we might be cleaning up contracts
@@ -620,40 +610,31 @@ final class RepairService(
     acsStatus match {
       case None => ignoreOrError("unknown contract")
       case Some(ActiveContractStore.Active(reassignmentCounter)) =>
+        val toc = tocFor(reassignmentCounter)
         for {
-          _ <- Either
+          storedContract <- Either
             .fromOption(
               storedContractO,
               show"Active contract $cid not found in contract store",
             )
+          eventReassignmentCounter <-
+            if (eventMode.useReassignmentEvent(reassignmentCounter))
+              reassignmentCounter.increment.leftMap(err => s"Contract $cid cannot be purged: $err")
+            else Right(reassignmentCounter)
         } yield {
           PurgeOperations(
             purge = Option((cid, toc)),
-            assign = None,
-            upstream = storedContractO.map((_, reassignmentCounter)),
+            upstream = Some((storedContract, eventReassignmentCounter)),
           )
         }
       case Some(ActiveContractStore.Archived) => ignoreOrError("archived contract")
       case Some(ActiveContractStore.Purged) => ignoreOrError("purged contract")
-      case Some(ActiveContractStore.ReassignedAway(targetSynchronizer, reassignmentCounter)) =>
-        logger.info(
-          s"Purging contract $cid previously marked as reassigned to $targetSynchronizer. " +
-            s"Marking contract as assigned from $targetSynchronizer (even though contract may have since been reassigned to yet another synchronizer) and subsequently as archived."
-        )
-
-        reassignmentCounter.increment.map { newReassignmentCounter =>
-          PurgeOperations(
-            purge = Option((cid, toc)),
-            assign = Option(
-              (
-                cid,
-                ReassignmentTag.Source(targetSynchronizer.unwrap),
-                newReassignmentCounter,
-                toc,
-              )
-            ),
-            upstream = storedContractO.map((_, reassignmentCounter)),
+      case Some(ActiveContractStore.ReassignedAway(targetSynchronizer, _)) =>
+        ignoreOrError("reassigned away contract").map { operations =>
+          logger.info(
+            s"Skipping purge of contract $cid, which is reassigned to $targetSynchronizer"
           )
+          operations
         }
     }
   }
@@ -679,14 +660,14 @@ final class RepairService(
     version = c.inst.version,
   )
 
-  private def writeContractsPurgedEvent(
-      contracts: Seq[GenContractInstance],
-      updateId: UpdateId,
+  private def publishArchivedEvent(
+      contracts: Seq[(GenContractInstance, ReassignmentCounter)],
       repair: RepairRequest,
+      repairCounter: RepairCounter,
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val nodeIds = LazyList.from(0).map(LfNodeId.apply)
-    val txNodes = nodeIds.zip(contracts.map(toArchive)).toMap
+    val txNodes = nodeIds.zip(contracts.map { case (c, _) => toArchive(c) }).toMap
     val update = Update.RepairTransactionAccepted(
       transactionMeta = TransactionMeta(
         ledgerEffectiveTime = repair.timestamp.toLf,
@@ -706,9 +687,9 @@ final class RepairService(
           )
         )
       ),
-      updateId = updateId,
+      updateId = randomUpdateId(syncCrypto),
       synchronizerId = repair.synchronizer.psid.logical,
-      repairCounter = repair.tryExactlyOneRepairCounter,
+      repairCounter = repairCounter,
       recordTime = repair.timestamp,
       // no need to pass the contract infos since no create nodes are involved
       contractInfos = Map.empty,
@@ -721,6 +702,7 @@ final class RepairService(
   private def publishUnassignedEvent(
       contracts: Seq[(GenContractInstance, ReassignmentCounter)],
       repair: RepairRequest,
+      repairCounter: RepairCounter,
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
@@ -763,7 +745,7 @@ final class RepairService(
             isReassigningParticipant = false,
           ),
           reassignment = Reassignment.Batch(unassignsNE),
-          repairCounter = repair.tryExactlyOneRepairCounter,
+          repairCounter = repairCounter,
           recordTime = repair.timestamp,
           synchronizerId = repair.synchronizer.psid.logical,
           traceContext = traceContext,
@@ -814,25 +796,20 @@ final class RepairService(
 
 private object RepairService {
 
-  private type MissingAssignment =
-    (LfContractId, ReassignmentTag.Source[SynchronizerId], ReassignmentCounter, TimeOfChange)
   private type MissingPurge = (LfContractId, TimeOfChange)
 
   /** What needs to be done to purge a contract
     * @param purge
     *   Canton internal purge
-    * @param assign
-    *   Canton internal assign
     * @param upstream
     *   Data to generate the event that notifies the indexer
     */
   final case class PurgeOperations(
       purge: Option[MissingPurge],
-      assign: Option[MissingAssignment],
       upstream: Option[(GenContractInstance, ReassignmentCounter)],
   )
 
   private object PurgeOperations {
-    def empty: PurgeOperations = PurgeOperations(None, None, None)
+    val empty: PurgeOperations = PurgeOperations(None, None)
   }
 }

@@ -99,6 +99,7 @@ final class UpdateService(
               ),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             )
           )
           .update(

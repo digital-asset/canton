@@ -116,11 +116,7 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.tea.v1.{
-  GetAccountResponse,
-  PruneEventsResponse,
-  UpdateAccountResponse,
-}
+import com.digitalasset.canton.tea.v1.{GetAccountResponse, PruneResponse, UpdateAccountResponse}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
@@ -133,6 +129,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
@@ -324,6 +321,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               includeTransactions = Some(transactionFormat),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             ),
             beginOffsetExclusive,
             endOffsetInclusive,
@@ -419,6 +417,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               ),
           includeTransactions = None,
           includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
         )
 
         mkResult(
@@ -486,6 +485,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               )
             )
           ),
+          includeTransactionsAndReassignments = None,
         )
 
         mkResult(
@@ -532,6 +532,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               includeTransactions = Some(transactionFormat),
               includeReassignments = None,
               includeTopologyEvents = None,
+              includeTransactionsAndReassignments = None,
             ),
             beginOffsetExclusive,
             endOffsetInclusive,
@@ -692,14 +693,15 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           verbose = false,
         )
         val updateFormat = UpdateFormat(
-          includeTransactions = Some(
+          includeTransactions = None,
+          includeReassignments = None,
+          includeTopologyEvents = None,
+          includeTransactionsAndReassignments = Some(
             TransactionFormatProto(
               eventFormat = Some(eventFormat),
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
             )
           ),
-          includeReassignments = Some(eventFormat),
-          includeTopologyEvents = None,
         )
 
         logger.info(s"Start measuring throughput (metric: $metricName).")
@@ -799,6 +801,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           tapsMaxPasses: Option[Int] = None,
           hashingSchemeVersion: HashingSchemeVersion =
             HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
+          accountId: String = "",
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -818,6 +821,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               estimateTrafficCost,
               tapsMaxPasses,
               hashingSchemeVersion,
+              accountId = accountId,
             )
           )
         }
@@ -845,6 +849,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           minLedgerTimeAbs: Option[Instant] = None,
+          accountId: String = "",
       ): ExecuteResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -856,6 +861,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               deduplicationPeriod = deduplicationPeriod,
               minLedgerTimeAbs = minLedgerTimeAbs,
               hashingSchemeVersion = hashingSchemeVersion,
+              accountId = accountId,
             )
           )
         }
@@ -881,6 +887,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           minLedgerTimeAbs: Option[Instant] = None,
           optTimeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          accountId: String = "",
       ): ExecuteAndWaitResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -893,6 +900,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               minLedgerTimeAbs = minLedgerTimeAbs,
               hashingSchemeVersion = hashingSchemeVersion,
               optTimeout = optTimeout,
+              accountId = accountId,
             )
           )
         }
@@ -920,6 +928,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           includeCreatedEventBlob: Boolean = false,
           customEventFormat: Option[EventFormat] = None,
           optTimeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          accountId: String = "",
       ): ApiTransaction =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -935,6 +944,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               includeCreatedEventBlob = includeCreatedEventBlob,
               customEventFormat = customEventFormat,
               optTimeout = optTimeout,
+              accountId = accountId,
             )
           )
         }.getTransaction
@@ -1025,6 +1035,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           includeCreatedEventBlob: Boolean = false,
           tapsMaxPasses: Option[Int] = None,
           customEventFormat: Option[EventFormat] = None,
+          accountId: String = "",
       ): ApiTransaction = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -1057,6 +1068,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
               tapsMaxPasses = tapsMaxPasses,
               customEventFormat = customEventFormat,
+              accountId = accountId,
             )
 
           case _ =>
@@ -1080,6 +1092,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   tapsMaxPasses,
                   optTimeout,
                   customEventFormat = customEventFormat,
+                  accountId = accountId,
                 )
               )
             }
@@ -1105,6 +1118,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
           tapsMaxPasses: Option[Int] = None,
+          accountId: String = "",
       ): Unit = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -1129,6 +1143,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId,
               userPackageSelectionPreference,
               tapsMaxPasses = tapsMaxPasses,
+              accountId = accountId,
             )
 
           case _ =>
@@ -1148,6 +1163,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   userId,
                   userPackageSelectionPreference,
                   tapsMaxPasses,
+                  accountId = accountId,
                 )
               )
             }
@@ -1225,6 +1241,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           submissionId: String = UUID.randomUUID().toString,
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          accountId: String = "",
       ): AssignedWrapper =
         submit_assign_with_format(
           submitter = submitter,
@@ -1236,6 +1253,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId = submissionId,
           eventFormat = eventFormatAllParties(),
           timeout = timeout,
+          accountId = accountId,
         ).assignedWrapper
 
       @Help.Summary(
@@ -1269,6 +1287,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId: String = UUID.randomUUID().toString,
           eventFormat: Option[EventFormat],
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          accountId: String = "",
       ): EmptyOrAssignedWrapper = {
         val result = consoleEnvironment.run(
           ledgerApiCommand(
@@ -1282,6 +1301,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               commandId = UUID.randomUUID().toString,
               submissionId = submissionId,
               eventFormat = eventFormat,
+              accountId = accountId,
             )
           )
         )
@@ -1315,6 +1335,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           submissionId: String = UUID.randomUUID().toString,
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          accountId: String = "",
       ): UnassignedWrapper =
         submit_unassign_with_format(
           submitter = submitter,
@@ -1326,6 +1349,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId = submissionId,
           eventFormat = eventFormatAllParties(),
           timeout = timeout,
+          overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+          overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
+          accountId = accountId,
         ).unassignedWrapper
 
       @Help.Summary(
@@ -1356,12 +1382,17 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           submissionId: String = UUID.randomUUID().toString,
           eventFormat: Option[EventFormat],
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          accountId: String = "",
       ): EmptyOrUnassignedWrapper = {
         val result = consoleEnvironment.run(
           ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitUnassign(
               submitter = submitter.toLf,
               contractIds = contractIds,
+              overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
               source = source,
               target = target,
               workflowId = workflowId,
@@ -1369,6 +1400,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               commandId = UUID.randomUUID().toString,
               submissionId = submissionId,
               eventFormat = eventFormat,
+              accountId = accountId,
             )
           )
         )
@@ -1388,6 +1420,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           submissionId: String = UUID.randomUUID().toString,
           timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          accountId: String = "",
       ): (UnassignedWrapper, AssignedWrapper) = {
         val unassigned = submit_unassign(
           submitter,
@@ -1398,6 +1433,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId,
           submissionId,
           timeout,
+          overrideSourceValidationPackageIds,
+          overrideTargetValidationPackageIds,
+          accountId = accountId,
         )
         val assigned = submit_assign(
           submitter,
@@ -1408,6 +1446,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId,
           submissionId,
           timeout,
+          accountId = accountId,
         )
         (unassigned, assigned)
       }
@@ -1425,6 +1464,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           commandId: String = UUID.randomUUID().toString,
           submissionId: String = UUID.randomUUID().toString,
+          accountId: String = "",
       ): Unit =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -1437,6 +1477,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               reassignmentId = reassignmentId,
               source = source,
               target = target,
+              accountId = accountId,
             )
           )
         }
@@ -1454,6 +1495,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userId: String = userId,
           commandId: String = UUID.randomUUID().toString,
           submissionId: String = UUID.randomUUID().toString,
+          overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+          accountId: String = "",
       ): Unit =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -1464,8 +1508,11 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               submitter = submitter.toLf,
               submissionId = submissionId,
               contractIds = contractIds,
+              overrideSourceValidationPackageIds = overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds = overrideTargetValidationPackageIds,
               source = source,
               target = target,
+              accountId = accountId,
             )
           )
         }
@@ -1488,6 +1535,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             // External party specifics
             verboseHashing: Boolean = false,
             tapsMaxPasses: Option[Int] = None,
+            accountId: String = "",
         ): Unit = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1504,6 +1552,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             prefetchContractKeys = Seq(),
             tapsMaxPasses = tapsMaxPasses,
             hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
+            accountId = accountId,
           )
 
           submit_prepared_async(
@@ -1513,6 +1562,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             submissionId = submissionId,
             minLedgerTimeAbs = minLedgerTimeAbs,
             userId = userId,
+            accountId = accountId,
           )
         }
 
@@ -1535,6 +1585,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             verboseHashing: Boolean = false,
             tapsMaxPasses: Option[Int] = None,
             customEventFormat: Option[EventFormat] = None,
+            accountId: String = "",
         ): ApiTransaction = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1551,6 +1602,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             prefetchContractKeys = Seq(),
             tapsMaxPasses = tapsMaxPasses,
             hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
+            accountId = accountId,
           )
 
           submit_prepared(
@@ -1564,6 +1616,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             transactionShape = transactionShape,
             includeCreatedEventBlob = includeCreatedEventBlob,
             customEventFormat = customEventFormat,
+            accountId = accountId,
           )
         }
 
@@ -1574,6 +1627,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             submissionId: String = "",
             minLedgerTimeAbs: Option[Instant] = None,
             userId: String = userId,
+            accountId: String = "",
         ): Unit = {
 
           val prepared = preparedTransaction.preparedTransaction.getOrElse(
@@ -1594,6 +1648,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId = userId,
               deduplicationPeriod = deduplicationPeriod,
               minLedgerTimeAbs = minLedgerTimeAbs,
+              accountId = accountId,
             )
             .discard
         }
@@ -1609,6 +1664,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             transactionShape: TransactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
             includeCreatedEventBlob: Boolean = false,
             customEventFormat: Option[EventFormat] = None,
+            accountId: String = "",
         ): ApiTransaction = {
 
           val prepared = preparedTransaction.preparedTransaction.getOrElse(
@@ -1632,6 +1688,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               minLedgerTimeAbs = minLedgerTimeAbs,
               includeCreatedEventBlob = includeCreatedEventBlob,
               customEventFormat = customEventFormat,
+              accountId = accountId,
             )
 
           optionallyAwait(tx, tx.updateId, tx.synchronizerId, optTimeout)
@@ -1725,6 +1782,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- includeCreatedEventBlob: Whether the result should contain the createdEventBlobs, it
             |  works only if the filterTemplate is non-empty.
             |- resultFilter: Custom filter of the results, applies before limit.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the result.
             """
         )
         def of_party(
@@ -1737,6 +1796,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
             resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
+            includeIncompleteReassignments: Boolean = true,
         ): Seq[WrappedContractEntry] = {
           val observer =
             new RecordingStreamObserver[GetActiveContractsResponse](limit, resultFilter)
@@ -1763,6 +1823,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   verbose,
                   timeout.asFiniteApproximation,
                   includeCreatedEventBlob,
+                  includeIncompleteReassignments = includeIncompleteReassignments,
                 )
               )
             },
@@ -1812,6 +1873,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isActiveContract,
+            includeIncompleteReassignments = false,
           )
             .flatMap(_.entry.activeContract)
 
@@ -1856,6 +1918,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isIncompleteUnassigned,
+            includeIncompleteReassignments = true,
           )
             .flatMap(_.entry.incompleteUnassigned)
             .map(WrappedIncompleteUnassigned(_))
@@ -1901,6 +1964,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout,
             includeCreatedEventBlob,
             _.contractEntry.isIncompleteAssigned,
+            includeIncompleteReassignments = true,
           )
             .flatMap(_.entry.incompleteAssigned)
             .map(WrappedIncompleteAssigned(_))
@@ -1929,6 +1993,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- includeCreatedEventBlob: Whether the result should contain the createdEventBlobs, it
             |  works only if the filterTemplate is non-empty.
             |- resultFilter: Custom filter of the results, applies before limit.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the result.
             """
         )
         def of_all(
@@ -1941,6 +2007,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             identityProviderId: String = "",
             includeCreatedEventBlob: Boolean = false,
             resultFilter: GetActiveContractsResponse => Boolean = _.contractEntry.isDefined,
+            includeIncompleteReassignments: Boolean = true,
         ): Seq[WrappedContractEntry] =
           consoleEnvironment.runE {
             ledgerCommandResultWithLocalParties(ifPartiesEmpty =
@@ -1965,6 +2032,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                         verbose,
                         timeout.asFiniteApproximation,
                         includeCreatedEventBlob,
+                        includeIncompleteReassignments = includeIncompleteReassignments,
                       )
                     )
                   },
@@ -1995,6 +2063,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- identityProviderId: Limit the response to parties governed by the given identity
             |  provider.
             |- timeout: The maximum wait time for the complete acs to arrive.
+            |- includeIncompleteReassignments: Whether the incomplete reassignments (incomplete
+            |  assigned and incomplete unassigned events) should be included in the count.
             """
         )
         def count(
@@ -2003,6 +2073,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             identityProviderId: String = "",
+            includeIncompleteReassignments: Boolean = true,
         ): Int =
           check(FeatureFlag.Testing)(consoleEnvironment.runE {
             ledgerCommandResultWithLocalParties(ifPartiesEmpty = Right(0))(
@@ -2020,6 +2091,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                         interfaceFilter = filterInterfaces,
                         activeAtOffset = activeAtOffsetO.getOrElse(end()),
                         timeout = timeout.asFiniteApproximation,
+                        includeIncompleteReassignments = includeIncompleteReassignments,
                       )
                     )
                   },
@@ -2045,7 +2117,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
         ): Unit =
           ConsoleMacros.utils.retry_until_true(timeout) {
-            of_party(party, verbose = false)
+            of_party(party, verbose = false, includeIncompleteReassignments = false)
               .exists(_.contractId == contractId.coid)
           }
 
@@ -2053,14 +2125,19 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         @Help.Description(
           """This search function returns an untyped ledger-api event.
             |The find will wait until the contract appears or throw an exception once it times out.
+            |The includeIncompleteReassignments parameter controls whether incomplete reassignments
+            |are also searched.
             """
         )
         def find_generic(
             partyId: Party,
             filter: WrappedContractEntry => Boolean,
             timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
+            includeIncompleteReassignments: Boolean = true,
         ): WrappedContractEntry = {
-          def scan: Option[WrappedContractEntry] = of_party(partyId).find(filter(_))
+          def scan: Option[WrappedContractEntry] =
+            of_party(partyId, includeIncompleteReassignments = includeIncompleteReassignments)
+              .find(filter(_))
 
           ConsoleMacros.utils.retry_until_true(timeout)(scan.isDefined)
           consoleEnvironment.runE {
@@ -2128,6 +2205,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  transaction.
           |- observingParticipantUids: List of other participants that should observe the
           |  transactions of the external party.
+          |- protocolVersion: The protocol version to create the topology transactions for, so
+          |  that clients that only read topology transactions of an older protocol version can
+          |  read them, e.g. 36 on a synchronizer with protocol version 37. Defaults to the
+          |  synchronizer's protocol version.
           """
       )
       def generate_topology(
@@ -2138,6 +2219,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           otherConfirmingParticipantIds: Seq[ParticipantId] = Seq.empty,
           confirmationThreshold: NonNegativeInt = NonNegativeInt.zero,
           observingParticipantIds: Seq[ParticipantId] = Seq.empty,
+          protocolVersion: Option[ProtocolVersion] = None,
       ): GenerateExternalPartyTopology =
         check(FeatureFlag.Preview)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -2149,6 +2231,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               otherConfirmingParticipantIds = otherConfirmingParticipantIds,
               confirmationThreshold = confirmationThreshold,
               observingParticipantIds = observingParticipantIds,
+              protocolVersion = protocolVersion,
             )
           )
         })
@@ -2761,6 +2844,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  interactive submissions as any party.
           |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
           |  party.
+          |- debitTrafficFrom: The set of traffic accounts this user is allowed to debit. An account
+          |  doesn't have to be a party.
+          |- debitTrafficFromAnyAccount: Flag (default false) indicating if the user is allowed to
+          |  debit any traffic account.
           """
       )
       def create(
@@ -2778,6 +2865,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           executeAsAnyParty: Boolean = false,
           actAsAnyParty: Boolean = false,
           primaryPartyAuthentication: Boolean = false,
+          debitTrafficFrom: Set[String] = Set(),
+          debitTrafficFromAnyAccount: Boolean = false,
       ): User = {
         val lapiUser = consoleEnvironment.run {
           ledgerApiCommand(
@@ -2796,6 +2885,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               executeAsAnyParty = executeAsAnyParty,
               actAsAnyParty = actAsAnyParty,
               primaryPartyAuthentication = primaryPartyAuthentication,
+              debitTrafficFrom = debitTrafficFrom,
+              debitTrafficFromAnyAccount = debitTrafficFromAnyAccount,
             )
           )
         }
@@ -2998,6 +3089,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  interactive submissions as any party.
           |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
           |  party.
+          |- debitTrafficFrom: The set of traffic accounts this user is allowed to debit. An account
+          |  doesn't have to be a party.
+          |- debitTrafficFromAnyAccount: Flag (default false) indicating if the user is allowed to
+          |  debit any traffic account.
           """
         )
         def grant(
@@ -3011,6 +3106,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             executeAs: Set[PartyId] = Set(),
             executeAsAnyParty: Boolean = false,
             actAsAnyParty: Boolean = false,
+            debitTrafficFrom: Set[String] = Set(),
+            debitTrafficFromAnyAccount: Boolean = false,
         ): UserRights =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -3025,6 +3122,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 readAsAnyParty = readAsAnyParty,
                 executeAsAnyParty = executeAsAnyParty,
                 actAsAnyParty = actAsAnyParty,
+                debitTrafficFrom = debitTrafficFrom,
+                debitTrafficFromAnyAccount = debitTrafficFromAnyAccount,
               )
             ).flatMap(_ =>
               ledgerApiCommand(
@@ -3056,6 +3155,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |  interactive submissions as any party.
             |- actAsAnyParty: Flag (default false) indicating if the user is allowed to act as any
             |  party.
+            |- debitTrafficFrom: The set of traffic accounts to remove the debit right for. The user
+            |  can still debit them if it holds `debitTrafficFromAnyAccount`.
+            |- debitTrafficFromAnyAccount: If set to true, the right to debit any traffic account
+            |  will be removed.
             """
         )
         def revoke(
@@ -3069,6 +3172,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             executeAs: Set[PartyId] = Set(),
             executeAsAnyParty: Boolean = false,
             actAsAnyParty: Boolean = false,
+            debitTrafficFrom: Set[String] = Set(),
+            debitTrafficFromAnyAccount: Boolean = false,
         ): UserRights =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -3083,6 +3188,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 readAsAnyParty = readAsAnyParty,
                 executeAsAnyParty = executeAsAnyParty,
                 actAsAnyParty = actAsAnyParty,
+                debitTrafficFrom = debitTrafficFrom,
+                debitTrafficFromAnyAccount = debitTrafficFromAnyAccount,
               )
             ).flatMap(_ =>
               ledgerApiCommand(
@@ -3197,6 +3304,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             tapsMaxPasses: Option[Int] = None,
             hashingSchemeVersion: HashingSchemeVersion =
               HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
+            accountId: String = "",
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -3216,6 +3324,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 estimateTrafficCost,
                 tapsMaxPasses,
                 hashingSchemeVersion,
+                accountId = accountId,
               )
             )
           }
@@ -3264,6 +3373,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             includeCreatedEventBlob: Boolean = false,
             tapsMaxPasses: Option[Int] = None,
             customEventFormat: Option[EventFormat] = None,
+            accountId: String = "",
         ): Transaction = {
           val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -3291,6 +3401,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 includeCreatedEventBlob = includeCreatedEventBlob,
                 tapsMaxPasses = tapsMaxPasses,
                 customEventFormat = customEventFormat,
+                accountId = accountId,
               )
 
             case _ =>
@@ -3314,6 +3425,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                     tapsMaxPasses,
                     optTimeout,
                     customEventFormat = customEventFormat,
+                    accountId = accountId,
                   )
                 )
               }
@@ -3340,6 +3452,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             readAs: Seq[Party] = Seq.empty,
             disclosedContracts: Seq[javab.data.DisclosedContract] = Seq.empty,
             userId: String = userId,
+            accountId: String = "",
         ): Unit =
           ledger_api.commands.submit_async(
             actAs,
@@ -3353,6 +3466,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             readAs,
             disclosedContracts.map(c => DisclosedContract.fromJavaProto(c.toProto)),
             userId,
+            accountId = accountId,
           )
 
         @Help.Summary(
@@ -3383,6 +3497,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId: String = userId,
             submissionId: String = UUID.randomUUID().toString,
             timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
+            overrideSourceValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+            overrideTargetValidationPackageIds: Map[LfContractId, LfPackageId] = Map.empty,
+            accountId: String = "",
         ): Reassignment =
           ledger_api.commands
             .submit_unassign(
@@ -3394,6 +3511,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId,
               submissionId,
               timeout,
+              overrideSourceValidationPackageIds,
+              overrideTargetValidationPackageIds,
+              accountId = accountId,
             )
             .unassignedWrapper
             .reassignment
@@ -3431,6 +3551,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             submissionId: String = UUID.randomUUID().toString,
             timeout: Option[config.NonNegativeDuration] = Some(timeouts.ledgerCommand),
             includeCreatedEventBlob: Boolean = false,
+            accountId: String = "",
         ): Reassignment =
           ledger_api.commands
             .submit_assign_with_format(
@@ -3443,6 +3564,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               submissionId,
               eventFormat = eventFormatAllParties(includeCreatedEventBlob),
               timeout,
+              accountId = accountId,
             )
             .reassignment
             .pipe(ReassignmentProto.toJavaProto)
@@ -3464,6 +3586,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId: String = userId,
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
               tapsMaxPasses: Option[Int] = None,
+              accountId: String = "",
           ): Unit = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -3482,6 +3605,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId = userId,
               userPackageSelectionPreference = userPackageSelectionPreference,
               tapsMaxPasses = tapsMaxPasses,
+              accountId = accountId,
             )
           }
 
@@ -3501,6 +3625,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               includeCreatedEventBlob: Boolean = false,
               tapsMaxPasses: Option[Int] = None,
               customEventFormat: Option[EventFormat] = None,
+              accountId: String = "",
           ): Transaction = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -3522,6 +3647,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               includeCreatedEventBlob = includeCreatedEventBlob,
               tapsMaxPasses = tapsMaxPasses,
               customEventFormat = customEventFormat,
+              accountId = accountId,
             )
 
             javab.data.Transaction.fromProto(ApiTransaction.toJavaProto(tx))
@@ -3710,6 +3836,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               |The command will wait until the contract appears or throw an exception once it times out.
               |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
               |trailing fields in the contract payload are handled during decoding.
+              |The includeIncompleteReassignments parameter controls whether contracts of incomplete
+              |reassignments are also considered.
               """
           )
           def await[
@@ -3725,6 +3853,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
               timeout: config.NonNegativeDuration = timeouts.ledgerCommand,
+              includeIncompleteReassignments: Boolean = true,
           ): TC = {
             val result = new AtomicReference[Option[TC]](None)
             ConsoleMacros.utils.retry_until_true(timeout) {
@@ -3733,6 +3862,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   partyId,
                   predicate,
                   synchronizerFilter,
+                  includeIncompleteReassignments,
                 )
               result.set(tmp.headOption)
               tmp.nonEmpty
@@ -3755,6 +3885,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               |You can restrict search to a synchronizer by specifying the optional synchronizer ID.
               |Optionally, an `UnknownTrailingFieldPolicy` can be specified to control how unknown
               |trailing fields in the contract payload are handled during decoding.
+              |The includeIncompleteReassignments parameter controls whether contracts of incomplete
+              |reassignments are also considered.
               """
           )
           def filter[
@@ -3769,6 +3901,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               partyId: Party,
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
+              includeIncompleteReassignments: Boolean = true,
           ): Seq[TC] = {
             val templateId = TemplateId.fromJavaIdentifier(templateCompanion.TEMPLATE_ID)
 
@@ -3779,7 +3912,11 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               }
 
             ledger_api.state.acs
-              .of_party(partyId, filterTemplates = Seq(templateId))
+              .of_party(
+                partyId,
+                filterTemplates = Seq(templateId),
+                includeIncompleteReassignments = includeIncompleteReassignments,
+              )
               .collect { case entry if synchronizerPredicate(entry) => entry.event }
               .flatMap { ev =>
                 JavaDecodeUtil
@@ -3843,23 +3980,33 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         )
       }
 
-      @Help.Summary("Prune events before or at the given timestamp", FeatureFlag.Stable)
+      @Help.Summary(
+        "Prune events, submission correlations and uncharged completions before or at the given timestamp",
+        FeatureFlag.Stable,
+      )
       @Help.Description(
-        """Prune events before or at the given timestamp.
-          |This command will delete all events that have a record time before or at the given
-          |timestamp. This is useful for cleaning up old events and reducing the size of the
-          |event store.
+        """Prune events, submission correlations and uncharged completions before or at the given
+          |timestamp.
+          |This command will delete all events, submission correlations and uncharged completions
+          |that have a timestamp before or at the given timestamp. This is useful for cleaning up
+          |old events and reducing the size of the event store. Submission correlations record
+          |which account each submission is charged to until its completion arrives. Uncharged
+          |completions record completions with a positive cost that weren't charged to any account.
+          |The timestamp must be at least the participant's max deduplication duration (7 days by
+          |default) in the past.
           |
           |WARNING:
           |- This operation is irreversible and should be used with caution.
           |- Affects de-duplication. If an event is pruned, de-duplication UpdateAccount
-          |  requests on it will NOT be possible."""
+          |  requests on it will NOT be possible.
+          |- If a submission's correlation is pruned before its completion arrives, the submission
+          |  is NOT debited."""
       )
-      def prune_events(
+      def prune(
           beforeOrAt: CantonTimestamp
-      ): PruneEventsResponse = consoleEnvironment.run {
+      ): PruneResponse = consoleEnvironment.run {
         ledgerApiCommand(
-          LedgerApiCommands.Traffic.PruneEvents(beforeOrAt)
+          LedgerApiCommands.Traffic.Prune(beforeOrAt)
         )
       }
     }
@@ -3925,10 +4072,11 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
       verbose = false,
     )
     UpdateFormat(
-      includeTransactions =
-        Some(TransactionFormatProto(Some(eventFormat), TRANSACTION_SHAPE_LEDGER_EFFECTS)),
-      includeReassignments = Some(eventFormat),
+      includeTransactions = None,
+      includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments =
+        Some(TransactionFormatProto(Some(eventFormat), TRANSACTION_SHAPE_LEDGER_EFFECTS)),
     )
   }
 

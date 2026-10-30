@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  LedgerApiSizeLimitsConfig,
   ValidateUpgradingPackageResolutions,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -254,7 +255,7 @@ class CommandServiceImplSpec
   ): ResourceOwner[CommandServiceGrpc.CommandServiceStub] = {
     val commandsValidator = new CommandsValidator(
       validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-    )
+    )(sizeLimitsConfig = LedgerApiSizeLimitsConfig())
     val apiService = new ApiCommandService(
       service = service,
       commandsValidator = commandsValidator,

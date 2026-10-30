@@ -9,44 +9,53 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
-import com.digitalasset.canton.protocol.{v31 as protoV31, v32 as protoV32}
+import com.digitalasset.canton.protocol.{v31 as protoV31, v32 as protoV32, v33 as protoV33}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.ProtocolVersion
 
-final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtocolLimits)
-    extends PrettyPrintingFromCompanion {
+final case class SynchronizerLimits(
+    transactionProtocolLimits: TransactionProtocolLimits,
+    topologyLimits: TopologyLimits,
+    acsCommitmentLimits: AcsCommitmentLimits,
+) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[SynchronizerLimits] = SynchronizerLimits
 
+  // v31 has no topology limits, so they fall back to the default on the way back in
   def toProtoV31: protoV31.SynchronizerLimits = protoV31.SynchronizerLimits(
     transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV31)
   )
 
   def toProtoV32: protoV32.SynchronizerLimits = protoV32.SynchronizerLimits(
-    transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV32)
+    transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV32),
+    topologyLimits = Some(topologyLimits.toProtoV32),
+    acsCommitmentLimits = Some(acsCommitmentLimits.toProtoV32),
+  )
+
+  def toProtoV33: protoV33.SynchronizerLimits = protoV33.SynchronizerLimits(
+    transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV33),
+    topologyLimits = Some(topologyLimits.toProtoV33),
+    acsCommitmentLimits = Some(acsCommitmentLimits.toProtoV33),
   )
 }
 
 object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
 
   override protected val pretty: Pretty[SynchronizerLimits] = prettyOfClass(
-    param("transaction protocol limits", _.transactionProtocolLimits)
+    param("transaction protocol limits", _.transactionProtocolLimits),
+    param("topology limits", _.topologyLimits),
+    param("acs commitment limits", _.acsCommitmentLimits),
   )
 
-  private lazy val default: SynchronizerLimits =
-    SynchronizerLimits(transactionProtocolLimits = TransactionProtocolLimits.default)
-  private lazy val defaultForProtoVDev: SynchronizerLimits =
-    SynchronizerLimits(transactionProtocolLimits = TransactionProtocolLimits.defaultForProtoVDev)
-  lazy val max: SynchronizerLimits =
-    SynchronizerLimits(transactionProtocolLimits = TransactionProtocolLimits.max)
-
-  def defaultFor(protocolVersion: ProtocolVersion): SynchronizerLimits = protocolVersion match {
-    // Before PV35, limits were not applied
-    case pv if pv <= ProtocolVersion.v35 => max
-    // TODO(i35890): Update default values for PVDev (to be upgraded to PV37 when set)
-    case ProtocolVersion.dev => defaultForProtoVDev
-    case _ => default
-  }
+  /** The same on every protocol version: each limit check states the protocol version it applies
+    * from through its ValidationParam. Applied where no synchronizer can be asked for its own
+    * limits, such as the authorized store and the admin API.
+    */
+  lazy val default: SynchronizerLimits =
+    SynchronizerLimits(
+      transactionProtocolLimits = TransactionProtocolLimits.default,
+      topologyLimits = TopologyLimits.default,
+      acsCommitmentLimits = AcsCommitmentLimits.default,
+    )
 
   def fromProtoV31(
       synchronizerLimitsP: protoV31.SynchronizerLimits
@@ -57,19 +66,266 @@ object SynchronizerLimits extends PrettyPrintingCompanion[SynchronizerLimits] {
       transactionProtocolLimits <- ProtoConverter
         .required("transaction_protocol_limits", transactionProtocolLimitsP)
         .flatMap(TransactionProtocolLimits.fromProtoV31)
-    } yield SynchronizerLimits(transactionProtocolLimits)
+    } yield SynchronizerLimits(
+      transactionProtocolLimits,
+      TopologyLimits.default,
+      AcsCommitmentLimits.default,
+    )
   }
 
   def fromProtoV32(
       synchronizerLimitsP: protoV32.SynchronizerLimits
   ): ParsingResult[SynchronizerLimits] = {
-    val protoV32.SynchronizerLimits(transactionProtocolLimitsP) = synchronizerLimitsP
+    val protoV32.SynchronizerLimits(
+      transactionProtocolLimitsP,
+      topologyLimitsP,
+      acsCommitmentLimitsP,
+    ) =
+      synchronizerLimitsP
 
     for {
       transactionProtocolLimits <- ProtoConverter
         .required("transaction_protocol_limits", transactionProtocolLimitsP)
         .flatMap(TransactionProtocolLimits.fromProtoV32)
-    } yield SynchronizerLimits(transactionProtocolLimits)
+      topologyLimits <- ProtoConverter
+        .required("topology_limits", topologyLimitsP)
+        .flatMap(TopologyLimits.fromProtoV32)
+      acsCommitmentLimits <- ProtoConverter
+        .required("acs_commitment_limits", acsCommitmentLimitsP)
+        .flatMap(AcsCommitmentLimits.fromProtoV32)
+
+    } yield SynchronizerLimits(transactionProtocolLimits, topologyLimits, acsCommitmentLimits)
+  }
+
+  def fromProtoV33(
+      synchronizerLimitsP: protoV33.SynchronizerLimits
+  ): ParsingResult[SynchronizerLimits] = {
+    val protoV33.SynchronizerLimits(
+      transactionProtocolLimitsP,
+      topologyLimitsP,
+      acsCommitmentLimitsP,
+    ) =
+      synchronizerLimitsP
+
+    for {
+      transactionProtocolLimits <- ProtoConverter
+        .required("transaction_protocol_limits", transactionProtocolLimitsP)
+        .flatMap(TransactionProtocolLimits.fromProtoV33)
+      topologyLimits <- ProtoConverter
+        .required("topology_limits", topologyLimitsP)
+        .flatMap(TopologyLimits.fromProtoV33)
+      acsCommitmentLimits <- ProtoConverter
+        .required("acs_commitment_limits", acsCommitmentLimitsP)
+        .flatMap(AcsCommitmentLimits.fromProtoV33)
+
+    } yield SynchronizerLimits(transactionProtocolLimits, topologyLimits, acsCommitmentLimits)
+  }
+}
+
+/** Size limits on collections within topology transactions.
+  *
+  * @param maxSigningKeysPerEntity
+  *   the largest number of signing keys an entity can be mapped to, where an entity is a member in
+  *   an [[com.digitalasset.canton.topology.transaction.OwnerToKeyMapping]] or a party in a
+  *   [[com.digitalasset.canton.topology.transaction.PartyToKeyMapping]]
+  * @param maxOwnersPerDecentralizedNamespace
+  *   the largest number of owners of a
+  *   [[com.digitalasset.canton.topology.transaction.DecentralizedNamespaceDefinition]]
+  * @param maxHostingParticipantsPerParty
+  *   the largest number of participants hosting a party in a
+  *   [[com.digitalasset.canton.topology.transaction.PartyToParticipant]]
+  * @param maxVettedPackagesPerParticipant
+  *   the largest number of packages a participant can vet in a
+  *   [[com.digitalasset.canton.topology.transaction.VettedPackages]]
+  * @param maxSequencersPerSynchronizer
+  *   the largest number of active and observer sequencers in a
+  *   [[com.digitalasset.canton.topology.transaction.SequencerSynchronizerState]]
+  * @param maxMediatorsPerGroup
+  *   the largest number of active and observer mediators in a
+  *   [[com.digitalasset.canton.topology.transaction.MediatorSynchronizerState]]
+  * @param maxSignaturesPerTransaction
+  *   the largest number of signatures, single and multi transaction combined, on a
+  *   [[com.digitalasset.canton.topology.transaction.SignedTopologyTransaction]]
+  * @param maxTransactionHashesPerMultiSignature
+  *   the largest number of transaction hashes a
+  *   [[com.digitalasset.canton.topology.transaction.MultiTransactionSignature]] covers
+  * @param maxTransactionsPerBroadcast
+  *   the largest number of signed topology transactions in a
+  *   [[com.digitalasset.canton.topology.transaction.SignedTopologyTransactions]], such as a
+  *   topology transactions broadcast
+  * @param maxEndpointsPerSequencerConnection
+  *   the largest number of endpoints in the connection of a
+  *   [[com.digitalasset.canton.topology.transaction.LsuSequencerConnectionSuccessor]]
+  */
+final case class TopologyLimits(
+    maxSigningKeysPerEntity: PositiveInt,
+    maxOwnersPerDecentralizedNamespace: PositiveInt,
+    maxHostingParticipantsPerParty: PositiveInt,
+    maxVettedPackagesPerParticipant: PositiveInt,
+    maxSequencersPerSynchronizer: PositiveInt,
+    maxMediatorsPerGroup: PositiveInt,
+    maxSignaturesPerTransaction: PositiveInt,
+    maxTransactionHashesPerMultiSignature: PositiveInt,
+    maxTransactionsPerBroadcast: PositiveInt,
+    maxEndpointsPerSequencerConnection: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[TopologyLimits] = TopologyLimits
+
+  // v32 has no max vetted packages, sequencers, mediators, signatures, transaction hashes,
+  // transactions per broadcast or endpoints, so they fall back to the default on the way back in
+  def toProtoV32: protoV32.TopologyLimits = protoV32.TopologyLimits(
+    maxSigningKeysPerEntity = maxSigningKeysPerEntity.value,
+    maxOwnersPerDecentralizedNamespace = maxOwnersPerDecentralizedNamespace.value,
+    maxHostingParticipantsPerParty = maxHostingParticipantsPerParty.value,
+  )
+
+  def toProtoV33: protoV33.TopologyLimits = protoV33.TopologyLimits(
+    maxSigningKeysPerEntity = maxSigningKeysPerEntity.value,
+    maxOwnersPerDecentralizedNamespace = maxOwnersPerDecentralizedNamespace.value,
+    maxHostingParticipantsPerParty = maxHostingParticipantsPerParty.value,
+    maxVettedPackagesPerParticipant = maxVettedPackagesPerParticipant.value,
+    maxSequencersPerSynchronizer = maxSequencersPerSynchronizer.value,
+    maxMediatorsPerGroup = maxMediatorsPerGroup.value,
+    maxSignaturesPerTransaction = maxSignaturesPerTransaction.value,
+    maxTransactionHashesPerMultiSignature = maxTransactionHashesPerMultiSignature.value,
+    maxTransactionsPerBroadcast = maxTransactionsPerBroadcast.value,
+    maxEndpointsPerSequencerConnection = maxEndpointsPerSequencerConnection.value,
+  )
+}
+
+object TopologyLimits extends PrettyPrintingCompanion[TopologyLimits] {
+
+  override protected val pretty: Pretty[TopologyLimits] = prettyOfClass(
+    param("max signing keys per entity", _.maxSigningKeysPerEntity),
+    param("max owners per decentralized namespace", _.maxOwnersPerDecentralizedNamespace),
+    param("max hosting participants per party", _.maxHostingParticipantsPerParty),
+    param("max vetted packages per participant", _.maxVettedPackagesPerParticipant),
+    param("max sequencers per synchronizer", _.maxSequencersPerSynchronizer),
+    param("max mediators per group", _.maxMediatorsPerGroup),
+    param("max signatures per transaction", _.maxSignaturesPerTransaction),
+    param("max transaction hashes per multi signature", _.maxTransactionHashesPerMultiSignature),
+    param("max transactions per broadcast", _.maxTransactionsPerBroadcast),
+    param("max endpoints per sequencer connection", _.maxEndpointsPerSequencerConnection),
+  )
+
+  lazy val default: TopologyLimits = TopologyLimits(
+    maxSigningKeysPerEntity = PositiveInt.tryCreate(20),
+    maxOwnersPerDecentralizedNamespace = PositiveInt.tryCreate(100),
+    maxHostingParticipantsPerParty = PositiveInt.tryCreate(100),
+    maxVettedPackagesPerParticipant = PositiveInt.tryCreate(10_000),
+    maxSequencersPerSynchronizer = PositiveInt.tryCreate(100),
+    maxMediatorsPerGroup = PositiveInt.tryCreate(100),
+    maxSignaturesPerTransaction = PositiveInt.tryCreate(1000),
+    maxTransactionHashesPerMultiSignature = PositiveInt.tryCreate(1000),
+    maxTransactionsPerBroadcast = PositiveInt.tryCreate(1000),
+    maxEndpointsPerSequencerConnection = PositiveInt.tryCreate(10),
+  )
+
+  def fromProtoV32(
+      topologyLimitsP: protoV32.TopologyLimits
+  ): ParsingResult[TopologyLimits] = {
+    val protoV32.TopologyLimits(
+      maxSigningKeysPerEntityP,
+      maxOwnersPerDecentralizedNamespaceP,
+      maxHostingParticipantsPerPartyP,
+    ) = topologyLimitsP
+
+    for {
+      maxSigningKeysPerEntity <- ProtoConverter.parsePositiveInt(
+        "max_signing_keys_per_entity",
+        maxSigningKeysPerEntityP,
+      )
+      maxOwnersPerDecentralizedNamespace <- ProtoConverter.parsePositiveInt(
+        "max_owners_per_decentralized_namespace",
+        maxOwnersPerDecentralizedNamespaceP,
+      )
+      maxHostingParticipantsPerParty <- ProtoConverter.parsePositiveInt(
+        "max_hosting_participants_per_party",
+        maxHostingParticipantsPerPartyP,
+      )
+    } yield TopologyLimits(
+      maxSigningKeysPerEntity,
+      maxOwnersPerDecentralizedNamespace,
+      maxHostingParticipantsPerParty,
+      default.maxVettedPackagesPerParticipant,
+      default.maxSequencersPerSynchronizer,
+      default.maxMediatorsPerGroup,
+      default.maxSignaturesPerTransaction,
+      default.maxTransactionHashesPerMultiSignature,
+      default.maxTransactionsPerBroadcast,
+      default.maxEndpointsPerSequencerConnection,
+    )
+  }
+
+  def fromProtoV33(
+      topologyLimitsP: protoV33.TopologyLimits
+  ): ParsingResult[TopologyLimits] = {
+    val protoV33.TopologyLimits(
+      maxSigningKeysPerEntityP,
+      maxOwnersPerDecentralizedNamespaceP,
+      maxHostingParticipantsPerPartyP,
+      maxVettedPackagesPerParticipantP,
+      maxSequencersPerSynchronizerP,
+      maxMediatorsPerGroupP,
+      maxSignaturesPerTransactionP,
+      maxTransactionHashesPerMultiSignatureP,
+      maxTransactionsPerBroadcastP,
+      maxEndpointsPerSequencerConnectionP,
+    ) = topologyLimitsP
+
+    for {
+      maxSigningKeysPerEntity <- ProtoConverter.parsePositiveInt(
+        "max_signing_keys_per_entity",
+        maxSigningKeysPerEntityP,
+      )
+      maxOwnersPerDecentralizedNamespace <- ProtoConverter.parsePositiveInt(
+        "max_owners_per_decentralized_namespace",
+        maxOwnersPerDecentralizedNamespaceP,
+      )
+      maxHostingParticipantsPerParty <- ProtoConverter.parsePositiveInt(
+        "max_hosting_participants_per_party",
+        maxHostingParticipantsPerPartyP,
+      )
+      maxVettedPackagesPerParticipant <- ProtoConverter.parsePositiveInt(
+        "max_vetted_packages_per_participant",
+        maxVettedPackagesPerParticipantP,
+      )
+      maxSequencersPerSynchronizer <- ProtoConverter.parsePositiveInt(
+        "max_sequencers_per_synchronizer",
+        maxSequencersPerSynchronizerP,
+      )
+      maxMediatorsPerGroup <- ProtoConverter.parsePositiveInt(
+        "max_mediators_per_group",
+        maxMediatorsPerGroupP,
+      )
+      maxSignaturesPerTransaction <- ProtoConverter.parsePositiveInt(
+        "max_signatures_per_transaction",
+        maxSignaturesPerTransactionP,
+      )
+      maxTransactionHashesPerMultiSignature <- ProtoConverter.parsePositiveInt(
+        "max_transaction_hashes_per_multi_signature",
+        maxTransactionHashesPerMultiSignatureP,
+      )
+      maxTransactionsPerBroadcast <- ProtoConverter.parsePositiveInt(
+        "max_transactions_per_broadcast",
+        maxTransactionsPerBroadcastP,
+      )
+      maxEndpointsPerSequencerConnection <- ProtoConverter.parsePositiveInt(
+        "max_endpoints_per_sequencer_connection",
+        maxEndpointsPerSequencerConnectionP,
+      )
+    } yield TopologyLimits(
+      maxSigningKeysPerEntity,
+      maxOwnersPerDecentralizedNamespace,
+      maxHostingParticipantsPerParty,
+      maxVettedPackagesPerParticipant,
+      maxSequencersPerSynchronizer,
+      maxMediatorsPerGroup,
+      maxSignaturesPerTransaction,
+      maxTransactionHashesPerMultiSignature,
+      maxTransactionsPerBroadcast,
+      maxEndpointsPerSequencerConnection,
+    )
   }
 }
 
@@ -85,6 +341,8 @@ final case class TransactionProtocolLimits(
     maxTransactionRootViews: PositiveInt,
     maxTransactionSubViews: PositiveInt,
     maxTransactionTreeDepth: PositiveInt,
+    maxSignaturesPerEnvelope: PositiveInt,
+    maxQuorumSize: PositiveInt,
 ) extends PrettyPrintingFromCompanion {
   override def prettyCompanion: PrettyPrintingCompanion[TransactionProtocolLimits] =
     TransactionProtocolLimits
@@ -115,7 +373,115 @@ final case class TransactionProtocolLimits(
     maxTransactionRootViews = maxTransactionRootViews.value,
     maxTransactionSubViews = maxTransactionSubViews.value,
     maxTransactionTreeDepth = maxTransactionTreeDepth.value,
+    maxSignaturesPerEnvelope = maxSignaturesPerEnvelope.value,
+    maxQuorumSize = maxQuorumSize.value,
   )
+
+  def toProtoV33: protoV33.TransactionProtocolLimits = protoV33.TransactionProtocolLimits(
+    maxActAs = maxActAs.value,
+    maxEnvelopes = maxEnvelopes.value,
+    maxRecipientsPerBatch = maxRecipientsPerBatch.value,
+    maxRecipientsTrees = maxRecipientsTrees.value,
+    maxRecipientsPerRecipientsTreeLevel = maxRecipientsPerRecipientsTreeLevel.value,
+    maxChildrenPerRecipientsTreeLevel = maxChildrenPerRecipientsTreeLevel.value,
+    maxRecipientsPerEnvelope = maxRecipientsPerEnvelope.value,
+    maxRecipientsTreeDepth = maxRecipientsTreeDepth.value,
+    maxTransactionRootViews = maxTransactionRootViews.value,
+    maxTransactionSubViews = maxTransactionSubViews.value,
+    maxTransactionTreeDepth = maxTransactionTreeDepth.value,
+    maxSignaturesPerEnvelope = maxSignaturesPerEnvelope.value,
+    maxQuorumSize = maxQuorumSize.value,
+  )
+}
+
+final case class AcsCommitmentLimits(
+    maxCommitmentSizeBytes: PositiveInt,
+    maxCommitmentSummarySizeBytes: PositiveInt,
+    maxAddressedCounterparticipants: PositiveInt,
+    maxUnsentDigests: PositiveInt,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[AcsCommitmentLimits] = AcsCommitmentLimits
+
+  def toProtoV32: protoV32.AcsCommitmentLimits = protoV32.AcsCommitmentLimits(
+    maxAcsCommitmentSizeBytes = maxCommitmentSizeBytes.value,
+    maxAcsCommitmentSummarySizeBytes = maxCommitmentSummarySizeBytes.value,
+    maxAddressedCounterparticipants = maxAddressedCounterparticipants.value,
+    maxUnsentDigests = maxUnsentDigests.value,
+  )
+
+  def toProtoV33: protoV33.AcsCommitmentLimits = protoV33.AcsCommitmentLimits(
+    maxAcsCommitmentSizeBytes = maxCommitmentSizeBytes.value,
+    maxAcsCommitmentSummarySizeBytes = maxCommitmentSummarySizeBytes.value,
+    maxAddressedCounterparticipants = maxAddressedCounterparticipants.value,
+    maxUnsentDigests = maxUnsentDigests.value,
+  )
+}
+
+object AcsCommitmentLimits extends PrettyPrintingCompanion[AcsCommitmentLimits] {
+  override protected val pretty: Pretty[AcsCommitmentLimits] = prettyOfClass(
+    param("max commitment size bytes", _.maxCommitmentSizeBytes),
+    param("max commitment summary size bytes", _.maxCommitmentSummarySizeBytes),
+    param("max addressed counterparticipants", _.maxAddressedCounterparticipants),
+    param("max unsent digests", _.maxUnsentDigests),
+  )
+
+  lazy val default: AcsCommitmentLimits = AcsCommitmentLimits(
+    maxCommitmentSizeBytes = PositiveInt.tryCreate(10 * 1024), // 10KB
+    maxCommitmentSummarySizeBytes = PositiveInt.tryCreate(1024 * 1024), // 1MB
+    maxAddressedCounterparticipants =
+      PositiveInt.tryCreate(10_000), // Same as old transaction default
+    maxUnsentDigests = PositiveInt.tryCreate(10_000),
+  )
+
+  def fromProtoV32(limitsP: protoV32.AcsCommitmentLimits): ParsingResult[AcsCommitmentLimits] =
+    for {
+      maxCommitmentSizeBytes <- ProtoConverter.parsePositiveInt(
+        "max_commitment_size_bytes",
+        limitsP.maxAcsCommitmentSizeBytes,
+      )
+      maxCommitmentSummarySizeBytes <- ProtoConverter.parsePositiveInt(
+        "max_commitment_summary_size_bytes",
+        limitsP.maxAcsCommitmentSummarySizeBytes,
+      )
+      maxAddressedCounterparticipants <- ProtoConverter.parsePositiveInt(
+        "max_addressed_counterparticipants",
+        limitsP.maxAddressedCounterparticipants,
+      )
+      maxUnsentDigests <- ProtoConverter.parsePositiveInt(
+        "max_unsent_digests",
+        limitsP.maxUnsentDigests,
+      )
+    } yield AcsCommitmentLimits(
+      maxCommitmentSizeBytes,
+      maxCommitmentSummarySizeBytes,
+      maxAddressedCounterparticipants,
+      maxUnsentDigests,
+    )
+
+  def fromProtoV33(limitsP: protoV33.AcsCommitmentLimits): ParsingResult[AcsCommitmentLimits] =
+    for {
+      maxCommitmentSizeBytes <- ProtoConverter.parsePositiveInt(
+        "max_commitment_size_bytes",
+        limitsP.maxAcsCommitmentSizeBytes,
+      )
+      maxCommitmentSummarySizeBytes <- ProtoConverter.parsePositiveInt(
+        "max_commitment_summary_size_bytes",
+        limitsP.maxAcsCommitmentSummarySizeBytes,
+      )
+      maxAddressedCounterparticipants <- ProtoConverter.parsePositiveInt(
+        "max_addressed_counterparticipants",
+        limitsP.maxAddressedCounterparticipants,
+      )
+      maxUnsentDigests <- ProtoConverter.parsePositiveInt(
+        "max_unsent_digests",
+        limitsP.maxUnsentDigests,
+      )
+    } yield AcsCommitmentLimits(
+      maxCommitmentSizeBytes,
+      maxCommitmentSummarySizeBytes,
+      maxAddressedCounterparticipants,
+      maxUnsentDigests,
+    )
 }
 
 object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProtocolLimits] {
@@ -132,6 +498,8 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
     param("max transaction root views", _.maxTransactionRootViews),
     param("max transaction sub views", _.maxTransactionSubViews),
     param("max transaction tree depth", _.maxTransactionTreeDepth),
+    param("max signatures per envelope", _.maxSignaturesPerEnvelope),
+    param("max quorum size", _.maxQuorumSize),
   )
 
   lazy val default: TransactionProtocolLimits =
@@ -147,26 +515,19 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViews = PositiveInt.tryCreate(1_000_000),
       maxTransactionSubViews = PositiveInt.tryCreate(10_000_000),
       maxTransactionTreeDepth = PositiveInt.MaxValue,
-    )
-  // TODO(i35890): Update default values for PVDev (to be upgraded to PV37 when set)
-  lazy val defaultForProtoVDev: TransactionProtocolLimits = default
-  lazy val max: TransactionProtocolLimits =
-    TransactionProtocolLimits(
-      maxActAs = PositiveInt.MaxValue,
-      maxEnvelopes = PositiveInt.MaxValue,
-      maxRecipientsPerBatch = PositiveInt.MaxValue,
-      maxRecipientsTrees = PositiveInt.MaxValue,
-      maxRecipientsPerRecipientsTreeLevel = PositiveInt.MaxValue,
-      maxChildrenPerRecipientsTreeLevel = PositiveInt.MaxValue,
-      maxRecipientsPerEnvelope = PositiveInt.MaxValue,
-      maxRecipientsTreeDepth = PositiveInt.MaxValue,
-      maxTransactionRootViews = PositiveInt.MaxValue,
-      maxTransactionSubViews = PositiveInt.MaxValue,
-      maxTransactionTreeDepth = PositiveInt.MaxValue,
+      maxSignaturesPerEnvelope = PositiveInt.tryCreate(1_000),
+      maxQuorumSize = PositiveInt.tryCreate(100_000_000),
     )
 
-  /** Common parsing logic for proto versions 31 and 32, which have identical fields. */
-  private def fromProtoV3132(
+  /** Common parsing logic for all proto versions, which only differ in whether
+    * maxSignaturesPerEnvelope and maxQuorumSize are carried on the wire.
+    *
+    * @param maxSignaturesPerEnvelope
+    *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
+    * @param maxQuorumSize
+    *   carried on v32 and later, not in v31, enforced on >= ProtocolVersion.newBoundsOnPV37
+    */
+  private def fromProtoCommon(
       maxActAsP: Int,
       maxEnvelopesP: Int,
       maxRecipientsPerBatchP: Int,
@@ -178,6 +539,8 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViewsP: Int,
       maxTransactionSubViewsP: Int,
       maxTransactionTreeDepthP: Int,
+      maxSignaturesPerEnvelope: PositiveInt,
+      maxQuorumSize: PositiveInt,
   ): ParsingResult[TransactionProtocolLimits] =
     for {
       maxActAs <- ProtoConverter.parsePositiveInt("max_act_as", maxActAsP)
@@ -230,6 +593,8 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViews = maxTransactionRootViews,
       maxTransactionSubViews = maxTransactionSubViews,
       maxTransactionTreeDepth = maxTransactionTreeDepth,
+      maxSignaturesPerEnvelope = maxSignaturesPerEnvelope,
+      maxQuorumSize = maxQuorumSize,
     )
 
   def fromProtoV31(
@@ -249,7 +614,7 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionTreeDepthP,
     ) = transactionProtocolLimitsP
 
-    fromProtoV3132(
+    fromProtoCommon(
       maxActAsP,
       maxEnvelopesP,
       maxRecipientsPerBatchP,
@@ -261,6 +626,10 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViewsP,
       maxTransactionSubViewsP,
       maxTransactionTreeDepthP,
+      // maxSignaturesPerEnvelope was introduced in proto V32
+      maxSignaturesPerEnvelope = TransactionProtocolLimits.default.maxSignaturesPerEnvelope,
+      // maxQuorumSize was introduced in Proto 32
+      maxQuorumSize = TransactionProtocolLimits.default.maxQuorumSize,
     )
   }
 
@@ -279,9 +648,42 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViewsP,
       maxTransactionSubViewsP,
       maxTransactionTreeDepthP,
+      maxSignaturesPerEnvelopeP,
+      maxQuorumSizeP,
     ) = transactionProtocolLimitsP
 
-    fromProtoV3132(
+    for {
+      maxSignaturesPerEnvelope <- ProtoConverter.parsePositiveInt(
+        "max_signatures_per_envelope",
+        maxSignaturesPerEnvelopeP,
+      )
+      maxQuorumSize <- ProtoConverter.parsePositiveInt(
+        "max_quorum_size",
+        maxQuorumSizeP,
+      )
+
+      limits <- fromProtoCommon(
+        maxActAsP,
+        maxEnvelopesP,
+        maxRecipientsPerBatchP,
+        maxRecipientsTreesP,
+        maxRecipientsPerRecipientsTreeLevelP,
+        maxChildrenPerRecipientsTreeLevelP,
+        maxRecipientsPerEnvelopeP,
+        maxRecipientsTreeDepthP,
+        maxTransactionRootViewsP,
+        maxTransactionSubViewsP,
+        maxTransactionTreeDepthP,
+        maxSignaturesPerEnvelope,
+        maxQuorumSize,
+      )
+    } yield limits
+  }
+
+  def fromProtoV33(
+      transactionProtocolLimitsP: protoV33.TransactionProtocolLimits
+  ): ParsingResult[TransactionProtocolLimits] = {
+    val protoV33.TransactionProtocolLimits(
       maxActAsP,
       maxEnvelopesP,
       maxRecipientsPerBatchP,
@@ -293,6 +695,35 @@ object TransactionProtocolLimits extends PrettyPrintingCompanion[TransactionProt
       maxTransactionRootViewsP,
       maxTransactionSubViewsP,
       maxTransactionTreeDepthP,
-    )
+      maxSignaturesPerEnvelopeP,
+      maxQuorumSizeP,
+    ) = transactionProtocolLimitsP
+
+    for {
+      maxSignaturesPerEnvelope <- ProtoConverter.parsePositiveInt(
+        "max_signatures_per_envelope",
+        maxSignaturesPerEnvelopeP,
+      )
+      maxQuorumSize <- ProtoConverter.parsePositiveInt(
+        "max_quorum_size",
+        maxQuorumSizeP,
+      )
+
+      limits <- fromProtoCommon(
+        maxActAsP,
+        maxEnvelopesP,
+        maxRecipientsPerBatchP,
+        maxRecipientsTreesP,
+        maxRecipientsPerRecipientsTreeLevelP,
+        maxChildrenPerRecipientsTreeLevelP,
+        maxRecipientsPerEnvelopeP,
+        maxRecipientsTreeDepthP,
+        maxTransactionRootViewsP,
+        maxTransactionSubViewsP,
+        maxTransactionTreeDepthP,
+        maxSignaturesPerEnvelope,
+        maxQuorumSize,
+      )
+    } yield limits
   }
 }

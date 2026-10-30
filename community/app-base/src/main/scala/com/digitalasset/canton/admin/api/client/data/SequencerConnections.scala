@@ -6,7 +6,7 @@ package com.digitalasset.canton.admin.api.client.data
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.{Id, Monad}
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
@@ -14,6 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.sequencing.{
+  SequencerConnectionPenaltyConfig as SequencerConnectionPenaltyConfigInternal,
   SequencerConnectionPoolDelays as SequencerConnectionPoolDelaysInternal,
   SequencerConnectionValidation as SequencerConnectionValidationInternal,
   SequencerConnections as SequencerConnectionsInternal,
@@ -35,6 +36,7 @@ final case class SequencerConnections(
     submissionRequestAmplification: SubmissionRequestAmplification,
     sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
     subscriptionLivenessLimits: SubscriptionLivenessLimits,
+    sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
 ) extends PrettyPrintingFromCompanion {
   require(
     aliasToConnection.sizeIs >= sequencerTrustThreshold.unwrap,
@@ -128,6 +130,7 @@ final case class SequencerConnections(
         submissionRequestAmplification.toInternal,
         sequencerConnectionPoolDelays.toInternal,
         subscriptionLivenessLimits.toInternal,
+        sequencerConnectionPenaltyConfig.toInternal,
       )
       .valueOr(err => throw new IllegalArgumentException(s"Invariants not respected: $err"))
 }
@@ -141,6 +144,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       param("submission request amplification", _.submissionRequestAmplification),
       param("sequencer connection pool delays", _.sequencerConnectionPoolDelays),
       param("subscription liveness limits", _.subscriptionLivenessLimits),
+      param("sequencer connection penalty", _.sequencerConnectionPenaltyConfig),
     )
 
   implicit private[data] def sequencerConnectionsToInternalTransformer
@@ -159,6 +163,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
       sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+      sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
     )
 
   def many(
@@ -168,6 +173,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
       subscriptionLivenessLimits: SubscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
   ): Either[String, SequencerConnections] = {
     val repeatedAliases = connections.groupBy(_.sequencerAlias).filter { case (_, connections) =>
       connections.lengthCompare(1) > 0
@@ -187,6 +193,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
             submissionRequestAmplification,
             sequencerConnectionPoolDelays,
             subscriptionLivenessLimits,
+            sequencerConnectionPenaltyConfig,
           )
         )
         .leftMap(_.getMessage)
@@ -200,6 +207,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
       subscriptionLivenessLimits: SubscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
   ): Either[String, SequencerConnections] =
     for {
       connectionsNE <- NonEmpty.from(connections).toRight("connections should not be empty")
@@ -210,6 +218,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
         submissionRequestAmplification,
         sequencerConnectionPoolDelays,
         subscriptionLivenessLimits,
+        sequencerConnectionPenaltyConfig,
       )
     } yield result
 
@@ -222,6 +231,8 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays =
         SequencerConnectionPoolDelays.default,
       subscriptionLivenessLimits: SubscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig =
+        SequencerConnectionPenaltyConfig.default,
   )(implicit consoleEnvironment: ConsoleEnvironment): SequencerConnections =
     many(
       connections,
@@ -230,6 +241,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
       submissionRequestAmplification,
       sequencerConnectionPoolDelays,
       subscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig,
     ).valueOr(consoleEnvironment.raiseError)
 
   private[canton] def fromInternal(internal: SequencerConnectionsInternal): SequencerConnections =
@@ -243,6 +255,7 @@ object SequencerConnections extends PrettyPrintingCompanion[SequencerConnections
         SubmissionRequestAmplification.fromInternal(internal.submissionRequestAmplification),
         SequencerConnectionPoolDelays.fromInternal(internal.sequencerConnectionPoolDelays),
         SubscriptionLivenessLimits.fromInternal(internal.subscriptionLivenessLimits),
+        SequencerConnectionPenaltyConfig.fromInternal(internal.sequencerConnectionPenaltyConfig),
       )
       .valueOr(err =>
         throw new IllegalStateException(
@@ -395,4 +408,61 @@ object SubscriptionLivenessLimits extends PrettyPrintingCompanion[SubscriptionLi
       internal: SubscriptionLivenessLimitsInternal
   ): SubscriptionLivenessLimits =
     internal.transformInto[SubscriptionLivenessLimits]
+}
+
+/** Configuration of the penalty mechanism for sequencer connections.
+  *
+  * @param enabled
+  *   Whether the penalty mechanism is enabled. If disabled, penalties are still tracked but ignored
+  *   when selecting sequencers.
+  * @param decayInterval
+  *   Interval at which the penalties of the sequencers in the connection pool are decayed.
+  * @param halfLife
+  *   Half-life of a sequencer's penalty. The penalty is reduced by half over this duration.
+  * @param zeroThreshold
+  *   Decayed penalties below this value are reset to 0 so that a sequencer whose penalty has been
+  *   increased can start over after a bounded number of decays.
+  */
+final case class SequencerConnectionPenaltyConfig(
+    enabled: Boolean,
+    decayInterval: config.PositiveFiniteDuration,
+    halfLife: config.PositiveFiniteDuration,
+    zeroThreshold: PositiveDouble,
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerConnectionPenaltyConfig] =
+    SequencerConnectionPenaltyConfig
+
+  def withDecayInterval(
+      interval: config.PositiveFiniteDuration
+  ): SequencerConnectionPenaltyConfig =
+    copy(decayInterval = interval)
+
+  def withHalfLife(halfLife: config.PositiveFiniteDuration): SequencerConnectionPenaltyConfig =
+    copy(halfLife = halfLife)
+
+  def withZeroThreshold(zeroThreshold: PositiveDouble): SequencerConnectionPenaltyConfig =
+    copy(zeroThreshold = zeroThreshold)
+
+  def disable(): SequencerConnectionPenaltyConfig = copy(enabled = false)
+
+  private[canton] def toInternal: SequencerConnectionPenaltyConfigInternal =
+    this.transformInto[SequencerConnectionPenaltyConfigInternal]
+}
+
+object SequencerConnectionPenaltyConfig
+    extends PrettyPrintingCompanion[SequencerConnectionPenaltyConfig] {
+  override protected val pretty: Pretty[SequencerConnectionPenaltyConfig] = prettyOfClass(
+    param("enabled", _.enabled),
+    param("decayInterval", _.decayInterval),
+    param("halfLife", _.halfLife),
+    param("zeroThreshold", _.zeroThreshold),
+  )
+
+  val default: SequencerConnectionPenaltyConfig =
+    SequencerConnectionPenaltyConfigInternal.default.transformInto[SequencerConnectionPenaltyConfig]
+
+  private[canton] def fromInternal(
+      internal: SequencerConnectionPenaltyConfigInternal
+  ): SequencerConnectionPenaltyConfig =
+    internal.transformInto[SequencerConnectionPenaltyConfig]
 }

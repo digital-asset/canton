@@ -29,6 +29,10 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.transaction.metrics.{
+  TransactionNodeHistograms,
+  TransactionNodeMetrics,
+}
 
 import scala.collection.concurrent.TrieMap
 
@@ -87,6 +91,8 @@ class ParticipantHistograms(val parent: MetricName)(implicit
     )
 
   val trafficEnforcement = new TrafficEnforcementInventory(prefix)
+
+  val transactionNode = new TransactionNodeHistograms(prefix)
 }
 
 class ParticipantMetrics(
@@ -149,6 +155,12 @@ class ParticipantMetrics(
   val trafficEnforcement: TrafficEnforcementMetrics =
     new TrafficEnforcementMetrics(
       inventory.trafficEnforcement,
+      openTelemetryMetricsFactory,
+    )
+
+  val transactionNode: TransactionNodeMetrics =
+    new TransactionNodeMetrics(
+      inventory.transactionNode,
       openTelemetryMetricsFactory,
     )
 

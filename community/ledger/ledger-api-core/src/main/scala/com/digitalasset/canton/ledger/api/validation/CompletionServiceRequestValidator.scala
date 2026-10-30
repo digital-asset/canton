@@ -22,21 +22,37 @@ object CompletionServiceRequestValidator {
   def validateCompletionByHash(
       hash: ByteString
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, ByteString] =
-    Either.cond(
-      !hash.isEmpty,
-      hash,
-      invalidArgument("Missing field: transaction_hash"),
-    )
+    Either
+      .cond(
+        !hash.isEmpty,
+        hash,
+        invalidArgument("Missing field: transaction_hash"),
+      )
+      .flatMap(hash =>
+        validateByteSizeLimit(
+          bytes = hash,
+          fieldName = "transaction_hash",
+          limit =
+            sizeLimitsConfig.publicLapiSizeConfig.getCompletionByHashRequest.transactionHashSizeLimit,
+        ).map(_ => hash)
+      )
 
   def validateGrpcCompletionStreamRequest(
       request: GrpcCompletionStreamRequest
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, CompletionStreamRequest] =
     for {
       userId <- requireUserId(request.userId, "user_id")
+      _ <- validateCardinality(
+        values = request.parties,
+        fieldName = "parties",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.completionStreamRequest.partiesSizeLimit,
+      )
       parties <- requireParties(request.parties.toSet)
       offsetO <- ParticipantOffsetValidator.validateNonNegative(
         request.beginExclusive,
@@ -72,9 +88,15 @@ object CompletionServiceRequestValidator {
       request: GetCompletionsRequest,
       ledgerEnd: Option[Offset],
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, GetCompletionsStreamRequest] =
     for {
+      _ <- validateCardinality(
+        values = request.parties,
+        fieldName = "parties",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.getCompletionsRequest.partiesSizeLimit,
+      )
       parties <- requireParties(request.parties.toSet)
       offsetO <- ParticipantOffsetValidator.validateNonNegative(
         request.beginExclusive,

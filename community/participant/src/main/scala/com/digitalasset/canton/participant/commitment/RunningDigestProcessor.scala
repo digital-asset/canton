@@ -6,12 +6,12 @@ package com.digitalasset.canton.participant.commitment
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricHandle.Gauge
+import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdateContainer
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
-  Added,
-  ChangedTo,
+  Onboarding,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
@@ -48,13 +48,18 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   allCheckpointsFilter,
 }
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
-import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParameters,
+  LfContractId,
+  TopologyLimits,
+}
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   SynchronizerParametersState,
   TopologyTransaction,
+  TopologyTransactionDeserializationContext,
 }
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -393,46 +398,35 @@ class RunningDigestProcessorImpl(
                 // given n topology events at the same record time, when processing the i-th topology event (where i <= n),
                 // all effects of the previously processed topology events 1 <= j < i must be applied to the party to participant
                 // topology state, so that the classification correctly calculates the required digest updates.
-                Source(events)
-                  .statefulMapAsyncUSAndDrain(
+                PekkoUtil
+                  .futureSourceUS(
+                    classificationForTopologyChange(topoSnapshot, events).map(Source(_))
+                  )
+                  .statefulMap(() =>
                     // start with the noop change
                     TopologyChangeTracker.empty
-                  ) { (changeTracker, topoEvent) =>
-                    // determine the digests that need to be changed for adding or removing a party from this participant.
-                    topoEvent match {
-                      case ptp @ PartyToParticipantAuthorization(
-                            _,
-                            `thisLfParticipant`,
-                            (Added(_) | Revoked),
-                          ) =>
-                        FutureUnlessShutdown.pure(
-                          determineClassificationForLocalTopologyChange(
-                            context.timepoint.offset,
-                            topoSnapshot,
-                            ptp,
-                            changeTracker,
-                          )
-                        )
-
-                      // determine the digests that need to be changed for remote topology changes
-                      case ptp: PartyToParticipantAuthorization
-                          if ptp.participant != thisLfParticipant =>
-                        val (updatedChangeTracker, classification) =
-                          classificationForTopologyChange(ptp, changeTracker)
-                        FutureUnlessShutdown.pure(
-                          (
-                            updatedChangeTracker,
-                            classification
-                              .map(Source.single)
-                              .getOrElse(Source.empty[Classification]),
-                          )
-                        )
-
-                      // in all other cases, do nothing and return the unmodified change tracker
-                      case _ =>
-                        FutureUnlessShutdown.pure(changeTracker -> Source.empty[Classification])
-                    }
-                  }
+                  )(
+                    (changeTracker, classifiedTopoEvent) =>
+                      // determine the digests that need to be changed for adding or removing a party from this participant.
+                      if (classifiedTopoEvent.participant == thisLfParticipant)
+                        classifiedTopoEvent match {
+                          case hostingChange: PartyHostingChange =>
+                            determineClassificationForLocalTopologyChange(
+                              context.timepoint.offset,
+                              topoSnapshot,
+                              hostingChange,
+                              changeTracker,
+                            )
+                          case _: PartyOnboardingToParticipant =>
+                            changeTracker -> Source.empty[Classification]
+                        }
+                      else {
+                        val updatedChangeTracker =
+                          registerTopologyChangeInChangeTracker(classifiedTopoEvent, changeTracker)
+                        updatedChangeTracker -> Source.single(classifiedTopoEvent)
+                      },
+                    onComplete = _ => None,
+                  )
                   .flatten
                   .map(classification => other.withValue(classification))
               case InternalIndexService.AcsUpdate.AcsCommitment(_) =>
@@ -447,41 +441,90 @@ class RunningDigestProcessorImpl(
       .flatten
       .map(updateMetric(metrics.runningDigestProcessor.latestClassifiedRecordTime, _))
 
-  /** Determines the classification for a topology event and register the corresponding change in
-    * the topology change tracker.
+  /** Classifies the topology changes:
+    *   - Transitions to
+    *     [[com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Added]]
+    *     translate to the party being added.
+    *   - Transitions to
+    *     [[com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Revoked]]
+    *     and Onboarding translate to the party being removed if it was previously active.
+    *   - Transitions to
+    *     [[com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Onboarding]]
+    *     translate to the party being onboarded if it has not been active previously.
+    *   - [[com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.ChangedTo]]
+    *     merely change the permission and are therefore dropped.
+    *
+    * @param topologySnapshotBeforeChange
+    *   The snapshot at the record time of `events`, which excludes their own changes.
     */
+  // TODO(#36607): Extend the PartyToParticipantAuthorization events with enough information
+  //  so that these decisions can be read off without consulting the prior topology state.
+  //  The snapshot holds the state before all changes at the record
+  //  time, so this breaks if the changes of one record time span several updates.
   private def classificationForTopologyChange(
-      topologyEvent: PartyToParticipantAuthorization,
-      changeTracker: TopologyChangeTracker,
-  ): (TopologyChangeTracker, Option[Classification]) = {
-    val PartyToParticipantAuthorization(party, participant, authorizationEvent) = topologyEvent
-    authorizationEvent match {
-      case AuthorizationEvent.Onboarding(_) =>
-        changeTracker ->
-          Option(PartyOnboardingToParticipant(party, participant))
-
-      case AuthorizationEvent.Added(_) =>
-        changeTracker.addPartyToParticipant(party, participant) ->
-          Option(
-            PartyAddedToParticipant(
-              party,
-              participant,
-            )
+      topologySnapshotBeforeChange: TopologySnapshot,
+      events: Set[PartyToParticipantAuthorization],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PartyTopologyChange]] = {
+    val revokedOrOnboardingParties = events.collect {
+      case PartyToParticipantAuthorization(party, _, Revoked | Onboarding(_)) => party
+    }
+    for {
+      activeParticipantsOfParties <-
+        if (revokedOrOnboardingParties.isEmpty)
+          FutureUnlessShutdown.pure(Map.empty[LfPartyId, Set[LedgerParticipantId]])
+        else
+          getOnboardedParticipantsOfParties(
+            topologySnapshotBeforeChange,
+            revokedOrOnboardingParties,
           )
-
-      case AuthorizationEvent.Revoked =>
-        changeTracker.removePartyFromParticipant(party, participant) ->
-          Option(
-            PartyRemovedFromParticipant(
-              party,
-              participant,
-            )
-          )
-
-      case ChangedTo(_) =>
-        changeTracker -> Option.empty
+    } yield {
+      events.flatMap {
+        case PartyToParticipantAuthorization(party, participant, authorizationEvent) =>
+          authorizationEvent match {
+            case AuthorizationEvent.Added(_) =>
+              // An added party has previously not been active on the participant.
+              // So we add its contracts to the digests.
+              Iterable(PartyAddedToParticipant(party, participant))
+            case AuthorizationEvent.Revoked =>
+              // A revoked party could be onboarding or active.
+              // We remove its contracts from the digests only when it had been active previously.
+              Option.when(activeParticipantsOfParties.get(party).exists(_.contains(participant)))(
+                PartyRemovedFromParticipant(party, participant)
+              )
+            case AuthorizationEvent.Onboarding(_) =>
+              // When a party becomes onboarding on a participant that has already been active,
+              // we remove its contracts again from the digests because its counterparticipants
+              // will not update their running digest with further contract updates.
+              val classification =
+                if (activeParticipantsOfParties.get(party).exists(_.contains(participant))) {
+                  PartyRemovedFromParticipant(party, participant)
+                } else {
+                  PartyOnboardingToParticipant(party, participant)
+                }
+              Iterable(classification)
+            case AuthorizationEvent.ChangedTo(_) => Seq.empty
+          }
+        case _ => Seq.empty
+      }
     }
   }
+
+  /** Register the effect of a
+    * [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.PartyTopologyChange]] in
+    * the
+    * [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.TopologyChangeTracker]].
+    */
+  private def registerTopologyChangeInChangeTracker(
+      topologyEvent: PartyTopologyChange,
+      changeTracker: TopologyChangeTracker,
+  ): TopologyChangeTracker =
+    topologyEvent match {
+      case _: PartyOnboardingToParticipant => changeTracker
+      case PartyAddedToParticipant(party, participant) =>
+        changeTracker.addPartyToParticipant(party, participant)
+      case PartyRemovedFromParticipant(party, participant) =>
+        changeTracker.removePartyFromParticipant(party, participant)
+    }
 
   /** Determines the required digests that need to be updated by:
     *   1. loading the ACS of `partyAffectedByTopologyChange` to find all counterparties
@@ -521,28 +564,25 @@ class RunningDigestProcessorImpl(
   private def determineClassificationForLocalTopologyChange(
       offset: Offset,
       topologySnapshot: TopologySnapshot,
-      ptp: PartyToParticipantAuthorization,
+      hostingChange: PartyHostingChange,
       changeTracker: TopologyChangeTracker,
   )(implicit
       traceContext: TraceContext
   ): (TopologyChangeTracker, Source[Classification, NotUsed]) = {
-    val isPartyBeingAdded = ptp.authorizationEvent match {
-      case _: AuthorizationEvent.Added => true
-      case AuthorizationEvent.Revoked => false
-      case _: AuthorizationEvent.Onboarding | _: AuthorizationEvent.ChangedTo =>
-        ErrorUtil.invalidArgument(s"Unexpected authorization level at $offset: $ptp")
+    ErrorUtil.requireArgument(
+      hostingChange.participant == thisLfParticipant,
+      s"Unexpected topology change for non-local participant at $offset: $hostingChange",
+    )
+    val isPartyBeingAdded = hostingChange match {
+      case _: PartyAddedToParticipant => true
+      case _: PartyRemovedFromParticipant => false
     }
 
-    ErrorUtil.requireArgument(
-      ptp.participant == thisLfParticipant,
-      s"Unexpected topology change for non-local participant at $offset: $ptp",
-    )
-
-    val partyAffectedByTopologyChange = ptp.party
+    val partyAffectedByTopologyChange = hostingChange.party
 
     // determine the change for the topology change tracker and how the local participant's digest needs to be updated
-    val (updatedTracker, topologyChangeForThisLfParticipant) =
-      classificationForTopologyChange(ptp, changeTracker)
+    val updatedTracker =
+      registerTopologyChangeInChangeTracker(hostingChange, changeTracker)
 
     // Reset the metrics for the local party change processing
     metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(0)
@@ -642,10 +682,10 @@ class RunningDigestProcessorImpl(
 
     (
       updatedTracker,
-      // please see the scaladoc of this method as to why the topology change is emitted after the AcsUpdates for added parties,
+      // see the scaladoc of this method as to why the topology change is emitted after the AcsUpdates for added parties,
       // but before the AcsUpdates for removed parties.
-      if (isPartyBeingAdded) acsUpdates.concat(Source(topologyChangeForThisLfParticipant.toList))
-      else Source(topologyChangeForThisLfParticipant.toList).concat(acsUpdates),
+      if (isPartyBeingAdded) acsUpdates.concat(Source.single(hostingChange))
+      else Source.single(hostingChange).concat(acsUpdates),
     )
   }
 
@@ -815,8 +855,7 @@ class RunningDigestProcessorImpl(
       val (ks, doneF) = PekkoUtil.runSupervised(
         graph = graph,
         errorLogMessagePrefix = s"$toString - pipeline",
-        reportExceptionAtInfo =
-          _.isInstanceOf[SubscriptionWithCancelException.NonFailureCancellation],
+        reportExceptionAtInfo = RunningDigestProcessorImpl.logExpectedStreamExceptionsAtInfo,
       )
       (
         new CombinedKillSwitch(
@@ -916,7 +955,10 @@ class RunningDigestProcessorImpl(
       event: GenericTopologyEvent.SynchronizerParametersState,
       currentSynchronizerParams: DynamicSynchronizerParameters,
   )(implicit traceContext: TraceContext): Option[CheckpointType] =
-    TopologyTransaction.fromTrustedByteString(event.payload) match {
+    // Trusted bytes from the node's own topology store, so the limits in the context are never read.
+    TopologyTransaction.fromTrustedByteString(
+      TopologyTransactionDeserializationContext(TopologyLimits.default)
+    )(event.payload) match {
       case Left(error) => ErrorUtil.invalidArgument(error.message)
       case Right(topoTx) =>
         topoTx.selectMapping[SynchronizerParametersState] match {
@@ -949,4 +991,10 @@ object RunningDigestProcessorImpl {
       streamName = "acsUpdates",
       additionalRecoverable = InternalIndexService.retryOnPruningError,
     )
+
+  val logExpectedStreamExceptionsAtInfo: Throwable => Boolean = {
+    case _: LoggedApiException => true
+    case _: SubscriptionWithCancelException.NonFailureCancellation => true
+    case _ => false
+  }
 }

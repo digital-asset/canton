@@ -26,6 +26,7 @@ import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{
   ForceFlag,
@@ -182,6 +183,7 @@ package api {
       packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
       prefetchKeys: Seq[ApiContractKey],
       tapsMaxPasses: Option[PositiveInt],
+      accountId: Option[AccountId],
   ) extends PrettyPrinting {
 
     override protected def pretty: Pretty[Commands] = {
@@ -199,6 +201,7 @@ package api {
         paramIfDefined("synchronizerId", _.synchronizerId),
         paramIfNonEmpty("prefetchKeys", _.prefetchKeys.map(_.toString.unquoted)),
         paramIfDefined("tapsMaxPasses", _.tapsMaxPasses.map(_.value)),
+        paramIfDefined("accountId", _.accountId.map(_.unwrap.singleQuoted)),
         indicateOmittedFields,
       )
     }
@@ -221,6 +224,7 @@ package api {
         "readAs" -> commands.readAs,
         "submittedAt" -> commands.submittedAt,
         "deduplicationPeriod" -> commands.deduplicationPeriod,
+        "accountId" -> commands.accountId.map(_.unwrap),
       )
     }
   }

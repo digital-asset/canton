@@ -23,7 +23,12 @@ data RunType =
       numAssetsPerActor: Int
       transferBatchSize: Int
       payloadSize: Int |
-    NoRun
+  TriParty
+    with
+      numIssuers : Int
+      numAgents : Int
+      numAssetsPerIssuer : Int 
+      numAccountsPerIssuer: Int 
     deriving (Eq, Show)
 
 validPartyGrowth : PartyGrowth -> Bool
@@ -36,13 +41,13 @@ validRunType : RunType -> Bool
 validRunType a = case a of
   DvpRun numAssets acsGrowth payloadSize partyGrowth -> numAssets > 0 && acsGrowth > -1 && payloadSize >= 0 && validPartyGrowth partyGrowth
   TransferRun numAssetsPerActor transferBatchSize payloadSize -> numAssetsPerActor > 0 && transferBatchSize > 0 && payloadSize >= 0
-  NoRun -> False
+  TriParty numIssuers numAgents numAssetsPerIssuer numAccountsPerIssuer -> numIssuers > 0 && numAgents > 0 && numAssetsPerIssuer > 0 && numAccountsPerIssuer > 0
 
 runTypeCode : RunType -> Int
 runTypeCode a =  case a of
   DvpRun {} -> 0
   TransferRun {} -> 1
-  NoRun -> -1
+  TriParty {} -> 2
 
 template TestRun
   with
@@ -183,5 +188,6 @@ template ParticipationRequest
         controller master
         do
           exercise masterCid AddParticipant with party, role
+
 
 

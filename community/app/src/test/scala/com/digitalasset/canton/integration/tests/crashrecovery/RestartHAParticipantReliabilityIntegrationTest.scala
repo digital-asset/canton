@@ -181,6 +181,14 @@ class RestartHAParticipantReliabilityIntegrationTest
     (include(
       "Subscription failed with grpc-error: INTERNAL / Received unexpected EOS on empty DATA frame from server"
     )
-      or super.matchAcceptableErrorOrWarnMessage)
 
+    // UNKNOWN_CONTRACT_SYNCHRONIZERS has two causes, both expected here:
+    //  - routing may briefly lack synchronizer data during participant failover;
+    //  - the DvP workload consumes asset contracts and deliberately submits duplicates
+    //    (duplicateSubmissionRatio = 1.0), so a command can reference a contract that another
+    //    submission has just archived, which routing reports as "The following contracts have
+    //    been archived".
+      or include("UNKNOWN_CONTRACT_SYNCHRONIZERS")
+
+      or super.matchAcceptableErrorOrWarnMessage)
 }

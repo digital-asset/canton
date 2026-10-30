@@ -1,0 +1,42 @@
+name: Build and Publish Docker Base Image
+description: Builds and publishes the base Docker image for Canton.
+
+inputs:
+  gac_json:
+    description: Google Cloud service account credentials JSON
+    required: true
+  oci_registry:
+    description: OCI registry hostname
+    required: true
+  nightly_release:
+    description: Whether this is a nightly release
+    required: false
+    default: "false"
+  release_suffix:
+    description: Computed release suffix
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Log Docker into GCR
+      uses: ./.github/actions/docker/docker_log_into_gcr
+      with:
+        gac_json: ${{ inputs.gac_json }}
+        oci_registry: ${{ inputs.oci_registry }}
+
+    - name: Setup QEMU and Buildx
+      uses: ./.github/actions/docker/setup_qemu_and_buildx
+
+    - name: Set up Docker Compose
+      uses: docker/setup-compose-action@v2.4.0
+
+    - name: Build and publish docker base image
+      shell: bash
+      env:
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+        IS_NIGHTLY_RELEASE: ${{ inputs.nightly_release }}
+        OCI_REGISTRY: ${{ inputs.oci_registry }}
+        PUBLISH_IMAGES: "true"
+      run: |
+        ./docker/canton/build_canton_image.sh

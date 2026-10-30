@@ -8,11 +8,24 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, TopologyConfig}
 import com.digitalasset.canton.crypto.BaseCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
-import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
-import com.digitalasset.canton.topology.store.TopologyStoreId
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionTestFactory,
+}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.topology.transaction.OwnerToKeyMapping
+import com.digitalasset.canton.topology.store.{TopologyStoreId, ValidatedTopologyTransaction}
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
+import com.digitalasset.canton.topology.transaction.{
+  HostingParticipant,
+  OwnerToKeyMapping,
+  ParticipantPermission,
+  PartyToParticipant,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -39,6 +52,79 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
     )
 
     behave like ((closingOutboxQueue _).tupled) (createSynchronizerTopologyManager())
+
+    "reject change from Active to Onboarding state unless the optional checks are disabled" in {
+      // Protocol version 36 creates a v30 transaction, in which the synchronizer accepts this
+      // change on every protocol version
+      def mkPtp(serial: PositiveInt, state: HostingState) = mkTrans(
+        TopologyTransaction.tryCreate(
+          TopologyChangeOp.Replace,
+          serial,
+          PartyToParticipant.tryCreate(
+            party1b,
+            PositiveInt.one,
+            Seq(HostingParticipant(participant1, ParticipantPermission.Submission, state)),
+          ),
+          ProtocolVersion.v36,
+        )
+      )
+
+      def addChangeToOnboarding(disableOptionalTopologyChecks: Boolean) = {
+        val (_, manager) = createSynchronizerTopologyManager(
+          disableOptionalTopologyChecks = disableOptionalTopologyChecks
+        )
+        manager.store
+          .update(
+            SequencedTime(CantonTimestamp.Epoch),
+            EffectiveTime(CantonTimestamp.Epoch),
+            removals = Map.empty,
+            additions = Seq(ns1k1_k1, mkPtp(PositiveInt.one, HostingState.Active))
+              .map(ValidatedTopologyTransaction(_)),
+          )
+          .futureValueUS
+        manager
+          .add(
+            Seq(mkPtp(PositiveInt.two, HostingState.Onboarding)),
+            ForceFlags.none,
+            expectFullAuthorization = true,
+          )
+          .futureValueUS
+      }
+
+      addChangeToOnboarding(disableOptionalTopologyChecks = true) shouldBe a[Right[?, ?]]
+      inside(addChangeToOnboarding(disableOptionalTopologyChecks = false)) { case Left(error) =>
+        error.code shouldBe TopologyManagerError.InvalidTopologyMapping
+        error.cause should include(
+          s"Invalid hosting state transitions for party $party1b: $participant1: Active -> Onboarding"
+        )
+      }
+    }
+
+    "reject a transaction to authorize as is if its serial does not follow the existing one" in {
+      val rootCertificateWithSerialTwo = TopologyTransaction.tryCreate(
+        TopologyChangeOp.Replace,
+        PositiveInt.two,
+        ns1k1_k1.mapping,
+        testedProtocolVersion,
+      )
+
+      inside(
+        createSynchronizerTopologyManager()._2
+          .authorizeTransaction(
+            rootCertificateWithSerialTwo,
+            signingKeys = Seq(SigningKeys.key1.fingerprint),
+            namespacesToSignFor = Seq.empty,
+            testedProtocolVersion,
+            expectFullAuthorization = true,
+            ForceFlags.none,
+          )
+          .value
+          .futureValueUS
+      ) { case Left(error) =>
+        error.code shouldBe TopologyManagerError.SerialMismatch
+        error.cause should include("expected serial Some(1)")
+      }
+    }
 
   }
 
@@ -219,7 +305,8 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
     )
 
   private def createSynchronizerTopologyManager(
-      maxUnsentQueueSize: NonNegativeInt = NonNegativeInt.tryCreate(10)
+      maxUnsentQueueSize: NonNegativeInt = NonNegativeInt.tryCreate(10),
+      disableOptionalTopologyChecks: Boolean = false,
   ) = {
     val outbox = new SynchronizerOutboxQueue(timeouts, loggerFactory)
     val manager = new SynchronizerTopologyManager(
@@ -238,7 +325,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
       ),
       outbox,
       dispatchQueueBackpressureLimit = maxUnsentQueueSize,
-      disableOptionalTopologyChecks = false,
+      disableOptionalTopologyChecks = disableOptionalTopologyChecks,
       exitOnFatalFailures = exitOnFatal,
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,

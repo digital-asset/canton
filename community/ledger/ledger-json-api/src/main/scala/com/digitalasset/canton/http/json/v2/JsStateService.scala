@@ -188,8 +188,9 @@ object JsStateService extends DocumentationEndpoints {
   import JsStateServiceCodecs.*
 
   private lazy val state = v2Endpoint.in(sttp.tapir.stringToPath("state"))
+  private lazy val stateWebsocket = v2WebsocketEndpoint.in(sttp.tapir.stringToPath("state"))
 
-  val activeContractsEndpoint = state.get
+  val activeContractsEndpoint = stateWebsocket.get
     .in(sttp.tapir.stringToPath("active-contracts"))
     .out(
       webSocketBody[

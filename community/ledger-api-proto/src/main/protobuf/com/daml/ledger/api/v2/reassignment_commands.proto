@@ -54,6 +54,13 @@ message ReassignmentCommands {
   //
   // Required: must be non-empty
   repeated ReassignmentCommand commands = 6;
+
+  // The account to charge for this reassignment when traffic accounting is enabled.
+  // Uses the same format and required rights as ``Commands.account_id``.
+  // If empty, the participant charges the submitter's account.
+  //
+  // Optional
+  string account_id = 7;
 }
 
 message ReassignmentCommand {
@@ -83,6 +90,17 @@ message UnassignCommand {
   //
   // Required
   string target = 3;
+
+  // The package id used to validate the contract on the source synchronizer.
+  //
+  // Optional
+  optional string override_source_validation_package_id = 4;
+
+  // The package id used to validate the contract on the target synchronizer. This
+  // package id will also become the representative package id used in the created event.
+  //
+  // Optional
+  optional string override_target_validation_package_id = 5;
 }
 
 // Assign a contract

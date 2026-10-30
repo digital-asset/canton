@@ -10,7 +10,10 @@ import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-final class SubmitReassignmentAuthIT extends SyncServiceCallAuthTests with SubmitDummyReassignment {
+final class SubmitReassignmentAuthIT
+    extends SyncServiceCallAuthTests
+    with SubmitDummyReassignment
+    with DebitTrafficFromAuthTests {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
@@ -22,5 +25,10 @@ final class SubmitReassignmentAuthIT extends SyncServiceCallAuthTests with Submi
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment
   ): Future[Any] =
-    submitReassignment(context.token, getMainActorId, context.userId)
+    serviceCallWithAccountId(context, accountId = "")
+
+  override def serviceCallWithAccountId(context: ServiceCallContext, accountId: String)(implicit
+      env: TestConsoleEnvironment
+  ): Future[Any] =
+    submitReassignment(context.token, getMainActorId, context.userId, accountId)
 }

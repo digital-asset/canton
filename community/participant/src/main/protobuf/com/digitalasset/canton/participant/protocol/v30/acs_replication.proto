@@ -43,8 +43,17 @@ message AcsReplicationStatus {
   // Sequencer channel agreement hasn't been proposed by target participant yet.
   message AgreementNotProposed {}
 
-  // Sequencer channel agreement has been proposed by target participant but not yet accepted by source participant.
-  message AgreementProposed {}
+  // Sequencer channel agreement proposal has been sent by target participant.
+  message AgreementProposalSent {}
+
+  // Sequencer channel agreement proposal has been observed but not yet accepted by source participant.
+  // This is the first state used both by the source and target participants (in contrast to
+  // the initial states above that are only used by the target participant).
+  message AgreementProposed {
+    // Daml admin workflow ACS replication proposal contract id.
+    // required
+    string contract_id = 1;
+  }
 
   // Agreement among participants to replicate the ACS via sequencer channel.
   message AgreementExists {
@@ -124,23 +133,24 @@ message AcsReplicationStatus {
     AgreementProposed proposed = 3;
     AgreementExists exists = 4;
     AgreementArchived archived = 5;
+    AgreementProposalSent proposal_sent = 6;
   }
   // Topology transaction that confirms that party is hosted by both source and target participant.
   // Used only for status reporting purposes, not for ACS replication logic.
-  PartyToParticipantTopologyTransaction ptp_topology_transaction = 6;
+  PartyToParticipantTopologyTransaction ptp_topology_transaction = 7;
   // I can use ProtoTimestamp which can be obtained from CantonTimestamp
   // Then I can use ledgerApiStore.lastSynchronizerOffset...
   // Or we could just pass offset as long and it's up to client to provide it (maybe that's the best)
   // ACS replication progress.
   // optional, set once the ACS replication has started.
-  AcsReplicationProgress replication = 7;
+  AcsReplicationProgress replication = 8;
   // Whether the party ACS has been successfully replicated to the target participant,
   // i.e. whether party replication has succeeded and is done.
   // required
-  bool has_completed = 8;
+  bool has_completed = 9;
   // Error details.
   // optional, set when there is a transient or terminal error.
-  AcsReplicationError error_message = 9;
+  AcsReplicationError error_message = 10;
 }
 
 /**

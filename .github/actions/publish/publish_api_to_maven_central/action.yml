@@ -1,0 +1,34 @@
+name: Publish API to Maven Central
+description: Publish API artifacts to Maven Central
+
+inputs:
+  release_suffix:
+    description: Release version suffix
+    required: true
+  gpg_code_signing:
+    description: Base64-encoded GPG private key
+    required: true
+  maven_username:
+    description: Sonatype username
+    required: true
+  maven_password:
+    description: Sonatype password
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup GPG
+      uses: ./.github/actions/publish/setup_gpg
+      with:
+        gpg_code_signing: ${{ inputs.gpg_code_signing }}
+
+    - name: Publish API artifacts to Maven Central
+      uses: ./.github/actions/nix/nix_run
+      env:
+        RELEASE_SUFFIX: ${{ inputs.release_suffix }}
+        gpg_code_signing: ${{ inputs.gpg_code_signing }}
+        MAVEN_USERNAME: ${{ inputs.maven_username }}
+        MAVEN_PASSWORD: ${{ inputs.maven_password }}
+      with:
+        command: scripts/ci/publish-api-to-maven-central.sh

@@ -179,6 +179,7 @@ class PingService(
         packageIdSelectionPreference = Nil,
         prefetchContractKeys = Nil,
         tapsMaxPasses = None,
+        accountId = "",
       ),
       timeout.duration.toScala,
     )

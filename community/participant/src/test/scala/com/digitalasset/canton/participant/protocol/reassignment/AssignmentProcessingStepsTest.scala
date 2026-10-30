@@ -9,11 +9,16 @@ import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
+import com.digitalasset.canton.config.{
+  CachingConfigs,
+  DefaultProcessingTimeouts,
+  SessionEncryptionKeyCacheConfig,
+}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
+import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
@@ -31,7 +36,10 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDe
 }
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidation.*
-import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidationError.UnassignmentDataNotFound
+import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidationError.{
+  AssignmentCompleted,
+  UnassignmentDataNotFound,
+}
 import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValidationResult.ReassigningParticipantValidationResult
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
@@ -54,7 +62,11 @@ import com.digitalasset.canton.participant.protocol.validation.{
   AuthenticationError,
   AuthenticationValidator,
 }
-import com.digitalasset.canton.participant.protocol.{EngineController, ProcessingStartingPoints}
+import com.digitalasset.canton.participant.protocol.{
+  EngineController,
+  ProcessingStartingPoints,
+  TransactionProcessor,
+}
 import com.digitalasset.canton.participant.store.ReassignmentStoreTest.{coidAbs1, reassignment10}
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
@@ -66,6 +78,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{pureCrypto, submitter}
@@ -88,7 +101,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, ResourceUtil}
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
@@ -103,6 +116,7 @@ final class AssignmentProcessingStepsTest
     with BaseTest
     with HasTestCloseContext
     with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec
     with FailOnShutdown {
   private lazy val sourcePsid = Source(
     SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("synchronizer::source")).toPhysical
@@ -251,6 +265,7 @@ final class AssignmentProcessingStepsTest
         // Disable the session encryption key cache: it starts a scheduler that must be closed properly,
         // otherwise we see RejectedExecutionException warnings during shutdown.
         SessionEncryptionKeyCacheConfig(enabled = false),
+        CachingConfigs.defaultTransparencyCheckCache,
         DefaultProcessingTimeouts.testing,
         loggerFactory = loggerFactory,
         FutureSupervisor.Noop,
@@ -324,6 +339,7 @@ final class AssignmentProcessingStepsTest
     val submissionParam = SubmissionParam(
       submitterInfo(party1),
       unassignmentData.reassignmentId,
+      SubmissionAccounting.NoAccount,
     )
 
     "succeed without errors" in {
@@ -407,6 +423,7 @@ final class AssignmentProcessingStepsTest
       val submissionParam2 = SubmissionParam(
         submitterInfo(party2),
         unassignmentData.reassignmentId,
+        SubmissionAccounting.NoAccount,
       )
 
       for {
@@ -449,6 +466,7 @@ final class AssignmentProcessingStepsTest
       val submissionParam2 = SubmissionParam(
         submitterInfo(party3),
         unassignmentData2.reassignmentId,
+        SubmissionAccounting.NoAccount,
       )
 
       for {
@@ -526,6 +544,7 @@ final class AssignmentProcessingStepsTest
       ResourceUtil.withResourceM(
         new SessionKeyStoreWithInMemoryCache(
           SessionEncryptionKeyCacheConfig(),
+          CachingConfigs.defaultTransparencyCheckCache,
           timeouts,
           loggerFactory,
         )
@@ -545,7 +564,7 @@ final class AssignmentProcessingStepsTest
               .decryptViews(
                 envelopes,
                 cryptoSnapshot,
-                SynchronizerLimits.defaultFor(testedProtocolVersion),
+                testedSynchronizerLimits,
                 sessionKeyStore,
               )
               .valueOrFailShutdown(
@@ -766,7 +785,7 @@ final class AssignmentProcessingStepsTest
       }
     }
 
-    "fail when target package id is unvetted" in {
+    "fail when target package id is unvetted" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       val result = loggerFactory.assertLogs(
         shouldReject(
           targetValidationPackageId = Target(unvettedPackageId)
@@ -1032,32 +1051,122 @@ final class AssignmentProcessingStepsTest
       }
     }
 
-    // TODO(#34870): report a failed activeness check with a warning, or crash.
-    "commit when the activeness check failed" in {
-      val failingActivenessValidation = pendingRequestData
-        .focus(_.assignmentValidationResult.commonValidationResult.activenessResult)
-        .replace(mkActivenessResult(locked = Set(contract.contractId)))
-
+    def getCommitSetAndContractsToBeStoredAndEvent(
+        steps: AssignmentProcessingSteps,
+        pendingAssignment: PendingAssignment,
+    ): Future[steps.CommitAndStoreContractsAndPublishEvent] =
       for {
         deps <- statefulDependencies
         (_persistentState, state) = deps
-        result <-
-          valueOrFail(
-            assignmentProcessingSteps
-              .getCommitSetAndContractsToBeStoredAndEventFactory(
-                NoOpeningErrors(
-                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
-                ),
-                Verdict.Approve(testedProtocolVersion),
-                failingActivenessValidation,
-                state.pendingAssignmentSubmissions,
-                crypto.pureCrypto,
-              )
-              .failOnShutdown
-          )("get commit set and contracts to be stored and event failed")
-      } yield {
-        result.commitSet.nonEmpty shouldBe true
-      }
+        result <- steps
+          .getCommitSetAndContractsToBeStoredAndEventFactory(
+            NoOpeningErrors(
+              SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+            ),
+            Verdict.Approve(testedProtocolVersion),
+            pendingAssignment,
+            state.pendingAssignmentSubmissions,
+            crypto.pureCrypto,
+          )
+          .value
+          .failOnShutdown
+      } yield result.valueOrFail("get commit set and contracts to be stored and event failed")
+
+    def failedActivenessAlarm(entries: Seq[LogEntry]): Assertion =
+      LogEntry.assertLogSeq(
+        Seq(
+          (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe s"Assignment request ${pendingRequestData.requestId} with failed activeness check is approved.",
+            ),
+            "failed activeness check",
+          )
+        )
+      )(entries)
+
+    val failingActivenessValidation = pendingRequestData
+      .focus(_.assignmentValidationResult.commonValidationResult.activenessResult)
+      .replace(mkActivenessResult(locked = Set(contract.contractId)))
+
+    "alarm and crash when the activeness check failed and crashAfterFailedValidation is set" in {
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        getCommitSetAndContractsToBeStoredAndEvent(
+          testInstance(
+            targetPsid,
+            cryptoClient,
+            None,
+            testContractAuthenticator,
+            crashAfterFailedValidation = true,
+          ),
+          failingActivenessValidation,
+        ).failed.map(_ shouldBe a[RuntimeException]),
+        failedActivenessAlarm,
+      )
+    }
+
+    "alarm but commit when the activeness check failed and crashAfterFailedValidation is not set" in {
+      for {
+        result <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          getCommitSetAndContractsToBeStoredAndEvent(
+            testInstance(
+              targetPsid,
+              cryptoClient,
+              None,
+              testContractAuthenticator,
+              crashAfterFailedValidation = false,
+            ),
+            failingActivenessValidation,
+          ),
+          failedActivenessAlarm,
+        )
+      } yield result.commitSet.nonEmpty shouldBe true
+    }
+
+    def assertNoAlarmWhenOnlyReassignmentIdIsInactive(
+        isReassigningParticipant: Boolean
+    ): Future[Assertion] = {
+      val inactiveReassignmentId = pendingRequestData
+        .focus(_.assignmentValidationResult.isReassigningParticipant)
+        .replace(isReassigningParticipant)
+        .focus(_.assignmentValidationResult.commonValidationResult.activenessResult)
+        .replace(mkActivenessResult(inactiveReassignments = Set(reassignmentId)))
+
+      for {
+        result <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          getCommitSetAndContractsToBeStoredAndEvent(
+            assignmentProcessingSteps,
+            inactiveReassignmentId,
+          ),
+          _ shouldBe empty,
+        )
+      } yield result.commitSet.nonEmpty shouldBe true
+    }
+
+    "not alarm on a non-reassigning participant when only the reassignment id is inactive" in {
+      assertNoAlarmWhenOnlyReassignmentIdIsInactive(isReassigningParticipant = false)
+    }
+
+    "not alarm on a reassigning participant when only the reassignment id is inactive and the assignment is not completed" in {
+      assertNoAlarmWhenOnlyReassignmentIdIsInactive(isReassigningParticipant = true)
+    }
+
+    "alarm on a reassigning participant when the assignment is completed" in {
+      val completedAssignment = pendingRequestData
+        .focus(_.assignmentValidationResult.isReassigningParticipant)
+        .replace(true)
+        .focus(_.assignmentValidationResult.commonValidationResult.activenessResult)
+        .replace(mkActivenessResult(inactiveReassignments = Set(reassignmentId)))
+        .focus(_.assignmentValidationResult.reassigningParticipantValidationResult)
+        .replace(ReassigningParticipantValidationResult(Seq(AssignmentCompleted(reassignmentId))))
+
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        getCommitSetAndContractsToBeStoredAndEvent(
+          assignmentProcessingSteps,
+          completedAssignment,
+        ).failed.map(_ shouldBe a[RuntimeException]),
+        failedActivenessAlarm,
+      )
     }
 
     "complete the reassignment in the store on a reassigning participant" in {
@@ -1106,6 +1215,27 @@ final class AssignmentProcessingStepsTest
           )("get commit set and contracts to be stored and event failed")
         commitSet <- result.commitSet.value.failOnShutdown
       } yield commitSet.reassignments shouldBe empty
+    }
+  }
+
+  "event and submission id for rejected command" should {
+    "report the submission id in the completion" in {
+      val submissionId = LedgerSubmissionId.assertFromString("rejected-submission-id")
+      val ts = CantonTimestamp.Epoch
+
+      val (updateO, _) = assignmentProcessingSteps.eventAndSubmissionIdForRejectedCommand(
+        ts,
+        SequencerCounter(0),
+        submitterInfo(party1).copy(submissionId = Some(submissionId)),
+        TestHash.dummyRootHash,
+        freshOwnTimelyTx = true,
+        TransactionProcessor.SubmissionErrors.NoViewWithValidRecipients.Error(ts),
+        NonNegativeLong.zero,
+      )
+
+      inside(updateO) { case Some(rejected: Update.SequencedCommandRejected) =>
+        rejected.completionInfo.submissionId shouldBe Some(submissionId)
+      }
     }
   }
 
@@ -1171,6 +1301,7 @@ final class AssignmentProcessingStepsTest
       snapshotOverride: SynchronizerCryptoClient,
       awaitTimestampOverride: Option[Future[Unit]],
       contractValidator: ContractValidator = ContractValidator.AllowAll,
+      crashAfterFailedValidation: Boolean = true,
   ) = {
 
     val pureCrypto = new SymbolicPureCrypto
@@ -1193,6 +1324,9 @@ final class AssignmentProcessingStepsTest
       clock,
       Target(testedProtocolVersion),
       reassignmentMetrics = ParticipantTestMetrics.synchronizer.reassignments,
+      participantNodeParameters = ParticipantNodeParameters
+        .forTestingOnly(testedProtocolVersion)
+        .copy(crashAfterFailedValidation = crashAfterFailedValidation),
       loggerFactory = loggerFactory,
     )
   }

@@ -49,9 +49,7 @@ jobs:
             .ci
             shell.nix
             nix
-            scripts/ci/check_canton_build_required_gate.py
-            scripts/ci/notify_job_classification.py
-            scripts/ci/notify_job_classification.yml
+            scripts/ci
           sparse-checkout-cone-mode: false
           fetch-depth: 1
       - name: Run yamllint
@@ -62,6 +60,10 @@ jobs:
         uses: ./.github/actions/nix/nix_run
         with:
           command: python3 scripts/ci/check_canton_build_required_gate.py
+      - name: Check scripts/ci for silently-swallowed failures
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 scripts/ci/check_guarded_excepts.py
 
   verify_circleci_config:
     name: Verify CircleCI config

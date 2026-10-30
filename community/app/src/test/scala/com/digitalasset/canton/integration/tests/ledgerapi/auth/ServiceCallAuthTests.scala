@@ -92,6 +92,7 @@ trait ServiceCallAuthTests
         includeTopologyEvents = topologyPartiesO.map(parties =>
           TopologyFormat(Some(ParticipantAuthorizationTopologyFormat(parties = parties)))
         ),
+        includeTransactionsAndReassignments = None,
       )
     )
 

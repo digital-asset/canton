@@ -46,6 +46,7 @@ public final class UpdateSubmission<U> {
   @NonNull private List<@NonNull PrefetchContractKey> prefetchContractKeys;
 
   @NonNull private final Optional<String> synchronizerId;
+  @NonNull private final Optional<String> accountId;
 
   private UpdateSubmission(
       @NonNull String userId,
@@ -62,7 +63,8 @@ public final class UpdateSubmission<U> {
       @NonNull Optional<String> synchronizerId,
       @NonNull List<DisclosedContract> disclosedContracts,
       @NonNull List<@NonNull String> packageIdSelectionPreference,
-      @NonNull List<@NonNull PrefetchContractKey> prefetchContractKeys) {
+      @NonNull List<@NonNull PrefetchContractKey> prefetchContractKeys,
+      @NonNull Optional<String> accountId) {
     this.workflowId = workflowId;
     this.userId = userId;
     this.commandId = commandId;
@@ -78,6 +80,7 @@ public final class UpdateSubmission<U> {
     this.disclosedContracts = disclosedContracts;
     this.packageIdSelectionPreference = packageIdSelectionPreference;
     this.prefetchContractKeys = prefetchContractKeys;
+    this.accountId = accountId;
   }
 
   public static <U> UpdateSubmission<U> create(String userId, String commandId, Update<U> update) {
@@ -96,7 +99,8 @@ public final class UpdateSubmission<U> {
         empty(),
         emptyList(),
         emptyList(),
-        emptyList());
+        emptyList(),
+        empty());
   }
 
   public Optional<String> getWorkflowId() {
@@ -159,6 +163,10 @@ public final class UpdateSubmission<U> {
     return unmodifiableList(prefetchContractKeys);
   }
 
+  public Optional<String> getAccountId() {
+    return accountId;
+  }
+
   public UpdateSubmission<U> withWorkflowId(String workflowId) {
     return new UpdateSubmission<U>(
         userId,
@@ -175,7 +183,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withActAs(String actAs) {
@@ -194,7 +203,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withActAs(List<@NonNull String> actAs) {
@@ -213,7 +223,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withReadAs(List<@NonNull String> readAs) {
@@ -232,7 +243,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withMinLedgerTimeAbs(Optional<Instant> minLedgerTimeAbs) {
@@ -251,7 +263,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withMinLedgerTimeRel(Optional<Duration> minLedgerTimeRel) {
@@ -270,7 +283,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withDeduplicationDuration(Optional<Duration> deduplicationDuration) {
@@ -289,7 +303,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withDeduplicationOffset(Optional<Long> deduplicationOffset) {
@@ -308,7 +323,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withAccessToken(Optional<String> accessToken) {
@@ -327,7 +343,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withSynchronizerId(String synchronizerId) {
@@ -343,10 +360,11 @@ public final class UpdateSubmission<U> {
         deduplicationDuration,
         deduplicationOffset,
         accessToken,
-        this.synchronizerId,
+        Optional.of(synchronizerId),
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withDisclosedContracts(
@@ -366,7 +384,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withPackageIdSelectionPreference(
@@ -386,7 +405,8 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 
   public UpdateSubmission<U> withPrefetchContractKeys(
@@ -406,7 +426,28 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         disclosedContracts,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
+  }
+
+  public UpdateSubmission<U> withAccountId(@NonNull String accountId) {
+    return new UpdateSubmission<U>(
+        userId,
+        commandId,
+        update,
+        actAs,
+        readAs,
+        workflowId,
+        minLedgerTimeAbs,
+        minLedgerTimeRel,
+        deduplicationDuration,
+        deduplicationOffset,
+        accessToken,
+        synchronizerId,
+        disclosedContracts,
+        packageIdSelectionPreference,
+        prefetchContractKeys,
+        Optional.of(accountId).filter(id -> !id.isEmpty()));
   }
 
   public CommandsSubmission toCommandsSubmission() {
@@ -426,6 +467,7 @@ public final class UpdateSubmission<U> {
         synchronizerId,
         accessToken,
         packageIdSelectionPreference,
-        prefetchContractKeys);
+        prefetchContractKeys,
+        accountId);
   }
 }

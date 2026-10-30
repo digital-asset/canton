@@ -230,9 +230,18 @@ abstract class ConsumesCancellableGrpcStreamObserver[
           FutureUtil.doNotAwait(
             closeReasonOO.thereafter {
               case Success(None) => requestStream.get.foreach(_.request(1))
-              case Success(Some(_)) | Failure(_) =>
-              // An error was signaled with `Success(Some(_))` or the processing failed completely (Failure(_)),
-              // therefore we don't request more data, as the entire request is going to be cancelled/closed anyway.
+              case Success(Some(_)) =>
+                // Messages buffered in the gRPC deframer (if any) are only released once they have been delivered,
+                // or when `cancel` is called. Unfortunately, due to what appears like a bug in grpc-java,
+                // if the transport has already been closed, `cancel` (called from `complete` above)
+                // does not reach gRPC's Netty handler, and the buffers are not released, resulting in
+                // `ResourceLeakDetector` errors.
+                // For this reason, we keep requesting messages even after the subscription has been closed,
+                // in order to drain the buffers and avoid the leak. These messages will anyway be discarded
+                // without reaching the handler.
+                requestStream.get.foreach(_.request(1))
+              case Failure(_) =>
+              // The processing failed completely, therefore we don't request more data.
             },
             s"Processing of $value",
           )

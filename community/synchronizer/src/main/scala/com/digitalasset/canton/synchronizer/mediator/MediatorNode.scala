@@ -40,6 +40,7 @@ import com.digitalasset.canton.sequencing.client.pool.{
   SequencerConnectionPool,
 }
 import com.digitalasset.canton.sequencing.client.{
+  BftTopologyForInitDownloader,
   RecordingConfig,
   ReplayConfig,
   RequestSigner,
@@ -78,7 +79,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -369,38 +370,53 @@ class MediatorNodeBootstrap(
 
       val (staticSynchronizerParameters, psid) = result
 
-      EitherT
-        .right(
-          TopologyStore
-            .create(
-              SynchronizerStore(psid),
-              storage,
-              indexedStringStore,
-              predecessor = None,
-              staticSynchronizerParameters.protocolVersion,
-              timeouts,
-              parameters.batchingConfig,
-              loggerFactory,
+      val pv = staticSynchronizerParameters.protocolVersion
+
+      for {
+
+        _ <-
+          if (pv.isSupported)
+            EitherTUtil.unitUS
+          else
+            EitherT.liftF(
+              FutureUnlessShutdown.failed(
+                new IllegalStateException(
+                  s"Mediator ${ReleaseVersion.current} does not support protocol version $pv"
+                )
+              )
             )
-        )
-        .map { synchronizerTopologyStore =>
-          addCloseable(synchronizerTopologyStore)
 
-          new StartupNode(
-            storage,
-            indexedStringStore,
-            SynchronizerCrypto(crypto, staticSynchronizerParameters),
-            adminServerRegistry,
-            adminTokenDispenser,
-            mediatorId,
-            staticSynchronizerParameters,
-            authorizedTopologyManager,
-            synchronizerConfigurationStore,
-            synchronizerTopologyStore,
-            healthService,
+        synchronizerTopologyStore <- EitherT
+          .right(
+            TopologyStore
+              .create(
+                SynchronizerStore(psid),
+                storage,
+                indexedStringStore,
+                predecessor = None,
+                staticSynchronizerParameters.protocolVersion,
+                timeouts,
+                parameters.batchingConfig,
+                loggerFactory,
+              )
           )
-        }
+      } yield {
+        addCloseable(synchronizerTopologyStore)
 
+        new StartupNode(
+          storage,
+          indexedStringStore,
+          SynchronizerCrypto(crypto, staticSynchronizerParameters),
+          adminServerRegistry,
+          adminTokenDispenser,
+          mediatorId,
+          staticSynchronizerParameters,
+          authorizedTopologyManager,
+          synchronizerConfigurationStore,
+          synchronizerTopologyStore,
+          healthService,
+        )
+      }
     }
 
     override def waitingFor: Option[WaitingForExternalInput] = Some(
@@ -676,6 +692,7 @@ class MediatorNodeBootstrap(
             .lift(member)
             .map(Synchronizer.defaultReplayPath(member)),
         arguments.metrics.sequencerClient,
+        new BftTopologyForInitDownloader(loggerFactory),
         parameters.loggingConfig,
         parameters.exitOnFatalFailures,
         synchronizerLoggerFactory,
@@ -763,7 +780,7 @@ class MediatorNodeBootstrap(
             new InitialTopologySnapshotValidator(
               new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
               synchronizerTopologyStore,
-              parameters.batchingConfig.topologyCacheAggregator,
+              parameters.batchingConfig,
               topologyConfig,
               Some(staticSynchronizerParameters),
               timeouts,

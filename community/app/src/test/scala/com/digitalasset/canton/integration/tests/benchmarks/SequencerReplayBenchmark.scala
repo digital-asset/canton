@@ -475,20 +475,3 @@ class BftSequencerReplayBenchmark extends SequencerReplayBenchmark {
     )
   )
 }
-
-// Commented out to provide an implementation for manual runs while saving CI costs.
-//
-//class ReferenceSequencerReplayBenchmark extends SequencerReplayBenchmark {
-//  override protected val performanceRunnerRecorder: PerformanceRunnerRecorder =
-//    new ReferenceSequencerPerformanceRunnerRecorder()
-//  override protected val referenceBlockSequencerPlugin
-//      : Option[UseReferenceBlockSequencer[?]] =
-//    Some(
-//      new UseReferenceBlockSequencer[DbConfig.Postgres](
-//        loggerFactory,
-//        postgres = Some(postgresPlugin),
-//      )
-//    )
-//
-//  referenceBlockSequencerPlugin.foreach(registerPlugin(_))
-//}

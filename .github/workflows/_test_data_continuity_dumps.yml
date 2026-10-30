@@ -117,7 +117,7 @@ jobs:
           CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
         run: |
           echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will use protocol version $CANTON_AUTOMATIC_PROTOCOL_VERSION"
+          echo "Canton will select the protocol version automatically"
         shell: bash
 
       - name: Run Data Continuity Tests

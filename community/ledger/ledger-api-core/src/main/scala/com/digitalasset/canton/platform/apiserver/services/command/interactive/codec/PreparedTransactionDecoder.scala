@@ -557,6 +557,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         // Hash is unknown at decode time; it is computed later from the verified
         // signature during execution (see ExternalTransactionProcessor.withTransactionHash).
         .withFieldConst(_.transactionHash, None)
+        .withFieldConst(_.accountId, executeRequest.accountId)
         .transform
         .toFutureWithLoggedFailuresDecode("Failed to deserialize submitter info", logger)
       synchronizer <- Future.fromTry(

@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client.pool
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.SequencerAggregatorXImpl.EventAndOrdinal
@@ -139,4 +139,7 @@ class SubscriptionHandlerImpl private[sequencing] (
 
       SubscriptionLivenessStatus(timestampDelta, ordinalDelta)
     }
+
+  override protected def onClosed(): Unit =
+    LifeCycle.close(eventValidator)(logger)
 }

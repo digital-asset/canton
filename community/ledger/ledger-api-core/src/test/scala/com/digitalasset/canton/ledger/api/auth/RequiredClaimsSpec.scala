@@ -20,6 +20,26 @@ import scalapb.lenses.Lens
 
 class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
 
+  private val eventFormatAbc = EventFormat(
+    filtersByParty = Map(
+      "a" -> Filters(Nil),
+      "b" -> Filters(Nil),
+      "c" -> Filters(Nil),
+    ),
+    filtersForAnyParty = Some(Filters(Nil)),
+    verbose = true,
+  )
+
+  private val eventFormat123 = EventFormat(
+    filtersByParty = Map(
+      "1" -> Filters(Nil),
+      "2" -> Filters(Nil),
+      "3" -> Filters(Nil),
+    ),
+    filtersForAnyParty = Some(Filters(Nil)),
+    verbose = true,
+  )
+
   behavior of "submissionClaims"
 
   it should "compute the correct claims in the happy path" in {
@@ -150,15 +170,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
 
   it should "compute the correct claims in the happy path" in {
     RequiredClaims.eventFormatClaims[String](
-      EventFormat(
-        filtersByParty = Map(
-          "a" -> Filters(Nil),
-          "b" -> Filters(Nil),
-          "c" -> Filters(Nil),
-        ),
-        filtersForAnyParty = Some(Filters(Nil)),
-        verbose = true,
-      )
+      eventFormatAbc
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
@@ -169,15 +181,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
 
   it should "compute the correct claims if no any party filters" in {
     RequiredClaims.eventFormatClaims[String](
-      EventFormat(
-        filtersByParty = Map(
-          "a" -> Filters(Nil),
-          "b" -> Filters(Nil),
-          "c" -> Filters(Nil),
-        ),
-        filtersForAnyParty = None,
-        verbose = false,
-      )
+      eventFormatAbc.copy(filtersForAnyParty = None)
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
@@ -215,29 +219,13 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = Some(Filters(Nil)),
-                verbose = true,
-              )
+              eventFormatAbc
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = Some(Filters(Nil)),
-            verbose = true,
-          )
+          eventFormat123
         ),
         includeTopologyEvents = Some(
           TopologyFormat(
@@ -248,11 +236,9 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
             )
           )
         ),
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
-      RequiredClaim.ReadAs("A"),
-      RequiredClaim.ReadAs("B"),
-      RequiredClaim.ReadAs("C"),
       RequiredClaim.ReadAs("a"),
       RequiredClaim.ReadAs("b"),
       RequiredClaim.ReadAs("c"),
@@ -269,29 +255,13 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = Some(Filters(Nil)),
-                verbose = true,
-              )
+              eventFormatAbc
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = Some(Filters(Nil)),
-            verbose = true,
-          )
+          eventFormat123
         ),
         includeTopologyEvents = Some(
           TopologyFormat(
@@ -302,6 +272,7 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
             )
           )
         ),
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -320,35 +291,20 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = Some(Filters(Nil)),
-                verbose = true,
-              )
+              eventFormatAbc
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = Some(Filters(Nil)),
-            verbose = true,
-          )
+          eventFormat123
         ),
         includeTopologyEvents = Some(
           TopologyFormat(
             includeParticipantAuthorizationEvents = None
           )
         ),
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -367,31 +323,16 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = Some(Filters(Nil)),
-                verbose = true,
-              )
+              eventFormatAbc
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = Some(Filters(Nil)),
-            verbose = true,
-          )
+          eventFormat123
         ),
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -410,31 +351,16 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = Some(Filters(Nil)),
-                verbose = true,
-              )
+              eventFormatAbc
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = None,
-            verbose = true,
-          )
+          eventFormat123.copy(filtersForAnyParty = None)
         ),
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -453,31 +379,16 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = None,
-                verbose = true,
-              )
+              eventFormatAbc.copy(filtersForAnyParty = None)
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = Some(
-          EventFormat(
-            filtersByParty = Map(
-              "1" -> Filters(Nil),
-              "2" -> Filters(Nil),
-              "3" -> Filters(Nil),
-            ),
-            filtersForAnyParty = None,
-            verbose = true,
-          )
+          eventFormat123.copy(filtersForAnyParty = None)
         ),
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -495,21 +406,14 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
         includeTransactions = Some(
           TransactionFormat(
             eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map(
-                  "a" -> Filters(Nil),
-                  "b" -> Filters(Nil),
-                  "c" -> Filters(Nil),
-                ),
-                filtersForAnyParty = None,
-                verbose = true,
-              )
+              eventFormatAbc.copy(filtersForAnyParty = None)
             ),
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           )
         ),
         includeReassignments = None,
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     ) should contain theSameElementsAs RequiredClaims[String](
       RequiredClaim.ReadAs("a"),
@@ -518,14 +422,122 @@ class RequiredClaimsSpec extends AsyncFlatSpec with BaseTest with Matchers {
     )
   }
 
-  it should "compute the correct claims if no includeTransactions" in {
+  it should "compute the correct claims if only includeTransactionsAndReassignments" in {
     RequiredClaims.updateFormatClaims[String](
       UpdateFormat(
         includeTransactions = None,
         includeReassignments = None,
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Some(
+          TransactionFormat(
+            eventFormat = Some(
+              eventFormatAbc
+            ),
+            transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
       )
-    ) shouldBe Nil
+    ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ReadAs("a"),
+      RequiredClaim.ReadAs("b"),
+      RequiredClaim.ReadAs("c"),
+      RequiredClaim.ReadAsAnyParty(),
+    )
+  }
+
+  it should "compute the correct claims if no filtersForAnyParty in includeTransactionsAndReassignments" in {
+    RequiredClaims.updateFormatClaims[String](
+      UpdateFormat(
+        includeTransactions = None,
+        includeReassignments = None,
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Some(
+          TransactionFormat(
+            eventFormat = Some(
+              eventFormatAbc.copy(filtersForAnyParty = None)
+            ),
+            transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
+      )
+    ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ReadAs("a"),
+      RequiredClaim.ReadAs("b"),
+      RequiredClaim.ReadAs("c"),
+    )
+  }
+
+  it should "require only a public claim if includeTransactionsAndReassignments has no event format" in {
+    RequiredClaims.updateFormatClaims[String](
+      UpdateFormat(
+        includeTransactions = None,
+        includeReassignments = None,
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Some(
+          TransactionFormat(
+            eventFormat = None,
+            transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
+      )
+    ) shouldBe List(RequiredClaim.Public[String]())
+  }
+
+  // The includeTransactionsAndReassignments cannot be combined with includeTransactions or includeReassignments,
+  // but we still want to make sure that the claims are deduplicated if they are combined.
+  it should "deduplicate claims from includeTransactionsAndReassignments and the other formats" in {
+    RequiredClaims.updateFormatClaims[String](
+      UpdateFormat(
+        includeTransactions = Some(
+          TransactionFormat(
+            eventFormat = Some(
+              eventFormatAbc
+            ),
+            transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
+        includeReassignments = Some(
+          eventFormat123
+        ),
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = Some(
+          TransactionFormat(
+            eventFormat = Some(
+              EventFormat(
+                filtersByParty = Map(
+                  "a" -> Filters(Nil),
+                  "1" -> Filters(Nil),
+                  "x" -> Filters(Nil),
+                ),
+                filtersForAnyParty = Some(Filters(Nil)),
+                verbose = true,
+              )
+            ),
+            transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+          )
+        ),
+      )
+    ) should contain theSameElementsAs RequiredClaims[String](
+      RequiredClaim.ReadAs("a"),
+      RequiredClaim.ReadAs("b"),
+      RequiredClaim.ReadAs("c"),
+      RequiredClaim.ReadAs("1"),
+      RequiredClaim.ReadAs("2"),
+      RequiredClaim.ReadAs("3"),
+      RequiredClaim.ReadAs("x"),
+      RequiredClaim.ReadAsAnyParty(),
+    )
+  }
+
+  it should "require only a public claim if no includeTransactions" in {
+    RequiredClaims.updateFormatClaims[String](
+      UpdateFormat(
+        includeTransactions = None,
+        includeReassignments = None,
+        includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
+      )
+    ) shouldBe List(RequiredClaim.Public[String]())
   }
 
   behavior of "idpAdminClaimsAndMatchingRequestIdpId"

@@ -4,14 +4,13 @@
 package com.digitalasset.canton.integration.tests.topology
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -23,19 +22,19 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction.TopologyTransaction
 import com.digitalasset.canton.version.ProtocolVersion
 
-/** Test that a participant onboarding to a synchronizer with a different protocol version re-signs
-  * its onboarding transactions to the synchronizer's protocol version at connect time.
+/** Scenario: a participant's authorized store holds its onboarding transactions of the latest
+  * protocol version. It connects to a synchronizer with protocol version 36, which doesn't admit
+  * them.
   *
-  * Setup:
-  *   - synchronizer with protocol version different from the ProtocolVersion.latest
+  * Goal: the participant re-signs them for the synchronizer's protocol version at connect time and
+  * becomes active.
   */
 final class ParticipantOnboardingResignIntegrationTestH2
     extends CommunityIntegrationTest
     with SharedEnvironment {
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseH2(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
-  // TODO(i33912): Once ProtocolVersion.latest is updated to v36,
-  // we should change this test to connect to a synchronizer using v35 by
   private val synchronizerPv = ProtocolVersion.v36
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -57,26 +56,22 @@ final class ParticipantOnboardingResignIntegrationTestH2
       }
 
   "A participant onboarding to a synchronizer with a different topology protocol version" should {
-    // TODO(i32231): enable this test.
-    "re-sign its onboarding transactions and become active" ignore { implicit env =>
+    "re-sign its onboarding transactions and become active" in { implicit env =>
+      "re-sign its onboarding transactions and become active" onlyRunWith ProtocolVersion.latest
       import env.*
 
       val onboardingMappings = TopologyStore.initialParticipantDispatchingSet.forgetNE.toSeq
 
-      // Before connecting, the participant's onboarding transactions in the authorize store are
-      // created with the current `latest` protocol version (v35)
       val authorizedOnboarding = participant1.topology.transactions
         .list(store = TopologyStoreId.Authorized, filterMappings = onboardingMappings)
         .result
       authorizedOnboarding should not be empty
 
-      // once the ProtocolVersion.latest is updated to v36, we should change this test to connect to a synchronizer using v35
-      // to still test that the participant resigns its transactions to the synchronizer's protocol version (v35) at connect time.
       forEvery(authorizedOnboarding) { stored =>
         val tx = stored.transaction.transaction
-        tx.isEquivalentTo(synchronizerPv) shouldBe false
+        tx.isAdmissibleFor(synchronizerPv) shouldBe false
         tx.representativeProtocolVersion shouldBe
-          TopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.v35)
+          TopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.latest)
       }
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)

@@ -378,7 +378,10 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
           eventually(timeUntilSuccess = waitTimeout.asFiniteApproximation) {
             allOnboardedParticipants.zip(allOnboardedParticipants.view.drop(1)).foreach {
-              case (from, to) => from.health.maybe_ping(to) shouldBe defined
+              case (from, to) =>
+                withClue(s"ping from ${from.name} to ${to.name}") {
+                  from.health.maybe_ping(to) shouldBe defined
+                }
             }
           }
         }
@@ -508,10 +511,12 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
   ): Boolean =
     instance match {
       case s: SequencerReference =>
-        s.health.is_running() && s.health.status.trySuccess.synchronizerId == activePsid
+        s.health.is_running() && s.health.status.successOption
+          .exists(_.synchronizerId == activePsid)
 
       case m: MediatorReference =>
-        m.health.is_running() && m.health.status.trySuccess.synchronizerId == activePsid
+        m.health.is_running() && m.health.status.successOption
+          .exists(_.synchronizerId == activePsid)
 
       case other => other.health.is_running()
     }
@@ -701,6 +706,8 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
     acceptableLogMessageExt(
       additional = Seq(
         SerialMismatch.id, // concurrent topology changes can result in stale serials,
+        // the same stale serial, detected only once the transaction was sequenced
+        "during topology validation: The actual serial",
         "No connection available", // new sequencer connection pool check
       ) ++ specificAdditional,
       additionalNonRetryable = specificAdditionalNonRetryable,

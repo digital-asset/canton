@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -93,6 +94,9 @@ class DirectSequencerConnection(
 
   override def fatal(reason: String)(implicit traceContext: TraceContext): Unit = ()
 
+  // There is a single sequencer, so its penalty is irrelevant
+  override def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit = ()
+
   override def sendAsync(
       request: SignedContent[SubmissionRequest],
       timeout: Duration,
@@ -126,18 +130,6 @@ class DirectSequencerConnection(
         GetTrafficStateForMemberResponse(trafficStateO, staticParameters.protocolVersion)
       }
       .leftMap(_.toString)
-
-  override def downloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      timeout: Duration,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] =
-    ErrorUtil.internalError(
-      new UnsupportedOperationException(
-        s"$functionFullName is not implemented for DirectSequencerConnection"
-      )
-    )
 
   override def logout()(implicit
       traceContext: TraceContext
@@ -236,6 +228,14 @@ class DirectSequencerConnection(
     // unlikely there will be any errors with this direct transport implementation
     SubscriptionErrorRetryPolicyPekko.never
 
+  override def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(
+      implicit traceContext: TraceContext
+  ): Either[String, Source[TopologyStateForInitResponse, NotUsed]] =
+    ErrorUtil.internalError(
+      new UnsupportedOperationException(
+        s"$functionFullName is not implemented for DirectSequencerConnection"
+      )
+    )
 }
 
 object DirectSequencerConnection extends PrettyPrintingCompanion[DirectSequencerConnection] {

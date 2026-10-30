@@ -79,6 +79,10 @@ Configure authentication (optional)
 Authentication is enabled by default. It can be configured with `endpoint-authentication` under `initial-network`
 (at the same level as `server-endpoint`):
 
+When authentication is enabled, only authenticated sequencer identities may establish P2P connections.
+Participant and mediator identities are rejected before the server attempts reverse authentication
+against the advertised peer endpoint.
+
 .. literalinclude:: CANTON/community/app/src/pack/examples/11-bft-sequencer/two-peers.conf
    :language: scala
    :start-after: user-manual-entry-begin: BftSequencerEndpointAuthentication

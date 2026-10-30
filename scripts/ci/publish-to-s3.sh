@@ -54,9 +54,14 @@ run " copy jar to s3" aws s3 cp --no-overwrite \
 # Cloudfront invalidation is known to be fragile, so bump the max number of attempts
 # See https://github.com/aws/aws-cdk/issues/15891#issuecomment-966456154
 # https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-retries.html#cli-usage-retries-configure
-AWS_MAX_ATTEMPTS=10 aws cloudfront create-invalidation \
-    --distribution-id "$AWS_CF_CANTON_IO_DISTRIBUTION_ID" \
-    --paths "/releases/*"
+# Skipped when the distribution id is not configured (not available on GHA yet)
+if [[ -n "${AWS_CF_CANTON_IO_DISTRIBUTION_ID:-}" ]]; then
+  AWS_MAX_ATTEMPTS=10 aws cloudfront create-invalidation \
+      --distribution-id "$AWS_CF_CANTON_IO_DISTRIBUTION_ID" \
+      --paths "/releases/*"
+else
+  warn "AWS_CF_CANTON_IO_DISTRIBUTION_ID not set, skipping CloudFront invalidation"
+fi
 info "Published to s3 and should be openly accessible at:"
 info "  - https://www.canton.io/releases/$filename.tar.gz"
 info "  - https://www.canton.io/releases/$filename.zip"

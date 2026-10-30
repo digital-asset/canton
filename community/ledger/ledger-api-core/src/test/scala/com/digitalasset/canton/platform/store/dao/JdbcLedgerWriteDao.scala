@@ -133,8 +133,7 @@ private class JdbcLedgerWriteDao(
         parameterStorageBackend.initializeParameters(
           ParameterStorageBackend.IdentityParams(
             participantId = participantId
-          ),
-          loggerFactory,
+          )
         )
       )
 

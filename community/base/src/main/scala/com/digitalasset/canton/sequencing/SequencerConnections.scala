@@ -33,6 +33,7 @@ final case class SequencerConnections private (
     submissionRequestAmplification: SubmissionRequestAmplification,
     sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
     subscriptionLivenessLimits: SubscriptionLivenessLimits,
+    sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
 ) extends HasVersionedWrapper[SequencerConnections]
     with PrettyPrintingFromCompanion {
   require(
@@ -66,6 +67,7 @@ final case class SequencerConnections private (
       submissionRequestAmplification = submissionRequestAmplification,
       sequencerConnectionPoolDelays = sequencerConnectionPoolDelays,
       subscriptionLivenessLimits = subscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig = sequencerConnectionPenaltyConfig,
     )
 
   private def modifyM[M[_]](
@@ -97,6 +99,7 @@ final case class SequencerConnections private (
       sequencerLivenessMargin.unwrap,
       Some(sequencerConnectionPoolDelays.toProtoV30),
       Some(subscriptionLivenessLimits.toProtoV30),
+      Some(sequencerConnectionPenaltyConfig.toProtoV30),
     )
 
   @transient override protected lazy val companionObj
@@ -128,6 +131,7 @@ object SequencerConnections
       submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
       sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       subscriptionLivenessLimits = SubscriptionLivenessLimits.default,
+      sequencerConnectionPenaltyConfig = SequencerConnectionPenaltyConfig.default,
     )
 
   def many(
@@ -137,6 +141,7 @@ object SequencerConnections
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
       subscriptionLivenessLimits: SubscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
   ): Either[String, SequencerConnections] = {
     val repeatedAliases = connections.groupBy(_.sequencerAlias).filter { case (_, connections) =>
       connections.lengthCompare(1) > 0
@@ -156,6 +161,7 @@ object SequencerConnections
             submissionRequestAmplification,
             sequencerConnectionPoolDelays,
             subscriptionLivenessLimits,
+            sequencerConnectionPenaltyConfig,
           )
         )
         .leftMap(_.getMessage)
@@ -169,6 +175,7 @@ object SequencerConnections
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionPoolDelays: SequencerConnectionPoolDelays,
       subscriptionLivenessLimits: SubscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig: SequencerConnectionPenaltyConfig,
   ): SequencerConnections =
     many(
       NonEmptyUtil.fromUnsafe(connections),
@@ -177,6 +184,7 @@ object SequencerConnections
       submissionRequestAmplification,
       sequencerConnectionPoolDelays,
       subscriptionLivenessLimits,
+      sequencerConnectionPenaltyConfig,
     ).valueOr(err => throw new IllegalArgumentException(err))
 
   def fromProtoV30(
@@ -189,6 +197,7 @@ object SequencerConnections
       sequencerLivenessMarginP,
       sequencerConnectionPoolDelaysP,
       subscriptionLivenessLimitsP,
+      sequencerConnectionPenaltyConfigP,
     ) = sequencerConnectionsProto
     for {
       sequencerTrustThreshold <- ProtoConverter.parsePositiveInt(
@@ -217,6 +226,9 @@ object SequencerConnections
       subscriptionLivenessLimitsO <- subscriptionLivenessLimitsP.traverse(
         SubscriptionLivenessLimits.fromProtoV30
       )
+      sequencerConnectionPenaltyConfigO <- sequencerConnectionPenaltyConfigP.traverse(
+        SequencerConnectionPenaltyConfig.fromProtoV30
+      )
       _ <- Either.cond(
         sequencerConnectionsNes.map(_.sequencerAlias).toSet.sizeIs == sequencerConnectionsNes.size,
         (),
@@ -232,6 +244,7 @@ object SequencerConnections
         submissionRequestAmplification,
         sequencerConnectionPoolDelays,
         subscriptionLivenessLimitsO.getOrElse(SubscriptionLivenessLimits.default),
+        sequencerConnectionPenaltyConfigO.getOrElse(SequencerConnectionPenaltyConfig.default),
       ).leftMap(ProtoDeserializationError.InvariantViolation(field = None, _))
     } yield sequencerConnections
   }
@@ -240,7 +253,7 @@ object SequencerConnections
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v35,
+      ProtocolVersion.v36,
       supportedProtoVersion(v30.SequencerConnections)(fromProtoV30),
       _.toProtoV30,
     )

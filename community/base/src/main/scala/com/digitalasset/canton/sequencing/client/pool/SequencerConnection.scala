@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing.client.pool
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
@@ -29,6 +30,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.duration.Duration
 
@@ -53,6 +56,19 @@ trait SequencerConnection extends FlagCloseable with NamedLogging {
   def fail(reason: String)(implicit traceContext: TraceContext): Unit
 
   def fatal(reason: String)(implicit traceContext: TraceContext): Unit
+
+  /** Increase the penalty of the sequencer this connection is connected to, i.e., the penalty is
+    * attributed to the sequencer identified by `attributes.sequencerId`, not to this particular
+    * connection. Sequencers with a lower penalty are preferred when the connection pool selects
+    * connections. Penalties decay over time.
+    *
+    * As a guideline, `amount` should be around 1 per adverse event, with larger values for more
+    * severe events.
+    *
+    * @param amount
+    *   the positive amount by which to increase the penalty
+    */
+  def increasePenalty(amount: PositiveInt)(implicit traceContext: TraceContext): Unit
 
   def sendAsync(
       request: SignedContent[SubmissionRequest],
@@ -80,9 +96,9 @@ trait SequencerConnection extends FlagCloseable with NamedLogging {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Option[CantonTimestamp]]
 
-  def downloadTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(implicit
+  def streamTopologyStateForInit(request: TopologyStateForInitRequest, timeout: Duration)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse]
+  ): Either[String, Source[TopologyStateForInitResponse, NotUsed]]
 
   def downloadTopologyStateForInitHash(request: TopologyStateForInitRequest, timeout: Duration)(
       implicit traceContext: TraceContext

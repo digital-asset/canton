@@ -32,7 +32,9 @@ import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.daml.lf.data.Ref
 
-object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageBackendFactory {
+final case class H2StorageBackendFactory(loggerFactory: NamedLoggerFactory)
+    extends StorageBackendFactory
+    with CommonStorageBackendFactory {
 
   override val createIngestionStorageBackend: IngestionStorageBackend[?] =
     new IngestionStorageBackendTemplate(H2Schema.schema)
@@ -40,7 +42,7 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
   override def createParameterStorageBackend(
       stringInterning: StringInterning
   ): ParameterStorageBackend =
-    new ParameterStorageBackendImpl(H2QueryStrategy, stringInterning)
+    new ParameterStorageBackendImpl(H2QueryStrategy, stringInterning, loggerFactory)
 
   override def createPartyStorageBackend(
       participantId: Ref.ParticipantId,
@@ -55,7 +57,6 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
   override def createCompletionStorageBackend(
       stringInterning: StringInterning,
       ledgerEndCache: LedgerEndCache,
-      loggerFactory: NamedLoggerFactory,
   ): CompletionStorageBackend =
     new CompletionStorageBackendTemplate(stringInterning, ledgerEndCache, loggerFactory)
 
@@ -68,7 +69,6 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
   override def createEventStorageBackend(
       ledgerEndCache: LedgerEndCache,
       stringInterning: StringInterning,
-      loggerFactory: NamedLoggerFactory,
   ): EventStorageBackend =
     new H2EventStorageBackend(
       ledgerEndCache = ledgerEndCache,
@@ -77,7 +77,7 @@ object H2StorageBackendFactory extends StorageBackendFactory with CommonStorageB
     )
 
   override val createDataSourceStorageBackend: DataSourceStorageBackend =
-    H2DataSourceStorageBackend
+    new H2DataSourceStorageBackend(loggerFactory)
 
   override val createDBLockStorageBackend: DBLockStorageBackend =
     H2DBLockStorageBackend

@@ -26,6 +26,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
 }
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.StorageBackendTestsEvents.PaginationFromToOps
+import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
@@ -128,7 +129,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     testBidirectionalFetchPage("signatory")(
@@ -199,7 +200,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(6), 6L))
     testBidirectionalFetchPageFiltered("signatory Create")(
@@ -358,7 +359,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     testBidirectionalFetchPage("signatory with template")(
@@ -430,7 +431,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     testBidirectionalFetchPage("signatory other template")(
@@ -495,7 +496,7 @@ private[backend] trait StorageBackendTestsEvents
       )
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(1), 1L))
     testBidirectionalFetchPage("unknown party")(
@@ -566,7 +567,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
     testBidirectionalFetchPage("range [1,1] limit 2")(
@@ -624,7 +625,7 @@ private[backend] trait StorageBackendTestsEvents
       dtoTransactionMeta(offset(1000), 1119, 1120),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(25), 1115))
     val maxEventSequentialId: Long => Long =
@@ -662,12 +663,13 @@ private[backend] trait StorageBackendTestsEvents
       dtoTransactionMeta(offset(20), 1101, 1110),
       dtoTransactionMeta(offset(21), 1111, 1115),
       dtoTransactionMeta(offset(22), 1116, 1118),
-      // eventless update (topology-only / empty tx): stored as first = last + 1
+      // eventless update (e.g. fetch-only transaction): stored as first = last + 1
       dtoTransactionMeta(offset(23), 1119, 1118),
-      dtoTransactionMeta(offset(1000), 1119, 1120),
+      dtoTransactionMeta(offset(24), 1119, 1120),
+      dtoTransactionMeta(offset(1000), 1121, 1122),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(25), 1115))
     val eventSequentialIdRange: (Long, Long) => Option[EventSeqIdRange] =
@@ -687,23 +689,66 @@ private[backend] trait StorageBackendTestsEvents
     // range partially overlapping meta entries still uses their full seq id spans
     eventSequentialIdRange(11, 19) shouldBe Some(EventSeqIdRange(1100, 1100))
     eventSequentialIdRange(16, 20) shouldBe Some(EventSeqIdRange(1101, 1110))
+    // range falling between two meta entries, hence no events
+    eventSequentialIdRange(16, 19) shouldBe None
     // range spanning meta entries up to the last one before the ledger end
-    eventSequentialIdRange(22, 999) shouldBe Some(EventSeqIdRange(1116, 1118))
+    eventSequentialIdRange(22, 999) shouldBe Some(EventSeqIdRange(1116, 1120))
     // range covering only an eventless update (first = last + 1), hence no events
     eventSequentialIdRange(23, 23) shouldBe None
     // range with no meta entry at all, hence no events
-    eventSequentialIdRange(24, 24) shouldBe None
+    eventSequentialIdRange(25, 25) shouldBe None
     // range mixing an event-bearing entry with an eventless one skips the eventless one
     eventSequentialIdRange(22, 23) shouldBe Some(EventSeqIdRange(1116, 1118))
+    // range starting with an eventless update uses the first id of the following event-bearing one
+    eventSequentialIdRange(23, 24) shouldBe Some(EventSeqIdRange(1119, 1120))
     // range extending beyond the ledger end is capped to the ledger end
-    eventSequentialIdRange(10, 1000) shouldBe Some(EventSeqIdRange(1000, 1118))
+    eventSequentialIdRange(10, 1000) shouldBe Some(EventSeqIdRange(1000, 1120))
     // range entirely beyond the ledger end, hence no events
     eventSequentialIdRange(26, 1000) shouldBe None
 
     // lowering the ledger end excludes the previously visible meta entry
     executeSql(updateLedgerEnd(offset(20), 1110))
     eventSequentialIdRange(10, 25) shouldBe Some(EventSeqIdRange(1000, 1110))
+    // range starting exactly at the ledger end still includes the meta entry at the ledger end
+    eventSequentialIdRange(20, 25) shouldBe Some(EventSeqIdRange(1101, 1110))
+    // range starting right after the ledger end, hence no events
     eventSequentialIdRange(21, 25) shouldBe None
+  }
+
+  it should "fetch the event sequential id range of an update from its meta entry" in {
+    val dtos = Vector(
+      dtoTransactionMeta(offset(10), 1000, 1099),
+      // eventless update (e.g. fetch-only transaction): stored as first = last + 1
+      dtoTransactionMeta(offset(11), 1100, 1099),
+      // update with a single event: stored as first = last
+      dtoTransactionMeta(offset(12), 1100, 1100),
+      dtoTransactionMeta(offset(13), 1101, 1110),
+      dtoTransactionMeta(offset(14), 1111, 1120),
+    )
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(ingest(dtos, _))
+    executeSql(updateLedgerEnd(offset(13), 1110))
+    val fetchIdsFromUpdateMeta: Long => Option[EventSeqIdRange] =
+      o =>
+        executeSql(
+          backend.event.updatePointwiseQueries.fetchIdsFromUpdateMeta(
+            LookupKey.ByOffset(offset(o))
+          )
+        )
+
+    // update with events
+    fetchIdsFromUpdateMeta(10) shouldBe Some(EventSeqIdRange(1000, 1099))
+    // update without events, hence no range
+    fetchIdsFromUpdateMeta(11) shouldBe None
+    // update with a single event
+    fetchIdsFromUpdateMeta(12) shouldBe Some(EventSeqIdRange(1100, 1100))
+    // update exactly at the ledger end
+    fetchIdsFromUpdateMeta(13) shouldBe Some(EventSeqIdRange(1101, 1110))
+    // update beyond the ledger end
+    fetchIdsFromUpdateMeta(14) shouldBe None
+    // no update at all
+    fetchIdsFromUpdateMeta(9) shouldBe None
   }
 
   it should "work properly for SynchronizerOffset queries" in {
@@ -769,7 +814,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(12), 2L, CantonTimestamp(startPublicationTime.addMicros(1000)))
@@ -1347,7 +1392,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(12), 2L, CantonTimestamp(startPublicationTime.addMicros(1000)))
@@ -1404,7 +1449,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     )
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(12), 2L, CantonTimestamp(startPublicationTime.addMicros(1000)))
@@ -1438,7 +1483,7 @@ private[backend] trait StorageBackendTestsEvents
       dtosWitnessedExercised(event_sequential_id = 7L, consuming = false),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(10000), 10000L)
@@ -2023,7 +2068,7 @@ private[backend] trait StorageBackendTestsEvents
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(10000), 10000L)
@@ -2227,7 +2272,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(10000), 10000L)
@@ -2356,7 +2401,7 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(10000), 10000L)
@@ -2771,7 +2816,7 @@ private[backend] trait StorageBackendTestsEvents
       dtosWitnessedExercised(event_sequential_id = 6L),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(
       updateLedgerEnd(offset(10000), 10000L)
@@ -2925,7 +2970,7 @@ private[backend] trait StorageBackendTestsEvents
       )(),
     ).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dbDtos, _))
     executeSql(updateLedgerEnd(offset(16), 16L))
 
@@ -2970,7 +3015,7 @@ private[backend] trait StorageBackendTestsEvents
       .toVector
       .flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
 
     executeSql(
@@ -3032,7 +3077,7 @@ private[backend] trait StorageBackendTestsEvents
   ).flatten
 
   it should "correctly handle deactivated contracts (when activeAt is at ledger end)" in {
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
@@ -3066,7 +3111,7 @@ private[backend] trait StorageBackendTestsEvents
 
   it should "correctly handle deactivated contracts (when activeAt contains a deactivation)" in {
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
@@ -3096,7 +3141,7 @@ private[backend] trait StorageBackendTestsEvents
 
   it should "correctly handle deactivated contracts (when activeAt contains a deactivation for all activations)" in {
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
@@ -3153,7 +3198,7 @@ private[backend] trait StorageBackendTestsEvents
 
     val dtos: Vector[DbDto] = (activations ++ deactivations).flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
@@ -3209,7 +3254,7 @@ private[backend] trait StorageBackendTestsEvents
 
   it should "correctly filter deactivated contracts from ACHS with varying activeAtEventSeqId" in {
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(dtos, _))
     executeSql(
       backend.event
@@ -3262,7 +3307,7 @@ private[backend] trait StorageBackendTestsEvents
       .toVector
       .flatten
 
-    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
     executeSql(ingest(achsDtos, _))
     executeSql(updateLedgerEnd(offset(5), 5L))
     executeSql(
@@ -3465,7 +3510,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3475,7 +3520,7 @@ private[backend] trait StorageBackendTestsEvents
         someSynchronizerId,
         Timestamp.Epoch.add(Duration.ofSeconds(1)),
       )
-    ) shouldBe Some(offset(2L))
+    ) shouldBe None
     executeSql(
       backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
         someSynchronizerId,
@@ -3498,7 +3543,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3535,7 +3580,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3571,7 +3616,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3581,7 +3626,7 @@ private[backend] trait StorageBackendTestsEvents
         someSynchronizerId,
         Timestamp.Epoch.add(Duration.ofSeconds(1)),
       )
-    ) shouldBe Some(offset(2L))
+    ) shouldBe None
     executeSql(
       backend.event.lastSynchronizerOffsetBeforeOrFirstAtRecordTime(
         someSynchronizerId,
@@ -3619,7 +3664,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3668,7 +3713,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3712,7 +3757,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3756,7 +3801,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3791,7 +3836,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(5L), 60L)(conn)
     }
@@ -3840,7 +3885,7 @@ private[backend] trait StorageBackendTestsEvents
     )
 
     executeSql { conn =>
-      backend.parameter.initializeParameters(someIdentityParams, loggerFactory)(conn)
+      backend.parameter.initializeParameters(someIdentityParams)(conn)
       ingest(dtos, conn)
       updateLedgerEnd(offset(6L), 60L)(conn)
     }

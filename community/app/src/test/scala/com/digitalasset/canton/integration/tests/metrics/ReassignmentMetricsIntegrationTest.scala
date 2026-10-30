@@ -5,10 +5,12 @@ package com.digitalasset.canton.integration.tests.metrics
 
 import com.daml.metrics.MetricsFilterConfig
 import com.daml.metrics.api.MetricQualification
+import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.AutomaticAssignment
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -17,7 +19,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.{UniquePortGenerator, config}
 import monocle.macros.syntax.lens.*
 
 final class ReassignmentMetricsIntegrationTest
@@ -37,6 +38,7 @@ final class ReassignmentMetricsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1_S1M1
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         _.focus(_.monitoring.metrics)
@@ -61,10 +63,7 @@ final class ReassignmentMetricsIntegrationTest
           .foreach(psid => participant1.dars.upload(CantonExamplesPath, synchronizerId = psid))
 
         // Disable automatic assignment
-        sequencer2.topology.synchronizer_parameters.propose_update(
-          acmeId,
-          _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
-        )
+        AutomaticAssignment.disable(Seq(sequencer2), acmeId)
       }
 
   "Reassignment metrics" should {

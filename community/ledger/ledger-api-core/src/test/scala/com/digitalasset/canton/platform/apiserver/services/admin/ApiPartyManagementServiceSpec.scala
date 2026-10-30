@@ -49,6 +49,7 @@ import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagem
 }
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.apiserver.services.tracking.{InFlight, StreamTracker}
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
@@ -76,8 +77,13 @@ import com.digitalasset.canton.tracing.{Spanning, TestTelemetrySetup, TraceConte
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.ProtocolVersionValidation
-import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutorService,
+  LfPartyId,
+  ProtocolVersionChecksAsyncWordSpec,
+}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -107,6 +113,7 @@ class ApiPartyManagementServiceSpec
     with PekkoBeforeAndAfterAll
     with ErrorsAssertions
     with BaseTest
+    with ProtocolVersionChecksAsyncWordSpec
     with Spanning
     with BeforeAndAfterEach
     with HasExecutorService {
@@ -263,6 +270,7 @@ class ApiPartyManagementServiceSpec
                 confirmationThreshold = 1,
                 observingParticipantUids =
                   Seq(DefaultTestIdentities.participant3.uid.toProtoPrimitive),
+                protocolVersion = None,
               )
             )
             signature = sign(keyPair, generatedTransactions.multiHash, partyId.fingerprint)
@@ -296,6 +304,38 @@ class ApiPartyManagementServiceSpec
               }
           } yield result
         }
+
+      def withHostingParticipants(
+          participants: HostingParticipant*
+      ): Lens[AllocateExternalPartyRequest, AllocateExternalPartyRequest] => Mutation[
+        AllocateExternalPartyRequest
+      ] =
+        _.onboardingTransactions.modify(_.map { tx =>
+          TopologyTransaction
+            .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+              tx.transaction
+            )
+            .value
+            .selectMapping[PartyToParticipant]
+            .map { p2p =>
+              val updatedTx = TopologyTransaction.tryCreate(
+                p2p.operation,
+                p2p.serial,
+                PartyToParticipant.tryCreate(
+                  p2p.mapping.partyId,
+                  p2p.mapping.threshold,
+                  participants,
+                  p2p.mapping.partySigningKeysWithThreshold,
+                ),
+                testedProtocolVersion,
+              )
+              SignedTransaction(
+                updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                tx.signatures,
+              )
+            }
+            .getOrElse(tx)
+        })
 
       def mkDecentralizedTx(ownerSize: Int): (SignedTransaction, Namespace) = {
         val ownersKeys = Seq.fill(ownerSize)(createSigningKey).map { case (publicKey, keyPair) =>
@@ -340,7 +380,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .nonEmpty
@@ -356,7 +398,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -379,7 +423,15 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -406,7 +458,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -429,7 +483,15 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -456,7 +518,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
@@ -468,7 +532,15 @@ class ApiPartyManagementServiceSpec
                       _.partyToParticipant.optionalPartySigningKeys.set(None)
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
+                .map(
+                  TopologyMapping
+                    .fromProtoV30(
+                      testedProtocolVersionValidation,
+                      testedTopologyLimits,
+                      _,
+                    )
+                    .value
+                )
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -521,7 +593,9 @@ class ApiPartyManagementServiceSpec
             val partyId = transactions
               .flatMap(tx =>
                 TopologyTransaction
-                  .fromByteString(testedProtocolVersion, tx.transaction)
+                  .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                    tx.transaction
+                  )
                   .value
                   .selectMapping[PartyToParticipant]
               )
@@ -549,7 +623,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.filter(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .nonEmpty
@@ -564,7 +640,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -595,12 +673,50 @@ class ApiPartyManagementServiceSpec
         )
       }
 
+      "refuse a P2P with a Nominated or Freezing entry" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+        testAllocateExternalPartyValidation(
+          withHostingParticipants(
+            HostingParticipant(participantId, ParticipantPermission.Confirmation),
+            HostingParticipant(
+              DefaultTestIdentities.participant2,
+              ParticipantPermission.Confirmation,
+              HostingState.Nominated,
+            ),
+            HostingParticipant(
+              DefaultTestIdentities.participant3,
+              ParticipantPermission.Observation,
+              HostingState.Freezing,
+            ),
+          ),
+          _ =>
+            Some(
+              "The PartyToParticipant transaction must not contain any node in hosting state Nominated or Freezing: these states are only for adding a node to an existing party. Nodes in these states: PAR::participant2::participant2... (Nominated), PAR::participant3::participant3... (Freezing)"
+            ),
+        )
+      }
+
+      "allow a P2P with an Onboarding entry" in {
+        testAllocateExternalPartyValidation(
+          withHostingParticipants(
+            HostingParticipant(participantId, ParticipantPermission.Confirmation),
+            HostingParticipant(
+              DefaultTestIdentities.participant2,
+              ParticipantPermission.Confirmation,
+              HostingState.Onboarding,
+            ),
+          ),
+          _ => None,
+        )
+      }
+
       "refuse a non multi-hosted party submitted to another node" in {
         testAllocateExternalPartyValidation(
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -641,7 +757,9 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.map(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
@@ -756,7 +874,9 @@ class ApiPartyManagementServiceSpec
             // Remove the Namespace delegation generated by default
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[NamespaceDelegation]
                 .isDefined
@@ -779,7 +899,9 @@ class ApiPartyManagementServiceSpec
             // Remove the Namespace delegation generated by default
             _.filterNot(tx =>
               TopologyTransaction
-                .fromByteString(testedProtocolVersion, tx.transaction)
+                .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+                  tx.transaction
+                )
                 .value
                 .selectMapping[NamespaceDelegation]
                 .isDefined
@@ -892,7 +1014,7 @@ class ApiPartyManagementServiceSpec
         val txs = response.topologyTransactions.toList
           .traverse(tx =>
             TopologyTransaction
-              .fromByteString(testedProtocolVersion, tx)
+              .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(tx)
           )
           .valueOrFail("unable to parse topology txs")
           .map(_.mapping)
@@ -917,6 +1039,7 @@ class ApiPartyManagementServiceSpec
               confirmationThreshold = 2,
               observingParticipantUids =
                 Seq(DefaultTestIdentities.participant3.uid.toProtoPrimitive),
+              protocolVersion = None,
             )
           )
         } yield {
@@ -954,6 +1077,7 @@ class ApiPartyManagementServiceSpec
                 Seq(DefaultTestIdentities.participant2.uid.toProtoPrimitive),
               confirmationThreshold = 1,
               observingParticipantUids = Seq(),
+              protocolVersion = None,
             )
           )
         } yield {
@@ -987,6 +1111,7 @@ class ApiPartyManagementServiceSpec
                   Seq(DefaultTestIdentities.participant2.uid.toProtoPrimitive),
                 confirmationThreshold = 3,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -994,6 +1119,52 @@ class ApiPartyManagementServiceSpec
           response.getMessage should include(
             "Confirmation threshold exceeds number of confirming participants"
           )
+        }
+      }
+      "create the transactions for the requested protocol version" in {
+        val (publicKey, _) = createSigningKey
+        for {
+          response <- apiService.generateExternalPartyTopology(
+            GenerateExternalPartyTopologyRequest(
+              synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
+              partyHint = "alice",
+              publicKey = publicKey,
+              localParticipantObservationOnly = false,
+              otherConfirmingParticipantUids = Seq(),
+              confirmationThreshold = 1,
+              observingParticipantUids = Seq(),
+              protocolVersion = Some(ProtocolVersion.v36.toProtoPrimitive),
+            )
+          )
+        } yield {
+          val transaction = TopologyTransaction
+            .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+              response.topologyTransactions.loneElement
+            )
+            .valueOrFail("unable to parse topology transaction")
+          transaction.representativeProtocolVersion shouldBe TopologyTransaction
+            .protocolVersionRepresentativeFor(ProtocolVersion.v36)
+        }
+      }
+      "reject an invalid protocol version" in {
+        val (publicKey, _) = createSigningKey
+        for {
+          response <- apiService
+            .generateExternalPartyTopology(
+              GenerateExternalPartyTopologyRequest(
+                synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
+                partyHint = "alice",
+                publicKey = publicKey,
+                localParticipantObservationOnly = false,
+                otherConfirmingParticipantUids = Seq(),
+                confirmationThreshold = 1,
+                observingParticipantUids = Seq(),
+                protocolVersion = Some(Int.MaxValue),
+              )
+            )
+            .failed
+        } yield {
+          response.getMessage should include("protocol_version")
         }
       }
       "fail gracefully on invalid synchronizer-ids" in {
@@ -1009,6 +1180,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1022,6 +1194,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1044,6 +1217,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1058,6 +1232,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1079,6 +1254,7 @@ class ApiPartyManagementServiceSpec
                 otherConfirmingParticipantUids = Seq(),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1101,6 +1277,7 @@ class ApiPartyManagementServiceSpec
                   Seq(DefaultTestIdentities.participant1.uid.toProtoPrimitive),
                 confirmationThreshold = 1,
                 observingParticipantUids = Seq(),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1115,6 +1292,7 @@ class ApiPartyManagementServiceSpec
                 confirmationThreshold = 1,
                 observingParticipantUids =
                   Seq(DefaultTestIdentities.participant1.uid.toProtoPrimitive),
+                protocolVersion = None,
               )
             )
             .failed
@@ -1130,6 +1308,7 @@ class ApiPartyManagementServiceSpec
                 confirmationThreshold = 1,
                 observingParticipantUids =
                   Seq(DefaultTestIdentities.participant2.uid.toProtoPrimitive),
+                protocolVersion = None,
               )
             )
             .failed

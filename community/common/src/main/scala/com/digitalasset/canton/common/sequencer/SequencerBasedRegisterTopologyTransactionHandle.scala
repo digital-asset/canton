@@ -113,6 +113,9 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     )
     sequencerClient.send(
       Batch.of(psid.protocolVersion, (request, Recipients.cc(TopologyBroadcastAddress.recipient))),
+      // we don't sign the inner `TopologyTransactionBroadcast` request so we don't need to provide a snapshot
+      // approximation and can let the sequencer client retrieve the latest snapshot itself.
+      currentSnapshotApproximation = None,
       timestamps = SendRequestTimestamps(
         approximateTimestampForSigning = approximateTimestampForSigning,
         maxSequencingTime = maxSequencingTime,

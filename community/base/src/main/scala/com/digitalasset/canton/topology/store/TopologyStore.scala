@@ -25,6 +25,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingFromCompanion,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.TopologyLimits
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -237,13 +238,17 @@ object StoredTopologyTransaction
       rejectionReason <- proto.rejectionReason.traverse(
         String300.fromProtoPrimitive(_, "rejection_reason")
       )
-      signedTx <- SignedTopologyTransaction.fromTrustedByteString(proto.transaction)
+      // Trusted bytes from the node's own store, so the validators pass the content through and
+      // the limits in the context are never read.
+      signedTx <- SignedTopologyTransaction.fromTrustedByteString(
+        TopologyTransactionDeserializationContext(TopologyLimits.default)
+      )(proto.transaction)
     } yield StoredTopologyTransaction(sequenced, validFrom, validUntil, signedTx, rejectionReason)
 
   override def supportedProtoVersions: StoredTopologyTransaction.SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v35,
+        ProtocolVersion.v36,
         supportedProtoVersion(adminTopoV30.TopologyTransactions.Item)(fromProtoV30),
         _.toAdminProtoV30,
       )
@@ -542,6 +547,16 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       includeRejected: Boolean,
   )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed]
 
+  /** Yields all transactions with sequenced time greater than `fromExclusive` and less than or
+    * equal to `toInclusive`. Sets `validUntil` to `None`, if `validUntil` is strictly greater than
+    * the maximum value of `validFrom`.
+    */
+  def findEssentialStateInInterval(
+      fromExclusiveO: Option[SequencedTime],
+      toInclusive: SequencedTime,
+      includeRejected: Boolean,
+  )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed]
+
   /** Yields a hash corresponding to the contents of the respective
     * [[findEssentialStateAtSequencedTime]], with `includeRejected = true`
     */
@@ -622,6 +637,17 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]]
+
+  /** Finds the last stored transaction for each requested hash with `validFrom` strictly before
+    * `asOfExclusive`. Hashes without a matching record are omitted.
+    */
+  def findStoredByHashes(
+      asOfExclusive: CantonTimestamp,
+      hashes: Set[TxHash],
+      includeRejected: Boolean = false,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[TxHash, GenericStoredTopologyTransaction]]
 
   /** Find all effective-time state changes. One EffectiveStateChange contains all positive
     * transactions which have valid_from == fromEffectiveInclusive for the new state, and all

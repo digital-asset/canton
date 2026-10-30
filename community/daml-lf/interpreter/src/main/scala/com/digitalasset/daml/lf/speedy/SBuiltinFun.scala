@@ -29,11 +29,13 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionError,
 }
 import com.digitalasset.daml.lf.value.Value as V
+import com.google.common.annotations.VisibleForTesting
 
 import java.nio.charset.StandardCharsets
-import java.security.spec.InvalidKeySpecException
+import java.security.spec.{InvalidKeySpecException, X509EncodedKeySpec}
 import java.security.{
   InvalidKeyException,
+  KeyFactory,
   NoSuchAlgorithmException,
   NoSuchProviderException,
   PublicKey,
@@ -767,7 +769,7 @@ private[lf] object SBuiltinFun {
                 )
               )
             )
-          publicKey = extractPublicKey(derEncodedPublicKey)
+          publicKey = ECPublicKeyUtil.extractPublicKey(derEncodedPublicKey)
         } yield {
           SBool(crypto.MessageSignature.verify(signature, message, publicKey))
         }
@@ -806,12 +808,83 @@ private[lf] object SBuiltinFun {
         case _: NoSuchAlgorithmException =>
           crash("BouncyCastle provider fails to support SECP256K1")
       }
+  }
+
+  @VisibleForTesting
+  private[speedy] object ECPublicKeyUtil {
+
+    @throws(classOf[NoSuchAlgorithmException])
+    @throws(classOf[InvalidKeySpecException])
+    def decodePublicKey(bytes: Array[Byte]): PublicKey = {
+      checkProviders
+      checkDerHeader(bytes)
+      KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(bytes))
+    }
+
+    // Check that the JCE providers for EC KeyFactory are exactly SunEC and BC in this order.
+    // This ensures that the behavior of decodePublicKey is not changed by unexpected provider registrations.
+    private lazy val checkProviders: Unit = {
+      val ecProviders = java.security.Security.getProviders
+        .filter(_.getService("KeyFactory", "EC") != null)
+        .map(_.getName)
+        .toList
+      if (ecProviders != List("SunEC", "BC"))
+        throw SError.Crash(
+          getClass.getCanonicalName,
+          s"Unexpected JCE security provider order for EC KeyFactory. " +
+            s"Expected exactly [SunEC, BC] in this order, but found [${ecProviders.mkString(", ")}]. " +
+            s"SunEC must have higher priority than BouncyCastle. " +
+            s"Fix: Update your JVM's 'java.security' config and disable overriding hardware drivers (e.g., SunPKCS11, SunMSCAPI).",
+        )
+    }
+
+    /** Sanitizes the DER encoded key to enforce ASN.1 TLV encoding and prevent JDK-specific parser
+      * malleability.
+      */
+    @throws(classOf[InvalidKeySpecException])
+    def checkDerHeader(bytes: Array[Byte]): Unit = {
+      // Minimum 2 bytes required for ASN.1 Type-Length-Value (Tag and Length)
+      if (bytes.length < 2)
+        throw new InvalidKeySpecException("public key is too short to contain a DER header")
+// 0x30 is the ASN.1 tag for SEQUENCE (required for X.509 SubjectPublicKeyInfo)
+      if (bytes(0) != 0x30.toByte)
+        throw new InvalidKeySpecException("public key does not start with DER SEQUENCE tag 0x30")
+// Read length byte as an unsigned 8-bit integer
+      val firstLength = bytes(1) & 0xff
+      // Short form (< 0x80): single length byte. Long form: 0x80 | n, followed by n length bytes.
+      val (headerLength, contentLength) =
+        if (firstLength < 0x80) (2, firstLength)
+        else {
+          // Long-form: highest bit is 1, remaining 7 bits indicate how many bytes hold the length
+          val n = firstLength & 0x7f
+// Prevent indefinite length (0), oversized keys (>16MB), and buffer overruns
+          if (n == 0 || n > 3 || bytes.length < 2 + n)
+            throw new InvalidKeySpecException("public key has an invalid DER length encoding")
+// Length must use the shortest possible byte representation (no leading zeros)
+          if (bytes(2) == 0)
+            throw new InvalidKeySpecException("public key has a non-canonical DER length")
+          val length = bytes.slice(2, 2 + n).foldLeft(0)((acc, b) => (acc << 8) | (b & 0xff))
+          if (length < 0x80)
+            throw new InvalidKeySpecException("public key has a non-canonical DER length")
+          (2 + n, length)
+        }
+// Rejects trailing garbage bytes to prevent parser discrepancies
+// across Java versions (e.g., JDK 17 permissively ignores trailing bytes, while JDK 21
+// throws an exception). See https://bugs.openjdk.org/browse/JDK-8308010.
+      if (bytes.length != headerLength + contentLength)
+        throw new InvalidKeySpecException(
+          s"Public key length ${bytes.length} does not match declared DER length ${headerLength + contentLength}"
+        )
+    }
 
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
+    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
+      val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
+
+      ECPublicKeyUtil.decodePublicKey(byteEncodedPublicKey)
+    }
   }
 
   final case object SBSECP256K1ValidateKey extends SBuiltinFun(1) {
@@ -832,7 +905,7 @@ private[lf] object SBuiltinFun {
                 )
               )
             )
-          publicKey = extractPublicKey(derEncodedPublicKey)
+          publicKey = ECPublicKeyUtil.extractPublicKey(derEncodedPublicKey)
         } yield {
           SBool(crypto.MessageSignature.validateKey(publicKey))
         }
@@ -865,12 +938,6 @@ private[lf] object SBuiltinFun {
         case _: NoSuchAlgorithmException =>
           crash("BouncyCastle provider fails to support SECP256K1")
       }
-
-    @throws(classOf[IllegalArgumentException])
-    @throws(classOf[NoSuchAlgorithmException])
-    @throws(classOf[InvalidKeySpecException])
-    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey =
-      crypto.MessageSignature.extractPublicKey(hexEncodedPublicKey)
   }
 
   final case object SBDecodeHex extends SBuiltinFun(1) {
@@ -1675,7 +1742,8 @@ private[lf] object SBuiltinFun {
           forbidLocalContractIds = forbidLocalContractIds,
           forbidTrailingNones = forbidTrailingNones,
         )
-        result <- fetchValidateDstContract(
+        _ <- ensureContractActive(machine, coid, dstTmplId)
+        result <- unpackValidateDstContract(
           machine,
           coid,
           srcTmplId,
@@ -2020,6 +2088,246 @@ private[lf] object SBuiltinFun {
           case Left(err) =>
             Control.Error(err)
         }
+      }
+    }
+  }
+
+  final case class SBUUnpackTemplate(dstTmplId: TypeConId) extends UpdateBuiltin(2) {
+    override protected def executeUpdate(
+        args: ArraySeq[SValue],
+        machine: UpdateMachine,
+    ): Control[Question.Update] = {
+      val coid = getSContractId(args, 0)
+      val resultContU = for {
+        templateArg <- unpackContract(machine, dstTmplId, coid)
+        contract <- getContractInfo(machine, coid, dstTmplId, templateArg)
+      } yield (contract, templateArg)
+      resultContU.run { case (contract, templateArg) =>
+        machine.ptx = machine.ptx.insertUnpack(
+          coid = coid,
+          contract = contract,
+          optLocation = machine.getLastLocation,
+        )
+        Control.Value(templateArg)
+      }
+    }
+
+    private[this] def unpackContract(
+        machine: UpdateMachine,
+        dstTmplId: TypeConId,
+        coid: V.ContractId,
+    ): ContU[SValue] = {
+
+      def processSrcContract(
+          srcTmplId: TypeConId,
+          srcPkgName: Ref.PackageName,
+          srcMetadata: ContractMetadata,
+          srcArg: V,
+          mbTypedNormalFormAuthenticator: Option[Hash => Boolean],
+          forbidLocalContractIds: Boolean,
+          forbidTrailingNones: Boolean,
+      ): ContU[SValue] =
+        if (srcTmplId.qualifiedName != dstTmplId.qualifiedName)
+          ContU.throwError(
+            IE.WronglyTypedContract(coid, dstTmplId, srcTmplId)
+          )
+        else
+          for {
+            _ <- machine.ensurePackageIsLoaded(
+              NameOf.qualifiedNameOfCurrentFunc,
+              dstTmplId.packageId,
+              language.Reference.Template(dstTmplId.toRef),
+            )
+            dstSArg <- importCreateArg(
+              machine,
+              Some(coid),
+              srcTmplId,
+              dstTmplId,
+              srcArg,
+              forbidLocalContractIds = forbidLocalContractIds,
+              forbidTrailingNones = forbidTrailingNones,
+            )
+            result <- unpackValidateDstContract(
+              machine,
+              coid,
+              srcTmplId,
+              srcPkgName,
+              srcMetadata,
+              dstTmplId,
+              dstSArg,
+              mbTypedNormalFormAuthenticator,
+            )
+            (_, value, _) = result
+          } yield value
+
+      machine.getIfLocalContract(coid) match {
+        case Some((srcTmplId, srcSArg)) =>
+          if (srcTmplId == dstTmplId)
+            ContU.pure(srcSArg)
+          else
+            for {
+              srcContractInfo <- getContractInfo(
+                machine,
+                coid,
+                srcTmplId,
+                srcSArg,
+              )
+              result <- processSrcContract(
+                srcTmplId = srcTmplId,
+                srcPkgName = srcContractInfo.packageName,
+                srcMetadata = srcContractInfo.metadata,
+                srcArg = srcContractInfo.createArg,
+                mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.hash),
+                forbidLocalContractIds = false,
+                forbidTrailingNones = true,
+              )
+            } yield result
+        case None =>
+          for {
+            entry <- machine.lookupContract(coid)
+            (coinst, hashingMethod, authenticator) = entry
+            _ <- authenticateIfLegacyContract(coid, coinst, hashingMethod, authenticator)
+            result <- processSrcContract(
+              srcTmplId = coinst.templateId,
+              srcPkgName = coinst.packageName,
+              srcMetadata = ContractMetadata(
+                coinst.signatories,
+                coinst.nonSignatoryStakeholders,
+                coinst.contractKeyWithMaintainers,
+              ),
+              srcArg = coinst.createArg,
+              mbTypedNormalFormAuthenticator = hashingMethod match {
+                case HashingMethod.TypedNormalForm => Some(authenticator)
+                case HashingMethod.Legacy | HashingMethod.UpgradeFriendlyUnsafe => None
+              },
+              forbidLocalContractIds = true,
+              forbidTrailingNones = hashingMethod match {
+                case HashingMethod.Legacy => false
+                case HashingMethod.UpgradeFriendlyUnsafe | HashingMethod.TypedNormalForm => true
+              },
+            )
+          } yield result
+      }
+    }
+  }
+
+  final case class SBUUnpackInterface(ifaceId: TypeConId) extends UpdateBuiltin(2) {
+    override protected def executeUpdate(
+        args: ArraySeq[SValue],
+        machine: UpdateMachine,
+    ): Control[Question.Update] = {
+      val coid = getSContractId(args, 0)
+      val resultContU = for {
+        iface <- unpackIface(machine, ifaceId, coid)
+        scrTmplId = iface.ty match {
+          case Ast.TTyCon(tycon) => tycon
+          case other => crash(s"unexpected type ${other.pretty} in interface")
+        }
+        contract <- getContractInfo(machine, coid, scrTmplId, iface.value)
+      } yield (contract, iface)
+      resultContU.run { case (contract, templateArg) =>
+        machine.ptx = machine.ptx.insertUnpack(
+          coid = coid,
+          contract = contract,
+          optLocation = machine.getLastLocation,
+        )
+        Control.Value(templateArg)
+      }
+    }
+
+    private[this] def unpackIface(
+        machine: UpdateMachine,
+        ifaceId: TypeConId,
+        coid: V.ContractId,
+    ): ContU[SAny] = {
+
+      def processSrcContract(
+          srcPackageName: Ref.PackageName,
+          srcTmplId: TypeConId,
+          srcMetadata: ContractMetadata,
+          srcArg: V,
+          mbTypedNormalFormAuthenticator: Option[Hash => Boolean],
+          forbidLocalContractIds: Boolean,
+          forbidTrailingNones: Boolean,
+      ): ContU[SAny] =
+        for {
+          pkgId <- ContU.from(
+            machine.packageResolution
+              .get(srcPackageName)
+              .toRight(IE.UnresolvedPackageName(srcPackageName))
+          )
+          dstTmplId = srcTmplId.copy(pkg = pkgId)
+          _ <- machine.ensurePackageIsLoaded(
+            NameOf.qualifiedNameOfCurrentFunc,
+            dstTmplId.packageId,
+            language.Reference.Template(dstTmplId.toRef),
+          )
+          _ <- ContU.assert(
+            interfaceInstanceExists(machine, ifaceId, dstTmplId),
+            IE.ContractDoesNotImplementInterface(ifaceId, coid, dstTmplId),
+          )
+          dstSArg <- importCreateArg(
+            machine,
+            Some(coid),
+            srcTmplId,
+            dstTmplId,
+            srcArg,
+            forbidLocalContractIds = forbidLocalContractIds,
+            forbidTrailingNones = forbidTrailingNones,
+          )
+          result <- unpackValidateDstContract(
+            machine,
+            coid,
+            srcTmplId,
+            srcPackageName,
+            srcMetadata,
+            dstTmplId,
+            dstSArg,
+            mbTypedNormalFormAuthenticator,
+          )
+          (dstTmplId, dstArg, _) = result
+        } yield SAny(Ast.TTyCon(dstTmplId), dstArg)
+
+      machine.getIfLocalContract(coid) match {
+        case Some((srcTmplId, srcSArg)) =>
+          for {
+            srcContractInfo <- getContractInfo(machine, coid, srcTmplId, srcSArg)
+            result <- processSrcContract(
+              srcPackageName = srcContractInfo.packageName,
+              srcTmplId = srcTmplId,
+              srcMetadata = srcContractInfo.metadata,
+              srcArg = srcContractInfo.createArg,
+              mbTypedNormalFormAuthenticator = Some(_ == srcContractInfo.hash),
+              forbidLocalContractIds = false,
+              forbidTrailingNones = true,
+            )
+          } yield result
+        case None =>
+          for {
+            entry <- machine.lookupContract(coid)
+            (coinst, hashingMethod, authenticator) = entry
+            // If hashingMethod is one of the legacy methods, we need to authenticate the contract before normalizing it.
+            _ <- authenticateIfLegacyContract(coid, coinst, hashingMethod, authenticator)
+            result <- processSrcContract(
+              srcPackageName = coinst.packageName,
+              srcTmplId = coinst.templateId,
+              srcMetadata = ContractMetadata(
+                coinst.signatories,
+                coinst.nonSignatoryStakeholders,
+                coinst.contractKeyWithMaintainers,
+              ),
+              srcArg = coinst.createArg,
+              mbTypedNormalFormAuthenticator = hashingMethod match {
+                case HashingMethod.TypedNormalForm => Some(authenticator)
+                case HashingMethod.Legacy | HashingMethod.UpgradeFriendlyUnsafe => None
+              },
+              forbidLocalContractIds = true,
+              forbidTrailingNones = hashingMethod match {
+                case HashingMethod.Legacy => false
+                case HashingMethod.UpgradeFriendlyUnsafe | HashingMethod.TypedNormalForm => true
+              },
+            )
+          } yield result
       }
     }
   }
@@ -2835,7 +3143,8 @@ private[lf] object SBuiltinFun {
             forbidLocalContractIds = forbidLocalContractIds,
             forbidTrailingNones = forbidTrailingNones,
           )
-          result <- fetchValidateDstContract(
+          _ <- ensureContractActive(machine, coid, dstTmplId)
+          result <- unpackValidateDstContract(
             machine,
             coid,
             srcTmplId,
@@ -2917,7 +3226,7 @@ private[lf] object SBuiltinFun {
     *
     * Assumes that the package of [dstTmplId] is already loaded.
     */
-  private[this] def fetchValidateDstContract(
+  private[this] def unpackValidateDstContract(
       machine: UpdateMachine,
       coid: V.ContractId,
       srcTmplId: TypeConId,
@@ -2929,7 +3238,6 @@ private[lf] object SBuiltinFun {
   ): ContU[(TypeConId, SValue, ContractInfo)] =
     for {
       dstContract <- getContractInfo(machine, coid, dstTmplId, dstTmplArg)
-      _ <- ensureContractActive(machine, coid, dstContract.templateId)
       _ <- checkContractUpgradable(
         coid,
         srcTmplId,

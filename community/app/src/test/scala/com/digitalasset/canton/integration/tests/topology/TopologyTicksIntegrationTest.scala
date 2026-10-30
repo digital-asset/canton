@@ -79,8 +79,8 @@ class TopologyTicksIntegrationTest
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   private val sendPolicy: SendPolicy = { _ => submission =>
-    // let's drop any time proof requests and time advancing messages so that only topology ticks can be used
-    // to advance time across all clients
+    // Let's drop any time proof requests and time advancing messages so that only topology ticks can be used
+    //  to advance time across all clients.
     if (TimeProof.isTimeProofSubmission(submission)) SendDecision.Drop
     else SendDecision.Process
   }
@@ -91,9 +91,9 @@ class TopologyTicksIntegrationTest
         import env.*
         val simClock = env.environment.simClock.value
         runAsyncAndAdvanceClockUntilFinished(
-          // we need to have this command run while advancing the clock, so that topology transactions
-          // (such as SynchronizerTrustCertificate) created during the participant connecting to the sequencer
-          // become effective and the process can complete
+          // We need to have this command run while advancing the clock, so that topology transactions
+          //  (such as SynchronizerTrustCertificate) created during the participant connecting to the sequencer
+          //  become effective and the process can complete.
           participant1.synchronizers.connect_local(sequencer1, alias = daName),
           simClock,
           deltaTime = epsilon,
@@ -102,15 +102,18 @@ class TopologyTicksIntegrationTest
         val sequencer = getProgrammableSequencer(sequencer1.name)
         sequencer.setPolicy("drop time proofs and time advancing messages")(sendPolicy)
 
-        // create party with synchronize = None so that we don't wait on the topology transaction to become effective
+        // Create party with synchronize = None so that we don't wait on the topology transaction
+        //  to become effective.
         val partyId = participant1.parties.enable("testParty1", synchronize = None)
 
-        // we see that it is not effective immediately
+        // We see that it is not effective immediately...
         participant1.ledger_api.parties.list().map(_.party) should not contain (partyId)
 
-        // but becomes effective after advancing time enough for a topology tick to be created and signal that the
-        // topology transaction is effective.
-        eventually(timeUntilSuccess = 60.seconds) {
+        // ...But becomes effective after advancing time enough for a topology tick to be created
+        //  and signal that the topology transaction is effective.
+        //  The participant's effective-time update can lag the topology tick under CI load;
+        //  a failing run took just over 60 seconds to complete this wait.
+        eventually(timeUntilSuccess = 75.seconds) {
           simClock.advance(epsilon.duration)
           participant1.ledger_api.parties.list().map(_.party) should contain(partyId)
           sequencer1.topology.party_to_participant_mappings
@@ -121,29 +124,32 @@ class TopologyTicksIntegrationTest
 
     "be persisted across restarts" in { implicit env =>
       import env.*
-      // doing a ping first to make create some events to make sure sequencer time is caught up to sim clock time
+      // Doing a ping first to make create some events to make sure sequencer time is caught up
+      //  to sim clock time.
       participant1.health.ping(participant1)
 
       val simClock = env.environment.simClock.value
       val sequencer = getProgrammableSequencer(sequencer1.name)
       sequencer.setPolicy("drop time proofs and time advancing messages")(sendPolicy)
 
-      // create a new party with synchronize = None so that we don't wait on the topology transaction to become effective
+      // Create a new party with synchronize = None so that we don't wait
+      //  on the topology transaction to become effective.
       val partyId = participant1.parties.enable("testParty2", synchronize = None)
 
-      // wait a little bit to make sure the sequencer has registered the topology transaction,
-      // before we proceed to test crash recovery
+      // Wait a little bit to make sure the sequencer has registered the topology transaction,
+      //  before we proceed to test crash recovery.
       blocking(Thread.sleep(1000))
 
-      // we see that the topology transaction is not effective immediately
+      // We see that the topology transaction is not effective immediately.
       participant1.ledger_api.parties.list().map(_.party) should not contain (partyId)
 
-      // restart the sequencer
+      // Restart the sequencer.
       sequencer1.stop()
       sequencer1.start()
 
-      // the sequencer persisted the timestamp of the latest topology transaction and after restart it is able to tell
-      // when it has become effective and emit a topology tick
+      // The sequencer persisted the timestamp of the latest topology transaction
+      //  and after restart it is able to tell when it has become effective
+      //  and emit a topology tick.
       eventually() {
         simClock.advance(epsilon.duration)
         participant1.ledger_api.parties.list().map(_.party) should contain(partyId)
@@ -169,7 +175,11 @@ class TopologyTicksIntegrationTest
 
       runAsyncAndAdvanceClockUntilFinished(
         bootstrap
-          .upload_new_sequencer_identity_transactions(daId, sequencer2, sequencer1),
+          .upload_new_sequencer_identity_transactions(
+            daId,
+            newSequencer = sequencer2,
+            existingSequencer = sequencer1,
+          ),
         simClock,
         deltaTime = epsilon,
       )
@@ -179,8 +189,8 @@ class TopologyTicksIntegrationTest
       // create the new sequencer's topology transaction without advancing time
       bootstrap.propose_new_sequencer_state(
         daId.logical,
-        sequencer2,
-        sequencer1,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
         initializedSynchronizers(daName).synchronizerOwners,
         synchronize = None, // set to none so we don't wait for transactions to be effective
       )
@@ -192,22 +202,33 @@ class TopologyTicksIntegrationTest
       // now propose new party topology transactions after new sequencer's topology transactions, but before they are effective
       val partyId = participant1.parties.enable("testParty3", synchronize = None)
       participant1.ledger_api.parties.list().map(_.party) should not contain partyId
-      // advance time so new sequencer's topology transactions become effective, but not the new party topology transactions
-      simClock.advance(epsilon.duration.dividedBy(2).plusMillis(10))
-      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
-      // complete initialization of new sequencer
+      // advance time so new sequencer's topology transactions become effective,
+      //  but not the new party topology transactions
+      simClock.advance(epsilon.duration.dividedBy(2).plusMillis(10))
+
+      // complete initialization of the new sequencer, so that the 2-nodes network is not stuck
       bootstrap.wait_for_sequencer_state_to_be_effective(
         daId.logical,
-        sequencer2,
-        sequencer1,
-        true,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
+        isBftSequencer = true,
         commandTimeouts.bounded,
       )
-      bootstrap.complete_new_sequencer_initialization(sequencer2, sequencer1)
-      setUpAdditionalConnections(sequencer1, sequencer2)
+      bootstrap.complete_new_sequencer_initialization(
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
+      )
+      setUpAdditionalConnections(
+        existingSequencerReference = sequencer1,
+        newSequencerReference = sequencer2,
+      )
       sequencer2.health.wait_for_initialized()
-      participant1.health.ping(participant1)
+
+      // Now sequencing is operational and sequencing time can advance, reach the target
+      //  instant to ensure that the new sequencer is effective
+      //  but not the new party topology transaction yet
+      TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
       // both sequencers do not consider party topology transaction effective yet
       sequencers.all.foreach { sequencer =>

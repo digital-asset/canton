@@ -166,23 +166,27 @@ class SetupPackageVetting(
           -- defaultPackageIds).map(LfPackageId.assertFromString)
 
       if (userDefinedPackages.nonEmpty) {
-        // Remove the vetted packages from the authorized store
-        participant.topology.vetted_packages.propose_delta(
-          participant = participant.id,
-          store = TopologyStoreId.Authorized,
-          removes = userDefinedPackages.toSeq,
-          force = AllUnvettingFlags,
-        )
+        def unvetUserPackages(store: TopologyStoreId): Unit = {
+          val packagesToRemove = participant.topology.vetted_packages
+            .list(
+              store = Some(store),
+              filterParticipant = participant.id.filterString,
+            )
+            .flatMap(_.item.packages.map(_.packageId))
+            .toSet
+            .intersect(userDefinedPackages)
 
-        // Remove the vetted packages from each synchronizer store
-        synchronizersPerParticipant(participant).foreach { syncId =>
-          participant.topology.vetted_packages.propose_delta(
-            participant = participant.id,
-            store = syncId,
-            removes = userDefinedPackages.toSeq,
-            force = AllUnvettingFlags,
-          )
+          if (packagesToRemove.nonEmpty)
+            participant.topology.vetted_packages.propose_delta(
+              participant = participant.id,
+              store = store,
+              removes = packagesToRemove.toSeq,
+              force = AllUnvettingFlags,
+            )
         }
+
+        unvetUserPackages(TopologyStoreId.Authorized)
+        synchronizersPerParticipant(participant).foreach(syncId => unvetUserPackages(syncId))
       }
     }
 

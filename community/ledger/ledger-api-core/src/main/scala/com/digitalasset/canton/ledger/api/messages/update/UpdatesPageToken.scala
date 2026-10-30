@@ -39,9 +39,12 @@ final case class UpdatesPageToken(
 object UpdatesPageToken {
 
   /** Token version used to detect format mismatch. Must be bumped every time protobuf token
-    * structure is changed.
+    * structure or the request checksum algorithm is changed.
+    *
+    * Version 2: the request checksum includes the
+    * UpdateFormat.include_transactions_and_reassignments field.
     */
-  val Version: Int = 1
+  val Version: Int = 2
 
   def requestChecksum(request: update_service.GetUpdatesPageRequest): ByteString =
     PageTokenUtils.toChecksum(

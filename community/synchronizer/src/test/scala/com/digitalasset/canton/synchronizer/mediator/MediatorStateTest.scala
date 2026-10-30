@@ -119,7 +119,7 @@ class MediatorStateTest
         FutureUnlessShutdown.pure(
           parties
             .map(party =>
-              party -> PartyInfo(
+              party -> PartyInfo.forTesting(
                 PositiveInt.one,
                 Map(ParticipantId("one") -> ParticipantAttributes(Confirmation)),
               )

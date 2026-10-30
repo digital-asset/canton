@@ -4,6 +4,7 @@
 package com.digitalasset.canton.ledger.participant.state
 
 import com.digitalasset.canton.protocol.LfFatContractInst
+import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
@@ -119,6 +120,8 @@ trait SubmissionSyncService {
     *   Daml applications communicating over the ledger.
     * @param reassignmentCommands
     *   The commands specifying this reassignment further.
+    * @param accountId
+    *   The traffic account to charge. If empty, the submitter's account is charged.
     */
   def submitReassignment(
       submitter: Ref.Party,
@@ -127,6 +130,7 @@ trait SubmissionSyncService {
       submissionId: Option[Ref.SubmissionId],
       workflowId: Option[Ref.WorkflowId],
       reassignmentCommands: Seq[ReassignmentCommand],
+      accountId: Option[AccountId],
   )(implicit
       traceContext: TraceContext
   ): Future[SubmissionResult]

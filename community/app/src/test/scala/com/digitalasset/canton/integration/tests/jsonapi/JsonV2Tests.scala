@@ -812,10 +812,13 @@ class JsonV2Tests
                         contractId = contractId,
                         source = validSynchronizerId.toProtoPrimitive,
                         target = validSynchronizerId.toProtoPrimitive, // intentionally wrong
+                        overrideSourceValidationPackageId = None,
+                        overrideTargetValidationPackageId = None,
                       )
                     )
                   )
                 ),
+                accountId = "",
               ),
             )
           }
@@ -979,6 +982,7 @@ class JsonV2Tests
                 activeAtOffset = endOffset,
                 eventFormat = Some(allTransactionsFormat),
                 streamContinuationToken = None,
+                includeIncompleteReassignments = false,
               )
 
             val message = TextMessage(
@@ -1019,6 +1023,7 @@ class JsonV2Tests
                   activeAtOffset = endOffset,
                   eventFormat = Some(allTransactionsFormat),
                   streamContinuationToken = None,
+                  includeIncompleteReassignments = false,
                 )
                 .asJson,
               headers,
@@ -1049,6 +1054,7 @@ class JsonV2Tests
                   activeAtOffset = endOffset + 100,
                   eventFormat = Some(allTransactionsFormat),
                   streamContinuationToken = None,
+                  includeIncompleteReassignments = false,
                 )
                 .asJson,
               headers,
@@ -1225,6 +1231,61 @@ class JsonV2Tests
             }
         } yield ()
       }
+    }
+
+    "honor the include_transactions_and_reassignments field of the update format" in httpTestFixture {
+      fixture =>
+        fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
+          val transactionsOnly = updateFormat(alice.unwrap)
+          val withShorthand = transactionsOnly.copy(
+            includeTransactions = None,
+            includeTransactionsAndReassignments = transactionsOnly.includeTransactions,
+          )
+          def updateByOffset(offset: Long, format: UpdateFormat) =
+            update_service.GetUpdateByOffsetRequest(offset = offset, updateFormat = Some(format))
+          def rejectionCause(offset: Long, format: UpdateFormat) =
+            postJsonRequest(
+              uri = fixture.uri.withPath(Uri.Path("/v2/updates/update-by-offset")),
+              json = updateByOffset(offset, format).asJson,
+              headers = headers,
+            ).map { case (status, response) =>
+              status should be(StatusCodes.BadRequest)
+              decode[JsCantonError](response.toString()).value.cause
+            }
+          for {
+            (_, offset) <- createCommand(fixture, alice, headers)
+            _ = updateByOffset(offset, withShorthand).asJson.noSpaces should include(
+              "\"includeTransactionsAndReassignments\":{"
+            )
+            // the field is accepted on its own
+            _ <- postJsonRequest(
+              uri = fixture.uri.withPath(Uri.Path("/v2/updates/update-by-offset")),
+              json = updateByOffset(offset, withShorthand).asJson,
+              headers = headers,
+            ).map { case (status, _) =>
+              status should be(StatusCodes.OK)
+            }
+            // but must not be combined with UpdateFormat.include_transactions
+            withTransactionsError <- rejectionCause(
+              offset,
+              withShorthand.copy(includeTransactions = transactionsOnly.includeTransactions),
+            )
+            // nor with UpdateFormat.include_reassignments
+            withReassignmentsError <- rejectionCause(
+              offset,
+              withShorthand.copy(includeReassignments =
+                transactionsOnly.includeTransactions.flatMap(_.eventFormat)
+              ),
+            )
+          } yield {
+            withTransactionsError should include(
+              "include_transactions_and_reassignments and include_transactions cannot both be set"
+            )
+            withReassignmentsError should include(
+              "include_transactions_and_reassignments and include_reassignments cannot both be set"
+            )
+          }
+        }
     }
   }
   "json api" should {
@@ -1500,6 +1561,7 @@ class JsonV2Tests
         ),
         includeReassignments = None,
         includeTopologyEvents = None,
+        includeTransactionsAndReassignments = None,
       )
     ),
     descendingOrder = false,
@@ -1523,6 +1585,7 @@ class JsonV2Tests
       includeTransactions = transactionFormat(party),
       includeReassignments = None,
       includeTopologyEvents = None,
+      includeTransactionsAndReassignments = None,
     )
 
   private def assertAcsDeltaEvents(

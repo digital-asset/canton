@@ -38,6 +38,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionConfir
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractInstanceOfId
 import com.digitalasset.canton.participant.store.ContractStore
 import com.digitalasset.canton.participant.traffic.TrafficCostEstimator.*
+import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -222,6 +223,8 @@ class TrafficCostEstimator(
           targetSynchronizer = targetSynchronizer,
           overrideSourceValidationPkgIds = Map.empty,
           overrideTargetValidationPkgIds = Map.empty,
+          // Estimation never sends the batch, so the traffic hook never reads this.
+          accounting = SubmissionAccounting.NoAccount,
         )
 
       val client = cryptoClient(snapshot)

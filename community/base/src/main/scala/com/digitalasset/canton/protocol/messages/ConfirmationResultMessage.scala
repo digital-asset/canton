@@ -103,7 +103,7 @@ object ConfirmationResultMessage
     )
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v30.ConfirmationResultMessage
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),

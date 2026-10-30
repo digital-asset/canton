@@ -26,11 +26,11 @@ class GrpcConnectionTest
     "notify on state changes" in {
       withLowLevelConnection() { (connection, listener) =>
         connection.start()
-        listener.shouldStabilizeOn(ConnectionState.Started)
+        listener.shouldStabilizeOnState(ConnectionState.Started)
 
         listener.clear()
         connection.stop()
-        listener.shouldStabilizeOn(ConnectionState.Stopped)
+        listener.shouldStabilizeOnState(ConnectionState.Stopped)
       }
     }
 

@@ -461,6 +461,10 @@ object PositiveFiniteDuration extends RefinedNonNegativeDurationCompanion[Positi
     _.asJava
   implicit val forgetRefinementFDuration: Transformer[PositiveFiniteDuration, FiniteDuration] =
     _.underlying
+
+  implicit val toInternalTransformer
+      : Transformer[PositiveFiniteDuration, PositiveFiniteDurationInternal] =
+    _.toInternal
 }
 
 /** Duration class used for positive durations that are rounded to the second. */

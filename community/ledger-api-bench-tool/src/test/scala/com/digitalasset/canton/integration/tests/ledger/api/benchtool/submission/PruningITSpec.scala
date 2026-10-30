@@ -4,8 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submission
 
 import com.daml.ledger.javaapi.data.Party
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.config.{Config, WorkflowConfig}
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
@@ -30,7 +29,11 @@ class PruningITSpec
     with OptionValues
     with Checkpoints {
   registerPlugin(NoAuthPlugin(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseH2(loggerFactory))
+  // The benchtool submits commands one at a time, so the mempool rarely reaches the default
+  // minimum batch size and every sequencing round would wait for the batch creation interval,
+  // which makes the 100 commands exceed the test timeout.
+  registerPlugin(new UseBftSequencer(loggerFactory, minRequestsInBatch = 1))
 
   private var system: ActorSystem[SpawnProtocol.Command] = _
 
@@ -113,8 +116,12 @@ class PruningITSpec
       } yield {
         pruningBenchmarkResult.value shouldBe ()
         txPrePruning.createEvents.size shouldBe 100
-        txPrePruning.consumingExercises.size shouldBe 49
-        acsPostPruning.numberOfCreatesPerTemplateName("Foo1") shouldBe 51
+        // The exact number of archivals is determined by the seed of the randomness provider,
+        // it is only approximately the configured 50% probability.
+        txPrePruning.consumingExercises.size shouldBe 51
+        // Everything that was not archived must still be active after pruning.
+        acsPostPruning.numberOfCreatesPerTemplateName("Foo1") shouldBe
+          txPrePruning.createEvents.size - txPrePruning.consumingExercises.size
         acsPostPruning.numberOfConsumingExercisesPerTemplateName("Foo1") shouldBe 0
         succeed
       }).futureValue

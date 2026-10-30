@@ -567,6 +567,7 @@ abstract class UpgradesMatrixIntegration(
                   verbose = false,
                 ),
                 validAtOffset = offset,
+                includeIncompleteReassignments = false,
               )
             result <- activeContracts
               .flatMap(_.createdEvent)

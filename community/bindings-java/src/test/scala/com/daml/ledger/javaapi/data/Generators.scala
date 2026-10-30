@@ -521,10 +521,12 @@ object Generators {
     for {
       eventFormat <- eventFormatGen
       activeAtOffset <- Arbitrary.arbLong.arbitrary
+      includeIncompleteReassignments <- Arbitrary.arbBool.arbitrary
     } yield v2.StateServiceOuterClass.GetActiveContractsRequest
       .newBuilder()
       .setEventFormat(eventFormat)
       .setActiveAtOffset(activeAtOffset)
+      .setIncludeIncompleteReassignments(includeIncompleteReassignments)
       .build()
 
   def activeContractGen: Gen[v2.StateServiceOuterClass.ActiveContract] =
@@ -1238,6 +1240,8 @@ object Generators {
       submissionId <- Arbitrary.arbString.arbitrary
       disclosedContract <- disclosedContractGen
       synchronizerId <- Arbitrary.arbString.arbitrary
+      prefetchContractKeys <- Gen.listOf(prefetchContractKeyGen)
+      accountId <- Arbitrary.arbString.arbitrary
     } yield Commands
       .newBuilder()
       .setWorkflowId(workflowId)
@@ -1252,6 +1256,8 @@ object Generators {
       .setSubmissionId(submissionId)
       .addDisclosedContracts(disclosedContract)
       .setSynchronizerId(synchronizerId)
+      .addAllPrefetchContractKeys(prefetchContractKeys.asJava)
+      .setAccountId(accountId)
       .build()
   }
 
@@ -1303,6 +1309,7 @@ object Generators {
       submitter <- Arbitrary.arbString.arbitrary
       commands <- Gen.listOf(reassignmentCommandGen)
       submissionId <- Arbitrary.arbString.arbitrary
+      accountId <- Arbitrary.arbString.arbitrary
     } yield ReassignmentCommands
       .newBuilder()
       .setWorkflowId(workflowId)
@@ -1311,6 +1318,7 @@ object Generators {
       .setSubmitter(submitter)
       .addAllCommands(commands.asJava)
       .setSubmissionId(submissionId)
+      .setAccountId(accountId)
       .build()
   }
 
@@ -1441,6 +1449,7 @@ object Generators {
       transactionFormatO <- Gen.option(transactionFormatGen)
       reassignmentFormatO <- Gen.option(eventFormatGen)
       topologyFormatO <- Gen.option(topologyFormatGen)
+      transactionsAndReassignmentsFormatO <- Gen.option(transactionFormatGen)
     } yield {
       val builder = TransactionFilterOuterClass.UpdateFormat
         .newBuilder()
@@ -1448,6 +1457,7 @@ object Generators {
       transactionFormatO.map(builder.setIncludeTransactions)
       reassignmentFormatO.map(builder.setIncludeReassignments)
       topologyFormatO.map(builder.setIncludeTopologyEvents)
+      transactionsAndReassignmentsFormatO.map(builder.setIncludeTransactionsAndReassignments)
 
       builder.build()
     }

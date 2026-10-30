@@ -3,15 +3,17 @@
 
 package com.digitalasset.canton.integration
 
+import cats.Applicative
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.{SharedCantonConfig, StorageConfig}
 import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.integration.plugins.UseExternalProcess
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.platform.indexer.IndexerState.ShutdownInProgress
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.{FutureInstances, MonadUtil}
@@ -35,11 +37,11 @@ class LedgerApiStoreIntegrityChecker(
 
     // Encapsulates the check for 'participantsWithoutLapiVerification'
     // to avoid duplicating the if/else logic and the log message.
-    def verifyOrBypass(participantName: String, participantLoggingName: String)(
-        verificationLogic: => FutureUnlessShutdown[Unit]
-    ): FutureUnlessShutdown[Unit] =
+    def verifyOrBypass[F[_]: Applicative](participantName: String, participantLoggingName: String)(
+        verificationLogic: => F[Unit]
+    ): F[Unit] =
       if (environment.testingConfig.participantsWithoutLapiVerification(participantName)) {
-        FutureUnlessShutdown.pure(
+        Applicative[F].pure(
           logger.info(
             s"Checking participant Ledger API Store integrity, for $participantLoggingName bypassed as it is specified in testingConfig.participantsWithoutLapiVerification."
           )
@@ -51,7 +53,7 @@ class LedgerApiStoreIntegrityChecker(
     def verifyAsync(
         participantLoggingName: String,
         storageConfig: StorageConfig,
-    ): FutureUnlessShutdown[Unit] = {
+    ): Future[Unit] = {
       val overallStart = System.currentTimeMillis()
       LedgerApiStore
         .initialize(
@@ -60,49 +62,63 @@ class LedgerApiStoreIntegrityChecker(
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
           ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),
+          disableMergeAndHashJoins = LedgerApiServerConfig().indexService.disableMergeAndHashJoins,
           timeouts = environmentTimeouts,
           loggerFactory = loggerFactory,
           metrics = LedgerApiServerMetrics.ForTesting,
           onlyForTesting_DoNotInitializeInMemoryState =
             true, // otherwise we emmit error logs and keep a DBDispatcher open for empty DBs
         )
-        .transformWith {
-          case Failure(t) =>
-            val elapsed = System.currentTimeMillis() - overallStart
-            logger.error(
-              s"Checking participant Ledger API Store integrity, for $participantLoggingName...FAILED TO ACCESS DATABASE, took: $elapsed ms",
-              t.getMessage,
-            )
-            FutureUnlessShutdown.failed(t)
-          case Success(store) =>
-            val elapsed = System.currentTimeMillis() - overallStart
-            logger.info(
-              s"Checking participant Ledger API Store integrity, for $participantLoggingName...CONNECTION ESTABLISHED took $elapsed ms, proceeding with integrity check"
-            )
-            val verificationStart = System.currentTimeMillis()
-            FutureUnlessShutdown
-              .lift(store)
-              .flatMap((st: LedgerApiStore) =>
-                st.verifyIntegrity(failForEmptyDB =
-                  false // sometimes configured participants are not even started once
-                ).transformWith {
-                  case Success(_) =>
-                    val elapsed = System.currentTimeMillis() - verificationStart
-                    logger.info(
-                      s"Checking participant Ledger API Store integrity, for $participantLoggingName...VERIFICATION DONE took $elapsed ms"
-                    )
-                    st.close()
-                    FutureUnlessShutdown.pure(())
-                  case Failure(t) =>
-                    val elapsed = System.currentTimeMillis() - verificationStart
-                    logger.error(
-                      s"Checking participant Ledger API Store integrity, for $participantLoggingName...VERIFICATION FAILED took $elapsed ms",
-                      t,
-                    )
-                    st.close()
-                    FutureUnlessShutdown.failed(t)
-                }
+        .unwrap
+        .transformWith { result =>
+          val elapsed = System.currentTimeMillis() - overallStart
+          result match {
+            case Success(Outcome(store)) =>
+              logger.info(
+                s"Checking participant Ledger API Store integrity, for $participantLoggingName...CONNECTION ESTABLISHED took $elapsed ms, proceeding with integrity check"
               )
+              val verificationStart = System.currentTimeMillis()
+              store
+                .verifyIntegrity(
+                  // sometimes configured participants are not even started once
+                  failForEmptyDB = false
+                )
+                .unwrap
+                .transformWith { result =>
+                  val elapsed = System.currentTimeMillis() - verificationStart
+                  val newResult = result match {
+                    case Success(Outcome(_)) =>
+                      logger.info(
+                        s"Checking participant Ledger API Store integrity, for $participantLoggingName...VERIFICATION DONE took $elapsed ms"
+                      )
+                      Future.unit
+                    case Success(AbortedDueToShutdown) =>
+                      logger.error(
+                        s"Checking participant Ledger API Store integrity, for $participantLoggingName...FAILED DUE TO SHUTDOWN during verification, took $elapsed ms"
+                      )
+                      Future.failed(ShutdownInProgress)
+                    case Failure(t) =>
+                      logger.error(
+                        s"Checking participant Ledger API Store integrity, for $participantLoggingName...VERIFICATION FAILED took $elapsed ms",
+                        t,
+                      )
+                      Future.failed(t)
+                  }
+                  store.close()
+                  newResult
+                }
+            case Success(AbortedDueToShutdown) =>
+              logger.error(
+                s"Checking participant Ledger API Store integrity, for $participantLoggingName...FAILED DUE TO SHUTDOWN, took $elapsed ms"
+              )
+              Future.failed(ShutdownInProgress)
+            case Failure(t) =>
+              logger.error(
+                s"Checking participant Ledger API Store integrity, for $participantLoggingName...FAILED TO ACCESS DATABASE, took: $elapsed ms",
+                t,
+              )
+              Future.failed(t)
+          }
         }
     }
 
@@ -110,24 +126,19 @@ class LedgerApiStoreIntegrityChecker(
         participantName: String,
         participantLoggingName: String,
         storageConfig: StorageConfig,
-    ): FutureUnlessShutdown[Unit] =
+    ): Future[Unit] =
       verifyOrBypass(participantName, participantLoggingName) {
         storageConfig match {
           case _: StorageConfig.Memory =>
-            FutureUnlessShutdown.pure(
-              logger.error(
-                s"Checking participant Ledger API Store integrity, for $participantLoggingName is FAILED, as it is backed by an InMemory store. For safety please consider: 1) keep local in-memory participant running at the end of the test, 2) switch to persistent storage 3) or as a last resort exclude in-memory, not running participants explicitly via testingConfig.participantsWithoutLapiVerification."
-              )
+            logger.error(
+              s"Checking participant Ledger API Store integrity, for $participantLoggingName is FAILED, as it is backed by an InMemory store. For safety please consider: 1) keep local in-memory participant running at the end of the test, 2) switch to persistent storage 3) or as a last resort exclude in-memory, not running participants explicitly via testingConfig.participantsWithoutLapiVerification."
             )
-
+            Future.unit
           case nonInMemoryStorageConfig =>
-            FutureUnlessShutdown
-              .pure(
-                logger.info(
-                  s"Checking participant Ledger API Store integrity, for $participantLoggingName..."
-                )
-              )
-              .flatMap(_ => verifyAsync(participantLoggingName, nonInMemoryStorageConfig))
+            logger.info(
+              s"Checking participant Ledger API Store integrity, for $participantLoggingName..."
+            )
+            verifyAsync(participantLoggingName, nonInMemoryStorageConfig)
         }
       }
 
@@ -148,32 +159,29 @@ class LedgerApiStoreIntegrityChecker(
           participantName = runningParticipant.name,
           participantLoggingName = s"local running participant ${runningParticipant.name}",
         ) {
-          FutureUnlessShutdown
-            .pure {
-              runningParticipant.health.status
+          runningParticipant.health.status
+          logger.info(
+            s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}..."
+          )
+          Try(
+            timeIt(
+              runningParticipant.testing.state_inspection.verifyLapiStoreIntegrity(),
+              s"integrity check for running local participant ${runningParticipant.name}",
+            )
+          ) match {
+            case Success(_) =>
               logger.info(
-                s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}..."
+                s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}...OK"
               )
-              Try(
-                timeIt(
-                  runningParticipant.testing.state_inspection.verifyLapiStoreIntegrity(),
-                  s"integrity check for running local participant ${runningParticipant.name}",
-                )
-              ) match {
-                case Success(_) =>
-                  logger.info(
-                    s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}...OK"
-                  )
 
-                case Failure(t) =>
-                  logger.error(
-                    s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}...FAILED",
-                    t,
-                  )
-              }
-            }
+            case Failure(t) =>
+              logger.error(
+                s"Checking participant Ledger API Store integrity, for local running participant ${runningParticipant.name}...FAILED",
+                t,
+              )
+          }
+          Future.unit
         }
-          .failOnShutdownToAbortException("failed check of local running participant")
       }
 
     def checkNonRunningParticipants =
@@ -192,7 +200,6 @@ class LedgerApiStoreIntegrityChecker(
           participantLoggingName = s"not running local participant ${notRunningParticipant.name}",
           storageConfig = storageConfig,
         )
-          .failOnShutdownToAbortException("ledger api store initialization")
       }
 
     def checkExternalParticipants: Seq[Future[Unit]] =
@@ -203,7 +210,7 @@ class LedgerApiStoreIntegrityChecker(
               participantName = remoteParticipant,
               participantLoggingName = s"for remote participant $remoteParticipant",
               storageConfig = externalPlugin.storageConfig(remoteParticipant),
-            ).failOnShutdownToAbortException("ledger api store initialization")
+            )
           }.toSeq
 
         case None =>

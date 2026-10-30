@@ -63,6 +63,16 @@ detect_key_spec() {
   esac
 }
 
+# Unwraps a serialized versioned topology transaction to JSON, using the proto version of the wrapper.
+# Takes the serialized versioned message in binary format from stdin
+versioned_topology_transaction_to_json() {
+  local wrapper # message to be converted
+  local version # proto version
+  wrapper=$(convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.version.v1.UntypedVersionedMessage") || return 1
+  version=$(echo "$wrapper" | jq -r .version) || return 1
+  echo "$wrapper" | jq -r .data | decode_from_base64 | convert_bin_to_json "$BUF_PROTO_IMAGE" "com.digitalasset.canton.protocol.v${version}.TopologyTransaction"
+}
+
 # Writes to stderr
 err() {
   echo "$1" >&2

@@ -1,0 +1,90 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Credits traffic to a traffic enforcement (TEA) account.
+--
+-- An application that sells traffic (for example a wallet provider)
+-- implements `TrafficCreditIssuer` on a contract that the paymaster signs, and
+-- exercises `PublishCredit` on that same contract from within its own
+-- purchase logic. The TEA of the participant hosting the paymaster reads the
+-- exercise off the ledger and adds `trafficAmount` to the balance of
+-- `accountId`. TEA only trusts credits whose acting party is one of its
+-- configured top-up paymasters.
+--
+-- Exercising `PublishCredit` on a contract that is not otherwise used by the
+-- transaction adds that contract to the transaction and makes the credit more
+-- expensive in traffic.
+--
+-- This package is the contract between Canton and those applications.
+-- Interfaces cannot be upgraded, so a change requires a new interface in a
+-- new package. The package must not contain templates.
+module Canton.Traffic.Credit
+  ( AccountId
+  , mkAccountId
+  , TrafficCreditIssuerView(..)
+  , TrafficCreditIssuer
+  , PublishCredit(..)
+  ) where
+
+import DA.Foldable (forA_)
+import DA.Text qualified as T
+
+-- | The id of a TEA account. At most 255 characters, matching
+-- `^[A-Za-z0-9@^$.!`\-#+'~_|:() ]+(?:/[A-Za-z0-9@^$.!`\-#+'~_|:() ]+)*$`:
+-- one or more non-empty segments separated by `/`.
+--
+-- The constructor is not exported: create account ids through `mkAccountId`.
+data AccountId = AccountId with
+    value : Text
+  deriving (Eq, Show)
+
+-- | Validate `value` as a TEA account id.
+mkAccountId : Text -> Either Text AccountId
+mkAccountId value
+  | len > 255 = Left ("Account id must be at most 255 characters, found " <> show len)
+  | otherwise = (AccountId with value) <$ forA_ (T.splitOn "/" value) validateSegment
+  where
+    len = T.length value
+
+-- | Validate one `/`-separated segment of an account id.
+validateSegment : Text -> Either Text ()
+validateSegment segment
+  | segment == "" = Left "Account id segments must not be empty"
+  | T.isPred isSegmentChar segment = Right ()
+  | otherwise =
+      Left ("Account id segments must only contain [A-Za-z0-9@^$.!`#+'~_|:() -], found " <> show segment)
+  where
+    isSegmentChar c = T.isAlphaNum c || c `elem` segmentPunctuation
+
+segmentPunctuation : [Text]
+segmentPunctuation = T.explode "@^$.!`-#+'~_|:() "
+
+-- | The view of a `TrafficCreditIssuer`.
+data TrafficCreditIssuerView = TrafficCreditIssuerView with
+    paymaster : Party
+      -- ^ The party paying for the traffic. Must be a configured top-up
+      -- paymaster of the TEA that ingests the credit.
+  deriving (Eq, Show)
+
+-- | A contract that can credit traffic paid for by its `paymaster`.
+interface TrafficCreditIssuer where
+  viewtype TrafficCreditIssuerView
+
+  -- | Credit `trafficAmount` traffic bytes to `accountId`.
+  --
+  -- Requires the authority of the paymaster, e.g. by being exercised from a
+  -- choice on the implementing contract that the paymaster signs. Any choice
+  -- that exercises `PublishCredit` with the authority of the paymaster can
+  -- credit traffic, so such choices must only do so once the traffic has been
+  -- paid for.
+  nonconsuming choice PublishCredit : ()
+    with
+      accountId : AccountId
+        -- ^ The TEA account to credit.
+      trafficAmount : Int
+        -- ^ Traffic to credit, in bytes.
+    controller (view this).paymaster
+    do
+      -- Revalidate the account id: Ledger API exercises bypass `mkAccountId`.
+      _ <- either abort pure (mkAccountId accountId.value)
+      assertMsg "trafficAmount must be positive" (trafficAmount > 0)

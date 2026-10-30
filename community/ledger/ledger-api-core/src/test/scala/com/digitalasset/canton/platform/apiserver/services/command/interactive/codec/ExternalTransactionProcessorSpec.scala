@@ -82,6 +82,7 @@ class ExternalTransactionProcessorSpec
       // transactionHash is computed later from the verified signature during execution
       // (see EnrichedTransactionData / ExternalTransactionProcessor); unknown at this point.
       transactionHash = None,
+      accountId = None,
     )
     val transactionMeta = TransactionMeta(
       ledgerEffectiveTime = LfTimestamp.Epoch,
@@ -124,6 +125,7 @@ class ExternalTransactionProcessorSpec
       synchronizerId = None,
       prefetchKeys = Seq.empty,
       tapsMaxPasses = None,
+      accountId = None,
     )
     (commandExecutionResult, commands)
   }

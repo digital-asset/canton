@@ -82,8 +82,11 @@ import com.digitalasset.canton.participant.traffic.{
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
+import com.digitalasset.canton.platform.apiserver.services.command.{
+  SubmissionAccounting,
+  TrafficEnforcementBackend,
+}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.sequencing.*
@@ -229,6 +232,7 @@ class ConnectedSynchronizer(
       parameters.loggingConfig,
       testingConfig.useLegacyContractIdVersionV11,
       loggerFactory,
+      metrics.transactionProcessing.transactionViewMetrics,
     )
 
   private val damle =
@@ -280,10 +284,12 @@ class ConnectedSynchronizer(
     timeouts,
     Source(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig = testingConfig,
     promiseUSFactory,
+    trafficEnforcementBackendO.map(_.value),
   )
 
   private val assignmentProcessor: AssignmentProcessor = new AssignmentProcessor(
@@ -301,10 +307,12 @@ class ConnectedSynchronizer(
     timeouts,
     Target(staticSynchronizerParameters.protocolVersion),
     metrics.reassignments,
+    parameters,
     loggerFactory,
     futureSupervisor,
     testingConfig,
     promiseUSFactory,
+    trafficEnforcementBackendO.map(_.value),
   )
 
   private val trafficCostEstimation = {
@@ -422,6 +430,9 @@ class ConnectedSynchronizer(
     synchronizerHandle.topologyClient,
     sequencerClient,
     ephemeral.timeTracker,
+    disableAuthorizedStoreDispatching = synchronizerConnectionConfigStore
+      .get(psid)
+      .exists(_.config.disableAuthorizedStoreDispatching),
   )
 
   private val messageDispatcher: MessageDispatcher = {
@@ -971,7 +982,6 @@ class ConnectedSynchronizer(
           "Failed to complete outstanding assignments on startup. " +
             "You may have to complete the assignments manually.",
         )
-        ()
       }).value
     }
 
@@ -1064,6 +1074,9 @@ class ConnectedSynchronizer(
                 data.submitterMetadata,
                 participantId,
                 data.targetTimestamp,
+                data.unassignmentTs,
+                parameters.reassignmentsConfig,
+                clock,
               )
             )
             eitherF.leftMap(err => data.reassignmentId -> err).value
@@ -1137,6 +1150,7 @@ class ConnectedSynchronizer(
     */
   def submitTransaction(
       submitterInfo: SubmitterInfo,
+      accounting: SubmissionAccounting,
       transactionMeta: TransactionMeta,
       transaction: WellFormedTransaction[WithoutSuffixes],
       disclosedContracts: Map[LfContractId, ContractInstance],
@@ -1154,6 +1168,7 @@ class ConnectedSynchronizer(
       transactionProcessor
         .submit(
           submitterInfo,
+          accounting,
           transactionMeta,
           transaction,
           disclosedContracts,
@@ -1166,6 +1181,9 @@ class ConnectedSynchronizer(
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
+      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
+      accounting: SubmissionAccounting,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
@@ -1194,8 +1212,9 @@ class ConnectedSynchronizer(
                 submitterMetadata,
                 contractIds,
                 targetSynchronizer,
-                overrideSourceValidationPkgIds = Map.empty,
-                overrideTargetValidationPkgIds = Map.empty,
+                overrideSourceValidationPkgIds = overrideSourceValidationPkgIds,
+                overrideTargetValidationPkgIds = overrideTargetValidationPkgIds,
+                accounting = accounting,
               ),
             sourceTopology.unwrap,
           )
@@ -1205,6 +1224,7 @@ class ConnectedSynchronizer(
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
       targetTopology: Target[TopologySnapshot],
+      accounting: SubmissionAccounting,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
@@ -1227,7 +1247,7 @@ class ConnectedSynchronizer(
         assignmentProcessor
           .submit(
             AssignmentProcessingSteps
-              .SubmissionParam(submitterMetadata, reassignmentId),
+              .SubmissionParam(submitterMetadata, reassignmentId, accounting),
             targetTopology.unwrap,
           )
     }

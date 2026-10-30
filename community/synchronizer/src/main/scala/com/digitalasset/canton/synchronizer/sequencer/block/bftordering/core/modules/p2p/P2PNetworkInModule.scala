@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PMetrics.{
@@ -22,13 +23,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkIn,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{Env, ModuleRef}
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessageBody.Message
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.{
   BftOrderingMessage,
   BftOrderingMessageBody,
 }
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.{Duration, Instant}
 
@@ -38,7 +40,7 @@ class P2PNetworkInModule[E <: Env[E]](
     override val consensus: ModuleRef[Consensus.Message[E]],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-)(implicit mc: MetricsContext)
+)(implicit synchronizerProtocolVersion: ProtocolVersion, mc: MetricsContext)
     extends P2PNetworkIn[E] {
 
   private type OutcomeType = metrics.p2p.receive.labels.source.values.SourceValue
@@ -134,11 +136,20 @@ class P2PNetworkInModule[E <: Env[E]](
         metrics.p2p.receive.labels.source.values.Retransmissions(from)
 
       case Message.StateTransferMessage(message) =>
-        SignedMessage
-          .fromProto(v30.StateTransferMessage)(
-            IssConsensusModule
-              .parseStateTransferMessage(from, _)
-          )(message)
+        val parsedSignedMessage =
+          if (synchronizerProtocolVersion >= ProtocolVersion.v37)
+            SignedMessage
+              .fromProto(v31.StateTransferMessage, SupportedVersions.ProtoData31)(
+                IssConsensusModule
+                  .parseStateTransferMessage31(from, _)
+              )(message)
+          else
+            SignedMessage
+              .fromProto(v30.StateTransferMessage, SupportedVersions.ProtoData30)(
+                IssConsensusModule
+                  .parseStateTransferMessage(from, _)
+              )(message)
+        parsedSignedMessage
           .fold(
             errorMessage =>
               logger.warn(

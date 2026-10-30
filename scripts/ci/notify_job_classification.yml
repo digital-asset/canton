@@ -14,8 +14,8 @@ test_jobs:
   - test_36
   - test_36_requires_external_kms
   - sequential_test_36
-  - test_35
-  - test_35_requires_external_kms
+  - test_37
+  - test_37_requires_external_kms
   - test_dev
   - ledger_api_compatibility_tests_36
   - protocol_continuity_test_latest
@@ -36,6 +36,7 @@ infra_jobs:
   - build_scaladoc
   - package_community
   - protobuf_continuity
+  - size_config_up_to_date
   - scalafix
   # Image build + compose ping smoke test, not run_tests/cleanup_test_job, so its
   # failures never reach the flaky pipeline and would be silent if not alerted.

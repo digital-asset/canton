@@ -770,6 +770,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -847,6 +848,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = true,
@@ -887,6 +889,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -937,6 +940,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = true,
@@ -982,6 +986,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = true,
@@ -1038,6 +1043,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = true,
@@ -1100,6 +1106,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = true,
@@ -1161,6 +1168,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -1214,6 +1222,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,
@@ -1270,6 +1279,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
             includeTransactions = Some(transactionFormat),
             includeReassignments = None,
             includeTopologyEvents = None,
+            includeTransactionsAndReassignments = None,
           )
         ),
         descendingOrder = false,

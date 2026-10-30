@@ -39,10 +39,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
   CommitmentsMismatch,
   NoSharedContracts,
 }
-import com.digitalasset.canton.participant.sync.SyncServiceError.{
-  SyncServiceSynchronizerDisabledUs,
-  SyncServiceSynchronizerDisconnect,
-}
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisconnect
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.MemberAccessDisabled
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, SubmissionRequest}
@@ -81,6 +78,9 @@ sealed trait AcsCommitmentProcessorIntegrationTest
   private var lastCommTick: CantonTimestampSecond = _
 
   private lazy val maxDedupDuration = java.time.Duration.ofHours(1)
+
+  private val subscriptionPermissionDenied =
+    "Permanently closing sequencer subscription due to permission denied"
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
@@ -762,9 +762,8 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       forEvery(_) { entry =>
         entry.message should (include(
           MemberAccessDisabled(participant1.id).reason
-        ) or include(
-          SyncServiceSynchronizerDisabledUs.id
-        ) or // The participant might have started to refresh the token before being disabled, but the refresh request
+        ) or include(SyncServiceSynchronizerDisconnect.id) or include(subscriptionPermissionDenied)
+          or // The participant might have started to refresh the token before being disabled, but the refresh request
           // is processed by the sequencer after the participant is disabled
           include(
             "Health-check service responded NOT_SERVING for"
@@ -865,22 +864,19 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           MemberAccessDisabled(participant2.id).reason
         ) or include(
           MemberAccessDisabled(participant1.id).reason
-        ) or include(
-          SyncServiceSynchronizerDisabledUs.id
         ) or // The participant might have started to refresh the token before being disabled, but the refresh request
           // is processed by the sequencer after the participant is disabled
           include(
             "Health-check service responded NOT_SERVING for"
           )
           // Added due to pool not propagating the "disabled us" error
-          or include(SyncServiceSynchronizerDisconnect.id))
+          or include(SyncServiceSynchronizerDisconnect.id) or include(subscriptionPermissionDenied))
       },
     )
   }
 }
 
-class AcsCommitmentProcessorBftOrderingIntegrationTestPostgres
-    extends AcsCommitmentProcessorIntegrationTest {
+class AcsCommitmentProcessorIntegrationTestPostgres extends AcsCommitmentProcessorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseBftSequencer(
@@ -896,11 +892,10 @@ class AcsCommitmentProcessorBftOrderingIntegrationTestPostgres
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-//class AcsCommitmentProcessorReferenceIntegrationTestH2
-//    extends AcsCommitmentProcessorIntegrationTest {
+//class AcsCommitmentProcessorIntegrationTestH2 extends AcsCommitmentProcessorIntegrationTest {
 //  registerPlugin(new UseH2(loggerFactory))
 //  registerPlugin(
-//    new UseReferenceBlockSequencer[DbConfig.H2](
+//    new UseBftSequencer(
 //      loggerFactory,
 //      sequencerGroups = MultiSynchronizer(
 //        Seq(

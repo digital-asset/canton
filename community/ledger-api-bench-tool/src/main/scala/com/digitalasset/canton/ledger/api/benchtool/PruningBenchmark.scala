@@ -67,6 +67,7 @@ class PruningBenchmark(reportingPeriod: FiniteDuration) {
           packageIdSelectionPreference = Nil,
           prefetchContractKeys = Nil,
           tapsMaxPasses = None,
+          accountId = "",
         )
       )
       metricsManager <- MetricsManager.create(

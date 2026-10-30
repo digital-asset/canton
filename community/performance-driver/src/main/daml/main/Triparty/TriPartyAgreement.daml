@@ -1,0 +1,109 @@
+module Triparty.TriPartyAgreement where
+
+import Triparty.Asset
+import Triparty.Settle
+
+lookupMtm : Text -> [(Text, Decimal)] -> Decimal
+lookupMtm id xs = case lookup id xs of
+    Some value -> value
+    None -> error ("Asset " <> id <> "not found in eligibility list")
+
+data Pledge = Pledge with assetId : Text, qty: Text deriving (Eq, Show)
+
+data Substitution = Substitution with oldAssetId : Text, oldQty : Decimal, newAssetId : Text, newQty : Decimal deriving (Eq, Show) 
+
+computeCashMovement : [Substitution] -> [(Text, Decimal)] -> Decimal
+computeCashMovement substitutions eligibility = sum (map (\sub -> lookupMtm sub.newAssetId eligibility * sub.newQty - lookupMtm sub.oldAssetId eligibility * sub.oldQty) substitutions)
+
+cashAccount : Text 
+cashAccount = "cash-account"
+
+cashId : Text 
+cashId = "cash"
+
+template TriPartyAgreement
+    with
+      agent : Party 
+      collateralGiver : Party
+      collateralTaker : Party
+      account : Text
+      -- list of eligible assets with mtm to compute cash true up
+      eligibility : [(Text, Decimal)]      
+      -- amount of cash released as part of agreement
+      amount : Decimal       
+    where 
+      signatory agent, collateralGiver, collateralTaker
+      
+      -- pledge assets and compute resulting cash movement
+      choice Open : ()
+        with 
+          pledges : [(Text, Decimal)]
+          assetCids : [ContractId Asset]    
+          settleCid : ContractId SettlementApp
+        controller collateralGiver
+        do 
+          let totalValue = sum (map (\(assetId, qty) -> lookupMtm assetId eligibility * qty) pledges)
+          let movements = map (\(assetId, qty) -> Movement with from = collateralGiver, fromAccount = account,to = collateralTaker, toAccount = account,id = assetId, qty = qty) pledges
+          let cashMovement = Movement with from = collateralTaker, fromAccount = account, to = collateralGiver, toAccount = account, id = cashId, qty = totalValue
+          _ <- create this with amount = amount + totalValue
+          exercise settleCid Settle with movements = (movements ++ [cashMovement]), assetCids = assetCids, auth = [collateralGiver, collateralTaker]
+          return ()
+
+      -- choice to substitute an asset with a new one and a cash movement
+      choice Substitute : ()
+        with
+            substitutions : [Substitution]
+            assetCids : [ContractId Asset]            
+            settleCid : ContractId SettlementApp
+        controller collateralGiver
+        do
+          let totalValue = computeCashMovement substitutions eligibility
+          let give = map (\sub -> Movement with from = collateralGiver, fromAccount = account, to = collateralTaker, toAccount = account, id = sub.newAssetId, qty = sub.newQty) substitutions
+          let take = map (\sub -> Movement with from = collateralTaker, fromAccount = account, to = collateralGiver, toAccount = account, id = sub.oldAssetId, qty = sub.oldQty) substitutions
+          let cashMovement = if totalValue > 0.0 then 
+                                Movement with from = collateralTaker, fromAccount = account, to = collateralGiver, 
+                                               toAccount = account, id = cashId, qty = totalValue            
+                             else Movement with from = collateralGiver, fromAccount = account, to = collateralTaker, 
+                                                 toAccount = account, id = cashId, qty = - totalValue
+          _ <- create this with amount = amount + totalValue
+          exercise settleCid Settle with movements = (give ++ take ++ [cashMovement]), assetCids = assetCids, auth = [collateralGiver, collateralTaker]
+          return ()
+
+template TriPartyAgreementProposal
+    with
+      agent : Party 
+      collateralGiver : Party
+      collateralTaker : Party
+      account : Text
+      -- list of eligible assets with mtm to compute cash true up
+      eligibility : [(Text, Decimal)]                
+      signed : [Party]    
+    where 
+      signatory collateralGiver, signed
+      observer agent, collateralTaker
+
+
+      choice AcceptTriPartyAgreementProposal : Either (ContractId TriPartyAgreementProposal) (ContractId TriPartyAgreement)
+        with
+          auth : Party
+        controller auth
+        do
+          assertMsg "Only the agent or the collateral taker can accept the agreement" (auth == agent || auth == collateralTaker)
+          let newSigned = if auth `elem` signed then signed else signed ++ [auth]
+          if length newSigned == 2 then 
+            do
+              ret <- create TriPartyAgreement with 
+                agent = agent
+                collateralGiver = collateralGiver
+                collateralTaker = collateralTaker
+                account = account
+                eligibility = eligibility                
+                amount = 0.0
+              return $ Right ret
+          else 
+            do
+              lft <- create this with signed = newSigned
+              return $ Left lft          
+
+
+            
