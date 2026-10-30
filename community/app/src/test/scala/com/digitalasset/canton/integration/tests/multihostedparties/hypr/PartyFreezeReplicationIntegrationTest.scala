@@ -18,7 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
 import com.digitalasset.canton.version.ProtocolVersion
 
-/** Test scenario: a party hosted on SP nominates DA and MPCH and raises its threshold from 1 to 2.
+/** Test scenario: a party hosted on SP nominates DA and Beta and raises its threshold from 1 to 2.
   * The targets replicate the party one after the other or in parallel: each freezes the party,
   * imports its ACS, and becomes Onboarding and then Active.
   *
@@ -38,12 +38,12 @@ final class PartyFreezeReplicationIntegrationTest
   override def environmentDefinition: EnvironmentDefinition = setup.environmentDefinition
 
   "Happy path" should {
-    "H1: the party alone nominates DA and MPCH and raises the threshold to 2" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "H1: the party alone nominates DA and Beta and raises the threshold to 2" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("H1")
 
         // The nomination is signed by the party alone (checked by the scenario)
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
         scenario.expectStep(
           Hosting.Hosted(PositiveInt.one, Set(sp.id)),
           events = Set.empty,
@@ -53,10 +53,10 @@ final class PartyFreezeReplicationIntegrationTest
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
-    "H2, C1: DA and then MPCH replicate the party sequentially, and the ACS commitments among the hosts match" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "H2, C1: DA and then Beta replicate the party sequentially, and the ACS commitments among the hosts match" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("H2")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
 
         scenario.replicate(da)(
           afterFreeze = scenario.expectStep(
@@ -76,21 +76,21 @@ final class PartyFreezeReplicationIntegrationTest
           ),
         )
 
-        scenario.replicate(mpch)(
+        scenario.replicate(beta)(
           afterFreeze = scenario.expectStep(
             Hosting.Frozen(PositiveInt.two, Set(sp.id, da.id)),
             events = Set.empty,
             Request.Rejected,
           ),
           afterOnboarding = scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Onboarding(mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Onboarding(beta.id)),
             Request.ApprovedBy(Set(sp.id, da.id)),
           ),
           afterActivation = scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Added(mpch.id)),
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Added(beta.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           ),
         )
 
@@ -133,10 +133,10 @@ final class PartyFreezeReplicationIntegrationTest
         expectOnboardedAndActivated(scenario, da)
     }
 
-    "H3: DA and MPCH replicate the party in parallel" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "H3: DA and Beta replicate the party in parallel" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("H3")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
 
         val frozenByDaAt = scenario.freeze(da)
         scenario.expectStep(
@@ -144,7 +144,7 @@ final class PartyFreezeReplicationIntegrationTest
           events = Set.empty,
           Request.Rejected,
         )
-        val frozenByMpchAt = scenario.freeze(mpch)
+        val frozenByBetaAt = scenario.freeze(beta)
         scenario.expectStep(
           Hosting.Frozen(PositiveInt.one, Set(sp.id)),
           events = Set.empty,
@@ -152,9 +152,9 @@ final class PartyFreezeReplicationIntegrationTest
         )
 
         scenario.importAcs(da, scenario.readAcs(frozenByDaAt))
-        scenario.importAcs(mpch, scenario.readAcs(frozenByMpchAt))
+        scenario.importAcs(beta, scenario.readAcs(frozenByBetaAt))
 
-        // MPCH is still Freezing, so the party stays frozen
+        // Beta is still Freezing, so the party stays frozen
         val beforeDaOnboarding = scenario.onboard(da)
         scenario.expectStep(
           Hosting.Frozen(PositiveInt.one, Set(sp.id, da.id)),
@@ -169,17 +169,17 @@ final class PartyFreezeReplicationIntegrationTest
         )
 
         // No entry is Freezing anymore
-        val beforeMpchOnboarding = scenario.onboard(mpch)
+        val beforeBetaOnboarding = scenario.onboard(beta)
         scenario.expectStep(
-          Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
-          events = Set(Event.Onboarding(mpch.id)),
+          Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
+          events = Set(Event.Onboarding(beta.id)),
           Request.ApprovedBy(Set(sp.id, da.id)),
         )
-        scenario.activate(mpch, beforeMpchOnboarding)
+        scenario.activate(beta, beforeBetaOnboarding)
         scenario.expectStep(
-          Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
-          events = Set(Event.Added(mpch.id)),
-          Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
+          events = Set(Event.Added(beta.id)),
+          Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
         )
 
         scenario.assertCommitmentsMatchAmongHosts()

@@ -31,7 +31,7 @@ final class ProtobufCompatibilityReaderTest
   // modified message:
   // my.proto:Field "3" with name "bar" on message "Foo" changed type from "bytes" to "string".
   //         ^ notice the removed line and column numbers
-  val acceptedBreakingChangesByVersion = Map(
+  private val acceptedBreakingChangesByVersion: Map[(Int, Int), Seq[String]] = Map(
     (3, 4) -> Seq(
       // Contract id recomputation had to be removed
       """com/digitalasset/canton/admin/participant/v30/acs_import.proto:Previously present enum value "3" on enum "ContractImportMode" was deleted.""",
@@ -296,7 +296,7 @@ final class ProtobufCompatibilityReaderTest
     """google/protobuf/descriptor.proto:Previously present field "2" with name "features" on message "FeatureSetEditionDefault" was deleted.""",
   )
 
-  val removalOfPv34 = Seq(
+  val removalOfPv34Changes = Seq(
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "1" with name "create" on message "ActionDescription" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "2" with name "exercise" on message "ActionDescription" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "3" with name "fetch" on message "ActionDescription" was deleted.""",
@@ -311,6 +311,10 @@ final class ProtobufCompatibilityReaderTest
     """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "1" with name "algorithm" on message "CompressedBatch" was deleted.""",
     """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "2" with name "compressed_batch" on message "CompressedBatch" was deleted.""",
   )
+
+  // 3.7 and later releases no longer contain the pv=34 messages
+  private def removalOfPv34(majorMinor: (Int, Int)): Seq[String] =
+    if (Ordering[(Int, Int)].lt(majorMinor, (3, 7))) removalOfPv34Changes else Seq.empty
 
   "protobuf" should {
 
@@ -348,9 +352,10 @@ final class ProtobufCompatibilityReaderTest
               processLogger.outputLines().map(_.replaceAll(raw".proto:\d+:\d+:", ".proto:"))
 
             val acceptedBreakingChanges =
-              acceptedBreakingChangesByVersion(
-                majorMinor
-              ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34
+              acceptedBreakingChangesByVersion.getOrElse(
+                majorMinor,
+                Nil,
+              ) ++ googleProtobufBreakingChanges(majorMinor) ++ removalOfPv34(majorMinor)
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {

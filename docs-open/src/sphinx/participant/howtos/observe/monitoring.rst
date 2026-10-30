@@ -476,7 +476,7 @@ The trace-id propagation is enabled by setting the ``canton.monitoring.tracing.p
 
 You can configure the service where traces and spans are reported for observing distributed traces. Refer to :ref:`Traces <traces>` for a preview.
 
-Jaeger and Zipkin are supported. For example, Jaeger reporting can be configured as follows:
+Jaeger are supported. For example, Jaeger reporting can be configured as follows:
 
 ::
 
@@ -502,7 +502,7 @@ By default, Jaeger will expose port `16686` (for its UI, which can be seen in a 
 
 Make sure that all Canton nodes in the network report to the same Jaeger server to have an accurate view of the full traces. Also, ensure that the Jaeger server is reachable by all Canton nodes.
 
-Apart from jaeger, Canton nodes can also be configured to report in Zipkin or OTLP formats.
+Apart from jaeger, Canton nodes can also be configured to report or OTLP formats.
 
 Sampling
 ~~~~~~~~

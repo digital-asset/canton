@@ -98,7 +98,7 @@ object ConsoleEnvironmentBinding {
     if (interactive) {
       addToBuilder(
         builder,
-        "repl.pprinter() = repl.pprinter().copy(additionalHandlers = { case p: com.digitalasset.canton.logging.pretty.PrettyPrinting => import com.digitalasset.canton.logging.pretty.Pretty._; p.toTree }, defaultHeight = 100)",
+        "repl.pprinter() = repl.pprinter().copy(additionalHandlers = com.digitalasset.canton.logging.pretty.Pretty.DefaultPprinter.additionalHandlers, defaultHeight = 100)",
       )
     }
 

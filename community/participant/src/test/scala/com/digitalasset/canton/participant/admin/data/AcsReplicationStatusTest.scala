@@ -40,7 +40,7 @@ class AcsReplicationStatusTest extends AnyWordSpec with BaseTest {
       pv = testedProtocolVersion,
       authorizationO = None,
       replicationO = None,
-      agreementStatus = InternalStatus.AgreementStatus.Proposed,
+      agreementStatus = InternalStatus.AgreementStatus.ProposalSent,
       hasCompleted = hasCompleted,
       errorO = errorO,
     )

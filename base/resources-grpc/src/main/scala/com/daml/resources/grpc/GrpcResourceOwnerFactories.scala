@@ -4,9 +4,8 @@
 package com.daml.resources.grpc
 
 import com.daml.resources.{AbstractResourceOwner, HasExecutionContext, ResourceOwnerFactories}
-import io.grpc.netty.shaded.io.netty.channel.EventLoopGroup
-import io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoopGroup
 import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel
+import io.grpc.netty.shaded.io.netty.channel.{EventLoopGroup, MultiThreadIoEventLoopGroup}
 import io.grpc.{Channel, ManagedChannel, ManagedChannelBuilder, Server, ServerBuilder}
 
 import java.util.concurrent.ThreadFactory
@@ -40,7 +39,7 @@ trait GrpcResourceOwnerFactories[Context] {
   private[grpc] def forNioEventLoopGroup(
       threadCount: Int,
       threadFactory: ThreadFactory,
-  ): AbstractResourceOwner[Context, NioEventLoopGroup] =
+  ): AbstractResourceOwner[Context, MultiThreadIoEventLoopGroup] =
     new NioEventLoopGroupResourceOwner[Context](threadCount, threadFactory)
 
   private[grpc] def forManagedChannel(

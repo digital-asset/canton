@@ -209,6 +209,7 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
               commitment1,
               srcTopologySnapshot.futureValueUS,
               None, // not needed for unit tests; session signing keys disabled
+              testedProtocolVersion,
             )
             .map(_ -> Recipients.cc(recipient))
             .futureValueUS

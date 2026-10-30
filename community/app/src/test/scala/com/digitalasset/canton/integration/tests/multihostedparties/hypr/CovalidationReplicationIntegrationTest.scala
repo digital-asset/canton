@@ -38,7 +38,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 /** Test scenario: the flows of the Covalidation Service. An external party hosted 1-of-1 on the
-  * primary, with contracts, moves to 2-of-3 with the covalidators DA and MPCH, using HyPR (Hybrid
+  * primary, with contracts, moves to 2-of-3 with the covalidators DA and Beta, using HyPR (Hybrid
   * Party Replication): in one transaction, the party nominates both and raises its threshold to 2;
   * then each covalidator freezes the party, imports its ACS, and becomes Onboarding and Active. The
   * cases include parallel replication, partial and full failures, the departure of the primary, and
@@ -52,7 +52,7 @@ import com.digitalasset.nonempty.NonEmpty
   *
   * Test setup:
   *   - 5 participants, 1 synchronizer, with a simulated clock: the primary (participant1), DA
-  *     (participant2), MPCH (participant3), the replacement X (participant4), and CP
+  *     (participant2), Beta (participant3), the replacement X (participant4), and CP
   *     (participant5), which hosts Bob.
   *   - Each case uses its own external party, hosted on the primary only with Confirmation
   *     permission and threshold 1. Each subclass creates another kind of external party.
@@ -93,7 +93,7 @@ abstract class CovalidationReplicationIntegrationTest
 
         primary = participant1
         da = participant2
-        mpch = participant3
+        beta = participant3
         x = participant4
         cp = participant5
         bob = cp.parties.enable("Bob")
@@ -101,7 +101,7 @@ abstract class CovalidationReplicationIntegrationTest
 
   private var primary: LocalParticipantReference = _
   private var da: LocalParticipantReference = _
-  private var mpch: LocalParticipantReference = _
+  private var beta: LocalParticipantReference = _
   private var x: LocalParticipantReference = _
   private var cp: LocalParticipantReference = _
   private var bob: Party = _
@@ -125,7 +125,7 @@ abstract class CovalidationReplicationIntegrationTest
       partySigner = partySigner,
       counterparty = bob,
       counterpartyParticipant = cp,
-      participants = Seq(primary, da, mpch, x, cp),
+      participants = Seq(primary, da, beta, x, cp),
       synchronizerId = daId,
       sequencer = getProgrammableSequencer(sequencer1.name),
       loggerFactory = loggerFactory,
@@ -207,9 +207,9 @@ abstract class CovalidationReplicationIntegrationTest
     )
   }
 
-  /** Step 1: the party alone nominates DA and MPCH and raises its threshold to 2. */
+  /** Step 1: the party alone nominates DA and Beta and raises its threshold to 2. */
   private def nominateCovalidators(scenario: PartyFreezeScenario): Unit = {
-    scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+    scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
     expectHostedByPrimary(scenario)
   }
 
@@ -229,12 +229,12 @@ abstract class CovalidationReplicationIntegrationTest
         )
         replicate(
           scenario,
-          mpch,
+          beta,
           Set(primary.id, da.id),
           thresholdBefore = PositiveInt.two,
           thresholdAfter = PositiveInt.two,
         )
-        scenario.expectQuorum(respondingHosts = Set(primary.id, mpch.id), approved = true)
+        scenario.expectQuorum(respondingHosts = Set(primary.id, beta.id), approved = true)
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
@@ -251,10 +251,10 @@ abstract class CovalidationReplicationIntegrationTest
         )
         val frozenByDaAt = scenario.freeze(da)
         expectFrozenWithHostPrimary()
-        val frozenByMpchAt = scenario.freeze(mpch)
+        val frozenByBetaAt = scenario.freeze(beta)
         expectFrozenWithHostPrimary()
         scenario.importAcs(da, scenario.readAcs(frozenByDaAt))
-        scenario.importAcs(mpch, scenario.readAcs(frozenByMpchAt))
+        scenario.importAcs(beta, scenario.readAcs(frozenByBetaAt))
 
         val beforeDaOnboarding = scenario.onboard(da)
         expectStep(
@@ -263,26 +263,26 @@ abstract class CovalidationReplicationIntegrationTest
           events = Set(Event.Onboarding(da.id)),
           Request.Rejected,
         )
-        val beforeMpchOnboarding = scenario.onboard(mpch)
+        val beforeBetaOnboarding = scenario.onboard(beta)
         expectStep(
           scenario,
-          Hosting.Hosted(PositiveInt.one, Set(primary.id, da.id, mpch.id)),
-          events = Set(Event.Onboarding(mpch.id)),
+          Hosting.Hosted(PositiveInt.one, Set(primary.id, da.id, beta.id)),
+          events = Set(Event.Onboarding(beta.id)),
           Request.ApprovedBy(Set(primary.id)),
         )
         scenario.activate(da, beforeDaOnboarding)
         expectStep(
           scenario,
-          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, beta.id)),
           events = Set(Event.Added(da.id)),
           Request.ApprovedBy(Set(primary.id, da.id)),
         )
-        scenario.activate(mpch, beforeMpchOnboarding)
+        scenario.activate(beta, beforeBetaOnboarding)
         expectStep(
           scenario,
-          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, mpch.id)),
-          events = Set(Event.Added(mpch.id)),
-          Request.ApprovedBy(Set(primary.id, da.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, beta.id)),
+          events = Set(Event.Added(beta.id)),
+          Request.ApprovedBy(Set(primary.id, da.id, beta.id)),
         )
         scenario.assertCommitmentsMatchAmongHosts()
     }
@@ -299,16 +299,16 @@ abstract class CovalidationReplicationIntegrationTest
           thresholdAfter = PositiveInt.two,
         )
 
-        clue("MPCH fails after its import and removes itself") {
-          val frozenAt = scenario.freeze(mpch)
+        clue("Beta fails after its import and removes itself") {
+          val frozenAt = scenario.freeze(beta)
           expectStep(
             scenario,
             Hosting.Frozen(PositiveInt.two, Set(primary.id, da.id)),
             events = Set.empty,
             Request.Rejected,
           )
-          scenario.importAcs(mpch, scenario.readAcs(frozenAt))
-          scenario.remove(mpch, by = Signer.Participant)
+          scenario.importAcs(beta, scenario.readAcs(frozenAt))
+          scenario.remove(beta, by = Signer.Participant)
           // 2-of-2: both the primary and DA must confirm
           expectStep(
             scenario,
@@ -317,7 +317,7 @@ abstract class CovalidationReplicationIntegrationTest
             Request.ApprovedBy(Set(primary.id, da.id)),
           )
           scenario.expectQuorum(respondingHosts = Set(primary.id), approved = false)
-          scenario.purge(mpch)
+          scenario.purge(beta)
         }
 
         clue("The party nominates X, which replicates") {
@@ -351,7 +351,7 @@ abstract class CovalidationReplicationIntegrationTest
           thresholdAfter = PositiveInt.two,
         )
 
-        scenario.remove(mpch, by = Signer.Party)
+        scenario.remove(beta, by = Signer.Party)
         expectStep(
           scenario,
           Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id)),
@@ -376,7 +376,7 @@ abstract class CovalidationReplicationIntegrationTest
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
-    "CV5: let DA alone meet the quorum when the primary leaves while MPCH is pending (known issue)" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "CV5: let DA alone meet the quorum when the primary leaves while Beta is pending (known issue)" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("CV5")
         nominateCovalidators(scenario)
@@ -388,7 +388,7 @@ abstract class CovalidationReplicationIntegrationTest
           thresholdAfter = PositiveInt.two,
         )
 
-        // [DA, MPCH → N], T = 2: the effective threshold drops to 1. This contradicts the
+        // [DA, Beta → N], T = 2: the effective threshold drops to 1. This contradicts the
         // Covalidation Service's promise that DA never meets the threshold alone, and is exempt
         // from the per-step check.
         scenario.remove(primary, by = Signer.Participant)
@@ -404,7 +404,7 @@ abstract class CovalidationReplicationIntegrationTest
     "CV5b: leave no confirmer, so DA alone cannot meet the quorum, when the primary leaves after the Observation-first procedure" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("CV5b")
-        scenario.nominate(Seq(da -> Observation, mpch -> Observation), PositiveInt.one)
+        scenario.nominate(Seq(da -> Observation, beta -> Observation), PositiveInt.one)
         expectHostedByPrimary(scenario)
         scenario.replicate(da)(
           afterFreeze = expectStep(
@@ -427,7 +427,7 @@ abstract class CovalidationReplicationIntegrationTest
           ),
         )
 
-        // [DA (Observation), MPCH (Observation) → N], T = 1: DA hosts the party but cannot confirm.
+        // [DA (Observation), Beta (Observation) → N], T = 1: DA hosts the party but cannot confirm.
         // The primary's topology manager refuses to leave a signatory without a confirming host.
         scenario.remove(
           primary,
@@ -455,18 +455,18 @@ abstract class CovalidationReplicationIntegrationTest
         )
         replicate(
           scenario,
-          mpch,
+          beta,
           Set(primary.id, da.id),
           thresholdBefore = PositiveInt.two,
           thresholdAfter = PositiveInt.two,
         )
 
-        // MPCH is lost: the party removes it and nominates X in one transaction
-        scenario.replace(mpch, x, Confirmation)
+        // Beta is lost: the party removes it and nominates X in one transaction
+        scenario.replace(beta, x, Confirmation)
         expectStep(
           scenario,
           Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id)),
-          events = Set(Event.Revoked(mpch.id)),
+          events = Set(Event.Revoked(beta.id)),
           Request.ApprovedBy(Set(primary.id, da.id)),
         )
         scenario.expectQuorum(respondingHosts = Set(primary.id), approved = false)
@@ -477,7 +477,7 @@ abstract class CovalidationReplicationIntegrationTest
           thresholdBefore = PositiveInt.two,
           thresholdAfter = PositiveInt.two,
         )
-        scenario.purge(mpch)
+        scenario.purge(beta)
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
@@ -502,24 +502,24 @@ abstract class CovalidationReplicationIntegrationTest
     "CV10: keep the covalidator's other parties confirmable by their other hosts while it is disconnected for the import" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         import env.*
-        // A party hosted 2-of-3 on the primary, DA and MPCH
+        // A party hosted 2-of-3 on the primary, DA and Beta
         val otherParty = PartyFreezeScenario(
           primary.parties.enable("Other-CV10"),
           source = primary,
           partySigner = PartySigner.Local(primary),
           counterparty = bob,
           counterpartyParticipant = cp,
-          participants = Seq(primary, da, mpch, x, cp),
+          participants = Seq(primary, da, beta, x, cp),
           synchronizerId = daId,
           sequencer = getProgrammableSequencer(sequencer1.name),
           loggerFactory = loggerFactory,
         )
-        Seq(da, mpch).foreach(otherParty.add(_, Confirmation, HostingState.Active).discard)
+        Seq(da, beta).foreach(otherParty.add(_, Confirmation, HostingState.Active).discard)
         otherParty.setThreshold(PositiveInt.two)
         otherParty.expectStep(
-          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, mpch.id)),
-          events = Set(Event.Added(da.id), Event.Added(mpch.id)),
-          Request.ApprovedBy(Set(primary.id, da.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.two, Set(primary.id, da.id, beta.id)),
+          events = Set(Event.Added(da.id), Event.Added(beta.id)),
+          Request.ApprovedBy(Set(primary.id, da.id, beta.id)),
         )
 
         val scenario = newScenario("CV10")
@@ -532,7 +532,7 @@ abstract class CovalidationReplicationIntegrationTest
           Request.Rejected,
         )
         scenario.importAcsWhile(da, scenario.readAcs(frozenAt))(
-          otherParty.expectQuorum(respondingHosts = Set(primary.id, mpch.id), approved = true)
+          otherParty.expectQuorum(respondingHosts = Set(primary.id, beta.id), approved = true)
         )
         val beforeOnboarding = scenario.onboard(da)
         expectStep(

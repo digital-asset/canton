@@ -149,6 +149,7 @@ class TrafficPurchasedSubmissionHandler(
         serial,
         totalTrafficPurchased,
         cryptoApi.psid,
+        protocolVersion,
       )
       maxSequencingTimes = computeMaxSequencingTimes(trafficParams, now)
       // Depending on the window size and the current timestamp, we may need to sign and send two traffic
@@ -165,6 +166,7 @@ class TrafficPurchasedSubmissionHandler(
                 validityPeriodEnd = maxSequencingTimes.maxOption,
               )
             ),
+            protocolVersion,
           )
         )
       synchronizerGroup = RecipientsTree.recipientsLeaf(

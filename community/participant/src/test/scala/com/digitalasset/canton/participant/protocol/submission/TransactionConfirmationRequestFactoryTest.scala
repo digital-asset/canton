@@ -315,8 +315,10 @@ trait TransactionConfirmationRequestFactoryTest
     }
 
     TransactionConfirmationRequest(
-      InformeeMessage(example.fullInformeeTree, SymbolicCrypto.emptySignature)(
-        testedProtocolVersion
+      InformeeMessage(
+        example.fullInformeeTree,
+        SymbolicCrypto.emptySignature,
+        testedProtocolVersion,
       ),
       expectedTransactionViewMessages,
       testedProtocolVersion,

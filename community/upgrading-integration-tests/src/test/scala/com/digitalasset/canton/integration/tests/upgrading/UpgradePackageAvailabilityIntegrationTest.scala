@@ -163,8 +163,7 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
       succeed
     }
 
-    // TODO(#23876) - remove ignore
-    "Not require that the V1 package is vetted in order to be able to confirm V2 package use" ignore {
+    "Not require that the V1 package is vetted in order to be able to confirm V2 package use" in {
       implicit env =>
         import env.*
 
@@ -198,38 +197,35 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
         succeed
     }
 
-    // TODO(#23876) - remove ignore
-    "Not require the V1 package to submit a V1 contract used in a V2 context" ignore {
-      implicit env =>
-        import env.*
-        val (quoteCid, disclosedQuote) = discloseQuote(101)
+    "Not require the V1 package to submit a V1 contract used in a V2 context" in { implicit env =>
+      import env.*
+      val (quoteCid, disclosedQuote) = discloseQuote(101)
 
-        val fetchQuoteCid = JavaDecodeUtil
-          .decodeAllCreated(v2.upgrade.FetchQuote.COMPANION)(
-            participant4.ledger_api.javaapi.commands.submit(
-              Seq(dan),
-              new v2.upgrade.FetchQuote(
-                dan.toProtoPrimitive,
-                dan.toProtoPrimitive,
-                dan.toProtoPrimitive,
-              ).create.commands.asScala.toSeq,
-            )
+      val fetchQuoteCid = JavaDecodeUtil
+        .decodeAllCreated(v2.upgrade.FetchQuote.COMPANION)(
+          participant4.ledger_api.javaapi.commands.submit(
+            Seq(dan),
+            new v2.upgrade.FetchQuote(
+              dan.toProtoPrimitive,
+              dan.toProtoPrimitive,
+              dan.toProtoPrimitive,
+            ).create.commands.asScala.toSeq,
           )
-          .loneElement
-          .id
-
-        // Submission will fail if V1 package is needed
-        participant4.ledger_api.javaapi.commands.submit(
-          Seq(dan),
-          fetchQuoteCid.exerciseFQ_ExFetch(quoteCid).commands.asScala.toSeq,
-          disclosedContracts = Seq(disclosedQuote),
         )
+        .loneElement
+        .id
 
-        succeed
+      // Submission will fail if V1 package is needed
+      participant4.ledger_api.javaapi.commands.submit(
+        Seq(dan),
+        fetchQuoteCid.exerciseFQ_ExFetch(quoteCid).commands.asScala.toSeq,
+        disclosedContracts = Seq(disclosedQuote),
+      )
+
+      succeed
     }
 
-    // TODO(#23876) - remove ignore
-    "Not require the V1 package to observe the use of a disclosed V1 contract used in a V2 context" ignore {
+    "Not require the V1 package to observe the use of a disclosed V1 contract used in a V2 context" in {
       implicit env =>
         import env.*
         val (quoteCid, disclosedQuote) = discloseQuote(102)
@@ -259,8 +255,7 @@ sealed abstract class UpgradePackageAvailabilityIntegrationTest
         succeed
     }
 
-    // TODO(#23876) - remove ignore
-    "Not require the V1 package to confirm the use of a disclosed V1 contract used in a V2 context" ignore {
+    "Not require the V1 package to confirm the use of a disclosed V1 contract used in a V2 context" in {
       implicit env =>
         import env.*
         val (quoteCid, disclosedQuote) = discloseQuote(102)

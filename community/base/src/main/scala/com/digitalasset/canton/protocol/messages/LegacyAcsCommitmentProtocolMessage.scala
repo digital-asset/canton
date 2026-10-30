@@ -32,9 +32,13 @@ import com.digitalasset.nonempty.NonEmpty
   * TODO(#30888): Make `AcsCommitmentProtocolMessage` the default and get rid of
   * `SignedProtocolMessage[AcsCommitment]`
   */
-final case class LegacyAcsCommitmentProtocolMessage(
+final case class LegacyAcsCommitmentProtocolMessage private (
     acsCommitment: LegacyAcsCommitment,
     signatures: NonEmpty[Seq[Signature]],
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      LegacyAcsCommitmentProtocolMessage.type
+    ]
 ) extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[LegacyAcsCommitmentProtocolMessage] {
 
@@ -42,10 +46,6 @@ final case class LegacyAcsCommitmentProtocolMessage(
     LegacyAcsCommitmentProtocolMessage
 
   override def psid: PhysicalSynchronizerId = acsCommitment.psid
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    LegacyAcsCommitmentProtocolMessage.type
-  ] = LegacyAcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   protected def toProtoV30: v30.AcsCommitmentProtocolMessage =
     v30.AcsCommitmentProtocolMessage(
@@ -62,6 +62,16 @@ object LegacyAcsCommitmentProtocolMessage
     extends VersioningCompanion[LegacyAcsCommitmentProtocolMessage] {
 
   override def name: String = "LegacyAcsCommitmentProtocolMessage"
+
+  def apply(
+      acsCommitment: LegacyAcsCommitment,
+      signatures: NonEmpty[Seq[Signature]],
+      protocolVersion: ProtocolVersion,
+  ): LegacyAcsCommitmentProtocolMessage =
+    LegacyAcsCommitmentProtocolMessage(
+      acsCommitment,
+      signatures,
+    )(LegacyAcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(protocolVersion))
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
@@ -94,7 +104,8 @@ object LegacyAcsCommitmentProtocolMessage
         "signatures",
         signaturesSeqP,
       )
-    } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)
+      rpv <- LegacyAcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)(rpv)
   }
 
 }

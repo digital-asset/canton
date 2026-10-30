@@ -121,6 +121,7 @@ trait AcsCommitmentRestartIntegrationTest
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
           ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),
+          disableMergeAndHashJoins = LedgerApiServerConfig().indexService.disableMergeAndHashJoins,
           timeouts = timeouts,
           loggerFactory = loggerFactory,
           metrics = ParticipantTestMetrics.ledgerApiServer,

@@ -59,7 +59,7 @@ import scala.jdk.CollectionConverters.*
   *
   * Setup:
   *   - 4 participants, 2 synchronizers `da` and `acme`, with a simulated clock: SP (participant1),
-  *     DA (participant2), MPCH (participant3), and CP (participant4), which hosts Bob.
+  *     DA (participant2), Beta (participant3), and CP (participant4), which hosts Bob.
   *   - Each case uses its own party, hosted on SP only, with Submission permission and threshold 1.
   *     Bob is the actor of a nonconsuming choice on a contract with the party as signatory. Bob's
   *     exercise of it is the request that needs the party's confirmation.
@@ -122,7 +122,7 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
 
         spRef = participant1
         daRef = participant2
-        mpchRef = participant3
+        betaRef = participant3
         cpRef = participant4
         bobRef = cp.parties.enable("Bob", synchronizer = Some(daName))
         cp.parties.enable("Bob", synchronizer = Some(acmeName)).discard
@@ -130,13 +130,13 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
 
   private var spRef: LocalParticipantReference = _
   private var daRef: LocalParticipantReference = _
-  private var mpchRef: LocalParticipantReference = _
+  private var betaRef: LocalParticipantReference = _
   private var cpRef: LocalParticipantReference = _
   private var bobRef: Party = _
 
   def sp: LocalParticipantReference = spRef
   def da: LocalParticipantReference = daRef
-  def mpch: LocalParticipantReference = mpchRef
+  def beta: LocalParticipantReference = betaRef
   def cp: LocalParticipantReference = cpRef
   def bob: Party = bobRef
 
@@ -187,7 +187,7 @@ private[hypr] final class PartyFreezeIntegrationTestSetup(
       partySigner = partySigner,
       counterparty = bob,
       counterpartyParticipant = cp,
-      participants = Seq(sp, da, mpch, cp),
+      participants = Seq(sp, da, beta, cp),
       synchronizerId = daId,
       sequencer = test.getProgrammableSequencer(sequencer1.name),
       loggerFactory = test.loggerFactory,

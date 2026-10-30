@@ -697,7 +697,7 @@ object Transaction {
     *   transaction (by calling [[Node.Action.packageIds]]). The [[usedPackages]] will then be this
     *   set of packages combined with all packages on which there is a transitive dependency (for
     *   details see deps in [[com.digitalasset.daml.lf.engine.Engine]]).
-    * @param timeBoundery
+    * @param timeBoundaries
     *   Indicates that the transaction computation is valid for ledger times within these bounds.
     * @param nodeSeeds
     *   An association list that maps the node-id of create and exercise nodes to their seed.
@@ -705,6 +705,9 @@ object Transaction {
     *   Input key mappings inferred during interpretation.
     * @param contractOrder
     *   The order of contract ids as they appear in the transaction.
+    * @param contractKeyMismatches
+    *   The contract key mismatches for the transaction. For each contract id, the first element of
+    *   the tuple is the declared key and the second element is the recomputed one.
     */
   final case class Metadata(
       submissionSeed: Option[crypto.Hash],
@@ -714,6 +717,10 @@ object Transaction {
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
       globalKeyMapping: Map[GlobalKey, Vector[ContractId]],
       contractOrder: List[ContractId],
+      contractKeyMismatches: Map[
+        ContractId,
+        (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers]),
+      ],
   ) {
     def dependsOnTime: Boolean =
       timeBoundaries != Time.Range.unconstrained

@@ -16,7 +16,7 @@ trait ObjectMetaTests extends ObjectMetaTestsBase {
   private[objectmeta] def valueExceedingAnnotationsLimit = "a" * maxAnnotationsSizeInBytes
   private[objectmeta] def largestAllowedValue = "a" * (maxAnnotationsSizeInBytes - 1)
   private[objectmeta] def annotationsOverSizeLimit = Map("a" -> largestAllowedValue, "c" -> "d")
-  private[objectmeta] def annotationsBelowMaxSizeLimitBecauseNotCountingEmptyValuedKeys =
+  private[objectmeta] def annotationsOverSizeLimitWithEmptyValuedKeys =
     Map("a" -> largestAllowedValue, "cc" -> "")
 
   private[objectmeta] def getAnnotationsBytes(annotations: Map[String, String]): Int =
@@ -30,7 +30,7 @@ trait ObjectMetaTests extends ObjectMetaTestsBase {
   )
   assertEquals(
     getAnnotationsBytes(annotationsOverSizeLimit),
-    getAnnotationsBytes(annotationsBelowMaxSizeLimitBecauseNotCountingEmptyValuedKeys),
+    getAnnotationsBytes(annotationsOverSizeLimitWithEmptyValuedKeys),
   )
 
   private[objectmeta] def invalidKey = ".aaaa.management.daml/foo_"
@@ -371,20 +371,18 @@ trait ObjectMetaTests extends ObjectMetaTestsBase {
   )
 
   testWithFreshResource(
-    "NotCountingEmptyValuedKeysToTheAnnotationsSizeLimitOnUpdate",
-    "Do not count the keys in the provided annotations map that correspond to deletions, towards the annotations' nax size limit",
+    "CountingEmptyValuedKeysToTheAnnotationsSizeLimitOnUpdate",
+    "Count the keys in the provided annotations map that correspond to deletions towards the annotations' max size limit",
   )() { implicit ec => implicit ledger => resource =>
     update(
       id = getId(resource),
-      annotations = annotationsBelowMaxSizeLimitBecauseNotCountingEmptyValuedKeys,
+      annotations = annotationsOverSizeLimitWithEmptyValuedKeys,
       updatePaths = Seq(annotationsUpdatePath),
-    ).map { objectMeta =>
-      assertEquals(
-        "updating and not exceeding annotations' max size limit because deletions are not counted towards the limit",
-        objectMeta.annotations,
-        Map("a" -> largestAllowedValue),
-      )
-    }
+    ).mustFailWith(
+      "total size of annotations, including empty-valued keys, is over 256kb",
+      errorCode = RequestValidationErrors.InvalidArgument,
+      exceptionMessageSubstring = Some("larger than the limit of 256kb"),
+    )
   }
 
   testWithFreshResource(

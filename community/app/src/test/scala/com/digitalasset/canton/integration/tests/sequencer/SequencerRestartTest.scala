@@ -236,10 +236,14 @@ trait InFlightAggregationTestHelper {
       RootHash(TestHash.digest(digestSeed)),
       MediatorReject(reason = MediatorError.MalformedMessage.Reject(s"Test$digestSeed"))
         .toVerdict(testedProtocolVersion),
+      testedProtocolVersion,
     )
     Batch.of(
       testedProtocolVersion,
-      SignedProtocolMessage.signAndCreate(resultMessage, cryptoOp, None).futureValueUS.value
+      SignedProtocolMessage
+        .signAndCreate(resultMessage, cryptoOp, None, testedProtocolVersion)
+        .futureValueUS
+        .value
         -> Recipients.cc(env.participant1.id),
     )
   }

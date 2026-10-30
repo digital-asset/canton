@@ -372,6 +372,7 @@ trait IndexComponentTest
               clientConnectionCheckInterval = None
             ),
           ),
+          disableMergeAndHashJoins = true,
           loggerFactory = loggerFactory,
         )
       indexer <- new JdbcIndexer.Factory(
@@ -393,6 +394,7 @@ trait IndexComponentTest
         postProcessor = (_, _) => Future.unit,
         sequentialPostProcessor = sequentialPostProcessor,
         contractStore = participantContractStore,
+        disableMergeAndHashJoins = true,
       ).initialized()
     } yield (indexer, participantContractStore, dbSupport, inMemoryState)
 

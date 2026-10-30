@@ -690,12 +690,23 @@ class SequencerAggregatorTest
         // ... and does not generate a new event downstream
         assertNoMessageDownstream(aggregator)
 
-        // Providing an old valid event fails if it is no longer in the past event cache...
+        // Providing an old valid event that is no longer in the past event cache succeeds...
         aggregator
           .combineAndMergeEvent(sequencerAlice, aliceEvents(0))
-          .futureValueUS shouldBe Left(
-          SequencerAggregatorError.BogusEvent(sequencerAlice, aliceEvents(0))
-        )
+          .futureValueUS shouldBe Either.unit
+        // ... and does not generate a new event downstream
+        assertNoMessageDownstream(aggregator)
+
+        // Providing an old invalid event that is no longer in the past event cache...
+        val oldEventWithBadHash = createEvent(
+          timestamp = aliceEvents(0).timestamp,
+          signatureOverride = Some(aliceEvents(0).signedEvent.signature),
+          serializedOverride = Some(aliceEvents(0).signedEvent.content.toByteString.substring(1)),
+        ).failOnShutdown("create bad event").futureValue
+        // ... succeeds ...
+        aggregator
+          .combineAndMergeEvent(sequencerAlice, oldEventWithBadHash)
+          .futureValueUS shouldBe Either.unit
         // ... and does not generate a new event downstream
         assertNoMessageDownstream(aggregator)
 
@@ -717,7 +728,7 @@ class SequencerAggregatorTest
 
         // Providing an old event with invalid timestamp...
         val eventWithBadTimestamp = createEvent(
-          timestamp = aliceEvents(0).timestamp.plusMillis(666),
+          timestamp = aliceEvents(1).timestamp.plusMillis(666),
           signatureOverride = Some(aliceEvents(2).signedEvent.signature),
         ).failOnShutdown("create bad event").futureValue
 

@@ -670,6 +670,7 @@ class AcsCommitmentBenchmark
               snapshot,
               signingTimestampOverrides =
                 None, // not needed for benchmark tests; session signing keys disabled
+              testedProtocolVersion,
             )
         }
       }

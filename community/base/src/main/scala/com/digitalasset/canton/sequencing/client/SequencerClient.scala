@@ -464,6 +464,7 @@ abstract class SequencerClientImpl(
                 messageIdO = None,
                 Batch(List.empty, protocolVersion),
                 Option.empty[TrafficReceipt],
+                protocolVersion = protocolVersion,
               )
             )
 

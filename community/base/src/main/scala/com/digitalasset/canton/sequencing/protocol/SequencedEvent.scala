@@ -117,21 +117,29 @@ object SequencedEvent
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
-    fromProtoGeneric(
-      pvv,
-      ProtoSequencedEventV32(sequencedEventP),
-      decompressBatch(pvv, context),
-    )(bytes)
+    for {
+      rpv <- SequencedEvent.protocolVersionRepresentativeFor(ProtoVersion(32))
+      parsed <- fromProtoGeneric(
+        pvv,
+        ProtoSequencedEventV32(sequencedEventP),
+        decompressBatch(pvv, context),
+        rpv,
+      )(bytes)
+    } yield parsed
 
   private[sequencing] def fromProtoV32Compressed(
       pvv: ProtocolVersionValidation,
       sequencedEventP: v32.SequencedEvent,
   )(bytes: ByteString): ParsingResult[SequencedEvent[CompressedBatch]] =
-    fromProtoGeneric(
-      pvv,
-      ProtoSequencedEventV32(sequencedEventP),
-      pb => Right(CompressedBatch(pb)),
-    )(bytes)
+    for {
+      rpv <- SequencedEvent.protocolVersionRepresentativeFor(ProtoVersion(32))
+      parsed <- fromProtoGeneric(
+        pvv,
+        ProtoSequencedEventV32(sequencedEventP),
+        pb => Right(CompressedBatch(pb)),
+        rpv,
+      )(bytes)
+    } yield parsed
 
   // toProtoV32 is protected on the trait, so expose it for CompressedSequencedEvent.
   private[sequencing] def serializeV32(event: SequencedEvent[GenBatch[?]]): v32.SequencedEvent =
@@ -154,6 +162,7 @@ object SequencedEvent
       pvv: ProtocolVersionValidation,
       protoSequencedEvent: ProtoSequencedEvent,
       decodeBatch: ProtoBatch => ParsingResult[B],
+      representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type],
   )(
       bytes: ByteString
   ): ParsingResult[SequencedEvent[B]] = {
@@ -213,7 +222,7 @@ object SequencedEvent
             msgId,
             deliverErrorReason,
             trafficConsumed,
-          )(Some(bytes)) {}
+          )(Some(bytes))(representativeProtocolVersion) {}
         case (None, Some(batch)) =>
           for {
             msgIdO <- ProtoValidation.validateThen(mbMsgIdP, "message_id", pvv)(
@@ -228,7 +237,7 @@ object SequencedEvent
             trafficConsumed,
           )(
             Some(bytes)
-          )
+          )(representativeProtocolVersion)
       }): ParsingResult[SequencedEvent[B]]
     } yield event
   }
@@ -341,7 +350,7 @@ object SequencedEvent
             deliver.messageIdO,
             newBatch,
             deliver.trafficReceipt,
-          )(deliver.deserializedFrom): SequencedEvent[C]
+          )(deliver.deserializedFrom)(deliver.representativeProtocolVersion): SequencedEvent[C]
         }
       case err: DeliverError => G.pure[SequencedEvent[C]](err)
     }
@@ -373,12 +382,10 @@ sealed abstract case class DeliverError private[sequencing] (
     messageId: MessageId,
     reason: Status,
     trafficReceipt: Option[TrafficReceipt],
-)(override val deserializedFrom: Option[ByteString])
-    extends SequencedEvent[Nothing]
+)(override val deserializedFrom: Option[ByteString])(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type]
+) extends SequencedEvent[Nothing]
     with NoCopy {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type] =
-    SequencedEvent.protocolVersionRepresentativeFor(synchronizerId.protocolVersion)
 
   def toProtoV32: v32.SequencedEvent = v32.SequencedEvent(
     previousTimestamp = previousTimestamp.map(_.toProtoPrimitive),
@@ -398,7 +405,7 @@ sealed abstract case class DeliverError private[sequencing] (
     messageId,
     reason,
     trafficReceipt,
-  )(deserializedFrom) {}
+  )(deserializedFrom)(representativeProtocolVersion) {}
 
   override protected def pretty: Pretty[DeliverError] = prettyOfClass(
     param("previous timestamp", _.previousTimestamp),
@@ -432,6 +439,7 @@ object DeliverError {
       messageId: MessageId,
       sequencerError: SequencerDeliverError,
       trafficReceipt: Option[TrafficReceipt],
+      protocolVersion: ProtocolVersion,
   ): DeliverError =
     new DeliverError(
       previousTimestamp,
@@ -440,7 +448,8 @@ object DeliverError {
       messageId,
       sequencerError.rpcStatusWithoutLoggingContext(),
       trafficReceipt,
-    )(None) {}
+    )(None)(SequencedEvent.protocolVersionRepresentativeFor(protocolVersion)) {}
+
   def create(
       previousTimestamp: Option[CantonTimestamp],
       timestamp: CantonTimestamp,
@@ -448,6 +457,7 @@ object DeliverError {
       messageId: MessageId,
       status: Status,
       trafficReceipt: Option[TrafficReceipt],
+      protocolVersion: ProtocolVersion,
   ): DeliverError =
     new DeliverError(
       previousTimestamp,
@@ -456,7 +466,7 @@ object DeliverError {
       messageId,
       status,
       trafficReceipt,
-    )(None) {}
+    )(None)(SequencedEvent.protocolVersionRepresentativeFor(protocolVersion)) {}
 }
 
 /** Intuitively, the member learns all envelopes addressed to it. It learns some recipients of these
@@ -482,10 +492,8 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
     trafficReceipt: Option[TrafficReceipt],
 )(
     val deserializedFrom: Option[ByteString]
-) extends SequencedEvent[B] {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type] =
-    SequencedEvent.protocolVersionRepresentativeFor(synchronizerId.protocolVersion)
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent.type])
+    extends SequencedEvent[B] {
 
   /** Is this deliver event a receipt for a message that the receiver previously sent? (messageId is
     * only populated for the sender)
@@ -517,7 +525,7 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
         messageIdO,
         newBatch,
         trafficReceipt,
-      )(deserializedFrom)
+      )(deserializedFrom)(representativeProtocolVersion)
     )
 
   @VisibleForTesting
@@ -537,7 +545,7 @@ case class Deliver[+B <: GenBatch[?]] private[sequencing] (
       messageIdO,
       batch,
       trafficReceipt,
-    )(deserializedFromO)
+    )(deserializedFromO)(representativeProtocolVersion)
 
   def updateTrafficReceipt(trafficReceipt: Option[TrafficReceipt]): Deliver[B] =
     copy(batch = batch, trafficReceipt = trafficReceipt)
@@ -566,6 +574,7 @@ object Deliver {
       messageIdO: Option[MessageId],
       batch: B,
       trafficReceipt: Option[TrafficReceipt],
+      protocolVersion: ProtocolVersion,
   ): Deliver[B] =
     Deliver[B](
       previousTimestamp,
@@ -574,7 +583,7 @@ object Deliver {
       messageIdO,
       batch,
       trafficReceipt,
-    )(None)
+    )(None)(SequencedEvent.protocolVersionRepresentativeFor(protocolVersion))
 
   def openEnvelopes(
       deliver: Deliver[Batch[ClosedEnvelope]]

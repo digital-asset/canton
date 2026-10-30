@@ -481,6 +481,7 @@ class ParticipantSimulator(
           forceChanges = ForceFlags.none,
           waitToBecomeEffective = synchronize,
           serverVersion = nodeStatus.releaseVersion,
+          protocolVersion = None,
         )
       )
     } yield ()
@@ -695,6 +696,7 @@ class ParticipantSimulator(
               syncCrypto,
               payload,
               AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+              pv,
             )
             .leftMap(_.toString)
         } yield Some(
@@ -735,6 +737,7 @@ class ParticipantSimulator(
                       timestampOverride = period.toInclusive.forgetRefinement,
                     ),
                     None,
+                    pv,
                   )
               )
             } yield Some(msg -> (counterParticipant, sender))

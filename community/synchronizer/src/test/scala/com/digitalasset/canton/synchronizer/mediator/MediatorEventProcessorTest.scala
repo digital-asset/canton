@@ -92,6 +92,7 @@ final class MediatorEventProcessorTest
           messageIdO = None, // not relevant
           batch = Batch(envelopes.toList, testedProtocolVersion),
           trafficReceipt = None, // not relevant
+          protocolVersion = testedProtocolVersion,
         )
       )(TraceContext.createNew("test")),
     )
@@ -138,8 +139,9 @@ final class MediatorEventProcessorTest
     )
 
     val message = SignedProtocolMessage(
-      TypedSignedProtocolMessageContent(confirmationResponses),
+      TypedSignedProtocolMessageContent(confirmationResponses, testedProtocolVersion),
       NonEmpty(Seq, SymbolicCrypto.emptySignature),
+      testedProtocolVersion,
     )
     mkDefaultOpenEnvelope(message)
   }
@@ -361,7 +363,7 @@ final class MediatorEventProcessorTest
       val event3 = mkEvent(
         ts(2),
         mkDefaultOpenEnvelope(
-          TopologyTransactionsBroadcast(physicalSynchronizerId, Seq.empty)
+          TopologyTransactionsBroadcast(physicalSynchronizerId, Seq.empty, testedProtocolVersion)
         ),
       )
 

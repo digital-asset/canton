@@ -44,6 +44,7 @@ import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil,
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
+  ProtoVersion,
   ProtocolVersion,
   ProtocolVersionValidation,
   ReleaseVersion,
@@ -591,6 +592,7 @@ class GrpcTopologyManagerReadService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val ret = for {
+      baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
       filterParty <- readFilter("filter_party", request.filterParty)
       filterParticipant <- readFilter("filter_participant", request.filterParticipant)
       partyPredicate = (x: PartyToParticipant) => x.partyId.toProtoPrimitive.startsWith(filterParty)
@@ -610,8 +612,18 @@ class GrpcTopologyManagerReadService(
         }
         .traverse { case (context, elem) =>
           val resE = for {
-            protoVersion <-
+            transactionProtoVersion <-
               TopologyTransaction.protoVersionFor(context.representativeProtocolVersion)
+            // Clients before 3.7 read only the v30 item. They get it whenever v30 can express the
+            // mapping, i.e. unless an entry is Nominated or Freezing.
+            protoVersion =
+              if (
+                !ReleaseVersion.Feature.topologyMappingProtoV31.supported(
+                  baseQuery.clientVersion
+                ) &&
+                elem.canBeSerializedTo(ProtoVersion(30)).isRight
+              ) ProtoVersion(30)
+              else transactionProtoVersion
 
             item <- elem
               .foldProtoVersioned(protoVersion)(

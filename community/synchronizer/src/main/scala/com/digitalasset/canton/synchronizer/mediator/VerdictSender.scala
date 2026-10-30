@@ -307,6 +307,7 @@ private[mediator] class DefaultVerdictSender(
           requestId,
           request.rootHash,
           verdict,
+          protocolVersion,
         )
         val recipientSeq = informeesMap.keys.toSeq.map(MemberRecipient.apply)
         val recipients =
@@ -329,6 +330,7 @@ private[mediator] class DefaultVerdictSender(
                 validityPeriodEnd = Some(decisionTime),
               )
             ),
+            protocolVersion,
           )
           .map(signedResult => List(OpenEnvelope(signedResult, recipients)(protocolVersion)))
       }
@@ -451,6 +453,7 @@ private[mediator] class DefaultVerdictSender(
             requestId,
             rootHash,
             rejectionReason,
+            protocolVersion,
           )
 
           val recipients = Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
@@ -465,6 +468,7 @@ private[mediator] class DefaultVerdictSender(
                   validityPeriodEnd = Some(decisionTime),
                 )
               ),
+              protocolVersion,
             )
             .map(_ -> recipients)
         }

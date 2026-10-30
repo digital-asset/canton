@@ -8,7 +8,7 @@ set -euo pipefail  # Exit on error, prevent unset vars, fail pipeline on first e
 # Source the utility script
 source "$(dirname "$0")/utils.sh"
 
-PROTOCOL_VERSION="37"
+PROTOCOL_VERSION="$DEFAULT_PROTOCOL_VERSION"
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in

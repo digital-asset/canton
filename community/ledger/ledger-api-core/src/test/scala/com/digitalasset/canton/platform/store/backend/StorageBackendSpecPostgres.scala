@@ -42,6 +42,8 @@ final class StorageBackendSpecPostgres
 
   private val blockingAwaitMillis: Int = 1000
 
+  private val postgresQueryStrategy = PostgresQueryStrategy(disableMergeAndHashJoins = true)
+
   behavior of "StorageBackend (Postgres)"
 
   it should "find the Postgres version" in {
@@ -499,7 +501,7 @@ final class StorageBackendSpecPostgres
   private val vacuumPruningContractCandidateTable =
     NamedQuery("vacuumPruningContractCandidateTable") { _ => implicit c =>
       c.setAutoCommit(true)
-      PostgresQueryStrategy.vacuumTable("lapi_pruning_contract_candidate")
+      postgresQueryStrategy.vacuumTable("lapi_pruning_contract_candidate")
       c.setAutoCommit(false)
     }
 
@@ -514,7 +516,7 @@ final class StorageBackendSpecPostgres
 
   private def reindexPruningContractCandidateTable(successful: Boolean) =
     NamedQuery("reindexPruningContractCandidateTable") { _ => implicit c =>
-      PostgresQueryStrategy.reindexTableIfPossible(
+      postgresQueryStrategy.reindexTableIfPossible(
         "lapi_pruning_contract_candidate"
       ) shouldBe successful
     }
@@ -558,21 +560,21 @@ final class StorageBackendSpecPostgres
 
   it should "row lock blocking leads to exception" in testRowLocking { env =>
     import env.*
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
     assertThrows[CannotAcquireAllRowLocksException] {
-      backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid2, cid3)))(c2)
+      backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid2, cid3)))(c2)
     }
   }
 
   it should "disjoint locking is not blocking" in testRowLocking { env =>
     import env.*
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid3, cid4)))(c2)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid3, cid4)))(c2)
   }
 
   it should "write should block read" in testRowLocking { env =>
     import env.*
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
     val f = Future(
       backend.event.readLockInternalContractIds(Set(cid2, cid3, -15), testDbLockMeta)(
         c2,
@@ -592,11 +594,11 @@ final class StorageBackendSpecPostgres
       implicitly,
     ) shouldBe Set(-15)
     assertThrows[CannotAcquireAllRowLocksException] {
-      backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
+      backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
     }
     c2.rollback()
     c1.commit()
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
   }
 
   it should "read should not block read" in testRowLocking { env =>
@@ -613,13 +615,13 @@ final class StorageBackendSpecPostgres
 
   it should "write should block write" in testRowLocking { env =>
     import env.*
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid2, -15)))(c1)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid2, -15)))(c1)
     assertThrows[CannotAcquireAllRowLocksException] {
-      backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
+      backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
     }
     c2.rollback()
     c1.commit()
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
   }
 
   it should "read lock should block write lock, write lock also might be starved by further read locks, and also the blocked writer progressively locking all entries as soon as possible" in testRowLocking {
@@ -632,7 +634,7 @@ final class StorageBackendSpecPostgres
       // write is blocked by the read for cid2, but cid1 is write locked
       val writeF = Future(
         blockingWriteLockInternalContractIds(
-          PostgresQueryStrategy.anyOf(List(cid1, cid2))
+          postgresQueryStrategy.anyOf(List(cid1, cid2))
         )(c2)
       )(parallelExecutionContext)
       Threading.sleep(500)
@@ -697,14 +699,14 @@ final class StorageBackendSpecPostgres
 
   it should "write lock should not block contract upsert" in testRowLocking { env =>
     import env.*
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c1)
     upsertParContracts(c2)
   }
 
   it should "contract upsert should not block write lock" in testRowLocking { env =>
     import env.*
     upsertParContracts(c1)
-    backend.event.writeLockInternalContractIds(PostgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
+    backend.event.writeLockInternalContractIds(postgresQueryStrategy.anyOf(List(cid1, cid2)))(c2)
   }
 
   case class TestRowLockingEnv(
@@ -767,7 +769,7 @@ final class StorageBackendSpecPostgres
     SQL"""
     SELECT contract_id
     FROM par_contracts
-    WHERE contract_id ${PostgresQueryStrategy.anyOfBinary(
+    WHERE contract_id ${postgresQueryStrategy.anyOfBinary(
         List("second", "first").map(_.getBytes)
       )}"""
       .asVectorOf(byteArray("contract_id"))(connection)

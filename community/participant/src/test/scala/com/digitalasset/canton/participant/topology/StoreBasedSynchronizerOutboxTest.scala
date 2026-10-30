@@ -604,5 +604,49 @@ final class StoreBasedSynchronizerOutboxTest
       }
     }
 
+    "skip a transaction that the synchronizer's protocol version cannot express" onlyRunWhen (
+      testedProtocolVersion >= ProtocolVersion.v37
+    ) in {
+      // v30 cannot express the Nominated state, so the transaction cannot be converted for a
+      // synchronizer on protocol version 36. Retrying it would block the later transactions.
+      val targetParameters =
+        BaseTest.defaultStaticSynchronizerParametersWith(protocolVersion = ProtocolVersion.v36)
+      val nominated = txAddFromMapping(
+        PartyToParticipant.tryCreate(
+          PartyId(UniqueIdentifier.tryCreate("nominee", namespace)),
+          PositiveInt.one,
+          Seq(
+            HostingParticipant(
+              participant2,
+              ParticipantPermission.Confirmation,
+              HostingParticipant.HostingState.Nominated,
+            )
+          ),
+        )
+      )
+      val later = txAddFromMapping(mkPTP("later"))
+      val (source, target, manager, handle, client) = mk(2, targetParameters = targetParameters)
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
+        (for {
+          _ <- push(manager, Seq(rootCert, nominated, later))
+          _ <- outboxConnected(
+            manager,
+            handle,
+            client,
+            source,
+            target,
+            targetParameters = targetParameters,
+          )
+          _ <- eventuallyAsync(10.seconds) {
+            handle.buffer.map(_.mapping) shouldBe Seq(rootCert.mapping, later.mapping)
+            ()
+          }
+        } yield succeed).onShutdown(fail("shutdown")),
+        entries => {
+          entries should not be empty
+          forAll(entries)(_.warningMessage should include("cannot express it"))
+        },
+      )
+    }
   }
 }

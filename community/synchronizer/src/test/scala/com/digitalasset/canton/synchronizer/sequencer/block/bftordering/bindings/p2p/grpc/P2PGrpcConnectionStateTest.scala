@@ -100,35 +100,6 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
       }
 
-    // TODO(#34191): re-enable and complete coverage after fixing
-    "reject associating a P2P endpoint ID to a BFT node ID if already associated to another BFT node ID" ignore {
-      val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
-
-      state.connections shouldBe empty
-
-      state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
-
-      suppressProblemLogs(
-        state.associateP2PEndpointIdToBftNodeId(
-          APeerP2PEndpoint.id,
-          AnotherPeerBftNodeId,
-        ) shouldBe Left(
-          P2PConnectionState.Error
-            .P2PEndpointIdAlreadyAssociated(
-              APeerP2PEndpoint.id,
-              APeerBftNodeId,
-              AnotherPeerBftNodeId,
-            )
-        )
-      )
-
-      state.connections should contain only Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId)
-      state.isDefined(APeerP2PEndpoint.id) shouldBe true
-      state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
-      state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
-      state.isConnected(Right(APeerBftNodeId)) shouldBe false
-    }
-
     "associate a gRPC streaming sender with a BFT node ID only if missing" in {
       val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
 

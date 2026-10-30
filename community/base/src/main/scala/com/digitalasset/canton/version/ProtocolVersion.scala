@@ -306,7 +306,7 @@ object ProtocolVersion {
     *   if the environment variable's value cannot be parsed to a protocol version
     */
   private val CANTON_PROTOCOL_VERSION = "CANTON_PROTOCOL_VERSION"
-  val forSynchronizer: ProtocolVersion = {
+  lazy val forSynchronizer: ProtocolVersion = {
     val shouldPvBeSet =
       sys.env.contains("CI") && !sys.env.contains("CANTON_AUTOMATIC_PROTOCOL_VERSION")
 

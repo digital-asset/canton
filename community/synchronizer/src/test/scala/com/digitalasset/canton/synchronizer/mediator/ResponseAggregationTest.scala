@@ -179,7 +179,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
       val rootHash = informeeMessage.rootHash
       val someOtherRootHash = RootHash(TestHash.digest(12345))
 
@@ -654,7 +654,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           testedProtocolVersion,
         ),
         Signature.noSignature,
-      )(testedProtocolVersion)
+        testedProtocolVersion,
+      )
 
       val view1Position = ViewPosition(List(MerkleSeqIndex(List(Direction.Left))))
       val view2Position = ViewPosition(List(MerkleSeqIndex(List(Direction.Right))))
@@ -1035,7 +1036,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
       val rootHash = informeeMessage.rootHash
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
@@ -1998,7 +1999,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
       when(

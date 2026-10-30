@@ -55,7 +55,7 @@ import scala.jdk.CollectionConverters.*
   *
   * Test setup:
   *   - 4 participants, 1 synchronizer, with a simulated clock: SP (participant1), DA
-  *     (participant2), MPCH (participant3), and CP (participant4), which hosts Bob. The two SEC2
+  *     (participant2), Beta (participant3), and CP (participant4), which hosts Bob. The two SEC2
   *     cases use different targets, as a mismatch persists.
   *   - Each case uses its own party, hosted on SP only, with contracts shared with Bob.
   *   - The remote ACS read and the import of its snapshot are simulated with the repair service.
@@ -90,14 +90,14 @@ final class PartyFreezeSecurityIntegrationTest
 
         sp = participant1
         da = participant2
-        mpch = participant3
+        beta = participant3
         cp = participant4
         bob = cp.parties.enable("Bob")
       }
 
   private var sp: LocalParticipantReference = _
   private var da: LocalParticipantReference = _
-  private var mpch: LocalParticipantReference = _
+  private var beta: LocalParticipantReference = _
   private var cp: LocalParticipantReference = _
   private var bob: Party = _
 
@@ -111,7 +111,7 @@ final class PartyFreezeSecurityIntegrationTest
       partySigner = PartySigner.Local(sp),
       counterparty = bob,
       counterpartyParticipant = cp,
-      participants = Seq(sp, da, mpch, cp),
+      participants = Seq(sp, da, beta, cp),
       synchronizerId = daId,
       sequencer = getProgrammableSequencer(sequencer1.name),
       loggerFactory = loggerFactory,
@@ -256,19 +256,19 @@ final class PartyFreezeSecurityIntegrationTest
         sp.ledger_api.javaapi.commands
           .submit(Seq(scenario.party), archived.exerciseArchive().commands.asScala.toSeq)
           .discard
-        scenario.nominate(Seq(mpch -> Confirmation), PositiveInt.one)
-        val frozenAt = scenario.freeze(mpch)
+        scenario.nominate(Seq(beta -> Confirmation), PositiveInt.one)
+        val frozenAt = scenario.freeze(beta)
         expectFrozen(scenario)
 
         val archivedContract = repair.acs
           .read_from_file(withArchived.path)
           .filter(_.getCreatedEvent.contractId == archived.contractId)
         val extended = changeSnapshot(scenario.readAcs(frozenAt))(_ ++ archivedContract)
-        scenario.importAcs(mpch, extended)
+        scenario.importAcs(beta, extended)
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
-            onboardAndActivate(scenario, mpch)
-            assertCommitmentsMismatch(mpch, cp, env.daId, since = scenario.latestChangeTime)
+            onboardAndActivate(scenario, beta)
+            assertCommitmentsMismatch(beta, cp, env.daId, since = scenario.latestChangeTime)
           },
           forAll(_)(_.warningMessage should include("digest")),
         )

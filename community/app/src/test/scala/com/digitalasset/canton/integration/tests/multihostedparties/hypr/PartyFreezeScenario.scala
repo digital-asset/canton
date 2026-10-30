@@ -267,18 +267,22 @@ final class PartyFreezeScenario private (
     * @return
     *   The effective time of the write.
     */
-  def writeAsV30Wallet(entries: Map[ParticipantId, Entry]): CantonTimestamp =
-    write(signers = Seq(Authorizer.V30Wallet), mapping.copy(entries = entries))
+  def writeAsV30Wallet(
+      entries: Map[ParticipantId, Entry],
+      forceFlags: ForceFlags,
+  ): CantonTimestamp =
+    write(signers = Seq(Authorizer.V30Wallet), mapping.copy(entries = entries), forceFlags)
 
   /** As [[writeAsV30Wallet]], for a write that a case expects to be rejected, so the expected
     * mapping does not change.
     */
-  def writeAsV30WalletRejected(entries: Map[ParticipantId, Entry]): Unit =
+  def writeAsV30WalletRejected(entries: Map[ParticipantId, Entry], forceFlags: ForceFlags): Unit =
     propose(
       Authorizer.V30Wallet,
       mapping.copy(entries = entries),
       nextSerial,
       synchronize = true,
+      forceFlags,
     )
 
   /** The serial that the next write uses. */

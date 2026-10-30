@@ -905,7 +905,11 @@ class ConfigValidationsTest extends BaseTestWordSpec {
             algorithms = CryptoSchemeConfig(
               default = Some(SigningAlgorithmSpec.EcDsaSha384),
               allowed = Some(
-                NonEmpty.mk(Set, SigningAlgorithmSpec.EcDsaSha256, SigningAlgorithmSpec.EcDsaSha384)
+                NonEmpty.mk(
+                  Set,
+                  SigningAlgorithmSpec.EcDsaSha256,
+                  SigningAlgorithmSpec.EcDsaSha384,
+                )
               ),
             ),
           )
@@ -1600,5 +1604,45 @@ class ConfigValidationsTest extends BaseTestWordSpec {
         clientFlowControlError("CantonBFT sequencer 's1', P2P endpoint: 127.0.0.1:5001")
       )
     }
+  }
+
+  "reject invalid GCP KMS destroyScheduledDuration values" in {
+    def sequencerConfigWithGcpDestroyKeyDuration(
+        destroyScheduledDuration: PositiveFiniteDuration
+    ): CantonConfig =
+      CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            crypto = CryptoConfig(kms =
+              Some(
+                KmsConfig.Gcp(
+                  locationId = "us-east1",
+                  projectId = "test-project",
+                  keyRingId = "test-key-ring",
+                  destroyScheduledDuration = destroyScheduledDuration,
+                )
+              )
+            )
+          )
+        )
+      )
+
+    val validConfig = sequencerConfigWithGcpDestroyKeyDuration(
+      PositiveFiniteDuration.ofHours(24)
+    )
+    assertValid(validConfig)
+
+    val tooShortDuration = PositiveFiniteDuration.ofHours(23)
+    val tooShortConfig = sequencerConfigWithGcpDestroyKeyDuration(tooShortDuration)
+    assertErrors(tooShortConfig)(
+      s"sequencer s1: GCP KMS destroyScheduledDuration must be between 24 hours and 120 days, but is $tooShortDuration."
+    )
+
+    val tooLongDuration = PositiveFiniteDuration.ofDays(121)
+    val tooLongConfig = sequencerConfigWithGcpDestroyKeyDuration(tooLongDuration)
+    assertErrors(tooLongConfig)(
+      s"sequencer s1: GCP KMS destroyScheduledDuration must be between 24 hours and 120 days, but is $tooLongDuration."
+    )
+
   }
 }

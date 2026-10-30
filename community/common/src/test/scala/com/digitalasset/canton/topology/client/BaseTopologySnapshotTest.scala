@@ -210,9 +210,9 @@ class BaseTopologySnapshotTest
   }
 
   "the effective confirmation threshold" should {
-    val loop = participant1
+    val alpha = participant1
     val da1 = participant2
-    val mpch1 = participant3
+    val beta1 = participant3
     val allHosts = allSubmission + (participant3 -> ParticipantAttributes(Submission))
 
     def active(participant: ParticipantId) = HostingParticipant(participant, Confirmation)
@@ -267,63 +267,63 @@ class BaseTopologySnapshotTest
     "be as expected in replication scenarios" in {
       val examples = Seq(
         EffectiveConfirmationThresholdExample(
-          "1. Two replications running: Loop confirms alone",
+          "1. Two replications running: Alpha confirms alone",
           PositiveInt.two,
-          Seq(active(loop), nominated(da1), nominated(mpch1)),
+          Seq(active(alpha), nominated(da1), nominated(beta1)),
           Some(PositiveInt.one),
         ),
         EffectiveConfirmationThresholdExample(
           "2. DA1 finished: intent already reached",
           PositiveInt.two,
-          Seq(active(loop), active(da1), nominated(mpch1)),
+          Seq(active(alpha), active(da1), nominated(beta1)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "3. DA1 aborted and removed",
           PositiveInt.two,
-          Seq(active(loop), nominated(mpch1)),
+          Seq(active(alpha), nominated(beta1)),
           Some(PositiveInt.one),
         ),
         EffectiveConfirmationThresholdExample(
           "4. Both removed, threshold not reset: unconfirmable until the party lowers it",
           PositiveInt.two,
-          Seq(active(loop)),
+          Seq(active(alpha)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "5. Both complete",
           PositiveInt.two,
-          Seq(active(loop), active(da1), active(mpch1)),
+          Seq(active(alpha), active(da1), active(beta1)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "6. A target in Onboarding at threshold = numConfirming: no longer blocks",
           PositiveInt.three,
-          Seq(active(loop), active(da1), onboarding(mpch1)),
+          Seq(active(alpha), active(da1), onboarding(beta1)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "7. Host left while one pending, threshold = numConfirming: unconfirmable (P4)",
           PositiveInt.three,
-          Seq(active(loop), nominated(mpch1)),
+          Seq(active(alpha), nominated(beta1)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "8. No active host: unhosted (P5)",
           PositiveInt.two,
-          Seq(nominated(da1), nominated(mpch1)),
+          Seq(nominated(da1), nominated(beta1)),
           None,
         ),
         EffectiveConfirmationThresholdExample(
           "9. Host left while one pending, threshold < numConfirming: before the departure",
           PositiveInt.two,
-          Seq(active(loop), active(da1), nominated(mpch1)),
+          Seq(active(alpha), active(da1), nominated(beta1)),
           Some(PositiveInt.two),
         ),
         EffectiveConfirmationThresholdExample(
           "9. Host left while one pending, threshold < numConfirming: quorum halved (gap in P4)",
           PositiveInt.two,
-          Seq(active(loop), nominated(mpch1)),
+          Seq(active(alpha), nominated(beta1)),
           Some(PositiveInt.one),
         ),
       )

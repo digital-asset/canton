@@ -544,6 +544,7 @@ class SequencerReader(
                 unvalidatedEvent.event.sender,
                 unvalidatedEvent.event.trafficReceiptO,
               ),
+              protocolVersion,
             )
           } else {
             Deliver.create(
@@ -553,6 +554,7 @@ class SequencerReader(
               None,
               emptyBatch,
               None,
+              protocolVersion,
             )
           }
 
@@ -800,6 +802,7 @@ class SequencerReader(
               filteredBatch,
               // deliver events should only retain the traffic state for the sender's subscription
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
+              protocolVersion,
             )
           }
 
@@ -817,6 +820,7 @@ class SequencerReader(
               Some(messageId),
               emptyBatch,
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
+              protocolVersion,
             )
           )
         case DeliverErrorStoreEvent(sender, messageId, error, _traceContext, trafficReceiptO) =>
@@ -831,6 +835,7 @@ class SequencerReader(
               messageId,
               status,
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
+              protocolVersion,
             )
           )
       }
@@ -859,6 +864,7 @@ class SequencerReader(
             None,
             emptyBatch,
             None,
+            protocolVersion,
           )
         }
       }

@@ -49,6 +49,7 @@ import com.digitalasset.canton.topology.{
   PartyId,
   TopologyManagerError,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import java.util.UUID
@@ -526,6 +527,60 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         synchronizeParticipants = Seq(participant1, participant2, participant3),
         synchronizerId = synchronizer1Id.logical,
       )
+    }
+
+    "allocate a multi-hosted party with topology transactions for protocol version 36" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
+        val (onboardingTransactions, externalParty) =
+          participant1.parties.testing.external
+            .onboarding_transactions(
+              "Grace",
+              additionalConfirming = Seq(participant2),
+              confirmationThreshold = PositiveInt.two,
+              protocolVersion = Some(ProtocolVersion.v36),
+            )
+            .futureValueUS
+            .value
+        val v36 = TopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.v36)
+        val partyToParticipant = onboardingTransactions.partyToParticipant.transaction
+        partyToParticipant.representativeProtocolVersion shouldBe v36
+
+        // participant2 gets the transaction without the party's signatures and signs it as is, so
+        // that its signature and the party's apply to the same transaction
+        participant1.ledger_api.parties.allocate_external(
+          synchronizer1Id,
+          onboardingTransactions.transactionsWithSingleSignature,
+          multiSignatures = onboardingTransactions.multiTransactionSignatures,
+        )
+        participant2.ledger_api.parties.allocate_external(
+          synchronizer1Id,
+          Seq(partyToParticipant -> Seq.empty),
+          multiSignatures = Seq.empty,
+        )
+
+        // The mapping becomes effective only if both participants signed the same transaction
+        eventually() {
+          val effective = participant1.topology.transactions
+            .list(
+              store = synchronizer1Id,
+              filterMappings = Seq(PartyToParticipant.code),
+              filterNamespace = externalParty.partyId.namespace.toProtoPrimitive,
+            )
+            .result
+            .loneElement
+            .transaction
+          effective.transaction.representativeProtocolVersion shouldBe v36
+          effective
+            .selectMapping[PartyToParticipant]
+            .value
+            .mapping
+            .participantIds
+            .toSet shouldBe Set(
+            participant1.id,
+            participant2.id,
+          )
+        }
     }
 
     "allocate a party from one of their observing nodes" in { implicit env =>

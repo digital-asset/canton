@@ -9,7 +9,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.netty.shaded.io.netty.buffer.ByteBuf
 import io.grpc.netty.shaded.io.netty.channel.epoll.EpollSocketChannel
-import io.grpc.netty.shaded.io.netty.channel.nio.NioEventLoopGroup
+import io.grpc.netty.shaded.io.netty.channel.nio.NioIoHandler
 import io.grpc.netty.shaded.io.netty.channel.socket.nio.NioSocketChannel
 import io.grpc.netty.shaded.io.netty.channel.{
   Channel,
@@ -17,6 +17,7 @@ import io.grpc.netty.shaded.io.netty.channel.{
   ChannelFactory,
   ChannelHandlerContext,
   ChannelPromise,
+  MultiThreadIoEventLoopGroup,
 }
 import io.grpc.netty.shaded.io.netty.util.concurrent.DefaultThreadFactory
 
@@ -70,8 +71,12 @@ private[bftordering] final class P2PNettyChannelInstrumentation(
 
   // Event loop group for the NIO fallback (created only when the epoll transport is not in use). The
   //  custom wire-byte-counting channel factory requires a paired event loop group (see `customize`).
-  private lazy val nioFallbackEventLoopGroup: NioEventLoopGroup =
-    new NioEventLoopGroup(0, new DefaultThreadFactory("bft-p2p-nio"))
+  private lazy val nioFallbackEventLoopGroup: MultiThreadIoEventLoopGroup =
+    new MultiThreadIoEventLoopGroup(
+      0,
+      new DefaultThreadFactory("bft-p2p-nio"),
+      NioIoHandler.newFactory(),
+    )
 
   override def close(): Unit = {
     if (eventLoopGroupO.isEmpty)

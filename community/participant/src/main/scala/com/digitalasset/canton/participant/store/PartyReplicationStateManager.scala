@@ -216,12 +216,24 @@ final class PartyReplicationStateManager(
   def updateAcsReplicationStatus(
       requestId: AddPartyRequestId,
       acsReplicationStatus: AcsReplicationStatus,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val modification: PartyReplicationStateManager.Modification =
+      _.setAcsReplicationStatus(Some(acsReplicationStatus))
+        .setReplication(acsReplicationStatus.replicationO)
+    val completeIfAcsReplicationCompletedWithFailure: PartyReplicationStateManager.Modification =
+      if (acsReplicationStatus.hasCompleted && acsReplicationStatus.errorO.isDefined) {
+        // ACS replication failed and was marked as completed.
+        // This terminal state must be reflected in PartyReplicationStatus.
+        // Otherwise, the status would differ on the source participant,
+        // which reads directly from AcsReplicationStateManager.
+        _.setCompleted()
+      } else identity
+
     update_(
       requestId,
-      _.setAcsReplicationStatus(Some(acsReplicationStatus))
-        .setReplication(acsReplicationStatus.replicationO),
+      modification.andThen(completeIfAcsReplicationCompletedWithFailure),
     )
+  }
 
   override protected def onClosed(): Unit =
     LifeCycle.close(executionQueue)(logger)

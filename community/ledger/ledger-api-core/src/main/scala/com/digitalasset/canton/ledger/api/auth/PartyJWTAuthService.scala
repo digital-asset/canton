@@ -154,7 +154,8 @@ class PartyJWTAuthService(
             signer = partyId,
             signature = signature,
             // Currently, we allow Party JWTs to be signed with the same keys that are used to sign protocol messages.
-            // TODO(i32231): Introduce a dedicated key usage for this, but keep Protocol for backwards-compatibility with older keys.
+            // TODO(#32231): Add a dedicated `SigningKeyUsage` for party JWTs and also accept it
+            //  here. Keep accepting `Protocol`, as older keys lack the new usage.
             usage = SigningKeyUsage.ProtocolOnly,
           )
           .value

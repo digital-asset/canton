@@ -48,7 +48,8 @@ object Dependencies {
   lazy val cats_version = "2.13.0"
   lazy val checkerFramework_version = "4.3.0"
   lazy val chimney_version = "1.4.0"
-  lazy val circe_version = "0.14.2"
+  lazy val circe_version = "0.14.17"
+  private val circe_generic_extras_version = "0.14.4"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "12.0.2"
@@ -72,6 +73,10 @@ object Dependencies {
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.3.0"
   lazy val munit_version = "1.3.6"
+  private val opentelemetry_version = "1.67.0"
+  private val opentelemetry_alpha_version = "1.67.0-alpha"
+  private val otel_instrumentation_version = "2.33.0"
+  private val otel_instrumentation_alpha_version = "2.33.0-alpha"
   lazy val grpc_version = io_grpc_grpc_api.revision
 
   lazy val pekko_http_backend_version = "3.11.0"
@@ -127,7 +132,10 @@ object Dependencies {
   lazy val monocle_macro = "dev.optics" %% "monocle-macro" % monocle_version
 
   // ammonite requires the full scala version including patch number
-  lazy val ammonite = "com.lihaoyi" % "ammonite" % ammonite_version cross CrossVersion.full
+  lazy val ammonite = ("com.lihaoyi" % "ammonite" % ammonite_version)
+    .cross(CrossVersion.full)
+    .excludeAll(ExclusionRule().withOrganization("org.jline"))
+
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
 
   lazy val h2 = "com.h2database" % "h2" % h2_version
@@ -170,6 +178,47 @@ object Dependencies {
   lazy val grpc_inprocess = "io.grpc" % "grpc-inprocess" % grpc_version
 
   lazy val scopt = "com.github.scopt" %% "scopt" % scopt_version
+
+  lazy val opentelemetry_instrumentation_grpc =
+    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % otel_instrumentation_alpha_version
+  // https://github.com/open-telemetry/opentelemetry-java-instrumentation/tree/main/instrumentation/hikaricp-3.0/library
+  lazy val opentelemetry_instrumentation_hikari =
+    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_instrumentation_api =
+    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api" % otel_instrumentation_version
+  lazy val opentelemetry_instrumentation_api_incubator =
+    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api-incubator" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_instrumentation_runtime =
+    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry" % otel_instrumentation_alpha_version
+  lazy val opentelemetry_semconv = "io.opentelemetry.semconv" % "opentelemetry-semconv" % "1.40.0"
+  lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
+  lazy val opentelemetry_api_incubator =
+    "io.opentelemetry" % "opentelemetry-api-incubator" % opentelemetry_alpha_version
+  lazy val opentelemetry_context =
+    "io.opentelemetry" % "opentelemetry-context" % opentelemetry_version
+  lazy val opentelemetry_exporter_common =
+    "io.opentelemetry" % "opentelemetry-exporter-common" % opentelemetry_version
+  lazy val opentelemetry_exporter_otlp =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp" % opentelemetry_version
+  lazy val opentelemetry_exporter_otlp_common =
+    "io.opentelemetry" % "opentelemetry-exporter-otlp-common" % opentelemetry_version
+  lazy val opentelemetry_exporter_prometheus =
+    "io.opentelemetry" % "opentelemetry-exporter-prometheus" % opentelemetry_alpha_version
+  lazy val opentelemetry_exporter_sender_okhttp =
+    "io.opentelemetry" % "opentelemetry-exporter-sender-okhttp" % opentelemetry_version
+  lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
+  lazy val opentelemetry_sdk_common =
+    "io.opentelemetry" % "opentelemetry-sdk-common" % opentelemetry_version
+  lazy val opentelemetry_sdk_extension_autoconfigure_spi =
+    "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure-spi" % opentelemetry_version
+  lazy val opentelemetry_sdk_logs =
+    "io.opentelemetry" % "opentelemetry-sdk-logs" % opentelemetry_version
+  lazy val opentelemetry_sdk_metrics =
+    "io.opentelemetry" % "opentelemetry-sdk-metrics" % opentelemetry_version
+  lazy val opentelemetry_sdk_testing =
+    "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
+  lazy val opentelemetry_sdk_trace =
+    "io.opentelemetry" % "opentelemetry-sdk-trace" % opentelemetry_version
 
   lazy val pekko_projection_core =
     "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version
@@ -243,7 +292,7 @@ object Dependencies {
     "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val circe_generic_extras =
-    "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+    "io.circe" %% "circe-generic-extras" % circe_generic_extras_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
 
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version

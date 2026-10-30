@@ -617,6 +617,7 @@ class Engine(
         nodeSeeds = seeds,
         globalKeyMapping = globalKeyMapping,
         contractOrder = contractOrder,
+        contractKeyMismatches = Map.empty,
       )
       _ <- checkAllowedDeps(usedPackages, interpretationConfig.allowedLanguageVersions)
       _ <- if (validating) Result.unit else checkTransactionLimits(tx, meta, inputContracts)
@@ -845,6 +846,7 @@ class Engine(
                 nodeSeeds,
                 globalKeyMapping,
                 contractOrder,
+                contractKeyMismatches,
               )
             ) =>
           deps(tx).flatMap { deps =>
@@ -894,6 +896,7 @@ class Engine(
               nodeSeeds = nodeSeeds,
               globalKeyMapping = globalKeyMapping,
               contractOrder = contractOrder,
+              contractKeyMismatches = contractKeyMismatches,
             )
 
             config.profileDir.foreach { dir =>

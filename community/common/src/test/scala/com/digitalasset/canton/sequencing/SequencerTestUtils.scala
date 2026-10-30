@@ -51,6 +51,7 @@ object SequencerTestUtils extends BaseTest {
       messageId,
       batch,
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
     deserializedFrom match {
@@ -87,6 +88,7 @@ object SequencerTestUtils extends BaseTest {
       messageId,
       batch,
       trafficReceipt,
+      testedProtocolVersion,
     )
   }
 
@@ -104,6 +106,7 @@ object SequencerTestUtils extends BaseTest {
       messageId,
       sequencerError,
       trafficReceipt,
+      testedProtocolVersion,
     )
 
 }

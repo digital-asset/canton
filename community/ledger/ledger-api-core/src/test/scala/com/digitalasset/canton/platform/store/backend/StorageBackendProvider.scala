@@ -86,7 +86,10 @@ trait StorageBackendProviderPostgres
   this: Suite =>
   override protected def jdbcUrl: String = postgresDatabase.url
   override protected val backend: TestBackend =
-    TestBackend(participantId, PostgresStorageBackendFactory(loggerFactory))
+    TestBackend(
+      participantId,
+      PostgresStorageBackendFactory(disableMergeAndHashJoins = true, loggerFactory = loggerFactory),
+    )
 }
 
 trait StorageBackendProviderH2 extends StorageBackendProvider with BaseTest { this: Suite =>

@@ -64,7 +64,7 @@ import java.io.OutputStream
 import java.util.UUID
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContextExecutor, Future, TimeoutException}
 import scala.util.{Failure, Success}
 
 /** grpc service to allow modifying party hosting on participants
@@ -445,7 +445,9 @@ class GrpcPartyManagementService(
       ec: ExecutionContextExecutor,
       traceContext: TraceContext,
       actorSystem: ActorSystem,
-  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, LapiTopologyTransaction] =
+  ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, LapiTopologyTransaction] = {
+    val timeout =
+      waitForActivationTimeout.getOrElse(NonNegativeFiniteDuration.tryOfMinutes(2)).toScala
     for {
       topologyTx <- EitherT
         .apply[Future, PartyManagementServiceError, LapiTopologyTransaction](
@@ -462,12 +464,26 @@ class GrpcPartyManagementService(
               }
             }
             .take(1)
-            .completionTimeout(
-              waitForActivationTimeout.getOrElse(NonNegativeFiniteDuration.tryOfMinutes(2)).toScala
-            )
+            .completionTimeout(timeout)
             .runWith(Sink.head)
             .transform {
               case Success(tx) => Success(Right(tx))
+              case Failure(_: TimeoutException) =>
+                Success(
+                  Left(
+                    PartyManagementServiceError.EffectivePartyToParticipantMappingNotFound
+                      .Error(
+                        party,
+                        targetParticipant,
+                        s"No topology transaction onboarding or adding participant $targetParticipant as host " +
+                          s"of the party was found after ledger offset ${beginOffsetExclusive.unwrap} " +
+                          s"(exclusive) within $timeout. Ensure that the begin offset strictly predates the " +
+                          s"party-to-participant mapping that onboards the party on the target participant. " +
+                          s"Exporting the ACS of a party already hosted on the target participant (e.g., the " +
+                          s"exporting participant itself) is not supported; use `repair.export_acs` instead.",
+                      )
+                  )
+                )
               case Failure(e) =>
                 Success(
                   Left(
@@ -479,6 +495,7 @@ class GrpcPartyManagementService(
         )
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield topologyTx
+  }
 
   private def extractOffsetAndTimestamp(
       topologyTransaction: LapiTopologyTransaction

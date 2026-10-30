@@ -127,17 +127,15 @@ trait UnsignedProtocolMessage extends ProtocolMessage {
   * `typedMessage` and needs to be valid.
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
-case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
+case class SignedProtocolMessage[+M <: SignedProtocolMessageContent] private (
     typedMessage: TypedSignedProtocolMessageContent[M],
     signatures: NonEmpty[Seq[Signature]],
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedProtocolMessage.type
+    ]
 ) extends ProtocolMessage
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    SignedProtocolMessage.type
-  ] = SignedProtocolMessage.protocolVersionRepresentativeFor(
-    typedMessage.content.psid.protocolVersion
-  )
 
   @transient override protected lazy val companionObj: SignedProtocolMessage.type =
     SignedProtocolMessage
@@ -179,7 +177,7 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
       typedMessage: TypedSignedProtocolMessageContent[MM] = this.typedMessage,
       signatures: NonEmpty[Seq[Signature]] = this.signatures,
   ): SignedProtocolMessage[MM] =
-    SignedProtocolMessage(typedMessage, signatures)
+    SignedProtocolMessage(typedMessage, signatures)(representativeProtocolVersion)
 
   override def psid: PhysicalSynchronizerId = message.psid
 
@@ -220,14 +218,25 @@ object SignedProtocolMessage
     )
   )
 
+  def apply[M <: SignedProtocolMessageContent](
+      typedMessage: TypedSignedProtocolMessageContent[M],
+      signatures: NonEmpty[Seq[Signature]],
+      protocolVersion: ProtocolVersion,
+  ): SignedProtocolMessage[M] =
+    new SignedProtocolMessage(typedMessage, signatures)(
+      SignedProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)
+    )
+
   @VisibleForTesting
   def from[M <: SignedProtocolMessageContent](
       message: M,
+      protocolVersion: ProtocolVersion,
       signature: Signature,
       moreSignatures: Signature*
   ): SignedProtocolMessage[M] = SignedProtocolMessage(
-    TypedSignedProtocolMessageContent(message),
+    TypedSignedProtocolMessageContent(message, protocolVersion),
     NonEmpty(Seq, signature, moreSignatures*),
+    protocolVersion,
   )
 
   /** @param signingTimestampOverrides
@@ -238,14 +247,15 @@ object SignedProtocolMessage
       message: M,
       cryptoApi: SyncCryptoApi,
       signingTimestampOverrides: Option[SigningTimestampOverrides],
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SignedProtocolMessage[M]] = {
-    val typedMessage = TypedSignedProtocolMessageContent(message)
+    val typedMessage = TypedSignedProtocolMessageContent(message, protocolVersion)
 
     mkSignature(typedMessage, cryptoApi, signingTimestampOverrides).map { signature =>
-      SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature))
+      SignedProtocolMessage(typedMessage, NonEmpty(Seq, signature), protocolVersion)
     }
   }
 
@@ -276,11 +286,12 @@ object SignedProtocolMessage
       message: M,
       cryptoApi: SyncCryptoApi,
       signingTimestampOverrides: Option[SigningTimestampOverrides],
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): FutureUnlessShutdown[SignedProtocolMessage[M]] =
-    signAndCreate(message, cryptoApi, signingTimestampOverrides)
+    signAndCreate(message, cryptoApi, signingTimestampOverrides, protocolVersion)
       .valueOr(err =>
         throw new IllegalStateException(s"Failed to create signed protocol message: $err")
       )
@@ -301,8 +312,8 @@ object SignedProtocolMessage
         "signatures",
         signaturesSeqP,
       )
-      signedMessage = SignedProtocolMessage(typedMessage, signatures)
-    } yield signedMessage
+      rpv <- SignedProtocolMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield SignedProtocolMessage(typedMessage, signatures)(rpv)
   }
 
   implicit def signedMessageCast[M <: SignedProtocolMessageContent](implicit

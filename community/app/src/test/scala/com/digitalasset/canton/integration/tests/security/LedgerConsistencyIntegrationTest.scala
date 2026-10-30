@@ -1480,7 +1480,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
       Target(daId),
       Target(participant1.testing.fetch_synchronizer_time(daId)),
       participant1.testing.fetch_synchronizer_time(acmeId),
-    )
+    )(UnassignmentData.protocolVersionRepresentativeFor(testedProtocolVersion))
 
     maliciousP1.submitAssignmentRequest(maintainer.toLf, data)
   }

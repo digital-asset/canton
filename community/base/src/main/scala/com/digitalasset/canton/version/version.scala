@@ -188,8 +188,8 @@ object Errors {
       details: Option[String],
   ): Nothing =
     throw new IllegalStateException(
-      s"Cannot serialize instance of $name with $versionKind $version" + details.fold("")(str =>
-        s": $str"
-      )
+      s"Cannot get versioning entry of instance of $name with $versionKind $version" + details.fold(
+        ""
+      )(str => s": $str")
     )
 }

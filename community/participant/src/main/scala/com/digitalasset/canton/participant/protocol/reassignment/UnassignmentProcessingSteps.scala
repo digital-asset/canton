@@ -296,6 +296,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           ViewType.UnassignmentViewType,
           sourceRecentSnapshot.ipsSnapshot.timestamp,
           EmptyRootHashMessagePayload,
+          protocolVersion.unwrap,
         )
       rootHashRecipients =
         Recipients.recipientGroups(

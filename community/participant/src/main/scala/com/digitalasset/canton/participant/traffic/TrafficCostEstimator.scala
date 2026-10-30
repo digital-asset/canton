@@ -468,6 +468,7 @@ class TrafficCostEstimator(
           confirmationResponses,
           client,
           None, // `ConfirmationResponses` are always signed with a `fixed` timestamp.
+          psid.protocolVersion,
         )
       }
       batch = Batch.of(

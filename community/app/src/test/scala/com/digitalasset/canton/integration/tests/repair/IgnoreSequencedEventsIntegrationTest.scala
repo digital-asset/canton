@@ -359,6 +359,7 @@ final class IgnoreSequencedEventsIntegrationTest
           MessageId.tryCreate("schnitzel"),
           SequencerErrors.SubmissionRequestRefused(""),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         )
         val tracedSignedTamperedEvent =
           SequencedEventWithTraceContext(lastEvent.copy(content = tamperedEvent))(traceContext)

@@ -44,7 +44,7 @@ import com.google.cloud.kms.v1.{
   GetPublicKeyRequest,
 }
 import com.google.common.util.concurrent.MoreExecutors
-import com.google.protobuf.ByteString
+import com.google.protobuf.{ByteString, Duration}
 import io.grpc.ManagedChannelBuilder
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.openssl.PEMParser
@@ -181,6 +181,13 @@ class GcpKms(
       errorHandler(err, (errStr, retryable) => kmsErrorGen(errStr, retryable))
     )
 
+  // NOTE: GCP KMS supports Ed25519 only with software protection
+  private def protectionLevel(algorithm: CryptoKeyVersionAlgorithm): gcp.ProtectionLevel =
+    algorithm match {
+      case CryptoKeyVersionAlgorithm.EC_SIGN_ED25519 => gcp.ProtectionLevel.SOFTWARE
+      case _ => gcp.ProtectionLevel.HSM
+    }
+
   /** Creates a GCP KMS key based on a series of specifications and returns its key identifier.
     *
     * @param keySpec
@@ -216,11 +223,19 @@ class GcpKms(
             gcp.CryptoKey
               .newBuilder()
               .setPurpose(keyPurpose)
+              .setDestroyScheduledDuration(
+                Duration
+                  .newBuilder()
+                  .setSeconds(
+                    config.destroyScheduledDuration.duration.toSeconds
+                  )
+                  .build()
+              )
               .setVersionTemplate(
                 gcp.CryptoKeyVersionTemplate
                   .newBuilder()
                   .setAlgorithm(keySpec)
-                  .setProtectionLevel(gcp.ProtectionLevel.HSM)
+                  .setProtectionLevel(protectionLevel(keySpec))
               )
               .build()
           kmsClient.createCryptoKeyCallable.futureCall(

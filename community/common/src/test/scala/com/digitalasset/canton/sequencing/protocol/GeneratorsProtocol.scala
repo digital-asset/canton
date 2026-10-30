@@ -279,6 +279,7 @@ final class GeneratorsProtocol(
       messageId,
       error,
       Option.empty[TrafficReceipt],
+      protocolVersion,
     )
   )
 
@@ -347,5 +348,6 @@ final class GeneratorsProtocol(
     messageIdO,
     batch,
     trafficReceipt,
+    protocolVersion,
   )
 }

@@ -998,6 +998,7 @@ class AcsCommitmentProcessorTest
           payload,
           snapshot,
           None, // not needed for unit tests; session signing keys disabled
+          testedProtocolVersion,
         )
     }
   }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto.kms
 
+import com.digitalasset.canton.config.CryptoProvider
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.crypto.{
   CryptoPureApi,
@@ -25,6 +26,13 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 
 class SymbolicKmsTest extends FixtureAsyncWordSpec with KmsTest {
   override type KmsType = SymbolicKms
+
+  override protected def supportedSchemes: Kms.SupportedSchemes = new Kms.SupportedSchemes {
+    override def supportedSigningKeySpecs = CryptoProvider.Jce.signingKeys.supported
+    override def supportedSigningAlgoSpecs = CryptoProvider.Jce.signingAlgorithms.supported
+    override def supportedEncryptionKeySpecs = CryptoProvider.Jce.encryptionKeys.supported
+    override def supportedEncryptionAlgoSpecs = CryptoProvider.Jce.encryptionAlgorithms.supported
+  }
 
   // Use null for the config as there's no KmsConfig subclass for SymbolicKms which is a test only KMS implementation
   @SuppressWarnings(Array("org.wartremover.warts.Null"))

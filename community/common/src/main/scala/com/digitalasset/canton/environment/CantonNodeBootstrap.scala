@@ -706,7 +706,7 @@ abstract class CantonNodeBootstrapImpl[
           VaultServiceGrpc.bindService(
             new GrpcVaultService(
               crypto,
-              arguments.parameterConfig.enablePreviewFeatures,
+              arguments.parameterConfig.enableKeyDownload,
               bootstrapStageCallback.loggerFactory,
             ),
             executionContext,

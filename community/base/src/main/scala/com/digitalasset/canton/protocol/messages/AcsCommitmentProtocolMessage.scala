@@ -39,6 +39,10 @@ import scala.concurrent.ExecutionContext
 final case class AcsCommitmentProtocolMessage private (
     acsCommitment: AcsCommitment,
     signature: Signature,
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      AcsCommitmentProtocolMessage.type
+    ]
 ) extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[AcsCommitmentProtocolMessage] {
 
@@ -46,10 +50,6 @@ final case class AcsCommitmentProtocolMessage private (
     AcsCommitmentProtocolMessage
 
   override def psid: PhysicalSynchronizerId = acsCommitment.psid
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    AcsCommitmentProtocolMessage.type
-  ] = AcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   protected def toProtoV32: v32.AcsCommitmentProtocolMessage =
     v32.AcsCommitmentProtocolMessage(
@@ -86,8 +86,9 @@ object AcsCommitmentProtocolMessage
       acsCommitment: AcsCommitment,
       signature: Signature,
       sizeLimit: PositiveInt,
+      protocolVersion: ProtocolVersion,
   ): Either[String, AcsCommitmentProtocolMessage] = {
-    val pvv = ProtocolVersionValidation.PV(acsCommitment.psid.protocolVersion)
+    val pvv = ProtocolVersionValidation.PV(protocolVersion)
 
     ProtoValidation
       .validateLength(
@@ -97,7 +98,11 @@ object AcsCommitmentProtocolMessage
         ValidationParam(ProtocolVersion.newBoundsOnPV37 -> sizeLimit),
       )
       .leftMap(_.message)
-      .map(_ => new AcsCommitmentProtocolMessage(acsCommitment, signature))
+      .map(_ =>
+        new AcsCommitmentProtocolMessage(acsCommitment, signature)(
+          AcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)
+        )
+      )
   }
 
   private[messages] def fromProtoV32(
@@ -121,8 +126,9 @@ object AcsCommitmentProtocolMessage
         "signature",
         signatureP,
       )
+      rpv <- AcsCommitmentProtocolMessage.protocolVersionRepresentativeFor(ProtoVersion(32))
       // Direct instantiation bypasses `create` limit check because `acsCommitmentP` is already length-validated above
-    } yield new AcsCommitmentProtocolMessage(acsCommitment, signature)
+    } yield new AcsCommitmentProtocolMessage(acsCommitment, signature)(rpv)
   }
 
   def signAndCreate(
@@ -141,7 +147,7 @@ object AcsCommitmentProtocolMessage
       snapshot <- EitherT.liftF(cryptoApi.awaitSnapshot(acsCommitment.period.toInclusive))
       signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None).leftMap(_.toString)
       message <- EitherT.fromEither[FutureUnlessShutdown](
-        create(acsCommitment, signature, sizeLimit)
+        create(acsCommitment, signature, sizeLimit, cryptoApi.psid.protocolVersion)
       )
     } yield message
   }
@@ -151,6 +157,7 @@ object AcsCommitmentProtocolMessage
       cryptoApi: SyncCryptoApi,
       acsCommitment: AcsCommitment,
       sizeLimit: PositiveInt,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -160,7 +167,7 @@ object AcsCommitmentProtocolMessage
     val hash = cryptoApi.pureCrypto.digest(hashPurpose, serialization)
     for {
       signature <- cryptoApi.sign(hash, SigningKeyUsage.ProtocolOnly, None).leftMap(_.toString)
-      message <- EitherT.fromEither(create(acsCommitment, signature, sizeLimit))
+      message <- EitherT.fromEither(create(acsCommitment, signature, sizeLimit, protocolVersion))
     } yield message
   }
 

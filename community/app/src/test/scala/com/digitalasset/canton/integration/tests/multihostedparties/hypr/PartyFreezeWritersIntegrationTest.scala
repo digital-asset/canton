@@ -25,7 +25,10 @@ import com.digitalasset.canton.participant.config.{
   DeclarativePartyConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
-import com.digitalasset.canton.topology.TopologyManagerError.UnauthorizedTransaction
+import com.digitalasset.canton.topology.TopologyManagerError.{
+  HostingStatesNotExpressible,
+  UnauthorizedTransaction,
+}
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
@@ -33,7 +36,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.{Namespace, PartyId}
+import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Namespace, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
@@ -65,7 +68,7 @@ final class PartyFreezeWritersIntegrationTest
       implicit env =>
         import env.*
         val scenario = newScenario("M1")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
         expectHostedBySp(scenario)
         scenario.freeze(da)
         expectFrozenWithHostSp(scenario)
@@ -86,15 +89,15 @@ final class PartyFreezeWritersIntegrationTest
           Request.Rejected,
         )
 
-        // MPCH alone could move itself from Nominated to Active, skipping Freezing and
+        // Beta alone could move itself from Nominated to Active, skipping Freezing and
         // Onboarding, so listing it without a state must keep it Nominated
-        mpch.topology.party_to_participant_mappings
-          .propose_delta(scenario.party.partyId, adds = Seq(mpch.id -> Observation), store = daId)
+        beta.topology.party_to_participant_mappings
+          .propose_delta(scenario.party.partyId, adds = Seq(beta.id -> Observation), store = daId)
           .discard
         scenario.expectWritten(
-          scenario.entries.updated(mpch.id, Entry(Observation, HostingState.Nominated)),
+          scenario.entries.updated(beta.id, Entry(Observation, HostingState.Nominated)),
           PositiveInt.two,
-          signers = Seq(mpch),
+          signers = Seq(beta),
         )
         expectFrozenWithHostSp(scenario)
     }
@@ -102,41 +105,41 @@ final class PartyFreezeWritersIntegrationTest
     "M1: reject the allocation of a party of which the participant is a nominee" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         import env.*
-        // The party's namespace is MPCH's, MPCH is Nominated, and SP hosts the party
-        val nomineesParty = PartyId.tryCreate("M1-nominee", mpch.namespace)
-        mpch.topology.party_to_participant_mappings
+        // The party's namespace is Beta's, Beta is Nominated, and SP hosts the party
+        val nomineesParty = PartyId.tryCreate("M1-nominee", beta.namespace)
+        beta.topology.party_to_participant_mappings
           .propose(
             nomineesParty,
-            newParticipants = Seq(sp.id -> Submission, mpch.id -> Confirmation),
+            newParticipants = Seq(sp.id -> Submission, beta.id -> Confirmation),
             store = daId,
-            participantStates = Map(mpch.id -> HostingState.Nominated),
+            participantStates = Map(beta.id -> HostingState.Nominated),
           )
           .discard
         sp.topology.party_to_participant_mappings
           .propose(
             nomineesParty,
-            newParticipants = Seq(sp.id -> Submission, mpch.id -> Confirmation),
+            newParticipants = Seq(sp.id -> Submission, beta.id -> Confirmation),
             store = daId,
-            participantStates = Map(mpch.id -> HostingState.Nominated),
+            participantStates = Map(beta.id -> HostingState.Nominated),
           )
           .discard
         def mapping() = eventually() {
-          mpch.topology.party_to_participant_mappings
+          beta.topology.party_to_participant_mappings
             .list(daId, filterParty = nomineesParty.filterString)
             .loneElement
             .item
         }
         val nominated = mapping()
-        nominated.participants.find(_.participantId == mpch.id).map(_.state) shouldBe Some(
+        nominated.participants.find(_.participantId == beta.id).map(_.state) shouldBe Some(
           HostingState.Nominated
         )
 
         loggerFactory.assertThrowsAndLogs[CommandFailure](
-          mpch.ledger_api.parties.allocate("M1-nominee", synchronizerId = Some(daId)).discard,
+          beta.ledger_api.parties.allocate("M1-nominee", synchronizerId = Some(daId)).discard,
           _.errorMessage should include(HostingState.Nominated.toString),
         )
         loggerFactory.assertThrowsAndLogs[CommandFailure](
-          mpch.parties.enable("M1-nominee", synchronizer = Some(daName)).discard,
+          beta.parties.enable("M1-nominee", synchronizer = Some(daName)).discard,
           _.errorMessage should include(HostingState.Nominated.toString),
         )
         def updateDeclarativeConfig(
@@ -145,13 +148,13 @@ final class PartyFreezeWritersIntegrationTest
           environment.pokeOrUpdateConfig(
             Some(
               Right(
-                ConfigTransforms.updateParticipantConfig(mpch.name)(
+                ConfigTransforms.updateParticipantConfig(beta.name)(
                   _.focus(_.alphaDynamic).modify(update)
                 )(environment.config)
               )
             )
           )
-        // Declares the party with Submission, which differs from MPCH's Confirmation entry
+        // Declares the party with Submission, which differs from Beta's Confirmation entry
         updateDeclarativeConfig(
           _.focus(_.parties)
             .replace(Seq(DeclarativePartyConfig("M1-nominee", synchronizers = Seq(daName.unwrap))))
@@ -168,8 +171,8 @@ final class PartyFreezeWritersIntegrationTest
     "L1: let a legacy offline party replication onboard a target while another target freezes the party" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         import env.*
-        // Its own namespace keeps the legacy import from anchoring MPCH's onboarding clearance at
-        // MPCH's onboarding for another party of SP's namespace: the import looks up onboarding
+        // Its own namespace keeps the legacy import from anchoring Beta's onboarding clearance at
+        // Beta's onboarding for another party of SP's namespace: the import looks up onboarding
         // entries by namespace, not by party
         val namespaceKey =
           sp.keys.secret.generate_signing_key("L1-namespace", SigningKeyUsage.NamespaceOnly)
@@ -183,35 +186,35 @@ final class PartyFreezeWritersIntegrationTest
         scenario.freeze(da)
         expectFrozenWithHostSp(scenario)
 
-        // The export and the clearance read MPCH's hosting state, not the hosting view
-        val beforeOnboarding = scenario.onboardLegacy(mpch, Confirmation)
+        // The export and the clearance read Beta's hosting state, not the hosting view
+        val beforeOnboarding = scenario.onboardLegacy(beta, Confirmation)
         scenario.expectStep(
-          Hosting.Frozen(PositiveInt.one, Set(sp.id, mpch.id)),
-          events = Set(Event.Onboarding(mpch.id)),
+          Hosting.Frozen(PositiveInt.one, Set(sp.id, beta.id)),
+          events = Set(Event.Onboarding(beta.id)),
           Request.Rejected,
         )
-        // The export includes the party's contract shared with Bob, whom MPCH does not host
-        mpch.ledger_api.state.acs
+        // The export includes the party's contract shared with Bob, whom Beta does not host
+        beta.ledger_api.state.acs
           .of_party(scenario.party)
           .map(_.contractId) should contain(scenario.counterpartysContract.contractId)
 
-        scenario.activate(mpch, beforeOnboarding)
+        scenario.activate(beta, beforeOnboarding)
         scenario.expectStep(
-          Hosting.Frozen(PositiveInt.one, Set(sp.id, mpch.id)),
-          events = Set(Event.Added(mpch.id)),
+          Hosting.Frozen(PositiveInt.one, Set(sp.id, beta.id)),
+          events = Set(Event.Added(beta.id)),
           Request.Rejected,
         )
 
         scenario.remove(da, by = Signer.Participant)
         scenario.expectStep(
-          Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
           events = Set.empty,
-          Request.ApprovedBy(Set(sp.id, mpch.id)),
+          Request.ApprovedBy(Set(sp.id, beta.id)),
         )
         scenario.assertCommitmentsMatchAmongHosts()
     }
 
-    "L2: keep the Freezing entry when a v30 wallet relists it, and unfreeze when the wallet leaves it out" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    "L2: reject a v30 wallet's write while an entry is Freezing unless forced; forced, keep the Freezing entry when relisted and unfreeze when left out" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newExternalScenario("L2")
         scenario.nominate(Seq(da -> Confirmation), PositiveInt.one)
@@ -219,14 +222,32 @@ final class PartyFreezeWritersIntegrationTest
         scenario.freeze(da)
         expectFrozenWithHostSp(scenario)
 
-        // A v30 entry is Onboarding with the onboarding flag and Active without it, so relisting
-        // the Freezing entry moves it forward, which needs DA's signature. Only the operator's log
-        // names DA's namespace as missing; the wallet gets a redacted security-sensitive error.
+        // A v30 transaction cannot express the Freezing state, so the participant that receives the
+        // wallet's write rejects it, whether the write relists the Freezing entry or leaves it out
+        Seq(
+          "Relisted" -> scenario.entries.updated(da.id, Entry(Confirmation, HostingState.Active)),
+          "Left out" -> (scenario.entries - da.id),
+        ).foreach { case (write, entries) =>
+          clue(write) {
+            loggerFactory.assertThrowsAndLogs[CommandFailure](
+              scenario.writeAsV30WalletRejected(entries, ForceFlags.none),
+              _.shouldBeCommandFailure(HostingStatesNotExpressible, s"${da.id} -> Freezing"),
+            )
+          }
+        }
+        expectFrozenWithHostSp(scenario)
+
+        // Forced, a v30 entry is Onboarding with the onboarding flag and Active without it, so
+        // relisting the Freezing entry moves it forward, which needs DA's signature. Only the
+        // operator's log names DA's namespace as missing; the wallet gets a redacted
+        // security-sensitive error.
+        val forced = ForceFlags(ForceFlag.AllowV30PartyToParticipantAfterHostingStates)
         Seq(HostingState.Onboarding, HostingState.Active).foreach { relisted =>
           clue(s"Relisted as $relisted") {
             loggerFactory.assertThrowsAndLogs[CommandFailure](
               scenario.writeAsV30WalletRejected(
-                scenario.entries.updated(da.id, Entry(Confirmation, relisted))
+                scenario.entries.updated(da.id, Entry(Confirmation, relisted)),
+                forced,
               ),
               _.shouldBeCantonError(
                 UnauthorizedTransaction,
@@ -239,7 +260,7 @@ final class PartyFreezeWritersIntegrationTest
         expectFrozenWithHostSp(scenario)
 
         // The party alone may remove an entry
-        scenario.writeAsV30Wallet(scenario.entries - da.id).discard
+        scenario.writeAsV30Wallet(scenario.entries - da.id, forced).discard
         expectHostedBySp(scenario)
         scenario.assertCommitmentsMatchAmongHosts()
     }
@@ -247,7 +268,7 @@ final class PartyFreezeWritersIntegrationTest
     "DR1: accept the topology steps of disaster recovery" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("DR1")
-        // DA stands for the broken participant, MPCH for the new one
+        // DA stands for the broken participant, Beta for the new one
         scenario.add(da, Confirmation, HostingState.Active)
         scenario.expectStep(
           Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id)),
@@ -256,7 +277,7 @@ final class PartyFreezeWritersIntegrationTest
         )
 
         clue("The party removes the broken participant and nominates the new one") {
-          scenario.replace(da, mpch, Confirmation)
+          scenario.replace(da, beta, Confirmation)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.one, Set(sp.id)),
             events = Set(Event.Revoked(da.id)),
@@ -264,15 +285,15 @@ final class PartyFreezeWritersIntegrationTest
           )
         }
         clue("The new participant moves N → F and removes itself") {
-          scenario.freeze(mpch)
+          scenario.freeze(beta)
           expectFrozenWithHostSp(scenario)
-          scenario.remove(mpch, by = Signer.Participant)
+          scenario.remove(beta, by = Signer.Participant)
           expectHostedBySp(scenario)
         }
         clue("The party and the new participant co-sign no entry → F") {
-          scenario.add(mpch, Confirmation, HostingState.Freezing)
+          scenario.add(beta, Confirmation, HostingState.Freezing)
           expectFrozenWithHostSp(scenario)
-          scenario.remove(mpch, by = Signer.Party)
+          scenario.remove(beta, by = Signer.Party)
           expectHostedBySp(scenario)
         }
         scenario.assertCommitmentsMatchAmongHosts()

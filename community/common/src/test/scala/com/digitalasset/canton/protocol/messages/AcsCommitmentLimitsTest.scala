@@ -97,6 +97,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           acsCommitment = oversizedAcs,
           signature = dummySignature,
           sizeLimit = defaultMaxCommitmentSize,
+          protocolVersion = testedProtocolVersion,
         )
 
         // Assertions
@@ -284,6 +285,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           acsCommitmentSummary = oversizedSummary,
           signature = dummySignature,
           sizeLimit = defaultMaxCommitmentSummarySize,
+          protocolVersion = testedProtocolVersion,
         )
 
         if (limitsEnforced) {

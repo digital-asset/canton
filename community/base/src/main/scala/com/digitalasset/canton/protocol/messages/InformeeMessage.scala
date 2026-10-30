@@ -40,7 +40,7 @@ case class InformeeMessage(
     fullInformeeTree: FullInformeeTree,
     override val submittingParticipantSignature: Signature,
 )(
-    protocolVersion: ProtocolVersion
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type]
 ) extends MediatorConfirmationRequest
     // By default, we use ProtoBuf for serialization.
     // Serializable classes that have a corresponding Protobuf message should inherit from this trait to inherit common code and naming conventions.
@@ -48,16 +48,13 @@ case class InformeeMessage(
     with UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[InformeeMessage] {
 
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage.type] =
-    InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
-
   override def submittingParticipant: ParticipantId = fullInformeeTree.submittingParticipant
 
   def copy(
       fullInformeeTree: FullInformeeTree = this.fullInformeeTree,
       submittingParticipantSignature: Signature = this.submittingParticipantSignature,
   ): InformeeMessage =
-    InformeeMessage(fullInformeeTree, submittingParticipantSignature)(protocolVersion)
+    InformeeMessage(fullInformeeTree, submittingParticipantSignature)(representativeProtocolVersion)
 
   override def requestUuid: UUID = fullInformeeTree.transactionUuid
 
@@ -108,6 +105,15 @@ object InformeeMessage
     )
   )
 
+  def apply(
+      fullInformeeTree: FullInformeeTree,
+      submittingParticipantSignature: Signature,
+      protocolVersion: ProtocolVersion,
+  ): InformeeMessage =
+    InformeeMessage(fullInformeeTree, submittingParticipantSignature)(
+      InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
+    )
+
   // The inverse of "toProto<version>".
   //
   // On error, it returns `Left(...)` as callers cannot predict whether the conversion would succeed.
@@ -123,8 +129,6 @@ object InformeeMessage
       context: (GenTransactionTreeDeserializationContext, ProtocolVersion),
       informeeMessageP: v30.InformeeMessage,
   ): ParsingResult[InformeeMessage] = {
-    val (_, protocolVersion) = context
-
     // Use pattern matching to access the fields of v0.InformeeMessage,
     // because this will break if a field is forgotten.
     val v30.InformeeMessage(
@@ -144,7 +148,10 @@ object InformeeMessage
           submittingParticipantSignaturePO,
         )
         .flatMap(Signature.fromProtoV30)
-    } yield new InformeeMessage(fullInformeeTree, submittingParticipantSignature)(protocolVersion)
+      // Always use proto version matching the proto tag in the versioningTable
+      // to access the representative protocol version
+      rpv <- InformeeMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield new InformeeMessage(fullInformeeTree, submittingParticipantSignature)(rpv)
   }
 
   implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] =

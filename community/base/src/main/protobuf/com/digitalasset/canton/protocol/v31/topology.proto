@@ -91,7 +91,6 @@ message PartyToParticipant {
 }
 
 // Difference with v30:
-// - compacted field numbers by removing reserved gaps
 // - uses v31.PartyToParticipant
 message TopologyMapping {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";

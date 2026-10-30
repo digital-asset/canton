@@ -85,7 +85,9 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     "throw when computing the rpv for an unknown protocol version" in {
       intercept[IllegalStateException](
         protocolVersionRepresentative(ProtocolVersion(-1))
-      ).getMessage should include("Cannot serialize instance of Message with protocol version -1")
+      ).getMessage should include(
+        "Cannot get versioning entry of instance of Message with protocol version -1"
+      )
     }
 
     "rpv computation fails for an unknown proto version" in {

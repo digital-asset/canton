@@ -282,7 +282,9 @@ final class GeneratorsTransaction(
     for {
       op <- Arbitrary.arbitrary[TopologyChangeOp]
       serial <- Arbitrary.arbitrary[PositiveInt]
-      // TODO(i32231): ensure that we create a valid mapping (i.e. usage?)
+      // TODO(#32231): Once a `SigningKeyUsage` exists that proto v30 can't express, generate only
+      //  signing keys whose usages `protocolVersion` can serialize, as `hostingParticipantArb` does
+      //  for the hosting states. Otherwise `tryCreate` throws for such keys.
       mapping <- Arbitrary.arbitrary[TopologyMapping]
     } yield TopologyTransaction.tryCreate(op, serial, mapping, protocolVersion)
   )

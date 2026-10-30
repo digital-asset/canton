@@ -35,6 +35,7 @@ import com.digitalasset.canton.version.{
 }
 
 import java.time.Duration
+import scala.util.Try
 
 /** @param pbftViewChangeTimeout
   * @param segmentLength
@@ -63,6 +64,7 @@ final case class SequencingParameters private (
     with HasProtocolVersionedWrapper[SequencingParameters] {
 
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
+
   require(
     maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
     s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
@@ -70,6 +72,17 @@ final case class SequencingParameters private (
       s"$maxRequestsPerBlock maximum requests per block, " +
       s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
   )
+
+  // TODO(#37082): individual caps are needed in order to always ensure the maximum block size
+  //  is below the limit; consider this case:
+  //  - Initially maxRequestsInBatch = 32, maxBatchesPerBlockProposal = 16
+  //  - Batches are disseminated with 32 requests per batch
+  //  - Then maxRequestsInBatch becomes 15 and maxBatchesPerBlockProposal becomes 64
+  //  - Previously disseminated batches are used in a block proposal,
+  //    which would then have 32 * 64 = 2048 requests, exceeding the limit of 1024.
+  //  We cannot at the moment enforcing the limit at validation time because the batch size
+  //  is not part of the PoA, and changing the PoA requires a Canton protocol change.
+
   require(
     maxRequestsInBatch <= 32,
     s"Max request in batch too big: $maxRequestsInBatch exceeds maximum allowed of 32",
@@ -239,16 +252,28 @@ object SequencingParameters
       }
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
         proto.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology
-    } yield SequencingParameters(
-      pbftViewChangeTimeout,
-      pbftViewChangeTimeoutStep,
-      pbftViewChangeTimeoutUpperBound,
-      segmentLength,
-      blacklistLeaderSelectionPolicyConfig,
-      maxRequestsInBatch,
-      maxBatchesPerProposal,
-      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
-    )(rpv)
+      result <- Try(
+        SequencingParameters(
+          pbftViewChangeTimeout,
+          pbftViewChangeTimeoutStep,
+          pbftViewChangeTimeoutUpperBound,
+          segmentLength,
+          blacklistLeaderSelectionPolicyConfig,
+          maxRequestsInBatch,
+          maxBatchesPerProposal,
+          stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
+        )(rpv)
+      ).fold(
+        ex =>
+          Left(
+            ValueConversionError(
+              "SequencingParameters",
+              s"Failed to create SequencingParameters: ${ex.getMessage}",
+            )
+          ),
+        Right(_),
+      )
+    } yield result
 
   override def name: String = "SequencingParameters"
 

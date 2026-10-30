@@ -10,7 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.topology.{
   ListOwnerToKeyMappingResult,
 }
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   InstanceReference,
   LocalParticipantReference,
@@ -18,9 +18,10 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.v30.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.digitalasset.canton.crypto.v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_UNSPECIFIED
-import com.digitalasset.canton.crypto.{Fingerprint, Signature, SigningKeyUsage, v30}
+import com.digitalasset.canton.crypto.{Fingerprint, HashPurpose, Signature, SigningKeyUsage, v30}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.MediatorError.MalformedMessage
-import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -30,6 +31,8 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.protocol.{v32, v30 as protocolV30}
+import com.digitalasset.canton.sequencing.client.RichSequencerClientImpl
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpenerError.EnvelopeOpenerDeserializationError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -38,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
   SendPolicyWithoutTraceContext,
 }
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
 import com.digitalasset.canton.topology.TopologyManagerError.TopologyManagerAlarm
 import com.digitalasset.canton.topology.transaction.*
@@ -47,9 +51,10 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 }
 import com.digitalasset.canton.topology.transaction.KeyMapping.MaxKeys
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Replace}
-import com.digitalasset.canton.topology.{Member, PartyId}
+import com.digitalasset.canton.topology.{Member, OpaquePhysicalSynchronizerId, PartyId}
 import com.digitalasset.canton.util.{MaliciousParticipantNode, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.v1.UntypedVersionedMessage
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
@@ -99,8 +104,138 @@ class InvalidTopologyBroadcastIntegrationTest
       }
 
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+  registerPlugin(new UsePostgres(loggerFactory))
 
   "An attacker" can {
+    "not permanently crash loop participant and mediator nodes via a malformed LSU test message" in {
+      implicit env =>
+        import env.*
+
+        val participant = participant1
+        val sync = participant.underlying.value.sync
+        val connectedSynchronizer = sync.readyConnectedSynchronizerById(daId.logical).value
+        val client = connectedSynchronizer.sequencerClient.asInstanceOf[RichSequencerClientImpl]
+
+        // 1. Construct the poisoned LSU test message (PV 35) in raw protobuf
+        val toxicPv = 2
+        val forgedPsid = OpaquePhysicalSynchronizerId(
+          connectedSynchronizer.psid.logical,
+          NonNegativeInt.zero,
+          toxicPv,
+        )
+
+        val maliciousContentProto = protocolV30.LsuSequencingTestMessageContent(
+          forgedPsid.toProtoPrimitive,
+          participant.id.toProtoPrimitive,
+        )
+
+        val maliciousContentWire = UntypedVersionedMessage(
+          UntypedVersionedMessage.Wrapper.Data(maliciousContentProto.toByteString),
+          30,
+        ).toByteString
+
+        val signature = v30.Signature(
+          SIGNATURE_FORMAT_RAW,
+          ByteString.copyFromUtf8("malicious signature"),
+          signingAlgorithmSpec = SIGNING_ALGORITHM_SPEC_UNSPECIFIED,
+          signatureDelegation = None,
+          signedBy = participant.namespace.fingerprint.toProtoPrimitive,
+        )
+
+        val envelopeContent = v32.EnvelopeContent(
+          v32.EnvelopeContent.SomeEnvelopeContent.LsuSequencingTestMessage(
+            protocolV30.LsuSequencingTestMessage(maliciousContentWire, Some(signature))
+          )
+        )
+
+        val messageBytes = UntypedVersionedMessage(
+          UntypedVersionedMessage.Wrapper.Data(envelopeContent.toByteString),
+          32,
+        ).toByteString
+
+        // 2. Create envelopes targeting both Participant1 and MediatorGroup 0
+        val targets: List[Recipient] = List(
+          MemberRecipient(participant.id.member),
+          MediatorGroupRecipient(MediatorGroupIndex.zero),
+        )
+
+        val closedEnvelopes = targets.map { recipient =>
+          ClosedUncompressedEnvelope.create(
+            messageBytes,
+            Recipients.cc(recipient),
+            Seq.empty,
+            connectedSynchronizer.staticSynchronizerParameters.protocolVersion,
+          )
+        }
+
+        val rawBatch = Batch(
+          closedEnvelopes,
+          connectedSynchronizer.staticSynchronizerParameters.protocolVersion,
+        )
+
+        // 3. Create and sign the SubmissionRequest
+        val submissionRequest = SubmissionRequest.tryCreate(
+          sender = participant.id,
+          messageId = MessageId.randomMessageId(),
+          batch = rawBatch,
+          maxSequencingTime = CantonTimestamp.MaxValue,
+          aggregationRule = None,
+          submissionCost = None,
+          protocolVersion = connectedSynchronizer.staticSynchronizerParameters.protocolVersion,
+        )
+
+        val snapshot =
+          connectedSynchronizer.synchronizerCrypto.currentSnapshotApproximation.futureValueUS
+        val signedRequest = client.requestSigner
+          .signRequest(
+            submissionRequest,
+            HashPurpose.SubmissionRequestSignature,
+            snapshot,
+            signingTimestampOverrides = None,
+          )
+          .value
+          .futureValueUS
+          .value
+
+        // 4. Send directly via the connection pool
+        val connection = client.connectionPool.getAllConnections.headOption.value
+
+        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+          connection.sendAsync(signedRequest, timeouts.network.duration).futureValueUS.value,
+          forAtLeast(4, _) {
+            // This includes multiple alarms as the message reaches multiple handlers:
+            // - LsuSequencingTestMessageHandler
+            // - TopologyTransactionProcessor - TOPOLOGY_MANAGER_ALARM
+            // - LsuSequencingTestMessageHandler
+            // - ParallelMessageDispatcher - SYNC_SERVICE_ALARM
+            entry =>
+              entry.message should (include("wrong synchronizer ids") and include(
+                forgedPsid.toString
+              ))
+          },
+        )
+
+        // Prove the participant is not a zombie
+        logger.info("Verifying participant is responsive to new commands")
+        participant.health.ping(participant)
+
+        // Restarting the node doesn't kill it
+        logger.info("Restarting participant to verify no crash loop on startup")
+        participant.stop()
+        participant.start()
+        logger.info("Reconnecting synchronizers")
+        participant.synchronizers.reconnect_all(
+          ignoreFailures = false,
+          synchronize = Some(timeouts.network),
+        )
+        eventually() {
+          participant.synchronizers.list_connected().map(_.physicalSynchronizerId) should contain(
+            connectedSynchronizer.psid
+          )
+        }
+        participant.health.ping(participant)
+
+    }
     // positive test to check that the setup works correctly
     "register an authorized key by using the sequencer api" in { implicit env =>
       import env.*

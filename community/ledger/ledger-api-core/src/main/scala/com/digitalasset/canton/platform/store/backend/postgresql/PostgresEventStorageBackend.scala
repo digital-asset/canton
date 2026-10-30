@@ -23,8 +23,9 @@ class PostgresEventStorageBackend(
     ledgerEndCache: LedgerEndCache,
     stringInterning: StringInterning,
     loggerFactory: NamedLoggerFactory,
+    queryStrategy: PostgresQueryStrategy,
 ) extends EventStorageBackendTemplate(
-      queryStrategy = PostgresQueryStrategy,
+      queryStrategy = queryStrategy,
       ledgerEndCache = ledgerEndCache,
       stringInterning = stringInterning,
       loggerFactory = loggerFactory,
@@ -60,7 +61,7 @@ class PostgresEventStorageBackend(
       internalContractIds -- SQL"""
         SELECT internal_contract_id
         FROM par_contracts
-        WHERE internal_contract_id ${PostgresQueryStrategy.anyOf(internalContractIds)}
+        WHERE internal_contract_id ${queryStrategy.anyOf(internalContractIds)}
         ORDER BY internal_contract_id
         FOR KEY SHARE
         """

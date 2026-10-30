@@ -39,3 +39,12 @@ python3 release/update_dependabot.py
 This rewrites `.github/dependabot.yml` so each supported line has a `docker`
 entry (release lines are covered for docker only for now) and drops entries for
 lines no longer listed.
+
+# Modify release/propose-open-source-code-drop.sh
+
+This step will only be required until we transition to the open source repo.
+
+Modify `release/propose-open-source-code-drop.sh` such that the `BASE_PUBLIC` and `BRANCH_PUBLIC` point
+to branches the include the release-line. For example see https://github.com/DACH-NY/canton/pull/37023
+
+

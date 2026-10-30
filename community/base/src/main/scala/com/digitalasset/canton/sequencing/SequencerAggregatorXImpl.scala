@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -171,26 +170,37 @@ class SequencerAggregatorXImpl(
 
     lateOrMerged match {
       case Left(pastEventsCache) =>
-        // The provided event was late -- ignore or return an error depending on whether it is valid.
-        // In both cases, the returned Future does not depend on the decision.
-        val eventIsValid = pastEventsCache.get(newEvent.timestamp).contains(eventHash)
+        // The provided event was late:
+        // - ignore if it is valid
+        // - ignore if it is older than the oldest event in the past event cache
+        // - return an error if it is within the timeframe of the cache but not present in it
+        // In all cases, the returned Future does not depend on the decision.
+
         val (firstTs, lastTs) =
           (pastEventsCache.headOption.map(_._1), pastEventsCache.lastOption.map(_._1))
+        val eventIsValid = pastEventsCache.get(newEvent.timestamp).contains(eventHash)
+        val eventIsAnteriorToCache = firstTs.exists(_ > newEvent.timestamp)
 
-        EitherT
-          .cond[FutureUnlessShutdown](
-            eventIsValid,
+        val result =
+          if (eventIsValid) {
             logger.debug(
-              s"[$context] Ignoring past event (latest processed at $lastTs)"
-            ), {
-              logger.info(
-                s"[$context] Rejecting unknown past event (not present in the last ${pastEventsCache.size}" +
-                  s" aggregated events between $firstTs and $lastTs)"
-              )
-              SequencerAggregatorError.BogusEvent(sequencerId, newEvent)
-            },
-          )
-          .value
+              s"[$context] Ignoring valid past event (latest processed at $lastTs)"
+            )
+            Either.unit
+          } else if (eventIsAnteriorToCache) {
+            logger.debug(
+              s"[$context] Ignoring past event (oldest in cache at $firstTs)"
+            )
+            Either.unit
+          } else {
+            logger.info(
+              s"[$context] Rejecting unknown past event (not present in the last ${pastEventsCache.size}" +
+                s" aggregated events between $firstTs and $lastTs)"
+            )
+            Left(SequencerAggregatorError.BogusEvent(sequencerId, newEvent))
+          }
+
+        result.toEitherT.value
 
       case Right((decisionP, contributorHash)) =>
         // The provided event has been merged -- return a future on the decision tailored for this sequencer

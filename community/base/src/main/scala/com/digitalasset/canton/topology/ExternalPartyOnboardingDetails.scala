@@ -17,6 +17,7 @@ import com.digitalasset.canton.topology.ExternalPartyOnboardingDetails.{
   SignedPartyToKeyMapping,
 }
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.{
   GenericSignedTopologyTransaction,
   PositiveSignedTopologyTransaction,
@@ -390,6 +391,19 @@ object ExternalPartyOnboardingDetails {
         (),
         s"The PartyToParticipant transaction must not contain any node with Submission permission. Nodes with submission permission: ${nodesWithSubmissionPermission
             .mkString(", ")}",
+      )
+      // Checks every entry, not only this node's: the party alone may add a node as Nominated.
+      nodesNominatedOrFreezing = hostingParticipants.filter(participant =>
+        participant.state == HostingState.Nominated || participant.state == HostingState.Freezing
+      )
+      _ <- Either.cond(
+        nodesNominatedOrFreezing.isEmpty,
+        (),
+        "The PartyToParticipant transaction must not contain any node in hosting state Nominated or Freezing: " +
+          "these states are only for adding a node to an existing party. Nodes in these states: " +
+          nodesNominatedOrFreezing
+            .map(participant => s"${participant.participantId} (${participant.state})")
+            .mkString(", "),
       )
       _ <- hostingParticipants.toList match {
         case HostingParticipant(hosting, permission, _state) :: Nil =>

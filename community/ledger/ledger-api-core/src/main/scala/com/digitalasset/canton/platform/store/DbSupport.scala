@@ -8,6 +8,7 @@ import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.ServerRole
+import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.backend.{
   DataSourceStorageBackend,
@@ -62,13 +63,18 @@ object DbSupport {
       dbConfig: DbConfig,
       serverRole: ServerRole,
       metrics: LedgerApiServerMetrics,
+      disableMergeAndHashJoins: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): ResourceOwner[DbSupport] = {
     val dbType = DbType.jdbcType(dbConfig.jdbcUrl)
-    val storageBackendFactory = StorageBackendFactory.of(dbType, loggerFactory)
+    val storageBackendFactory = StorageBackendFactory.of(
+      dbType = dbType,
+      disableMergeAndHashJoins = disableMergeAndHashJoins,
+      loggerFactory = loggerFactory,
+    )
     val dataSourceStorageBackend = storageBackendFactory.createDataSourceStorageBackend
     for {
       dataSource <- ResourceOwner.forFuture(() =>
@@ -103,6 +109,6 @@ object DbSupport {
         overallExecutionTimer = metrics.index.db.execAll,
         loggerFactory = loggerFactory,
       ),
-      storageBackendFactory = StorageBackendFactory.of(DbType.H2Database, loggerFactory),
+      storageBackendFactory = H2StorageBackendFactory(loggerFactory),
     )
 }

@@ -3310,6 +3310,7 @@ class EngineTestHelpers(
           nodeSeeds = state.nodeSeeds.toImmArray,
           globalKeyMapping = Map.empty,
           contractOrder = List.empty,
+          contractKeyMismatches = Map.empty,
         ),
       )
     )

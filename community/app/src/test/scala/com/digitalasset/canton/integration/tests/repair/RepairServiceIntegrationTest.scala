@@ -191,9 +191,6 @@ trait RepairServiceIntegrationTest
 sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrationTest {
   override protected def cantonTestsPath: String = CantonTestsPath
 
-  // TODO(#36201) Enable this test again when we handle unassign + purge scenario correctly in ACS commitments
-  override protected val enableAcsDigestConsistencyCheck: Boolean = false
-
   "RepairService" should {
     "prevent concurrent synchronizer reconnect" when {
       "a repair command is being processed" in { implicit env =>
@@ -487,8 +484,10 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
           }
         }
       }
+    }
 
-      "contract is reassigned away" in { implicit env =>
+    "skip purging contract" when {
+      "contract is reassigned away and ignore flag set" in { implicit env =>
         withParticipantsInitialized { (alice, bob) =>
           import env.*
 
@@ -501,7 +500,8 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
             cid
           }
 
-          participant1.repair.purge(daName, Seq(contractId.toLf))
+          val offsetBeforePurge = participant1.ledger_api.state.end()
+          participant1.repair.purge(daName, Seq(contractId.toLf), ignoreAlreadyPurged = true)
 
           withSynchronizerConnected(daName) {
             eventually() {
@@ -509,11 +509,45 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
               res.headOption.map { case (isActive, _) => isActive } shouldBe Some(false)
             }
           }
+
+          val unassignmentsAfterPurge = participant1.ledger_api.updates
+            .reassignments(
+              partyIds = Set(alice, bob),
+              completeAfter = PositiveInt.tryCreate(Int.MaxValue),
+              beginOffsetExclusive = offsetBeforePurge,
+              endOffsetInclusive = Some(participant1.ledger_api.state.end()),
+            )
+            .collect { case unassigned: UpdateService.UnassignedWrapper => unassigned.events }
+            .flatten
+            .filter(_.contractId == contractId.toLf.coid)
+
+          unassignmentsAfterPurge shouldBe empty
         }
       }
     }
 
     "error purging contract" when {
+      "contract is reassigned away and ignore flag not set" in { implicit env =>
+        withParticipantsInitialized { (alice, bob) =>
+          import env.*
+
+          val contractId = withSynchronizerConnected(daName) {
+            val cid = createContract(participant1, alice, bob)
+            withSynchronizerConnected(acmeName) {
+              participant1.ledger_api.commands
+                .submit_unassign(bob, Seq(cid.toLf), daId, acmeId)
+            }.discard
+            cid
+          }
+
+          loggerFactory.assertThrowsAndLogs[CommandFailure](
+            participant1.repair
+              .purge(daName, Seq(contractId.toLf), ignoreAlreadyPurged = false),
+            _.commandFailureMessage should include("cannot be purged: reassigned away contract"),
+          )
+        }
+      }
+
       "no contract id to purge specified" in { implicit env =>
         withParticipantsInitialized { (_, _) =>
           import env.*
@@ -906,7 +940,7 @@ sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrati
       unassignedEventForPurgedContract.source shouldBe daId.logical.toProtoPrimitive
       unassignedEventForPurgedContract.target shouldBe daId.logical.toProtoPrimitive
 
-      unassignedEventForPurgedContract.reassignmentCounter shouldBe contract.reassignmentCounter.unwrap
+      unassignedEventForPurgedContract.reassignmentCounter shouldBe contract.reassignmentCounter.unwrap + 1
     } else {
       // Fetch from the Ledger API the synthetically created Archive event for the purged contract
       val exercisedEventForPurgedContract = updateWithPurge
@@ -1338,7 +1372,7 @@ sealed trait RepairServiceMixedRepresentationTests extends RepairServiceIntegrat
                   .flatten
                   .loneElement
                 unassignedEvent.contractId shouldBe nonZeroCounterCid
-                unassignedEvent.reassignmentCounter shouldBe 3L
+                unassignedEvent.reassignmentCounter shouldBe 4L
                 unassignedEvent.source shouldBe daId.logical.toProtoPrimitive
                 unassignedEvent.target shouldBe daId.logical.toProtoPrimitive
 

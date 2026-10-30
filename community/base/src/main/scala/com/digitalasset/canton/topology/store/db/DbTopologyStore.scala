@@ -1372,14 +1372,32 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       nsFilter: Option[(SQLActionBuilder, SQLActionBuilder)] = None,
   ): QueryAction = {
 
+    val rejectionFilter =
+      if (!includeRejected)
+        sql" AND rejection_reason IS NULL"
+      else sql""
+
     def baseQuery(targetTable: SQLActionBuilder) =
       sql"SELECT instance, sequenced, valid_from, valid_until, rejection_reason, id FROM " ++ targetTable ++ sql" WHERE store_id = $storeIndex" ++
-        subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL" else sql"")
+        subQuery ++ rejectionFilter
 
     def queryWithFilter(filter: (SQLActionBuilder, SQLActionBuilder)) = {
       val (leftTable, onFilter) = filter
-      val targetTable = leftTable ++ sql" JOIN common_topology_transactions ON " ++ onFilter
-      baseQuery(targetTable)
+      storage.profile match {
+        case _: Profile.Postgres =>
+          // Force one index lookup on common_topology_transactions per filter entry.
+          // With a plain join, Postgres' planner switches to a hash join over all transactions
+          // of the requested types once the filter has more than a handful of entries, which is
+          // orders of magnitude slower on large topology states. `OFFSET 0` prevents the planner
+          // from flattening the lateral subquery back into a plain join.
+          sql"SELECT t.* FROM " ++ leftTable ++
+            sql" CROSS JOIN LATERAL (SELECT instance, sequenced, valid_from, valid_until, rejection_reason, id, identifier, namespace" ++
+            sql" FROM common_topology_transactions WHERE store_id = $storeIndex AND " ++ onFilter ++
+            subQuery ++ rejectionFilter ++ sql" OFFSET 0) t"
+        case _: Profile.H2 =>
+          // H2 doesn't support lateral joins
+          baseQuery(leftTable ++ sql" JOIN common_topology_transactions ON " ++ onFilter)
+      }
     }
 
     val query = (uidFilter, nsFilter) match {

@@ -130,13 +130,8 @@ final class P2PGrpcConnectionState(
   // - A P2P endpoint ID is associated with a BFT node ID as soon as the association is known.
   // - Associating a P2P endpoint ID to this BFT node ID returns an error (self-association is
   //   rejected).
-  // TODO(#34191)
-  // - Re-associating a P2P endpoint ID to a different BFT node ID is currently permitted: the
-  //   impersonation check that would return an error (`P2PEndpointIdAlreadyAssociated`) is
-  //   disabled (see #34192), so the mapping is silently updated. The transport auth interceptors
-  //   are thus the only line of defense currently active against endpoint-level impersonation.
-  // - All P2P endpoint IDs for a BFT node ID point to the same network reference to which the BFT node ID also points,
-  //   replacing and closing duplicates as they are identified.
+  // - All P2P endpoint IDs for a BFT node ID point to the same network reference to which
+  //   the BFT node ID also points, replacing and closing duplicates as they are identified.
   // - No new sender is associated with a BFT node ID if one is already associated with it.
   // - No new network ref is associated with a P2P endpoint ID if one is already associated with it.
   // - No new network ref is associated with a BFT node ID if one is already associated with it.
@@ -420,7 +415,6 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
 
     override def prettyCompanion: PrettyPrintingCompanion[State] = State
 
-    // TODO(#34191) and restructure to avoid local mutability
     // Returns the new state with the endpoint associated to the node,
     //  the state transition with logs, potentially an error if the association is not allowed
     //  and the network refs to close, if any duplicates were replaced.
@@ -449,12 +443,11 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
           p2pEndpointIdToBftNodeId
             .updatedWith(p2pEndpointId) {
               // The self-association check must come before handling an existing association:
-              //  since re-association is currently allowed (see the disabled impersonation check
-              //  below), an endpoint previously associated with a peer that later resolves to this
-              //  node would otherwise be silently re-associated to this node, and the connection
-              //  wouldn't be shut down as a self-connection.
+              //  since re-association is allowed, an endpoint previously associated with a peer
+              //  that later resolves to this node would otherwise be silently re-associated to
+              //  this node, and the connection wouldn't be shut down as a self-connection.
               //
-              //  Any existing association is left untouched, i.e., the association is purely refused.
+              //  Any existing association is left untouched, i.e., the association is refused.
               case previousBftNodeIdO if bftNodeId == thisNode =>
                 result = Left(
                   P2PConnectionState.Error
@@ -473,19 +466,6 @@ object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionS
                   annotation =
                     s"Endpoint $p2pEndpointId already associated with $previousBftNodeId, no change"
                 } else {
-//                  result = Left(
-//                    P2PConnectionState.Error
-//                      .P2PEndpointIdAlreadyAssociated(
-//                        p2pEndpointId,
-//                        previousBftNodeId,
-//                        bftNodeId,
-//                      )
-//                  )
-//                  annotation = "Possible impersonation attempt: " +
-//                    s"endpoint $p2pEndpointId is already associated with $previousBftNodeId, " +
-//                    s"not associating it to $bftNodeId; if this is a legitimate change, " +
-//                    "the previous association must be removed first"
-//                  logLevel = Level.WARN
                   annotation =
                     s"Endpoint $p2pEndpointId was previously associated with $previousBftNodeId, changing to $bftNodeId"
                   logLevel = Level.INFO

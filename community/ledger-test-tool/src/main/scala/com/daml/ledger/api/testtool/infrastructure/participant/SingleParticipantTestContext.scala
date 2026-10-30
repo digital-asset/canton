@@ -311,6 +311,7 @@ final class SingleParticipantTestContext private[participant] (
           otherConfirmingParticipantUids = Seq(),
           confirmationThreshold = 1,
           observingParticipantUids = Seq(),
+          protocolVersion = None,
         )
       )
     } yield onboardingTransactions

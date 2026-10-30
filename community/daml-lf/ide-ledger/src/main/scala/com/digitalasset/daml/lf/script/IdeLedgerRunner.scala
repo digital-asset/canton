@@ -352,7 +352,15 @@ private[lf] object IdeLedgerRunner {
     }
 
     def saveTransaction(result: Speedy.UpdateMachine.Result, snapshotDir: Path): Option[String] = {
-      val Speedy.UpdateMachine.Result(tx, _, _, nodeSeeds, globalKeyMapping, contractOrder) = result
+      val Speedy.UpdateMachine.Result(
+        tx,
+        _,
+        _,
+        nodeSeeds,
+        globalKeyMapping,
+        contractOrder,
+        contractKeyMismatches,
+      ) = result
 
       deps(tx).flatMap { deps =>
         val meta = Transaction.Metadata(
@@ -363,6 +371,7 @@ private[lf] object IdeLedgerRunner {
           nodeSeeds = nodeSeeds,
           globalKeyMapping = globalKeyMapping,
           contractOrder = contractOrder,
+          contractKeyMismatches = contractKeyMismatches,
         )
         val snapshotFile = snapshotDir.resolve("snapshot-ide-ledger.bin")
 
@@ -533,7 +542,7 @@ private[lf] object IdeLedgerRunner {
           Interruption(continue)
         case SResult.SResultFinal(_) =>
           ledgerMachine.finish match {
-            case Right(result @ Speedy.UpdateMachine.Result(tx, _, locationInfo, _, _, _)) =>
+            case Right(result @ Speedy.UpdateMachine.Result(tx, _, locationInfo, _, _, _, _)) =>
               snapshotDir.foreach(saveTransaction(result, _)) // FIXME:
               val committedTx = CommittedTransaction(enrich(suffixer.suffixCids(tx)))
               ledger.commit(committers, readAs, location, committedTx, locationInfo) match {
