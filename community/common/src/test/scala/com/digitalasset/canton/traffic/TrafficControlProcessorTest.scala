@@ -54,6 +54,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
   private lazy val topoTx: TopologyTransactionsBroadcast = TopologyTransactionsBroadcast(
     synchronizerId,
     List(factory.ns1k1_k1),
+    testedProtocolVersion,
   )
 
   private def mkSetTrafficPurchased(
@@ -64,12 +65,14 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       PositiveInt.one,
       NonNegativeLong.tryCreate(100),
       synchronizerId,
+      testedProtocolVersion,
     )
 
     signatureO match {
       case Some(signature) =>
         SignedProtocolMessage.from(
           setTrafficPurchased,
+          testedProtocolVersion,
           signature,
         )
 
@@ -80,6 +83,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
             synchronizerCrypto.currentSnapshotApproximation.futureValueUS,
             signingTimestampOverrides =
               None, // not needed for unit tests; session signing keys disabled
+            protocolVersion = testedProtocolVersion,
           )
           .failOnShutdown
           .futureValue
@@ -129,6 +133,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       None,
       batch,
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
   private def mkDeliverError(
@@ -141,6 +146,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       MessageId.fromUuid(new UUID(0, 1)),
       SequencerErrors.SubmissionRequestRefused("Some error"),
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
   "the traffic control processor" should {

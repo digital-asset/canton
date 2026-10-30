@@ -22,13 +22,13 @@ final case class SetTrafficPurchasedMessage private (
     psid: PhysicalSynchronizerId,
 )(
     override val deserializedFrom: Option[ByteString]
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SetTrafficPurchasedMessage.type
+    ]
 ) extends ProtocolVersionedMemoizedEvidence
     with HasProtocolVersionedWrapper[SetTrafficPurchasedMessage]
     with SignedProtocolMessageContent {
-
-  val representativeProtocolVersion: RepresentativeProtocolVersion[
-    SetTrafficPurchasedMessage.type
-  ] = SetTrafficPurchasedMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   // Only used in security tests, this is not part of the protobuf payload
   override val signingTimestamp: Option[CantonTimestamp] = None
@@ -85,10 +85,11 @@ object SetTrafficPurchasedMessage
       serial: PositiveInt,
       totalTrafficPurchased: NonNegativeLong,
       psid: PhysicalSynchronizerId,
+      protocolVersion: ProtocolVersion,
   ): SetTrafficPurchasedMessage =
     new SetTrafficPurchasedMessage(member, serial, totalTrafficPurchased, psid)(
       None
-    )
+    )(SetTrafficPurchasedMessage.protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -108,12 +109,13 @@ object SetTrafficPurchasedMessage
         "physical_synchronizer_id",
         pvv,
       )(PhysicalSynchronizerId.fromProtoPrimitive)
+      rpv <- SetTrafficPurchasedMessage.protocolVersionRepresentativeFor(ProtoVersion(1))
     } yield new SetTrafficPurchasedMessage(
       member,
       serial,
       totalTrafficPurchased,
       synchronizerId,
-    )(Some(bytes))
+    )(Some(bytes))(rpv)
 
   implicit val setTrafficPurchasedCast: SignedMessageContentCast[SetTrafficPurchasedMessage] =
     SignedMessageContentCast.create[SetTrafficPurchasedMessage](

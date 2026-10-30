@@ -62,6 +62,7 @@ class LedgerApiStoreIntegrityChecker(
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
           ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),
+          disableMergeAndHashJoins = LedgerApiServerConfig().indexService.disableMergeAndHashJoins,
           timeouts = environmentTimeouts,
           loggerFactory = loggerFactory,
           metrics = LedgerApiServerMetrics.ForTesting,

@@ -788,8 +788,8 @@ private[apiserver] final class ApiPartyManagementService private (
         .fromByteString(
           // TODO(i27619): We may be able to not validate the protocol version here
           // depending on the trust we put in the input
-          // Note that pinning to a protocol version makes it not possible to use transactions
-          // generated with an earlier protocol version (e.g in between synchronizer updates)
+          // The validation admits the topology transactions of the protocol versions that the
+          // synchronizer admits, e.g. those of protocol version 36 on protocol version 37
           ProtocolVersionValidation(protocolVersion),
           TopologyTransactionDeserializationContext(SynchronizerLimits.default),
           signedTransaction.transaction,
@@ -990,6 +990,7 @@ private[apiserver] final class ApiPartyManagementService private (
       otherConfirmingParticipantUids,
       confirmationThreshold,
       observingParticipantUids,
+      requestedProtocolVersionP,
     ) = request
 
     val participantId = syncService.participantId
@@ -1021,7 +1022,7 @@ private[apiserver] final class ApiPartyManagementService private (
         .fromProtoV30(publicKeyT)
         .leftMap(_.message)
       namespace = Namespace(pubKey.fingerprint)
-      protocolVersion <- UniqueIdentifier
+      synchronizerProtocolVersion <- UniqueIdentifier
         .fromProtoPrimitive_(synchronizerIdP)
         .map(SynchronizerId(_))
         .leftMap(_.message)
@@ -1031,6 +1032,13 @@ private[apiserver] final class ApiPartyManagementService private (
             .map(_.protocolVersion)
             .toRight(s"Unknown or not connected synchronizer $synchronizerId")
         )
+      protocolVersion <- requestedProtocolVersionP
+        .traverse(ProtocolVersion.fromProtoPrimitive(_))
+        .leftMap(_.message)
+        .flatMap(
+          TopologyTransaction.protocolVersionToCreate(synchronizerProtocolVersion, _)
+        )
+        .leftMap(error => s"protocol_version: $error")
       _ <- Either.cond(partyHint.nonEmpty, (), "Party hint is empty")
       _ <- UniqueIdentifier.verifyValidString(partyHint).leftMap(x => "party_hint: " + x)
       uid <- UniqueIdentifier.create(partyHint, namespace)

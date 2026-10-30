@@ -16,7 +16,7 @@ import com.daml.jwt.{
 import com.google.common.cache.{Cache, CacheBuilder}
 
 import java.net.{URI, URL}
-import java.util.concurrent.TimeUnit
+import java.time.Duration
 import scala.concurrent.duration.FiniteDuration
 
 /** A JWK verifier, where the public keys are automatically fetched from the given JWKS URL.
@@ -62,7 +62,7 @@ class JwksVerifier(
   private[this] val cache: Cache[String, JwtVerifier] = CacheBuilder
     .newBuilder()
     .maximumSize(cacheMaxSize)
-    .expireAfterWrite(cacheExpiration.toSeconds, TimeUnit.SECONDS)
+    .expireAfterWrite(Duration.ofSeconds(cacheExpiration.toSeconds))
     .build()
 
   private[this] def getVerifier(keyId: String): Either[Error, JwtVerifier] =

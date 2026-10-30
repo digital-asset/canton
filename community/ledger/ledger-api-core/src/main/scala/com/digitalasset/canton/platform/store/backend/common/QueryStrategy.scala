@@ -17,6 +17,7 @@ import com.digitalasset.canton.util.ResourceUtil
 import com.typesafe.scalalogging.Logger
 
 import java.sql.{Connection, ResultSet}
+import scala.annotation.unused
 
 object QueryStrategy {
 
@@ -221,6 +222,11 @@ trait QueryStrategy {
   def analyzeTable(tableName: String): CompositeSql
 
   def forceSynchronousCommitForCurrentTransactionForPostgreSQL(connection: Connection): Unit = ()
+
+  def withMergeAndHashJoinsDisabledForPostgres[T](f: => T)(implicit
+      @unused connection: Connection
+  ): T =
+    f
 
   def cleanTable(tableName: String)(implicit connection: Connection): Unit
 

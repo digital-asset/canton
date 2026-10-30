@@ -84,7 +84,11 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         NoOpMetricsFactory,
       )
     val dbType = DbType.jdbcType(jdbcUrl)
-    val storageBackendFactory = StorageBackendFactory.of(dbType, loggerFactory)
+    val storageBackendFactory = StorageBackendFactory.of(
+      dbType = dbType,
+      disableMergeAndHashJoins = true,
+      loggerFactory = loggerFactory,
+    )
     val dbConfig = DbConfig(
       jdbcUrl,
       connectionPool = ConnectionPoolConfig(
@@ -106,6 +110,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         serverRole = ServerRole.Testing(getClass),
         metrics = metrics,
         dbConfig = dbConfig,
+        disableMergeAndHashJoins = true,
         loggerFactory = loggerFactory,
       )
       contractLoader <- ContractLoader.create(

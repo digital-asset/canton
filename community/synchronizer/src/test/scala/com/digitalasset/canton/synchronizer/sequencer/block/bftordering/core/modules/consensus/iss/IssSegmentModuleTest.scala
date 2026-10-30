@@ -2807,9 +2807,11 @@ class IssSegmentModuleTest
     }
     val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
     val segmentState = overrideSegmentState.getOrElse {
-      val segment = epoch.segments.find(_.originalLeader == leader).getOrElse(fail(""))
+      val segmentIndex = epoch.segments.indexWhere(_.originalLeader == leader)
+      val segment = epoch.segments.lift(segmentIndex).getOrElse(fail(""))
       new SegmentState(
         segment,
+        segmentIndex,
         epoch,
         clock,
         epochInProgress.completedBlocks,

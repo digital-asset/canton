@@ -165,6 +165,7 @@ final class GeneratorsMessages(
           acsCommitmentSummary,
           signature,
           AcsCommitmentLimits.default.maxCommitmentSummarySizeBytes,
+          protocolVersion,
         )
         .value
     )
@@ -174,7 +175,7 @@ final class GeneratorsMessages(
     for {
       acsCommitment <- Arbitrary.arbitrary[LegacyAcsCommitment]
       signatures <- nonEmptyListGen(implicitly[Arbitrary[Signature]])
-    } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)
+    } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures, protocolVersion)
   )
 
   implicit val acsCommitmentProtocolMessageArb: Arbitrary[AcsCommitmentProtocolMessage] = Arbitrary(
@@ -186,6 +187,7 @@ final class GeneratorsMessages(
         acsCommitment,
         signature,
         AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+        protocolVersion,
       )
       .value
   )
@@ -203,6 +205,7 @@ final class GeneratorsMessages(
       requestId,
       rootHash,
       verdict,
+      protocolVersion,
     )
   )
 
@@ -259,7 +262,7 @@ final class GeneratorsMessages(
   implicit val typedSignedProtocolMessageContent
       : Arbitrary[TypedSignedProtocolMessageContent[SignedProtocolMessageContent]] = Arbitrary(for {
     content <- Arbitrary.arbitrary[SignedProtocolMessageContent]
-  } yield TypedSignedProtocolMessageContent(content))
+  } yield TypedSignedProtocolMessageContent(content, protocolVersion))
 
   implicit val signedProtocolMessageArb
       : Arbitrary[SignedProtocolMessage[SignedProtocolMessageContent]] = Arbitrary(
@@ -268,7 +271,7 @@ final class GeneratorsMessages(
         .arbitrary[TypedSignedProtocolMessageContent[SignedProtocolMessageContent]]
 
       signatures <- nonEmptyListGen(implicitly[Arbitrary[Signature]])
-    } yield SignedProtocolMessage(typedMessage, signatures)
+    } yield SignedProtocolMessage(typedMessage, signatures, protocolVersion)
   )
 
   implicit val serializedRootHashMessagePayloadArb: Arbitrary[SerializedRootHashMessagePayload] =
@@ -291,7 +294,7 @@ final class GeneratorsMessages(
     for {
       fullInformeeTree <- Arbitrary.arbitrary[FullInformeeTree]
       submittingParticipantSignature <- Arbitrary.arbitrary[Signature]
-    } yield InformeeMessage(fullInformeeTree, submittingParticipantSignature)(protocolVersion)
+    } yield InformeeMessage(fullInformeeTree, submittingParticipantSignature, protocolVersion)
   )
 
   implicit val asymmetricEncrypted: Arbitrary[AsymmetricEncrypted[SecureRandomness]] = Arbitrary(
@@ -355,6 +358,7 @@ final class GeneratorsMessages(
         viewType,
         submissionTopologyTime,
         payload,
+        protocolVersion,
       )
     )
 
@@ -362,7 +366,7 @@ final class GeneratorsMessages(
     for {
       psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       transactions <- boundedListGen[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
-    } yield TopologyTransactionsBroadcast(psid, transactions)
+    } yield TopologyTransactionsBroadcast(psid, transactions, protocolVersion)
   )
 
   implicit val lsuSequencingTestMessageContentArb: Arbitrary[LsuSequencingTestMessageContent] =
@@ -370,14 +374,14 @@ final class GeneratorsMessages(
       for {
         psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
         sender <- Arbitrary.arbitrary[Member]
-      } yield LsuSequencingTestMessageContent.create(psid, sender)
+      } yield LsuSequencingTestMessageContent.create(psid, sender, protocolVersion)
     )
 
   implicit val lsuSequencingTestMessageArb: Arbitrary[LsuSequencingTestMessage] = Arbitrary(
     for {
       content <- Arbitrary.arbitrary[LsuSequencingTestMessageContent]
       signature <- Arbitrary.arbitrary[Signature]
-    } yield LsuSequencingTestMessage(content, signature)
+    } yield LsuSequencingTestMessage(content, signature, protocolVersion)
   )
 
   implicit val unsignedProtocolMessageArb: Arbitrary[UnsignedProtocolMessage] =

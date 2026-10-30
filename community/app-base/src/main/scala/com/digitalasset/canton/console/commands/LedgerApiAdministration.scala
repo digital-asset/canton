@@ -134,6 +134,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.user.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
@@ -2165,6 +2166,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |  transaction.
           |- observingParticipantUids: List of other participants that should observe the
           |  transactions of the external party.
+          |- protocolVersion: The protocol version to create the topology transactions for, so
+          |  that clients that only read topology transactions of an older protocol version can
+          |  read them, e.g. 36 on a synchronizer with protocol version 37. Defaults to the
+          |  synchronizer's protocol version.
           """
       )
       def generate_topology(
@@ -2175,6 +2180,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           otherConfirmingParticipantIds: Seq[ParticipantId] = Seq.empty,
           confirmationThreshold: NonNegativeInt = NonNegativeInt.zero,
           observingParticipantIds: Seq[ParticipantId] = Seq.empty,
+          protocolVersion: Option[ProtocolVersion] = None,
       ): GenerateExternalPartyTopology =
         check(FeatureFlag.Preview)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -2186,6 +2192,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               otherConfirmingParticipantIds = otherConfirmingParticipantIds,
               confirmationThreshold = confirmationThreshold,
               observingParticipantIds = observingParticipantIds,
+              protocolVersion = protocolVersion,
             )
           )
         })

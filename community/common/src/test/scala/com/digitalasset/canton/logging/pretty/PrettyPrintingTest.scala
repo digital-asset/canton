@@ -5,6 +5,7 @@ package com.digitalasset.canton.logging.pretty
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ApiLoggingConfig
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ShowUtil.*
 import org.mockito.exceptions.verification.SmartNullPointerException
 import org.scalatest.wordspec.AnyWordSpec
@@ -260,6 +261,22 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
           override def run(): Unit = ???
         })
         .show shouldBe "Object()"
+    }
+  }
+
+  "DefaultPprinter" should {
+    "pretty print types using PrettyPrintingFromCompanion" in {
+      // Used by the console (see ConsoleEnvironmentBinding)
+      val party = DefaultTestIdentities.party1
+      val psid = DefaultTestIdentities.physicalSynchronizerId
+
+      val partyStr = Pretty.DefaultPprinter(party).plainText
+      partyStr shouldBe party.toString
+      partyStr should not include "UniqueIdentifier("
+
+      val psidStr = Pretty.DefaultPprinter(psid).plainText
+      psidStr should not include "UniqueIdentifier("
+      psidStr should not include "NonNegativeNumeric("
     }
   }
 }

@@ -37,15 +37,15 @@ case class ConfirmationResultMessage private (
     verdict: Verdict,
 )(
     override val deserializedFrom: Option[ByteString]
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      ConfirmationResultMessage.type
+    ]
 ) extends ProtocolVersionedMemoizedEvidence
     with HasPhysicalSynchronizerId
     with HasRequestId
     with SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[ConfirmationResultMessage] {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    ConfirmationResultMessage.type
-  ] = ConfirmationResultMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   override def signingTimestamp: Option[CantonTimestamp] = Some(requestId.unwrap)
 
@@ -58,7 +58,7 @@ case class ConfirmationResultMessage private (
   ): ConfirmationResultMessage =
     ConfirmationResultMessage(synchronizerId, viewType, requestId, rootHash, verdict)(
       None
-    )
+    )(representativeProtocolVersion)
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -117,8 +117,11 @@ object ConfirmationResultMessage
       requestId: RequestId,
       rootHash: RootHash,
       verdict: Verdict,
+      protocolVersion: ProtocolVersion,
   ): ConfirmationResultMessage =
-    ConfirmationResultMessage(synchronizerId, viewType, requestId, rootHash, verdict)(None)
+    ConfirmationResultMessage(synchronizerId, viewType, requestId, rootHash, verdict)(None)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -148,13 +151,14 @@ object ConfirmationResultMessage
         "verdict",
         verdictPO,
       )
+      rpv <- ConfirmationResultMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ConfirmationResultMessage(
       synchronizerId,
       viewType,
       requestId,
       rootHash,
       verdict,
-    )(Some(bytes))
+    )(Some(bytes))(rpv)
   }
 
   implicit val confirmationResultMessageCast: SignedMessageContentCast[ConfirmationResultMessage] =

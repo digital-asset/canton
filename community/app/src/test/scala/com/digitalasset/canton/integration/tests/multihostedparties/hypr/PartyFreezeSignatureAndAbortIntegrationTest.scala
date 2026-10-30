@@ -111,7 +111,7 @@ final class PartyFreezeSignatureAndAbortIntegrationTest
     "X1: emit no events for a removal from N, by the party or by the target, and recompute the effective threshold" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("X1")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
         expectHostedBySp(scenario)
 
         scenario.remove(da, by = Signer.Party)
@@ -119,7 +119,7 @@ final class PartyFreezeSignatureAndAbortIntegrationTest
 
         // SP is the only entry left, but the threshold is still 2: unconfirmable
         scenario.remove(
-          mpch,
+          beta,
           by = Signer.Participant,
           forceFlags = ForceFlags(ForceFlag.AllowConfirmingThresholdCanBeMet),
         )
@@ -137,16 +137,16 @@ final class PartyFreezeSignatureAndAbortIntegrationTest
     "X2: unfreeze on a removal from F before the import only if no other entry is Freezing" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("X2")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.one)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.one)
         expectHostedBySp(scenario)
         scenario.freeze(da)
         expectFrozenWithHostSp(scenario)
-        scenario.freeze(mpch)
+        scenario.freeze(beta)
         expectFrozenWithHostSp(scenario)
 
         scenario.remove(da, by = Signer.Party)
         expectFrozenWithHostSp(scenario)
-        scenario.remove(mpch, by = Signer.Participant)
+        scenario.remove(beta, by = Signer.Participant)
         expectHostedBySp(scenario)
         scenario.assertCommitmentsMatchAmongHosts()
     }
@@ -169,7 +169,7 @@ final class PartyFreezeSignatureAndAbortIntegrationTest
     "X4: revoke the party on a participant removed from O or from A, and let the party continue" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       implicit env =>
         val scenario = newScenario("X4")
-        scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.one)
+        scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.one)
         expectHostedBySp(scenario)
 
         clue("Removal from O") {
@@ -192,26 +192,26 @@ final class PartyFreezeSignatureAndAbortIntegrationTest
         }
 
         clue("Removal from A") {
-          scenario.replicate(mpch)(
+          scenario.replicate(beta)(
             afterFreeze = expectFrozenWithHostSp(scenario),
             afterOnboarding = scenario.expectStep(
-              Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
-              events = Set(Event.Onboarding(mpch.id)),
+              Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
+              events = Set(Event.Onboarding(beta.id)),
               Request.ApprovedBy(Set(sp.id)),
             ),
             afterActivation = scenario.expectStep(
-              Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
-              events = Set(Event.Added(mpch.id)),
-              Request.ApprovedBy(Set(sp.id, mpch.id)),
+              Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
+              events = Set(Event.Added(beta.id)),
+              Request.ApprovedBy(Set(sp.id, beta.id)),
             ),
           )
-          scenario.remove(mpch, by = Signer.Party)
+          scenario.remove(beta, by = Signer.Party)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.one, Set(sp.id)),
-            events = Set(Event.Revoked(mpch.id)),
+            events = Set(Event.Revoked(beta.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
-          scenario.purge(mpch)
+          scenario.purge(beta)
         }
 
         scenario.assertCommitmentsMatchAmongHosts()

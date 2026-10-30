@@ -227,6 +227,7 @@ import com.digitalasset.canton.user.{
   IdentityProviderConfig as ApiIdentityProviderConfig,
 }
 import com.digitalasset.canton.util.BinaryFileUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   GrpcServiceInvocationMethod,
   LfPackageId,
@@ -296,6 +297,7 @@ object LedgerApiCommands {
         otherConfirmingParticipantIds: Seq[ParticipantId],
         confirmationThreshold: NonNegativeInt,
         observingParticipantIds: Seq[ParticipantId],
+        protocolVersion: Option[ProtocolVersion],
     ) extends BaseCommand[
           GenerateExternalPartyTopologyRequest,
           GenerateExternalPartyTopologyResponse,
@@ -327,6 +329,7 @@ object LedgerApiCommands {
               otherConfirmingParticipantIds.map(_.uid.toProtoPrimitive),
             confirmationThreshold = confirmationThreshold.value,
             observingParticipantUids = observingParticipantIds.map(_.uid.toProtoPrimitive),
+            protocolVersion = protocolVersion.map(_.toProtoPrimitive),
           )
         )
 

@@ -237,6 +237,7 @@ private[reassignment] class AssignmentProcessingSteps(
           ViewType.AssignmentViewType,
           recentSnapshot.ipsSnapshot.timestamp,
           EmptyRootHashMessagePayload,
+          protocolVersion.unwrap,
         )
       // Each member gets a message sent to itself and to the mediator
       rootHashRecipients =

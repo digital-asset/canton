@@ -227,6 +227,7 @@ class MaliciousParticipantNode(
             ViewType.UnassignmentViewType,
             cryptoSnapshot.ipsSnapshot.timestamp,
             EmptyRootHashMessagePayload,
+            sourceProtocolVersion.unwrap,
           )
         rootHashRecipients =
           Recipients.recipientGroups(
@@ -381,6 +382,7 @@ class MaliciousParticipantNode(
             ViewType.AssignmentViewType,
             cryptoSnapshot.ipsSnapshot.timestamp,
             EmptyRootHashMessagePayload,
+            targetProtocolVersion.unwrap,
           )
         rootHashRecipients =
           Recipients.recipientGroups(
@@ -418,6 +420,7 @@ class MaliciousParticipantNode(
     val broadcast = TopologyTransactionsBroadcast(
       psid,
       List(signedTopologyTransaction),
+      protocolVersion,
     )
 
     // It's safe to use these timestamps for signing the request because batch signatures are either empty

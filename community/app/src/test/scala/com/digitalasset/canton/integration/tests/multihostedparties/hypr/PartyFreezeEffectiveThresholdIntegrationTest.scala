@@ -43,17 +43,17 @@ import com.digitalasset.canton.version.ProtocolVersion
   * numConfirmingPending those of them that are not Active (see
   * `PartyInfo.effectiveConfirmationThreshold`).
   * {{{
-  * 1. [SP, DA → N, MPCH → N], T = 2, eT = 1: two replications running, SP confirms alone
-  * 2. [SP, DA, MPCH → N],     T = 2, eT = 2: DA finished, SP and DA must confirm
-  * 3. [SP, MPCH → N],         T = 2, eT = 1: DA aborted and was removed
+  * 1. [SP, DA → N, Beta → N], T = 2, eT = 1: two replications running, SP confirms alone
+  * 2. [SP, DA, Beta → N],     T = 2, eT = 2: DA finished, SP and DA must confirm
+  * 3. [SP, Beta → N],         T = 2, eT = 1: DA aborted and was removed
   * 4. [SP],                   T = 2, eT = 2: both removed, T not lowered: unconfirmable until
   *                                           the party lowers T
-  * 5. [SP, DA, MPCH],         T = 2, eT = 2: both finished, any two hosts confirm
-  * 6. [SP, DA, MPCH → O],     T = 3, eT = 2: the Onboarding entry does not block
-  * 7. [SP, MPCH → O],         T = 3, eT = 2: DA left while MPCH was pending: unconfirmable
+  * 5. [SP, DA, Beta],         T = 2, eT = 2: both finished, any two hosts confirm
+  * 6. [SP, DA, Beta → O],     T = 3, eT = 2: the Onboarding entry does not block
+  * 7. [SP, Beta → O],         T = 3, eT = 2: DA left while Beta was pending: unconfirmable
   *                                           until the party lowers T
-  * 8. [DA → N, MPCH → N],     T = 2:         no Active host, requests are rejected
-  * 9. From 2 to 3: DA leaves while MPCH is pending, so eT drops from 2 to 1 although the party
+  * 8. [DA → N, Beta → N],     T = 2:         no Active host, requests are rejected
+  * 9. From 2 to 3: DA leaves while Beta is pending, so eT drops from 2 to 1 although the party
   *    did not lower T (accepted: it is the quorum the party gets when it recovers anyway)
   * }}}
   * T4 and T5 cover the liveness of the party while it raises its threshold, and who may submit for
@@ -83,11 +83,11 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
         clue("Examples 1, 2, 9, 3 and 4") {
           val scenario = newScenario("T1-a")
 
-          // 1. [SP, DA → N, MPCH → N], T = 2: SP confirms alone
-          scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+          // 1. [SP, DA → N, Beta → N], T = 2: SP confirms alone
+          scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
           expectHostedBySp(scenario)
 
-          // 2. [SP, DA, MPCH → N], T = 2: both SP and DA must confirm
+          // 2. [SP, DA, Beta → N], T = 2: both SP and DA must confirm
           scenario.move(da, HostingState.Active)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id)),
@@ -96,7 +96,7 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
           )
           scenario.expectQuorum(respondingHosts = Set(sp.id), approved = false)
 
-          // 9 and 3 (T3). [SP, MPCH → N], T = 2: DA left while MPCH is pending, so the quorum
+          // 9 and 3 (T3). [SP, Beta → N], T = 2: DA left while Beta is pending, so the quorum
           // drops from 2 to 1, although only SP can confirm (known issue, see CV5 in
           // CovalidationReplicationIntegrationTest)
           scenario.remove(da, by = Signer.Participant)
@@ -107,7 +107,7 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
           )
 
           // 4 (T2). [SP], T = 2: unconfirmable until the party lowers T
-          scenario.remove(mpch, by = Signer.Party, forceFlags = unconfirmable)
+          scenario.remove(beta, by = Signer.Party, forceFlags = unconfirmable)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.two, Set(sp.id)),
             events = Set.empty,
@@ -126,56 +126,56 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
             events = Set(Event.Added(da.id)),
             Request.ApprovedBy(Set(sp.id, da.id)),
           )
-          scenario.add(mpch, Confirmation, HostingState.Active)
+          scenario.add(beta, Confirmation, HostingState.Active)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Added(mpch.id)),
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Added(beta.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
 
-          // 5. [SP, DA, MPCH], T = 2: any two hosts
+          // 5. [SP, DA, Beta], T = 2: any two hosts
           scenario.setThreshold(PositiveInt.two)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
             events = Set.empty,
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
-          scenario.expectQuorum(respondingHosts = Set(sp.id, mpch.id), approved = true)
+          scenario.expectQuorum(respondingHosts = Set(sp.id, beta.id), approved = true)
           scenario.expectQuorum(respondingHosts = Set(sp.id), approved = false)
 
-          // 6. [SP, DA, MPCH → O], T = 3: the Onboarding entry does not block.
-          // MPCH cannot move back from Active to Onboarding, so it leaves and is re-added as
+          // 6. [SP, DA, Beta → O], T = 3: the Onboarding entry does not block.
+          // Beta cannot move back from Active to Onboarding, so it leaves and is re-added as
           // Onboarding.
-          scenario.remove(mpch, by = Signer.Participant)
+          scenario.remove(beta, by = Signer.Participant)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id)),
-            events = Set(Event.Revoked(mpch.id)),
+            events = Set(Event.Revoked(beta.id)),
             Request.ApprovedBy(Set(sp.id, da.id)),
           )
-          scenario.add(mpch, Confirmation, HostingState.Onboarding)
+          scenario.add(beta, Confirmation, HostingState.Onboarding)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Onboarding(mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Onboarding(beta.id)),
             Request.ApprovedBy(Set(sp.id, da.id)),
           )
           scenario.setThreshold(PositiveInt.three)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
             events = Set.empty,
             Request.ApprovedBy(Set(sp.id, da.id)),
           )
 
-          // 7 (T2). [SP, MPCH → O], T = 3: DA left while MPCH is pending, so the party is
+          // 7 (T2). [SP, Beta → O], T = 3: DA left while Beta is pending, so the party is
           // unconfirmable until it lowers T. Onboarding counts as pending like Nominated.
           scenario.remove(da, by = Signer.Participant, forceFlags = unconfirmable)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, beta.id)),
             events = Set(Event.Revoked(da.id)),
             Request.TimesOut,
           )
           scenario.setThreshold(PositiveInt.two)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
             events = Set.empty,
             Request.ApprovedBy(Set(sp.id)),
           )
@@ -184,10 +184,10 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
 
         clue("Example 8") {
           val scenario = newScenario("T1-c")
-          scenario.nominate(Seq(da -> Confirmation, mpch -> Confirmation), PositiveInt.two)
+          scenario.nominate(Seq(da -> Confirmation, beta -> Confirmation), PositiveInt.two)
           expectHostedBySp(scenario)
 
-          // 8. [DA → N, MPCH → N], T = 2: no host, requests are rejected
+          // 8. [DA → N, Beta → N], T = 2: no host, requests are rejected
           scenario.remove(sp, by = Signer.Party)
           scenario.expectStep(
             Hosting.NotHosted,
@@ -203,7 +203,7 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
         // the quorum checks never drop them.
         def twoOfThree(testCase: String): PartyFreezeScenario = {
           val scenario = newScenario(testCase)
-          Seq(da, mpch).foreach { host =>
+          Seq(da, beta).foreach { host =>
             scenario.add(host, Confirmation, HostingState.Active)
             scenario.expectStep(
               Hosting.Hosted(PositiveInt.one, scenario.entries.keySet),
@@ -213,13 +213,13 @@ final class PartyFreezeEffectiveThresholdIntegrationTest
           }
           scenario.setThreshold(PositiveInt.two)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.two, Set(sp.id, da.id, beta.id)),
             events = Set.empty,
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
           scenario
         }
-        val existingHosts = Set(sp.id, da.id, mpch.id)
+        val existingHosts = Set(sp.id, da.id, beta.id)
         val allHosts = existingHosts + cp.id
 
         clue("The nomination and T = 3 in one transaction") {

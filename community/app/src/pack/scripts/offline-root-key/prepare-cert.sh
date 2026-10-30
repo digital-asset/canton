@@ -27,7 +27,7 @@ ALLOWED_DELEGATION_RESTRICTIONS=($(gunzip -c "$BUF_PROTO_IMAGE" | jq '.file[]
 
 # Function to display usage information
 usage() {
-  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> [--protocol-version <value>] --output <prefix>"
+  echo "Usage: $0 [--root-delegation] [--delegation-restrictions <values>] --root-pub-key <path> --target-pub-key <path> --target-key-spec <ed25519|ecp256|ecp384|secp256k1|mldsa65> [--protocol-version <36|37>] --output <prefix>"
   echo
   echo "Arguments:"
   echo "  --root-delegation              Optional. Set if the delegation is a self signed root delegation."
@@ -58,7 +58,19 @@ usage() {
   echo "                                 The script will attempt to automatically detect the key specification"
   echo "                                 from the public key. This flag can be used to override it or provide it if"
   echo "                                 automatic detection fails."
-  echo "  --protocol-version <value>     Optional. Protocol version of the target synchronizer. Defaults to 37."
+  echo "  --protocol-version <36|37>     Optional. Protocol version for which the certificate is prepared:"
+  echo "                                   - 36 (default): builds the certificate as a v30 topology transaction, as"
+  echo "                                     earlier releases did. Use it while any synchronizer that the node"
+  echo "                                     connects to runs protocol version 36. Synchronizers on protocol"
+  echo "                                     version 37 accept it too, but only to ease the transition."
+  echo "                                   - 37: builds it as a v31 topology transaction, the version added for"
+  echo "                                     protocol version 37, which synchronizers on protocol version 36 reject."
+  echo "                                     Prefer it once all of them run 37, as the certificate is meant to last."
+  echo "                                 Higher values also build a v31 topology transaction. For a later protocol"
+  echo "                                 version, use the scripts released with it, as it may add another topology"
+  echo "                                 version."
+  echo "                                 A node can't convert the certificate to another protocol version, as it"
+  echo "                                 doesn't have the offline root key."
   echo "  --output <prefix>              Required. Output prefix for the generated files."
   echo
   echo "Description:"
@@ -78,7 +90,7 @@ TARGET_KEY_SPEC=""
 ROOT_KEY_SPEC=""
 DELEGATION_RESTRICTIONS=""
 REVOKE_INTERMEDIATE_DELEGATION=""
-PROTOCOL_VERSION="37"
+PROTOCOL_VERSION="36"
 RESTRICTIONS_LIST=()
 
 # Parse arguments
@@ -225,6 +237,12 @@ EOF
       ;;
   esac
 done
+
+# Ensure the protocol version is supported
+if ! get_topology_version_number "$PROTOCOL_VERSION" &>/dev/null; then
+  err "Error: Unsupported protocol version '$PROTOCOL_VERSION'. Use 36 or 37."
+  usage
+fi
 
 # Ensure only one of --root-delegation or --delegation-restrictions is set
 if [[ "$ROOT_DELEGATION" == "true" && ${#RESTRICTIONS_LIST[@]} -gt 0 ]]; then

@@ -228,17 +228,16 @@ object PartyOps {
               .map(Some(_))
               .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
           case ExternalPartyOnboardingDetails.UnsignedPartyToParticipant(unsigned) =>
-            // Otherwise add the mapping as a proposal
+            // Otherwise add the transaction as a proposal. Signing it as is keeps the protocol
+            // version that the client created it for, so that the party's signatures on it apply.
             topologyManager
-              .proposeAndAuthorize(
-                op = TopologyChangeOp.Replace,
-                mapping = unsigned.mapping,
-                serial = Some(unsigned.serial),
+              .authorizeTransaction(
+                unsigned,
                 signingKeys = Seq.empty,
                 namespacesToSignFor = Seq(participantId.namespace),
                 protocolVersion = synchronizerId.protocolVersion,
                 expectFullAuthorization = false,
-                waitToBecomeEffective = None,
+                forceChanges = ForceFlags.none,
               )
               .map(_ => None)
               .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)

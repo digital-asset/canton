@@ -80,6 +80,12 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
 
     // Fails on TT 3.4.12 and 3.5.0  FAILED_PRECONDITION: AUTOMATIC_REASSIGNMENT_FOR_TRANSACTION_FAILED(9,7f2edb88): Automatically reassigning contracts to a common synchronizer failed.[0m
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
+
+    // Empty-valued annotation keys now count towards the max annotations size limit.
+    // Older test tools still expect them not to count (the test was replaced by
+    // CountingEmptyValuedKeysToTheAnnotationsSizeLimitOnUpdate).
+    "UserManagementServiceObjectMetaIT:NotCountingEmptyValuedKeysToTheAnnotationsSizeLimitOnUpdate",
+    "PartyManagementServiceObjectMetaIT:NotCountingEmptyValuedKeysToTheAnnotationsSizeLimitOnUpdate",
   )
 }
 

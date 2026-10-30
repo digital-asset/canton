@@ -498,8 +498,6 @@ object BuildCommon {
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
     case PathList("META-INF", "okhttp.kotlin_module") => MergeStrategy.first
-    // TODO(i31788): Remove this merge strategy once zipkin exporter is removed
-    case PathList("okhttp3", _ @_*) => MergeStrategy.first
     // h2 and opentelemetry-runtime-telemetry both provide native-image reflect-config.json, discard both as we don't use native-image
     case PathList("META-INF", "native-image", "reflect-config.json") => MergeStrategy.discard
     case PathList("org", "publicsuffix", "list", "effective_tld_names.dat") => MergeStrategy.first
@@ -811,7 +809,6 @@ object BuildCommon {
           opentelemetry_exporter_common,
           opentelemetry_exporter_otlp,
           opentelemetry_exporter_prometheus,
-          opentelemetry_exporter_zipkin,
           opentelemetry_sdk,
           scalatest % Test,
         ),
@@ -996,6 +993,12 @@ object BuildCommon {
           circe_parser,
           jul_to_slf4j,
           pureconfig_cats,
+          // Bump transitive deps introduced by ammonite to address vulnerabilities
+          jline,
+          jline_native,
+          jline_reader,
+          jline_terminal,
+          jline_terminal_jna,
         ),
         excludeTranscodeConflictingDependencies,
       )
@@ -1159,7 +1162,7 @@ object BuildCommon {
           grpc_inprocess % Test,
           h2,
           opentelemetry_instrumentation_grpc,
-          opentelemetry_instrumentation_runtime_metrics,
+          opentelemetry_instrumentation_runtime,
           pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
           pekko_http, // used for http health service
           pekko_stream,
@@ -2853,7 +2856,6 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           circe_core % Test,
           circe_generic % Test,
-          circe_generic_extras % Test,
           circe_parser % Test,
           fasterjackson_core,
           logback_classic % Test,

@@ -19,6 +19,10 @@ class BftSequencerMinimalConfigIntegrationTest
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.fromFiles(bftSequencerConfigurationFolder / "minimal.conf")
 
+  // Examples run with default canton.features.enable-repair-commands = false,
+  // which disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "participant" should {
     "successfully connect to synchronizer and ping" in { implicit env =>
       import env.*

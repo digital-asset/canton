@@ -11,7 +11,7 @@ Therefore, make an effort to pass the right trace context!
 
 The trace information is also used for distributed span reporting.
 We use the [OpenTelemetry](https://opentelemetry.io/) library, which supports a variety of reporting backends.
-Check the Canton manual on how to expose the traces to Otlp or Zipkin.
+Check the Canton manual on how to expose the traces to Otlp.
 
 # Passing `TraceContext`
 

@@ -80,7 +80,8 @@ private[apiserver] final class ApiJoseService(
         )
         usableKeys = foundKeys.keys.forgetNE.toList.filter { key =>
           // Currently, we allow Party JWTs to be signed with the same keys that are used to sign protocol messages.
-          // TODO(i32231): Introduce a dedicated key usage for this, but keep Protocol for backwards-compatibility with older keys.
+          // TODO(#32231): Add a dedicated `SigningKeyUsage` for party JWTs and also return keys
+          //  with it. Keep returning `Protocol` keys, as older keys lack the new usage.
           key.usage.contains(SigningKeyUsage.Protocol)
         }
         jwksKeys <- EitherT.fromEither[FutureUnlessShutdown](

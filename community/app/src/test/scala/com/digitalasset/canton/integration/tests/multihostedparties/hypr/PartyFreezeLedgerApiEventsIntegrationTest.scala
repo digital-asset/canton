@@ -73,20 +73,20 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
           expectHostedBySp()
         }
 
-        clue("<> → F of MPCH while DA is Active, then removal from F by MPCH") {
+        clue("<> → F of Beta while DA is Active, then removal from F by Beta") {
           scenario.add(da, Confirmation, HostingState.Active)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id)),
             events = Set(Event.Added(da.id)),
             Request.ApprovedBy(Set(sp.id, da.id)),
           )
-          scenario.add(mpch, Confirmation, HostingState.Freezing)
+          scenario.add(beta, Confirmation, HostingState.Freezing)
           scenario.expectStep(
             Hosting.Frozen(PositiveInt.one, Set(sp.id, da.id)),
             events = Set.empty,
             Request.Rejected,
           )
-          scenario.remove(mpch, by = Signer.Participant)
+          scenario.remove(beta, by = Signer.Participant)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id)),
             events = Set.empty,
@@ -125,12 +125,12 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
         }
 
         clue("N → O") {
-          scenario.nominate(Seq(mpch -> Confirmation), PositiveInt.one)
+          scenario.nominate(Seq(beta -> Confirmation), PositiveInt.one)
           expectOnboarded(da, events = Set.empty)
-          scenario.move(mpch, HostingState.Onboarding)
+          scenario.move(beta, HostingState.Onboarding)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Onboarding(mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Onboarding(beta.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
         }
@@ -138,13 +138,13 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
         clue("<> → O") {
           scenario.remove(da, by = Signer.Participant)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
             events = Set(Event.Revoked(da.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
           scenario.add(da, Confirmation, HostingState.Onboarding)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
             events = Set(Event.Onboarding(da.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
@@ -178,43 +178,43 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
         }
 
         clue("<> → A") {
-          scenario.add(mpch, Confirmation, HostingState.Active)
+          scenario.add(beta, Confirmation, HostingState.Active)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Added(mpch.id)),
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Added(beta.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
         }
 
         clue("N → A") {
-          scenario.remove(mpch, by = Signer.Party)
-          expectHostedBySpAndDa(events = Set(Event.Revoked(mpch.id)))
-          scenario.nominate(Seq(mpch -> Confirmation), PositiveInt.one)
+          scenario.remove(beta, by = Signer.Party)
+          expectHostedBySpAndDa(events = Set(Event.Revoked(beta.id)))
+          scenario.nominate(Seq(beta -> Confirmation), PositiveInt.one)
           expectHostedBySpAndDa()
-          scenario.move(mpch, HostingState.Active)
+          scenario.move(beta, HostingState.Active)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Added(mpch.id)),
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Added(beta.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
         }
 
         clue("F → A") {
-          scenario.remove(mpch, by = Signer.Participant)
-          expectHostedBySpAndDa(events = Set(Event.Revoked(mpch.id)))
-          scenario.nominate(Seq(mpch -> Confirmation), PositiveInt.one)
+          scenario.remove(beta, by = Signer.Participant)
+          expectHostedBySpAndDa(events = Set(Event.Revoked(beta.id)))
+          scenario.nominate(Seq(beta -> Confirmation), PositiveInt.one)
           expectHostedBySpAndDa()
-          scenario.freeze(mpch)
+          scenario.freeze(beta)
           scenario.expectStep(
             Hosting.Frozen(PositiveInt.one, Set(sp.id, da.id)),
             events = Set.empty,
             Request.Rejected,
           )
-          scenario.move(mpch, HostingState.Active)
+          scenario.move(beta, HostingState.Active)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.Added(mpch.id)),
-            Request.ApprovedBy(Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.Added(beta.id)),
+            Request.ApprovedBy(Set(sp.id, da.id, beta.id)),
           )
         }
 
@@ -230,24 +230,24 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
           events = Set(Event.Onboarding(da.id)),
           Request.ApprovedBy(Set(sp.id)),
         )
-        scenario.add(mpch, Confirmation, HostingState.Active)
+        scenario.add(beta, Confirmation, HostingState.Active)
         scenario.expectStep(
-          Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-          events = Set(Event.Added(mpch.id)),
-          Request.ApprovedBy(Set(sp.id, mpch.id)),
+          Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+          events = Set(Event.Added(beta.id)),
+          Request.ApprovedBy(Set(sp.id, beta.id)),
         )
 
         clue("Permission change of an O entry, and of an A entry") {
           scenario.downgrade(da, Observation)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
             events = Set(Event.ChangedTo(da.id, Observation)),
-            Request.ApprovedBy(Set(sp.id, mpch.id)),
+            Request.ApprovedBy(Set(sp.id, beta.id)),
           )
-          scenario.downgrade(mpch, Observation)
+          scenario.downgrade(beta, Observation)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, mpch.id)),
-            events = Set(Event.ChangedTo(mpch.id, Observation)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, da.id, beta.id)),
+            events = Set(Event.ChangedTo(beta.id, Observation)),
             Request.ApprovedBy(Set(sp.id)),
           )
         }
@@ -255,14 +255,14 @@ final class PartyFreezeLedgerApiEventsIntegrationTest
         clue("Removal from O, and from A") {
           scenario.remove(da, by = Signer.Participant)
           scenario.expectStep(
-            Hosting.Hosted(PositiveInt.one, Set(sp.id, mpch.id)),
+            Hosting.Hosted(PositiveInt.one, Set(sp.id, beta.id)),
             events = Set(Event.Revoked(da.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
-          scenario.remove(mpch, by = Signer.Party)
+          scenario.remove(beta, by = Signer.Party)
           scenario.expectStep(
             Hosting.Hosted(PositiveInt.one, Set(sp.id)),
-            events = Set(Event.Revoked(mpch.id)),
+            events = Set(Event.Revoked(beta.id)),
             Request.ApprovedBy(Set(sp.id)),
           )
         }

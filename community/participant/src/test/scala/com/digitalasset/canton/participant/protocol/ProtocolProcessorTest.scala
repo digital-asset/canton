@@ -191,6 +191,7 @@ class ProtocolProcessorTest
                 Some(messageId),
                 Batch.filterOpenEnvelopesFor(batch, participant, Set.empty),
                 Option.empty[TrafficReceipt],
+                testedProtocolVersion,
               )
             )
           )
@@ -476,6 +477,7 @@ class ProtocolProcessorTest
     TestViewType,
     testTopologyTimestamp,
     SerializedRootHashMessagePayload.empty,
+    testedProtocolVersion,
   )
   private lazy val someRecipients = Recipients.cc(participant)
   private lazy val someRequestBatch = RequestAndRootHashMessage(
@@ -499,7 +501,7 @@ class ProtocolProcessorTest
     rootHashO = Some(rootHash),
     sequencingInfo = UnsequencedSubmission(
       requestId.unwrap,
-      TransactionSubmissionTrackingData(
+      TransactionSubmissionTrackingData.create(
         CompletionInfo(
           List.empty,
           changeId.userId,
@@ -1114,6 +1116,7 @@ class ProtocolProcessorTest
           TestViewType,
           submissionTopologyTimestamp, // Crafted submission timestamp (far) in the future
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         )
 
         val maliciousBatch = RequestAndRootHashMessage(

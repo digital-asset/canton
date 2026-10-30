@@ -44,6 +44,7 @@ object ValidatorTestLib {
     nodeSeeds = ImmArray.empty,
     globalKeyMapping = Map.empty,
     contractOrder = List.empty,
+    contractKeyMismatches = Map.empty,
   )
   val pkgName = Ref.PackageName.assertFromString("PkgName")
   val coid = V.ContractId.V1(Hash.hashPrivateKey("#cid1"))

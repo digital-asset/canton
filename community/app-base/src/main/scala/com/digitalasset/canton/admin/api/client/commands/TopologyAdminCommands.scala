@@ -1074,11 +1074,12 @@ object TopologyAdminCommands {
         wrapV31: ProtoV31 => T,
     ): Either[String, T] = {
 
-      // TODO(#32231): Revise when the feature (signingKeyUsageProtoV31) is actually implemented.
-      // We force to v31 ONLY if v30 validation explicitly fails (e.g. a PartyToParticipant hosting state is Nominated or Freezing)
+      // Use v31 if v30 cannot express the mapping (e.g. a PartyToParticipant hosting state is Nominated
+      // or Freezing), or if the server accepts v31: such a server rejects a v30 PartyToParticipant
+      // mapping while the party has hosting states that v30 cannot express.
       val useV31 = mapping
         .canBeSerializedTo(ProtoVersion(30))
-        .isLeft || ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion)
+        .isLeft || ReleaseVersion.Feature.topologyMappingProtoV31.supported(serverVersion)
 
       ProposalMappingSerializer[T](mapping)
         .attemptVersion(
@@ -1398,6 +1399,7 @@ object TopologyAdminCommands {
         store: TopologyStoreId,
         waitToBecomeEffective: Option[NonNegativeDuration],
         serverVersion: Option[ReleaseVersion],
+        protocolVersion: Option[ProtocolVersion],
     ) extends BaseWriteCommand[
           AuthorizeRequest,
           AuthorizeResponse,
@@ -1421,6 +1423,7 @@ object TopologyAdminCommands {
                   change.toProto,
                   serial.map(_.value).getOrElse(0),
                   protoMapping,
+                  protocolVersion.map(_.toProtoPrimitive),
                 )
               ),
               mustFullyAuthorize = mustFullyAuthorize,
@@ -1482,6 +1485,7 @@ object TopologyAdminCommands {
           store,
           waitToBecomeEffective,
           serverVersion,
+          protocolVersion = None,
         )
 
     }

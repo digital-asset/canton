@@ -11,21 +11,18 @@ import scala.collection.immutable.SortedMap
 object SharedDependencies {
 
   // Version constants shared by a family of artifacts that are always bumped together.
-  private val opentelemetry_version = "1.60.1"
-  private val opentelemetry_alpha_version = "1.60.1-alpha"
-  private val otel_instrumentation_version = "2.26.1"
-  private val otel_instrumentation_alpha_version = "2.26.1-alpha"
-  private val grpc_version = "1.81.0"
+  // NOTE: bumping GRPC version requires a matching bump of grpcio-tools in community/app/src/pack/examples/08-interactive-submission/requirements.txt
+  private val grpc_version = "1.85.0"
   private val pekko_actor_version = "1.2.1"
   private val pekko_http_version = "1.1.0"
   private val bouncycastle_version = "1.86"
-  private val jline_version = "3.27.1"
+  private val jline_version = "3.30.17"
   // Mirrors the scalapb the sbt-protoc plugin generates with (project/plugins.sbt), asserted
   // below so the json cannot pin a version the build never resolves.
   private val scalapb_version = "0.11.14"
   private val scalapb_protoc_version = "0.9.5"
   private val logback_version = "1.6.3"
-  private val jackson_version = "2.22.2"
+  private val jackson_version = "2.22.4"
   private val protobuf_version = "4.35.1"
   private val reactivestreams_version = "1.0.4"
   private val scalameter_version = "0.21"
@@ -72,48 +69,6 @@ object SharedDependencies {
   lazy val io_grpc_grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val io_grpc_grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_util = "io.grpc" % "grpc-util" % grpc_version
-  lazy val opentelemetry_instrumentation_grpc =
-    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % otel_instrumentation_alpha_version
-  // https://github.com/open-telemetry/opentelemetry-java-instrumentation/tree/main/instrumentation/hikaricp-3.0/library
-  lazy val opentelemetry_instrumentation_hikari =
-    "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % otel_instrumentation_alpha_version
-  lazy val opentelemetry_instrumentation_api =
-    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api" % otel_instrumentation_version
-  lazy val opentelemetry_instrumentation_api_incubator =
-    "io.opentelemetry.instrumentation" % "opentelemetry-instrumentation-api-incubator" % otel_instrumentation_alpha_version
-  lazy val opentelemetry_instrumentation_runtime_metrics =
-    "io.opentelemetry.instrumentation" % "opentelemetry-runtime-telemetry-java8" % otel_instrumentation_alpha_version
-  lazy val opentelemetry_semconv = "io.opentelemetry.semconv" % "opentelemetry-semconv" % "1.40.0"
-  lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
-  lazy val opentelemetry_api_incubator =
-    "io.opentelemetry" % "opentelemetry-api-incubator" % opentelemetry_alpha_version
-  lazy val opentelemetry_context =
-    "io.opentelemetry" % "opentelemetry-context" % opentelemetry_version
-  lazy val opentelemetry_exporter_common =
-    "io.opentelemetry" % "opentelemetry-exporter-common" % opentelemetry_version
-  lazy val opentelemetry_exporter_otlp =
-    "io.opentelemetry" % "opentelemetry-exporter-otlp" % opentelemetry_version
-  lazy val opentelemetry_exporter_otlp_common =
-    "io.opentelemetry" % "opentelemetry-exporter-otlp-common" % opentelemetry_version
-  lazy val opentelemetry_exporter_prometheus =
-    "io.opentelemetry" % "opentelemetry-exporter-prometheus" % opentelemetry_alpha_version
-  lazy val opentelemetry_exporter_sender_okhttp =
-    "io.opentelemetry" % "opentelemetry-exporter-sender-okhttp" % opentelemetry_version
-  lazy val opentelemetry_exporter_zipkin =
-    "io.opentelemetry" % "opentelemetry-exporter-zipkin" % opentelemetry_version
-  lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
-  lazy val opentelemetry_sdk_common =
-    "io.opentelemetry" % "opentelemetry-sdk-common" % opentelemetry_version
-  lazy val opentelemetry_sdk_extension_autoconfigure_spi =
-    "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure-spi" % opentelemetry_version
-  lazy val opentelemetry_sdk_logs =
-    "io.opentelemetry" % "opentelemetry-sdk-logs" % opentelemetry_version
-  lazy val opentelemetry_sdk_metrics =
-    "io.opentelemetry" % "opentelemetry-sdk-metrics" % opentelemetry_version
-  lazy val opentelemetry_sdk_testing =
-    "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
-  lazy val opentelemetry_sdk_trace =
-    "io.opentelemetry" % "opentelemetry-sdk-trace" % opentelemetry_version
   lazy val spray_json = "io.spray" % "spray-json_2.13" % "1.3.6"
   lazy val logstash = "net.logstash.logback" % "logstash-logback-encoder" % "6.6"
   lazy val commons_compress = "org.apache.commons" % "commons-compress" % "1.24.0"
@@ -146,9 +101,10 @@ object SharedDependencies {
   lazy val bouncycastle_bcprov = "org.bouncycastle" % "bcprov-jdk18on" % bouncycastle_version
   lazy val bcutil_jdk18on = "org.bouncycastle" % "bcutil-jdk18on" % bouncycastle_version
   lazy val jline = "org.jline" % "jline" % jline_version
+  lazy val jline_native = "org.jline" % "jline-native" % jline_version
   lazy val jline_reader = "org.jline" % "jline-reader" % jline_version
   lazy val jline_terminal = "org.jline" % "jline-terminal" % jline_version
-  lazy val jline_terminal_jna = "org.jline" % "jline-terminal-jna" % "3.14.1"
+  lazy val jline_terminal_jna = "org.jline" % "jline-terminal-jna" % jline_version
   lazy val anorm_tokenizer = "org.playframework.anorm" % "anorm-tokenizer_2.13" % anorm_version
   lazy val anorm = "org.playframework.anorm" % "anorm_2.13" % anorm_version
   lazy val reactivestreams = "org.reactivestreams" % "reactive-streams" % reactivestreams_version
@@ -172,7 +128,6 @@ object SharedDependencies {
     "io.github.paoloboni" % "spray-json-derived-codecs_2.13" % "2.3.10"
   lazy val pekko_http_spray_json =
     "org.apache.pekko" % "pekko-http-spray-json_2.13" % pekko_http_version
-  lazy val jline_native = "org.jline" % "jline-native" % jline_version
   lazy val sangria_spray_json = "org.sangria-graphql" % "sangria-spray-json_2.13" % "1.0.2"
 
   // Every public 0-arg method returning a ModuleID is one of the lazy vals above, so there is no

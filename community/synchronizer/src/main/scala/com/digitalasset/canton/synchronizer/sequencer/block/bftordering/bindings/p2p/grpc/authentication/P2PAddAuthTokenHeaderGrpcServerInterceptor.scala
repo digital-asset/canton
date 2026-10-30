@@ -27,7 +27,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   createNettyClientChannelBuilder,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication.P2PAddAuthTokenHeaderGrpcServerInterceptor.P2PAuthenticatorServerCall
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall as GrpcSimpleForwardingServerCall
@@ -78,6 +79,37 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    // The token authentication interceptor must run first. Never call back an endpoint supplied
+    // by a member that has not been authenticated as a sequencer.
+    // Its Contexts.interceptCall attaches the authenticated context around the synchronous call
+    // into this interceptor, so this lookup does not depend on thread-local propagation across threads.
+    IdentityContextHelper.getCurrentStoredMember match {
+      case Some(_: SequencerId) =>
+        interceptSequencerCall(call, requestHeaders, next)
+      case Some(peerMember) =>
+        logger.info(s"Rejecting P2P call from non-sequencer member $peerMember")
+        call.close(
+          Status.PERMISSION_DENIED.withDescription("P2P connections require a sequencer identity"),
+          new Metadata(),
+        )
+        new ServerCall.Listener[ReqT] {}
+      case None =>
+        logger.info("Rejecting P2P call without an authenticated member")
+        call.close(
+          Status.UNAUTHENTICATED.withDescription(
+            "P2P connections require an authenticated sequencer"
+          ),
+          new Metadata(),
+        )
+        new ServerCall.Listener[ReqT] {}
+    }
+  }
+
+  private def interceptSequencerCall[ReqT, RespT](
+      call: ServerCall[ReqT, RespT],
+      requestHeaders: Metadata,
+      next: ServerCallHandler[ReqT, RespT],
+  )(implicit traceContext: TraceContext): ServerCall.Listener[ReqT] =
     Option(
       requestHeaders.get(P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY)
     ) match {
@@ -143,7 +175,6 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
         call.close(Status.INTERNAL, new Metadata())
         new ServerCall.Listener[ReqT] {}
     }
-  }
 
   override def closeAsync(): Seq[AsyncOrSyncCloseable] =
     Seq(

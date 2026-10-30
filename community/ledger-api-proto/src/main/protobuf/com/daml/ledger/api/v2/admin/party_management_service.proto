@@ -420,6 +420,15 @@ message GenerateExternalPartyTopologyRequest {
   //
   // Optional: can be empty
   repeated string observing_participant_uids = 7;
+
+  // The protocol version to create the topology transactions for, so that clients that only read topology
+  // transactions of an older protocol version can read them, e.g. 36 on a synchronizer with protocol version 37.
+  // Must be the synchronizer's protocol version or a lower one whose topology transactions the synchronizer admits:
+  // from protocol version 37 on, a synchronizer admits those of protocol version 36.
+  // Defaults to the synchronizer's protocol version.
+  //
+  // Optional
+  optional uint32 protocol_version = 8;
 }
 
 // Response message with topology transactions and the multi-hash to be signed.
@@ -436,8 +445,8 @@ message GenerateExternalPartyTopologyResponse {
 
   // The serialized topology transactions which need to be signed and submitted as part of the allocate party process
   // Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
-  // as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
-  // supported by the synchronizer.
+  // as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` for the requested
+  // protocol version, or for the synchronizer's protocol version if none is requested.
   //
   // Required: must be non-empty
   repeated bytes topology_transactions = 3;

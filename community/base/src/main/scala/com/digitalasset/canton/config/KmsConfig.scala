@@ -104,6 +104,9 @@ object KmsConfig {
     * @param keyRingId
     *   defines a key-ring to where keys will be added. This can be created as a multi-region
     *   key-ring, which enables multi-region keys
+    * @param destroyScheduledDuration
+    *   The period of time that versions of a key are scheduled for destruction before they are
+    *   actually destroyed. This value must be at least 24 hours and at most 120 days.
     * @param auditLogging
     *   when enabled, all calls to KMS will be logged. Defaults to false.
     * @param retries
@@ -115,6 +118,7 @@ object KmsConfig {
       locationId: String,
       projectId: String,
       keyRingId: String,
+      destroyScheduledDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofDays(30),
       auditLogging: Boolean = false,
       override val retries: RetryConfig = RetryConfig(),
       endpointOverride: Option[String] = None,
@@ -125,11 +129,13 @@ object KmsConfig {
       locationId = "us-east1",
       projectId = "gcp-kms-testing",
       keyRingId = "canton-test-keys-2023",
+      destroyScheduledDuration = PositiveFiniteDuration.ofHours(24),
     )
     val multiRegionTestConfig: Gcp = Gcp(
       locationId = "global",
       projectId = "gcp-kms-testing",
       keyRingId = "canton-test-keys-multi-region",
+      destroyScheduledDuration = PositiveFiniteDuration.ofHours(24),
     )
   }
 

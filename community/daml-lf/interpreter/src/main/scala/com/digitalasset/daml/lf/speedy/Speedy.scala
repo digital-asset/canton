@@ -54,7 +54,7 @@ private[lf] object Speedy {
 
   /** A constructor/deconstructor of value arithmetic errors. */
   val ValueArithmeticError: V.ValueArithmeticError =
-    new value.Value.ValueArithmeticError(StablePackages.stablePackages)
+    new V.ValueArithmeticError(StablePackages.stablePackages)
 
   /** A constructor/deconstructor of svalue arithmetic errors. */
   val SArithmeticError: SValue.SArithmeticError =
@@ -495,6 +495,7 @@ private[lf] object Speedy {
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
         ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
         ptx.csmJournal.contractOrder,
+        keyMismatches,
       )
     }
 
@@ -552,6 +553,16 @@ private[lf] object Speedy {
         .foreach(addLine)
       stringBuilder.result()
     }
+
+    private var keyMismatches =
+      Map.empty[V.ContractId, (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers])]
+
+    private[speedy] def recordContractKeyMismatch(
+        coid: V.ContractId,
+        srcKey: Option[GlobalKeyWithMaintainers],
+        recomputedKey: Option[GlobalKeyWithMaintainers],
+    ): Unit =
+      keyMismatches = keyMismatches.updated(coid, (srcKey, recomputedKey))
 
   }
 
@@ -617,6 +628,10 @@ private[lf] object Speedy {
         seeds: NodeSeeds,
         globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
         contractOrder: List[V.ContractId],
+        contractKeyMismatches: Map[
+          V.ContractId,
+          (Option[GlobalKeyWithMaintainers], Option[GlobalKeyWithMaintainers]),
+        ],
     )
   }
 

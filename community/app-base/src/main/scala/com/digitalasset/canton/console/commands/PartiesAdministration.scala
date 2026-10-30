@@ -464,6 +464,7 @@ class ParticipantPartiesAdministrationGroup(
             forceChanges = ForceFlags.none,
             waitToBecomeEffective = synchronize,
             serverVersion = nodeStatus.releaseVersion,
+            protocolVersion = None,
           )
         )
     } yield result
@@ -817,8 +818,10 @@ class ParticipantPartiesAdministrationGroup(
       |authorized by both the party itself and the target participant via
       |party-to-participant topology transactions.
       |
-      |This command will fail if the party has not yet been activated on the target
-      |participant.
+      |This command is only meant for party replication. It cannot export the ACS of a
+      |party that is already hosted on the target participant (for example, the exporting
+      |participant itself, or a party onboarded before `beginOffsetExclusive`). To export
+      |the ACS of a party without replicating it, use `repair.export_acs` instead.
       |
       |Upon successful completion, the command writes a GZIP-compressed ACS snapshot
       |file. While designed to work in tandem with the `import_party_acs` command, the
@@ -833,7 +836,10 @@ class ParticipantPartiesAdministrationGroup(
       |  will be replicated. Restricts the export to contracts not already known to
       |  the target participant.
       |- beginOffsetExclusive: Exclusive ledger offset used as a starting point to find
-      |  the party's activation on the target participant.
+      |  the party's activation on the target participant. Must strictly predate the
+      |  party-to-participant topology transaction that onboards the party on the target
+      |  participant; otherwise the command waits for an activation that never comes and
+      |  fails after `waitForActivationTimeout`.
       |- exportFilePath: The path denoting the file where the ACS snapshot will be
       |  stored. Defaults to "canton-acs-export.gz" when undefined.
       |- waitForActivationTimeout: The maximum duration the service will wait to find

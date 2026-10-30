@@ -264,8 +264,6 @@ final class TopologyTransactionTest
         }
       }
 
-      // TODO(i32231): once proto version 31 is enabled, move 31 to the accepted versions (with
-      //  v31 payload bytes) and adapt the expected representative protocol versions
       s"reject proto with unknown versions" in {
         val lastKnown = TopologyTransaction.versioningTable.converters.keys.max.v
 
@@ -819,6 +817,33 @@ final class TopologyTransactionTest
       runTest(dmp1, dmp2)
     }
 
+  }
+
+  "the protocol version to create a topology transaction for" should {
+    import TopologyTransaction.protocolVersionToCreate
+
+    "default to the store's protocol version" in {
+      protocolVersionToCreate(ProtocolVersion.v37, None) shouldBe Right(ProtocolVersion.v37)
+    }
+
+    "accept protocol version 36 on a store of protocol version 37" in {
+      protocolVersionToCreate(ProtocolVersion.v37, Some(ProtocolVersion.v36)) shouldBe Right(
+        ProtocolVersion.v36
+      )
+    }
+
+    "reject a higher protocol version than the store's" in {
+      protocolVersionToCreate(ProtocolVersion.v36, Some(ProtocolVersion.v37)).left.value should
+        include("Admissible protocol versions: 36")
+      protocolVersionToCreate(ProtocolVersion.v37, Some(ProtocolVersion.dev)).left.value should
+        include("Admissible protocol versions: 36, 37")
+    }
+
+    "accept a lower admissible protocol version on a store of the dev protocol version" in {
+      protocolVersionToCreate(ProtocolVersion.dev, Some(ProtocolVersion.v36)) shouldBe Right(
+        ProtocolVersion.v36
+      )
+    }
   }
 
   "authorized store topology transactions" when {

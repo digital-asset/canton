@@ -1139,6 +1139,7 @@ final class UnassignmentProcessingStepsTest
         RequestId(CantonTimestamp.Epoch),
         rootHash,
         Verdict.Approve(testedProtocolVersion),
+        testedProtocolVersion,
       )
 
     val synchronizerParameters = DynamicSynchronizerParametersWithValidity(
@@ -1151,6 +1152,7 @@ final class UnassignmentProcessingStepsTest
         reassignmentResult,
         cryptoSnapshot,
         None,
+        testedProtocolVersion,
       )
       .futureValueUS
 
@@ -1164,6 +1166,7 @@ final class UnassignmentProcessingStepsTest
         Some(MessageId.tryCreate("msg-0")),
         batch,
         Option.empty[TrafficReceipt],
+        testedProtocolVersion,
       )
     }
     val signedContent = SignedContent(
@@ -1453,5 +1456,6 @@ final class UnassignmentProcessingStepsTest
       UnassignmentViewType,
       testTopologyTimestamp,
       SerializedRootHashMessagePayload.empty,
+      testedProtocolVersion,
     )
 }

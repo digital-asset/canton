@@ -76,6 +76,7 @@ import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
+  BaseTest,
   HasActorSystem,
   HasExecutionContext,
   ProtocolVersionChecksAsyncWordSpec,
@@ -661,6 +662,7 @@ trait AcsCommitmentSenderImplTest
 
 object AcsCommitmentSenderImplTest extends TestDigestUtils {
   private lazy val psid = physicalSynchronizerId
+  private lazy val protocolVersion = BaseTest.testedProtocolVersion
   private lazy val initialSynchronizerParameters = TestSynchronizerParameters.defaultDynamic
 
   lazy val defaultSync: IndexedSynchronizer = IndexedSynchronizer.tryCreate(psid.logical, 1)
@@ -815,6 +817,7 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
           messageIdO = None,
           batch = request.batch,
           trafficReceipt = None,
+          protocolVersion = protocolVersion,
         )
       )
     )
@@ -851,6 +854,7 @@ object AcsCommitmentSenderImplTest extends TestDigestUtils {
             messageId = MessageId.randomMessageId(),
             sequencerError = SequencerErrors.SenderUnknown("Sender Unknown"),
             trafficReceipt = None,
+            protocolVersion = protocolVersion,
           )
         )
       )

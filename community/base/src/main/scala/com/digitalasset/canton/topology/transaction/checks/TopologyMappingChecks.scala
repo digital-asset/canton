@@ -63,6 +63,47 @@ object TopologyMappingChecks {
       )
   }
 
+  private[checks] final case class HostingStateMove(
+      participantId: ParticipantId,
+      from: HostingParticipant.HostingState,
+      to: HostingParticipant.HostingState,
+  ) {
+    def describe: String = s"$participantId: $from -> $to"
+  }
+
+  /** The participants whose hosting state moves backward in the order Nominated < Freezing <
+    * Onboarding < Active. Skipping states is a forward move; a restart is a removal followed by a
+    * new nomination.
+    */
+  private[checks] def backwardHostingStateMoves(
+      toValidate: PartyToParticipant,
+      inStore: Option[PartyToParticipant],
+  ): Seq[HostingStateMove] = {
+    val previousStates = inStore.toList
+      .flatMap(_.participants)
+      .map(p => p.participantId -> p.state)
+      .toMap
+    toValidate.participants.flatMap(p =>
+      previousStates
+        .get(p.participantId)
+        .filter(_ > p.state)
+        .map(HostingStateMove(p.participantId, _, p.state))
+    )
+  }
+
+  private[checks] def rejectHostingStateMoves(
+      partyId: PartyId,
+      moves: Seq[HostingStateMove],
+  ): Either[TopologyTransactionRejection, Unit] =
+    Either.cond(
+      moves.isEmpty,
+      (),
+      RequiredMappingRejection.InvalidTopologyMapping(
+        s"Invalid hosting state transitions for party $partyId: " +
+          moves.map(_.describe).mkString(", ")
+      ),
+    )
+
 }
 
 trait TopologyMappingChecks {
@@ -590,7 +631,8 @@ class RequiredTopologyMappingChecks(
     *   - threshold is less than or equal to the number of confirming participants
     *   - new participants have a valid DTC
     *   - new participants have an OTK (valid keys are checked as part of OTK checks)
-    *   - from pv=37 on, no participant's hosting state moves backward
+    *   - from pv=37 on, no participant's hosting state moves backward, except Active -> Onboarding
+    *     if the mapping in the store and the proposal are `v30`
     */
   private def checkPartyToParticipant(
       effective: EffectiveTime,
@@ -683,42 +725,48 @@ class RequiredTopologyMappingChecks(
         )
       } yield ()
 
-    /* Rejects moving a participant's hosting state backward in the order Nominated < Freezing <
-     * Onboarding < Active. Skipping states is a forward move; a restart is a removal followed by a
-     * new nomination.
+    def isV30(
+        transaction: SignedTopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant]
+    ): Boolean = transaction.transaction.isEquivalentTo(ProtocolVersion.v36)
+
+    /* Gated on pv=37: older protocol versions accept Active -> Onboarding, and rejecting it there
+     * would make new nodes reject valid transactions when validating the initial topology snapshot.
      *
-     * The authorization rules for hosting-state changes need no protocol-version gate, but this
-     * check does. Older protocol versions cannot serialize Nominated and Freezing, so on them the
-     * rules reduce to what those versions already required: the participant's authorization for
-     * Onboarding -> Active and the party's for Active -> Onboarding. This check, however, rejects
-     * Active -> Onboarding, which older protocol versions accept. Rejecting it there would make
-     * nodes on different releases disagree on the topology state.
+     * From pv=37 on, Active -> Onboarding, the only backward move that `v30` can express, is still
+     * accepted if the mapping in the store and the proposal are `v30`. `v30` clients keep working,
+     * and a node that replays a pv=36 history, e.g. after an LSU, accepts what pv=36 accepted.
+     * These moves are logged so that they can be counted. The submitting node rejects them in
+     * OptionalTopologyMappingChecks.
+     *
+     * Keep this exception after support for pv=36 is dropped: later successors and joining members
+     * replay the same history.
      */
-    def checkNoBackwardHostingStateMoves()
+    def checkNoBackwardHostingStateMovesFromPv37()
         : EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
       if (protocolVersion >= ProtocolVersion.v37) {
-        val previousStates = inStore.toList
-          .flatMap(_.mapping.participants)
-          .map(p => p.participantId -> p.state)
-          .toMap
-        val backwardMoves = mapping.participants.flatMap(p =>
-          previousStates
-            .get(p.participantId)
-            .filter(_ > p.state)
-            .map(previousState => s"${p.participantId}: $previousState -> ${p.state}")
-        )
-        EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
-          backwardMoves.isEmpty,
-          RequiredMappingRejection.InvalidTopologyMapping(
-            s"Invalid hosting state transitions for party ${mapping.partyId}: " +
-              backwardMoves.mkString(", ")
-          ),
-        )
+        val betweenV30Transactions = isV30(toValidate) && inStore.exists(isV30)
+        val (acceptedForBackwardCompatibility, rejected) = TopologyMappingChecks
+          .backwardHostingStateMoves(mapping, inStore.map(_.mapping))
+          .partition(move =>
+            betweenV30Transactions &&
+              move.from == HostingParticipant.HostingState.Active &&
+              move.to == HostingParticipant.HostingState.Onboarding
+          )
+        EitherT
+          .fromEither[FutureUnlessShutdown](
+            TopologyMappingChecks.rejectHostingStateMoves(mapping.partyId, rejected)
+          )
+          .map(_ =>
+            if (acceptedForBackwardCompatibility.nonEmpty)
+              logger.info(
+                s"Accepting v30 transaction ${toValidate.hash} for backward compatibility, although it moves hosting states backward for party ${mapping.partyId}: ${acceptedForBackwardCompatibility.map(_.describe).mkString(", ")}"
+              )
+          )
       } else EitherTUtil.unitUS
 
     for {
       _ <- validateDuplicates
-      _ <- checkNoBackwardHostingStateMoves()
+      _ <- checkNoBackwardHostingStateMovesFromPv37()
       _ <- checkParticipants()
       _ <- checkIsNotSelfSignedWithARevokedRootNSDKey()
     } yield ()

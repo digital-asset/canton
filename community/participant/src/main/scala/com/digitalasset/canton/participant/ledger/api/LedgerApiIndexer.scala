@@ -207,6 +207,8 @@ object LedgerApiIndexer {
         postProcessor,
         sequentialPostProcessor,
         contractStore,
+        disableMergeAndHashJoins =
+          ledgerApiIndexerConfig.serverConfig.indexService.disableMergeAndHashJoins,
       ).initialized()
       normalIndexerCreateFunction =
         (commit: Commit) =>

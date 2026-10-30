@@ -53,11 +53,16 @@ object JdbcIndexer {
       postProcessor: (Vector[PostPublishData], TraceContext) => Future[Unit],
       sequentialPostProcessor: Update => Unit,
       contractStore: LedgerApiContractStore,
+      disableMergeAndHashJoins: Boolean,
   )(implicit materializer: Materializer) {
 
     def initialized()(implicit traceContext: TraceContext): ResourceOwner[Indexer] = {
       val dbType = DbType.jdbcType(participantDataSourceConfig.jdbcUrl)
-      val factory = StorageBackendFactory.of(dbType, loggerFactory)
+      val factory = StorageBackendFactory.of(
+        dbType = dbType,
+        disableMergeAndHashJoins = disableMergeAndHashJoins,
+        loggerFactory = loggerFactory,
+      )
       val dataSourceStorageBackend = factory.createDataSourceStorageBackend
       val ingestionStorageBackend = factory.createIngestionStorageBackend
       val parameterStorageBackend =

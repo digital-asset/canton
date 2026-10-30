@@ -27,8 +27,7 @@ object VerifiedDataSource {
   ): Future[DataSource] = {
     val dataSourceStorageBackend =
       StorageBackendFactory
-        .of(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
-        .createDataSourceStorageBackend
+        .dataSourceStorageBackend(dbType = DbType.jdbcType(jdbcUrl), loggerFactory = loggerFactory)
     apply(
       dataSourceStorageBackend,
       DataSourceStorageBackend.DataSourceConfig(jdbcUrl),

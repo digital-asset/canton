@@ -47,7 +47,8 @@ admin_channel = grpc.insecure_channel(f"localhost:{admin_port}")
 def run_demo(
     channel: Channel,
     synchronizer_id: str,
-    protocol_version: str,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ) -> (EllipticCurvePrivateKey, str):
     # [start generate keys]
     private_key = ec.generate_private_key(curve=ec.SECP256R1())
@@ -68,7 +69,7 @@ def run_demo(
         public_key_bytes,
         crypto_pb2.CryptoKeyFormat.CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO,
         crypto_pb2.SigningKeyScheme.SIGNING_KEY_SCHEME_EC_DSA_P256,
-        protocol_version,
+        protocol_version=protocol_version,
     )
     # [end build mapping]
     # [start build serialized versioned transaction]
@@ -130,8 +131,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--protocol-version",
         type=str,
-        help="Protocol version",
-        default="37",
+        help=PROTOCOL_VERSION_HELP,
+        default=DEFAULT_PROTOCOL_VERSION,
     )
 
     subparsers = parser.add_subparsers(required=True, dest="subcommand")
@@ -140,8 +141,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    check_protocol_version_argument(parser, args.protocol_version)
 
     if args.subcommand == "run-demo":
-        run_demo(admin_channel, args.synchronizer_id, args.protocol_version)
+        run_demo(admin_channel, args.synchronizer_id, protocol_version=args.protocol_version)
     else:
         parser.print_help()

@@ -443,6 +443,14 @@ object Error {
 
       final case class BudgetExceeded(cause: String) extends Error
     }
+
+    final case class ContractKeyMismatchError(
+        coid: ContractId,
+        srcKey: Option[GlobalKeyWithMaintainers],
+        recomputedKey: Option[GlobalKeyWithMaintainers],
+    ) extends Error {
+      assert(srcKey.map(_.globalKey.hash) != recomputedKey.map(_.globalKey.hash))
+    }
   }
 
   final case class MalformedText(err: String) extends Error

@@ -29,7 +29,6 @@ trait P2PEndpointsStore[E <: Env[E]] extends AutoCloseable {
   protected final def addEndpointActionName(endpoint: P2PEndpoint): String =
     s"add BFT ordering P2P endpoint $endpoint"
 
-  // TODO(#34191): disallow changing associations once fixed (requiring removal first)
   def associate(existingEndpoint: P2PEndpoint, nodeId: BftNodeId)(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Boolean]

@@ -45,7 +45,7 @@ import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantProcessor,
   AcsReplicationTargetParticipantProcessor,
 }
-import com.digitalasset.canton.participant.store.AcsReplicationStateManager
+import com.digitalasset.canton.participant.store.{AcsReplicationStateManager, SyncPersistentState}
 import com.digitalasset.canton.participant.sync.{CantonSyncService, ConnectedSynchronizer}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch
 import com.digitalasset.canton.protocol.LfContractId
@@ -60,6 +60,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.Materializer
 
@@ -146,6 +147,22 @@ final class AcsReplicator(
           participantPermission,
           replicationDestination,
         ) = args
+
+        def ensureCanReplicate(
+            syncPersistentState: SyncPersistentState
+        ): EitherT[FutureUnlessShutdown, String, Unit] =
+          for {
+            _ <- ensurePartyHostedBySourceAndTargetParticipant(
+              partyId,
+              sourceParticipantId,
+              participantId,
+              syncPersistentState.topologyStore,
+            )
+            _ <- EitherT.fromEither[FutureUnlessShutdown](
+              ensureCanReplicateAcs(targetParticipantId = participantId, partyId)
+            )
+          } yield ()
+
         for {
           _ <- EitherT.cond[FutureUnlessShutdown](
             syncService.isActive(),
@@ -166,27 +183,20 @@ final class AcsReplicator(
                 .toRight(s"Unknown synchronizer $synchronizerId")
             )
           syncPersistentState = connectedSynchronizer.synchronizerHandle.syncPersistentState
-          _ <- ensurePartyHostedBySourceAndTargetParticipant(
-            partyId,
-            sourceParticipantId,
-            participantId,
-            syncPersistentState.topologyStore,
+          _ <- ensureCanReplicate(syncPersistentState).leftSemiflatTap { err =>
+            addStatus(
+              args,
+              syncPersistentState.psid.protocolVersion,
+              AgreementStatus.NotProposed,
+              Some(err),
+            ).value
+          }
+          newStatus <- addStatus(
+            args,
+            syncPersistentState.psid.protocolVersion,
+            AgreementStatus.NotProposed,
+            None,
           )
-          _ <- EitherT.fromEither[FutureUnlessShutdown](ensureCanReplicateAcs())
-          newStatus = AcsReplicationStatus(
-            AcsReplicationStatus.AcsReplicationParameters(
-              requestId,
-              partyId,
-              synchronizerId,
-              sourceParticipantId,
-              participantId,
-              timestamp,
-              participantPermission,
-              replicationDestination,
-            ),
-            syncPersistentState.staticSynchronizerParameters.protocolVersion,
-          )
-          _ <- acsReplicationStateManager.add(newStatus)
         } yield {
           logger.info(s"New ACS replication $requestId created and is about to start")
           activateProgressMonitoring(requestId)
@@ -737,7 +747,7 @@ final class AcsReplicator(
         replicationParams.requestId,
         replicationStatus => {
           val withoutError = replicationStatus.modifyErrorO(_ => None)
-          withoutError.setAgreementStatus(AcsReplicationStatus.AgreementStatus.Proposed)
+          withoutError.setAgreementStatus(AcsReplicationStatus.AgreementStatus.ProposalSent)
         },
       )
     } yield ()
@@ -1031,20 +1041,26 @@ final class AcsReplicator(
       )
     } yield ()
 
-  private def ensureCanReplicateAcs(): Either[String, Unit] = for {
+  private def ensureCanReplicateAcs(
+      targetParticipantId: ParticipantId,
+      partyId: PartyId,
+  ): Either[String, Unit] = for {
+    // This verifies the following guarantees:
+    // - Source participants can retry after an error
+    // - The target participant can replicate different parties independently
     _ <- acsReplicationStateManager
       .collectFirst {
         case (
               id,
               status @ AcsReplicationStatus(
-                _,
-                _,
+                params,
+                AgreementStatus.Exists(_, _, _) | AgreementStatus.Archived,
                 _,
                 _,
                 _,
                 Some(AcsReplicationStatus.AcsReplicationFailed(errorMsg)),
               ),
-            ) =>
+            ) if params.partyId == partyId && params.targetParticipantId == targetParticipantId =>
           (id, status, errorMsg)
       }
       .fold(Right(()): Either[String, Unit]) { case (id, previousStatus, errorMsg) =>
@@ -1064,24 +1080,41 @@ final class AcsReplicator(
       }
   } yield ()
 
+  override private[admin] def processAcsReplicationProposalArchival(
+      contractId: LfContractId
+  )(implicit traceContext: TraceContext): Unit =
+    processAcsReplicationContractArchival(
+      "proposal",
+      acsReplicationStateManager.findByProposalContractId,
+    )(contractId)
+
   override private[admin] def processAcsReplicationAgreementArchival(
       contractId: LfContractId
   )(implicit traceContext: TraceContext): Unit =
+    processAcsReplicationContractArchival(
+      "agreement",
+      acsReplicationStateManager.findByAgreementContractId,
+    )(contractId)
+
+  private def processAcsReplicationContractArchival(
+      contractType: String,
+      lookupFn: LfContractId => Option[AcsReplicationStatus],
+  )(contractId: LfContractId)(implicit traceContext: TraceContext): Unit =
     executeAsyncWithCustomResultHandling(
       contractId,
-      s"process archival of ACS replication agreement contract $contractId",
+      s"process archival of ACS replication $contractType contract $contractId",
     ) {
-      acsReplicationStateManager
-        .findByAgreementContractId(contractId)
+      lookupFn(contractId)
         .fold(EitherT.pure[FutureUnlessShutdown, String](Option.empty[AcsReplicationRequestId]))(
           replicationStatus =>
             for {
               requestId <- EitherT.fromEither[FutureUnlessShutdown](
                 (replicationStatus.agreementStatus match {
-                  case _: AcsReplicationStatus.AgreementStatus.Exists =>
+                  case _: AcsReplicationStatus.AgreementStatus.Exists |
+                      _: AcsReplicationStatus.AgreementStatus.Proposed =>
                     Some(replicationStatus.params.requestId)
                   case _ => None
-                }).toRight(s"No existing agreement for contract id $contractId")
+                }).toRight(s"No existing $contractType for contract id $contractId")
               )
               _ <- acsReplicationStateManager.update_(
                 requestId,
@@ -1093,18 +1126,168 @@ final class AcsReplicator(
       resET.value.map {
         case Left(err) =>
           logger.warn(
-            s"Failed to process archival of ACS replication agreement contract $contractId: $err"
+            s"Failed to process archival of ACS replication $contractType contract $contractId: $err"
           )
         case Right(None) =>
           logger.info(
-            s"ACS replication for contract agreement $contractId no longer tracked as local participant has issued the archival."
+            s"ACS replication for contract $contractType $contractId no longer tracked as local participant has issued the archival."
           )
         case Right(Some(requestId)) =>
           logger.info(
-            s"ACS replication $requestId agreement contract $contractId has been archived"
+            s"ACS replication $requestId $contractId contract $contractId has been archived"
           )
       }
     }
+
+  override private[admin] def processAcsReplicationProposalRejection(
+      contractId: LfContractId,
+      reason: String,
+  )(implicit traceContext: TraceContext): Unit =
+    executeAsyncWithCustomResultHandling(
+      contractId,
+      s"process rejection of ACS replication proposal contract $contractId",
+    ) {
+      acsReplicationStateManager
+        .findByProposalContractId(contractId)
+        .fold(EitherT.pure[FutureUnlessShutdown, String](Option.empty[AcsReplicationRequestId])) {
+          replicationStatus =>
+            val requestId = replicationStatus.params.requestId
+            for {
+              _ <- acsReplicationStateManager.update(
+                requestId,
+                _.modifyErrorO(_ => Some(AcsReplicationFailed(reason)))
+                  .setCompleted(),
+              )
+            } yield Some(requestId)
+        }
+    } { _ => resET =>
+      resET.value.map {
+        case Left(err) =>
+          logger.warn(
+            s"Failed to process rejection of ACS replication proposal contract $contractId: $err"
+          )
+        case Right(None) =>
+          logger.info(
+            s"Could not find ACS replication status for proposal contract $contractId. " +
+              s"The proposal may not have been observed yet or may have already been archived."
+          )
+        case Right(Some(requestId)) =>
+          logger.info(
+            s"ACS replication $requestId proposal contract $contractId has been rejected"
+          )
+      }
+    }
+
+  private def addStatus(
+      args: AcsReplicationArguments,
+      protocolVersion: ProtocolVersion,
+      agreementStatus: AgreementStatus,
+      error: Option[String],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] =
+    addStatus(
+      AcsReplicationParameters(
+        requestId = args.requestId,
+        partyId = args.partyId,
+        synchronizerId = args.synchronizerId,
+        sourceParticipantId = args.sourceParticipantId,
+        targetParticipantId = participantId,
+        timestamp = args.timestamp,
+        // TODO(#36539) remove permission once using AcsReplicationStatus
+        participantPermission = args.participantPermission,
+        acsReplicationDestination = args.replicationDestination,
+      ),
+      protocolVersion,
+      agreementStatus,
+      error,
+    )
+
+  private def addStatus(
+      proposalParams: AcsReplicationProposalParams,
+      protocolVersion: ProtocolVersion,
+      agreementStatus: AgreementStatus,
+      error: Option[String] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] =
+    addStatus(
+      AcsReplicationParameters(
+        requestId = proposalParams.requestId,
+        partyId = proposalParams.partyId,
+        synchronizerId = proposalParams.synchronizerId,
+        sourceParticipantId = participantId,
+        targetParticipantId = proposalParams.targetParticipantId,
+        timestamp = proposalParams.timestamp,
+        // TODO(#36539) remove permission once using AcsReplicationStatus
+        participantPermission = proposalParams.participantPermission,
+      ),
+      protocolVersion,
+      agreementStatus,
+      error,
+    )
+
+  private def addStatus(
+      replicationParams: AcsReplicationParameters,
+      protocolVersion: ProtocolVersion,
+      agreementStatus: AgreementStatus,
+      error: Option[String],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, AcsReplicationStatus] = {
+    val newStatus = AcsReplicationStatus(
+      params = replicationParams,
+      pv = protocolVersion,
+      agreementStatus = agreementStatus,
+      hasCompleted = error.isDefined,
+      errorO = error.map(AcsReplicationFailed(_)),
+    )
+    acsReplicationStateManager
+      .add(newStatus)
+      .tapLeft { err =>
+        logger.warn(
+          s"Unexpectedly unable to add ACS replication tracking ${replicationParams.requestId}. Dropping $newStatus: $err"
+        )
+      }
+      .map(_ => newStatus)
+  }
+
+  private def markAsProposedAtTargetParticipant(
+      proposalParams: AcsReplicationProposalParams
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    import proposalParams.*
+    acsReplicationStateManager.get(requestId) match {
+      case None =>
+        EitherT.leftT[FutureUnlessShutdown, Unit](
+          s"Received an ACS replication proposal created outside the target participant: $proposalParams"
+        )
+      case Some(_) =>
+        acsReplicationStateManager.update_(
+          requestId,
+          _.setAgreementStatus(AgreementStatus.Proposed(proposalContractId)),
+        )
+    }
+  }
+
+  override private[party] def processAcsReplicationProposalAtTargetParticipant(
+      proposalOrError: Either[String, AcsReplicationProposalParams]
+  )(implicit traceContext: TraceContext): Unit =
+    proposalOrError.fold(
+      logger.warn(_),
+      proposalParams =>
+        executeAsyncWithCustomResultHandling(
+          proposalParams.requestId,
+          s"Marking ACS replication (${proposalParams.requestId}) as proposed on target participant",
+        ) {
+          markAsProposedAtTargetParticipant(proposalParams)
+        } { _ => resET =>
+          resET.value.map {
+            case Left(err) =>
+              logger.warn(err)
+            case Right(_) => ()
+          }
+        },
+    )
 
   /** Validates a channel proposal at the source participant and chooses a sequencer to participate
     * in party replication and respond accordingly by invoking the provided admin workflow callback.
@@ -1113,30 +1296,25 @@ final class AcsReplicator(
       proposalOrError: Either[String, AcsReplicationProposalParams],
       respondToProposal: Either[String, AcsReplicationAgreementParams] => Unit,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[String, Unit]] = {
-    val operation = proposalOrError.fold(
-      err => s"reject ACS replication: $err",
-      params => s"respond to ACS replication proposal ${params.requestId}",
-    )
-    logger.info(s"About to $operation")
-    val responseET = executionQueue.executeEUS(
+
+    def doProcessProposal(
+        proposal: AcsReplicationProposalParams,
+        connectedSynchronizer: ConnectedSynchronizer,
+    ): EitherT[FutureUnlessShutdown, String, AcsReplicationAgreementParams] = {
+      val AcsReplicationProposalParams(
+        _,
+        _,
+        partyId,
+        synchronizerId,
+        targetParticipantId,
+        sequencerIdsProposed,
+        _,
+        _,
+      ) = proposal
       for {
-        proposal <- EitherT.fromEither[FutureUnlessShutdown](proposalOrError)
-        AcsReplicationProposalParams(
-          _,
-          partyId,
-          synchronizerId,
-          targetParticipantId,
-          sequencerIdsProposed,
-          _,
-          _,
-        ) = proposal
-        connectedSynchronizer <-
-          EitherT.fromEither[FutureUnlessShutdown](
-            syncService
-              .readyConnectedSynchronizerById(synchronizerId)
-              .toRight(s"Synchronizer $synchronizerId not connected")
-          )
-        _ <- EitherT.fromEither[FutureUnlessShutdown](ensureCanReplicateAcs())
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          ensureCanReplicateAcs(targetParticipantId, partyId)
+        )
         topologySnapshot =
           connectedSynchronizer.synchronizerHandle.topologyClient.headSnapshot
         sequencerIdsInTopology <- EitherT
@@ -1180,50 +1358,54 @@ final class AcsReplicator(
           targetParticipantId,
           syncPersistentState.topologyStore,
         )
-      } yield (
-        AcsReplicationAgreementParams.fromProposal(proposal, participantId, sequencerId),
-        connectedSynchronizer.staticSynchronizerParameters.protocolVersion,
-      ),
-      operation,
+      } yield AcsReplicationAgreementParams.fromProposal(proposal, participantId, sequencerId)
+    }
+
+    val operation = proposalOrError.fold(
+      err => s"reject ACS replication: $err",
+      params => s"respond to ACS replication proposal ${params.requestId}",
     )
+    logger.info(s"About to $operation")
+    val responseET: EitherT[FutureUnlessShutdown, String, AcsReplicationAgreementParams] =
+      executionQueue.executeEUS(
+        for {
+          proposal <- EitherT.fromEither[FutureUnlessShutdown](proposalOrError)
+          connectedSynchronizer <-
+            EitherT.fromEither[FutureUnlessShutdown](
+              syncService
+                .readyConnectedSynchronizerById(proposal.synchronizerId)
+                .toRight(s"Synchronizer ${proposal.synchronizerId} not connected")
+            )
+          protocolVersion = connectedSynchronizer.psid.protocolVersion
+          agreementParams <- doProcessProposal(proposal, connectedSynchronizer).leftSemiflatTap(
+            err =>
+              addStatus(
+                proposal,
+                protocolVersion,
+                AgreementStatus.Proposed(proposal.proposalContractId),
+                Some(err),
+              ).value
+          )
+          _ <- addStatus(
+            proposal,
+            protocolVersion,
+            AgreementStatus.Proposed(proposal.proposalContractId),
+          )
+        } yield agreementParams,
+        operation,
+      )
 
     for {
       agreementResponseE <- responseET.value
       // Respond to the proposal depending on the outcome of the agreement response.
-      _ = respondToProposal(agreementResponseE.map { case (agreement, _) => agreement })
+      _ = respondToProposal(agreementResponseE)
       _ <- agreementResponseE.fold(
         _ => FutureUnlessShutdown.unit,
-        { case (response, protocolVersion) =>
-          // Upon success indicate that the SP has processed the proposal.
-          val newStatus = AcsReplicationStatus(
-            AcsReplicationStatus.AcsReplicationParameters(
-              response.requestId,
-              response.partyId,
-              response.synchronizerId,
-              response.sourceParticipantId,
-              response.targetParticipantId,
-              response.timestamp,
-              // TODO(#36539) remove permission once using AcsReplicationStatus
-              response.participantPermission,
-            ),
-            protocolVersion,
-            AgreementStatus.Proposed,
+        response => {
+          logger.info(
+            s"ACS replication ${response.requestId} proposal processed at source participant"
           )
-          acsReplicationStateManager
-            .add(newStatus)
-            .bimap(
-              err =>
-                logger.warn(
-                  s"Unexpectedly unable to add already-tracked ACS replication ${response.requestId}. Dropping $newStatus: $err"
-                ),
-              _ => {
-                logger.info(
-                  s"ACS replication ${response.requestId} proposal processed at source participant"
-                )
-                activateProgressMonitoring(response.requestId)
-              },
-            )
-            .merge
+          FutureUnlessShutdown.pure(activateProgressMonitoring(response.requestId))
         },
       )
     } yield agreementResponseE.map(_ => ())

@@ -154,7 +154,7 @@ class ReceivedAcsCommitmentMatcherTest
         )
         .value
       val message = AcsCommitmentProtocolMessage
-        .create(commitment, Signature.noSignature, defaultMaxAcsSize)
+        .create(commitment, Signature.noSignature, defaultMaxAcsSize, testedProtocolVersion)
         .value
       val receivedAcsCommitments = ReceivedAcsCommitments(NonEmpty(Seq, message))
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
@@ -366,7 +366,7 @@ class ReceivedAcsCommitmentMatcherTest
       )
       val messages = (commitmentsP2 ++ commitmentsP3).map(cmt =>
         AcsCommitmentProtocolMessage
-          .create(cmt.value, Signature.noSignature, defaultMaxAcsSize)
+          .create(cmt.value, Signature.noSignature, defaultMaxAcsSize, testedProtocolVersion)
           .value
       )
       val receivedAcsCommitments = ReceivedAcsCommitments(messages)

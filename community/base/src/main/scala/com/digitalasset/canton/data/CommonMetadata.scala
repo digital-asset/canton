@@ -36,12 +36,10 @@ final case class CommonMetadata private (
 )(
     hashOps: HashOps,
     override val deserializedFrom: Option[ByteString],
-) extends MerkleTreeLeaf[CommonMetadata](hashOps)
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[CommonMetadata.type])
+    extends MerkleTreeLeaf[CommonMetadata](hashOps)
     with HasProtocolVersionedWrapper[CommonMetadata]
     with ProtocolVersionedMemoizedEvidence {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[CommonMetadata.type] =
-    CommonMetadata.protocolVersionRepresentativeFor(synchronizerId.protocolVersion)
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -94,7 +92,7 @@ object CommonMetadata
     CommonMetadata(synchronizerId, mediator, salt, uuid)(
       hashOps,
       None,
-    )
+    )(CommonMetadata.protocolVersionRepresentativeFor(synchronizerId.protocolVersion))
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -119,9 +117,10 @@ object CommonMetadata
       uuid <- ProtoValidation.validateThen(uuidP, "uuid", pvv)(
         ProtoConverter.UuidConverter.fromProtoPrimitive
       )
+      rpv <- CommonMetadata.protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield CommonMetadata(synchronizerId, mediatorGroupRecipient, salt, uuid)(
       hashOps,
       Some(bytes),
-    )
+    )(rpv)
   }
 }

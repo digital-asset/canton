@@ -264,6 +264,10 @@ private[lf] object Pretty {
         }
       case Dev(_, error) =>
         error match {
+          case Dev.ContractKeyMismatchError(coid, srcKey, recomputedKey) =>
+            text(
+              s"Contract key mismatch for contract $coid. The source key value is $srcKey but the recomputed key value is $recomputedKey}"
+            )
           case Dev.Limit(error) =>
             error match {
               case Dev.Limit.ContractSignatories(

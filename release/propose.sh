@@ -280,7 +280,7 @@ create_release_pr() {
   create_release_commit "$release_version"
 
   echo "Running a simple ping as a smoke test to test release"
-  run "Running simple ping as a smoke test" sbt pingTest
+  CANTON_AUTOMATIC_PROTOCOL_VERSION=1 run "Running simple ping as a smoke test" sbt pingTest
   echo "Ping was successful"
 
   create_next_snapshot_commit "$next_version"

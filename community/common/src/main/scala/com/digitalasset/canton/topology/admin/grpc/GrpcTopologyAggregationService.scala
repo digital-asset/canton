@@ -245,7 +245,7 @@ class GrpcTopologyAggregationService(
         )
       ): EitherT[FutureUnlessShutdown, RpcError, Option[MemberCode]]
 
-      clientVersion <- EitherT
+      _ <- EitherT
         .fromEither[FutureUnlessShutdown](
           ProtoValidation.validateThen(
             request.baseAggregationRequest.map(_.clientVersion),
@@ -294,12 +294,7 @@ class GrpcTopologyAggregationService(
         .flatTraverse { case (owner, keyPerSynchronizer) =>
           keyPerSynchronizer
             .traverse { case (psid, keys) =>
-              val serializedKeysE =
-                // TODO(#32231) Switch to v31
-                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(clientVersion))
-                  Seq().asRight
-                else
-                  keys.signingKeys.traverse(_.toProtoV30)
+              val serializedKeysE = keys.signingKeys.traverse(_.toProtoV30)
               serializedKeysE.map(serializedKeys =>
                 v30.ListKeyOwnersResponse.Result(
                   keyOwner = owner.toProtoPrimitive,

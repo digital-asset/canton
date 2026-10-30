@@ -367,7 +367,7 @@ class TransactionProcessingSteps(
         error: TransactionError,
         completionInfo: CompletionInfo,
     ): TransactionSubmissionTrackingData =
-      TransactionSubmissionTrackingData(
+      TransactionSubmissionTrackingData.create(
         completionInfo,
         TransactionSubmissionTrackingData.CauseWithTemplate(error),
         psid,
@@ -468,7 +468,7 @@ class TransactionProcessingSteps(
       def mkError(
           rejectionCause: TransactionSubmissionTrackingData.RejectionCause
       ): Success[Outcome[Either[SubmissionTrackingData, PreparedBatch]]] = {
-        val trackingData = TransactionSubmissionTrackingData(
+        val trackingData = TransactionSubmissionTrackingData.create(
           // At this stage we're still preparing the batch to be sent,
           // so no traffic cost has been charged
           submitterInfoWithDedupPeriod.toCompletionInfo(paidTrafficCost = NonNegativeLong.zero),
@@ -501,7 +501,7 @@ class TransactionProcessingSteps(
     }
 
     override def submissionTimeoutTrackingData: SubmissionTrackingData =
-      TransactionSubmissionTrackingData(
+      TransactionSubmissionTrackingData.create(
         // Since we're timing out, we have to assume here the event has not been ordered and therefore
         // no traffic was charged
         submitterInfo.toCompletionInfo(NonNegativeLong.zero).copy(optDeduplicationPeriod = None),
@@ -584,7 +584,7 @@ class TransactionProcessingSteps(
         case otherSendError =>
           CauseWithTemplate(SequencerRequest.Error(otherSendError): TransactionError)
       }
-      TransactionSubmissionTrackingData(
+      TransactionSubmissionTrackingData.create(
         completionInfo,
         rejectionCause,
         psid,

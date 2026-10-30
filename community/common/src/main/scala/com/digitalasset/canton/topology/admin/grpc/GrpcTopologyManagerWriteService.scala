@@ -145,7 +145,8 @@ class GrpcTopologyManagerWriteService(
           signedTopoTx <- authorizeFromHash(txHash)
         } yield signedTopoTx
 
-      case Type.Proposal(Proposal(op, serial, mapping)) =>
+      case Type.Proposal(Proposal(op, serial, mapping, requestedProtocolVersionP)) =>
+        val isV30Mapping = mapping.isV30
         val validatedMappingE = for {
           // we treat serial=0 as "serial was not set". negative values should be rejected by parsePositiveInt
           serial <- Option
@@ -206,6 +207,22 @@ class GrpcTopologyManagerWriteService(
           (op, serial, validatedMapping, signingKeys, forceChanges) = mapping
 
           manager <- targetManagerET(store)
+          _ <- checkV30MappingCanExpressHostingStates(
+            manager,
+            isV30Mapping,
+            validatedMapping,
+            forceChanges,
+          )
+          protocolVersion <- EitherT.fromEither[FutureUnlessShutdown](
+            requestedProtocolVersionP
+              .traverse(ProtocolVersion.fromProtoPrimitive(_))
+              .flatMap(requested =>
+                TopologyTransaction
+                  .protocolVersionToCreate(manager.managerVersion.serialization, requested)
+                  .leftMap(ProtoDeserializationError.InvariantViolation("protocol_version", _))
+              )
+              .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+          )
           signedTopoTx <- manager
             .proposeAndAuthorize(
               op,
@@ -213,7 +230,7 @@ class GrpcTopologyManagerWriteService(
               serial,
               signingKeys,
               namespacesToSignFor = Seq.empty,
-              manager.managerVersion.serialization,
+              protocolVersion,
               expectFullAuthorization = mustFullyAuthorize,
               forceChanges = forceChanges,
               waitToBecomeEffective = waitToBecomeEffectiveO,
@@ -223,6 +240,16 @@ class GrpcTopologyManagerWriteService(
     }
     CantonGrpcUtil.mapErrNewEUS(result.map(tx => v30.AuthorizeResponse(Some(tx.toProtoV30))))
   }
+
+  private def checkV30MappingCanExpressHostingStates(
+      manager: TopologyManager[TopologyStoreId, BaseCrypto],
+      isV30Mapping: Boolean,
+      mapping: TopologyMapping,
+      forceChanges: ForceFlags,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+    if (isV30Mapping)
+      manager.checkV30MappingCanExpressHostingStates(mapping, forceChanges).leftWiden[RpcError]
+    else EitherTUtil.unitUS
 
   override def signTransactions(
       requestP: v30.SignTransactionsRequest
@@ -538,6 +565,12 @@ class GrpcTopologyManagerWriteService(
             .leftMap(ProtoDeserializationFailure.Wrap(_))
           (serial, op, mapping) = serialOpMapping
           manager <- targetManagerET(store)
+          _ <- checkV30MappingCanExpressHostingStates(
+            manager,
+            mappingPO.isV30,
+            mapping,
+            ForceFlags.none,
+          )
           existingTransaction <- manager
             .findExistingTransaction(mapping)
           transaction <- manager

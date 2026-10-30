@@ -862,6 +862,7 @@ class SequencerReaderTest
                   messageId.some,
                   batch,
                   Option.empty[TrafficReceipt],
+                  testedProtocolVersion,
                 )
 
                 assertSequencedEventEquals(
@@ -898,6 +899,7 @@ class SequencerReaderTest
                   None,
                   batch,
                   Option.empty[TrafficReceipt],
+                  testedProtocolVersion,
                 )
 
                 assertSequencedEventEquals(

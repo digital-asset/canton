@@ -29,18 +29,47 @@ import grpc
 
 # [Imports end]
 
+# Protocol version for which the helpers and examples build topology transactions by default. Its
+# proto version 30 is what they built in earlier releases, and synchronizers on protocol versions 36
+# and 37 accept it.
+DEFAULT_PROTOCOL_VERSION = "36"
+
+# Explains which protocol version to pass, for the help and the errors of the examples
+PROTOCOL_VERSION_HELP = (
+    "Protocol version of the synchronizer that the topology transactions are for: 36 (default) or 37. "
+    "36 builds v30 topology transactions, as earlier releases did. Synchronizers on protocol versions 36 "
+    "and 37 accept them; those on 37 do so only to ease the transition. 37 builds v31 topology "
+    "transactions, the version added for protocol version 37, which synchronizers on protocol version 36 "
+    "reject. Switch to 37 once your synchronizer runs protocol version 37. Higher values also build v31 "
+    "topology transactions. For a later protocol version, use the scripts released with it, as it may add "
+    "another topology version. In the Canton console, <participant>.synchronizers.list_connected() shows "
+    "the protocol version at the end of the physical synchronizer ID, e.g. 37 in '...::37-0'."
+)
+
+
 def get_topology_module(protocol_version: str):
     """Returns the correct protobuf module based on the protocol version."""
-    if protocol_version == "dev" or int(protocol_version) >= 37:
+    if get_topology_version_number(protocol_version) == 31:
         return topology_v31_pb2
     return topology_v30_pb2
 
 
 def get_topology_version_number(protocol_version: str) -> int:
     """Returns the protobuf version number for UntypedVersionedMessage."""
-    if protocol_version == "dev" or int(protocol_version) >= 37:
+    pv = str(protocol_version)
+    if pv == "36":
+        return 30
+    if pv == "dev" or (pv.isdigit() and int(pv) >= 37):
         return 31
-    return 30
+    raise ValueError(f"Unsupported protocol version '{protocol_version}'. {PROTOCOL_VERSION_HELP}")
+
+
+def check_protocol_version_argument(parser, protocol_version):
+    """Exits with an explanation if the --protocol-version argument is unsupported."""
+    try:
+        get_topology_version_number(protocol_version)
+    except ValueError as e:
+        parser.error(str(e))
 
 
 def handle_grpc_error(func):
@@ -251,7 +280,8 @@ def build_namespace_mapping(
     public_key_bytes: bytes,
     key_format: crypto_pb2.CryptoKeyFormat,
     key_scheme: crypto_pb2.SigningKeyScheme,
-    protocol_version: str,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ):
     """
     Constructs a topology mapping for namespace delegation.
@@ -261,7 +291,7 @@ def build_namespace_mapping(
         public_key_bytes (bytes): The raw bytes of the public key.
         key_format (crypto_pb2.CryptoKeyFormat): The format of the public key.
         key_scheme (crypto_pb2.SigningKeyScheme): The signing scheme of the key.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         topology_pb2.TopologyMapping: A topology mapping for namespace delegation.
@@ -289,8 +319,9 @@ def build_namespace_mapping(
 
 def build_topology_transaction(
     mapping,
-    protocol_version: str,
     serial: int = 1,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ):
     """
     Builds a topology transaction.
@@ -298,7 +329,7 @@ def build_topology_transaction(
     Args:
         mapping (topology_pb2.TopologyMapping): The topology mapping to include in the transaction.
         serial (int): The serial of the topology transaction. Defaults to 1.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         topology_pb2.TopologyTransaction: The topology transaction object.
@@ -313,15 +344,16 @@ def build_topology_transaction(
 
 
 def build_versioned_transaction(
-        data: bytes,
-        protocol_version: str,
+    data: bytes,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ):
     """
     Builds a versioned transaction wrapper for the given data.
 
     Args:
         data (bytes): Serialized transaction data.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         untyped_versioned_message_pb2.UntypedVersionedMessage: The versioned transaction object.
@@ -335,8 +367,9 @@ def build_versioned_transaction(
 
 def serialize_topology_transaction(
     mapping,
-    protocol_version: str,
     serial: int = 1,
+    *,
+    protocol_version: str = DEFAULT_PROTOCOL_VERSION,
 ):
     """
     Serializes a topology transaction correctly based on the protocol version.
@@ -344,15 +377,17 @@ def serialize_topology_transaction(
     Args:
         mapping: The topology mapping to serialize.
         serial (int): The serial of the topology transaction. Defaults to 1.
-        protocol_version: The protocol version of the synchronizer
+        protocol_version (str): The protocol version of the synchronizer that the transaction is for, "36" or "37". Defaults to "36".
 
     Returns:
         bytes: The serialized topology transaction.
     """
-    topology_transaction = build_topology_transaction(mapping, protocol_version, serial)
+    topology_transaction = build_topology_transaction(
+        mapping, serial=serial, protocol_version=protocol_version
+    )
     versioned_topology_transaction = build_versioned_transaction(
         topology_transaction.SerializeToString(),
-        protocol_version,
+        protocol_version=protocol_version,
     )
     return versioned_topology_transaction.SerializeToString()
 

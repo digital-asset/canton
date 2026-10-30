@@ -370,7 +370,8 @@ class StoreBasedSynchronizerOutbox(
       )
 
   /** Filters out transactions whose conversion to the synchronizer's protocol version is already in
-    * the target store, for example because the operator provided it when onboarding.
+    * the target store, for example because the operator provided it when onboarding, and those that
+    * the synchronizer's protocol version cannot express.
     */
   private def notPresentInSynchronizerVersion(
       transactions: Seq[GenericSignedTopologyTransaction]
@@ -385,7 +386,14 @@ class StoreBasedSynchronizerOutbox(
           TopologyTransaction
             .create(tx.transaction.operation, tx.transaction.serial, tx.mapping, protocolVersion)
             .fold(
-              _ => FutureUnlessShutdown.pure(Option(tx)),
+              // Retrying cannot succeed and would block every later transaction for this synchronizer
+              err => {
+                logger.warn(
+                  s"Not dispatching the transaction with serial ${tx.transaction.serial} of ${tx.mapping} " +
+                    s"to $synchronizerAlias, as its protocol version $protocolVersion cannot express it: $err"
+                )
+                FutureUnlessShutdown.pure(None)
+              },
               converted =>
                 targetStore
                   .findStoredForVersion(CantonTimestamp.MaxValue, converted)

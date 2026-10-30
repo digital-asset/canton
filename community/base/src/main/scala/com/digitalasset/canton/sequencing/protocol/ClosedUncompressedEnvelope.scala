@@ -64,7 +64,7 @@ final case class ClosedUncompressedEnvelope private[protocol] (
           .fromByteString(ProtocolVersionValidation.PV(protocolVersion), bytes)
           .map { typedMessage =>
             OpenEnvelope(
-              SignedProtocolMessage(typedMessage, signaturesNE),
+              SignedProtocolMessage(typedMessage, signaturesNE, protocolVersion),
               recipients,
             )(protocolVersion)
           }
@@ -80,8 +80,9 @@ final case class ClosedUncompressedEnvelope private[protocol] (
                 Right(
                   OpenEnvelope(
                     SignedProtocolMessage(
-                      TypedSignedProtocolMessageContent(acsCommitment),
+                      TypedSignedProtocolMessageContent(acsCommitment, protocolVersion),
                       signatures,
+                      protocolVersion,
                     ),
                     recipients,
                   )(protocolVersion)
@@ -214,7 +215,7 @@ object ClosedUncompressedEnvelope {
           case acsCommitment: LegacyAcsCommitment =>
             ClosedUncompressedEnvelope.create(
               EnvelopeContent(
-                LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures),
+                LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures, protocolVersion),
                 protocolVersion,
               ).toByteString,
               recipients,

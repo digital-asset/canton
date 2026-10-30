@@ -84,6 +84,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           Some(MessageId.tryCreate("deliver")),
           mkBatch(closedEnvelope),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         sign("deliver signature"),
         None,
@@ -107,6 +108,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           Some(MessageId.tryCreate("single-max-positive-deliver")),
           mkBatch(closedEnvelope),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         sign("single deliver signature"),
         None,
@@ -125,6 +127,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           Some(MessageId.tryCreate("single-min-deliver")),
           mkBatch(closedEnvelope),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         sign("single deliver signature"),
         None,
@@ -156,6 +159,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           Some(MessageId.tryCreate("empty-deliver")),
           mkBatch(),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         sign("Deliver signature"),
         None,
@@ -175,6 +179,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
           MessageId.tryCreate("deliver-error"),
           SequencerErrors.SubmissionRequestRefused("paniertes schnitzel"),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         sign("Deliver error signature"),
         None,
@@ -643,6 +648,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
               Option.empty[TrafficReceipt],
+              testedProtocolVersion,
             )
           )
         )
@@ -657,6 +663,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
             Some(MessageId.tryCreate("deliver2")),
             emptyBatch,
             Option.empty[TrafficReceipt],
+            testedProtocolVersion,
           )
         )
       )
@@ -744,6 +751,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
               Option.empty[TrafficReceipt],
+              testedProtocolVersion,
             )
           )
         )
@@ -759,6 +767,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               Some(MessageId.tryCreate("deliver2")),
               emptyBatch,
               Option.empty[TrafficReceipt],
+              testedProtocolVersion,
             )
           )
         )
@@ -829,6 +838,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
               Option.empty[TrafficReceipt],
+              testedProtocolVersion,
             )
           )
         )
@@ -844,6 +854,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
               Some(MessageId.tryCreate("deliver2")),
               emptyBatch,
               Option.empty[TrafficReceipt],
+              testedProtocolVersion,
             )
           )
         )

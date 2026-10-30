@@ -38,6 +38,10 @@ import scala.concurrent.ExecutionContext
 final case class AcsCommitmentSummaryProtocolMessage private (
     acsCommitmentSummary: AcsCommitmentSummary,
     signature: Signature,
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      AcsCommitmentSummaryProtocolMessage.type
+    ]
 ) extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[AcsCommitmentSummaryProtocolMessage] {
 
@@ -45,10 +49,6 @@ final case class AcsCommitmentSummaryProtocolMessage private (
     AcsCommitmentSummaryProtocolMessage
 
   override def psid: PhysicalSynchronizerId = acsCommitmentSummary.psid
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    AcsCommitmentSummaryProtocolMessage.type
-  ] = AcsCommitmentSummaryProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   override protected[messages] def toProtoSomeEnvelopeContentV32
       : v32.EnvelopeContent.SomeEnvelopeContent =
@@ -84,8 +84,9 @@ object AcsCommitmentSummaryProtocolMessage
       acsCommitmentSummary: AcsCommitmentSummary,
       signature: Signature,
       sizeLimit: PositiveInt,
+      protocolVersion: ProtocolVersion,
   ): Either[String, AcsCommitmentSummaryProtocolMessage] = {
-    val pvv = ProtocolVersionValidation.PV(acsCommitmentSummary.psid.protocolVersion)
+    val pvv = ProtocolVersionValidation.PV(protocolVersion)
 
     ProtoValidation
       .validateLength(
@@ -95,7 +96,11 @@ object AcsCommitmentSummaryProtocolMessage
         ValidationParam(ProtocolVersion.newBoundsOnPV37 -> sizeLimit),
       )
       .leftMap(_.message)
-      .map(_ => new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature))
+      .map(_ =>
+        new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)(
+          AcsCommitmentSummaryProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)
+        )
+      )
   }
 
   private[messages] def fromProtoV32(
@@ -120,7 +125,8 @@ object AcsCommitmentSummaryProtocolMessage
         "signature",
         signatureP,
       )
-    } yield new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
+      rpv <- AcsCommitmentSummaryProtocolMessage.protocolVersionRepresentativeFor(ProtoVersion(32))
+    } yield new AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)(rpv)
   }
 
   // TODO(#34736) Re-use more code for signing and verifying instead of copy-pasting
@@ -141,7 +147,7 @@ object AcsCommitmentSummaryProtocolMessage
       snapshot <- EitherT.liftF(cryptoApi.awaitSnapshot(acsCommitmentSummary.commitmentTick))
       signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None).leftMap(_.toString)
       protocolMessage <- EitherT.fromEither(
-        create(acsCommitmentSummary, signature, sizeLimit)
+        create(acsCommitmentSummary, signature, sizeLimit, cryptoApi.psid.protocolVersion)
       )
     } yield protocolMessage
   }

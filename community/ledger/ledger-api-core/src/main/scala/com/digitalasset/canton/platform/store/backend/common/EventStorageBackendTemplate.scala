@@ -748,70 +748,67 @@ abstract class EventStorageBackendTemplate(
         )
       """.execute().discard
       logger.info("Add contract pruning candidates from lapi_events_various_witnessed")
-      SQL"""
-      INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
-      SELECT DISTINCT lapi_events_various_witnessed.internal_contract_id
-      FROM lapi_events_various_witnessed
-      WHERE
-        event_sequential_id <= $pruningToInclusiveEventSeqId
-        AND event_sequential_id > $pruningFromExclusiveEventSeqId
-        AND lapi_events_various_witnessed.internal_contract_id IS NOT NULL
-        -- only insert new contract IDs
-        AND NOT EXISTS (
-          SELECT 1
-          FROM lapi_pruning_contract_candidate c2
-          WHERE c2.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
-        )
-        -- only if no other activation event defines it above pruning
-        -- this is an approximation only, not prevents to populate candidates related to activations earlier
-        -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
-        AND NOT EXISTS (
-          SELECT 1
-          FROM lapi_events_activate_contract activates
-          WHERE activates.event_sequential_id > $pruningToInclusiveEventSeqId
-          AND activates.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
-        )
-        -- only if no other witnessed event defines it above pruning
-        AND NOT EXISTS (
-          SELECT 1
-          FROM lapi_events_various_witnessed witnessed
-          WHERE witnessed.event_sequential_id > $pruningToInclusiveEventSeqId
-          AND witnessed.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
-        )
-      """.execute().discard
-      logger.info("Analyze lapi_pruning_contract_candidate table")
-      SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
-
-      // prune activate tables
-      def pruneActivate(tableName: String): Unit =
-        pruneWithLogging(s"Pruning $tableName table") {
-          SQL"""
-          DELETE from #$tableName
-          WHERE EXISTS (
+      queryStrategy.withMergeAndHashJoinsDisabledForPostgres {
+        SQL"""
+        INSERT INTO lapi_pruning_contract_candidate(internal_contract_id)
+        SELECT DISTINCT lapi_events_various_witnessed.internal_contract_id
+        FROM lapi_events_various_witnessed
+        WHERE
+          event_sequential_id <= $pruningToInclusiveEventSeqId
+          AND event_sequential_id > $pruningFromExclusiveEventSeqId
+          AND lapi_events_various_witnessed.internal_contract_id IS NOT NULL
+          -- only insert new contract IDs
+          AND NOT EXISTS (
             SELECT 1
-            FROM lapi_pruning_candidate_deactivated
-            WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.activate_event_sequential_id
-          )"""
-        }
-      pruneActivate("lapi_filter_activate_stakeholder")
-      pruneActivate("lapi_filter_activate_witness")
-      pruneActivate("lapi_filter_achs_stakeholder")
-      pruneActivate("lapi_events_activate_contract")
-
-      // prune deactivate tables
-      def pruneDeactivate(tableName: String): Unit =
-        pruneWithLogging(s"Pruning $tableName table") {
-          SQL"""
-          DELETE from #$tableName
-          WHERE EXISTS (
+            FROM lapi_pruning_contract_candidate c2
+            WHERE c2.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+          )
+          -- only if no other activation event defines it above pruning
+          -- this is an approximation only, not prevents to populate candidates related to activations earlier
+          -- no need to check deactivations as deactivation defined contract IDs are a subset of activation defined contract IDs
+          AND NOT EXISTS (
             SELECT 1
-            FROM lapi_pruning_candidate_deactivated
-            WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.deactivate_event_sequential_id
-          )"""
-        }
-      pruneDeactivate("lapi_filter_deactivate_stakeholder")
-      pruneDeactivate("lapi_filter_deactivate_witness")
-      pruneDeactivate("lapi_events_deactivate_contract")
+            FROM lapi_events_activate_contract activates
+            WHERE activates.event_sequential_id > $pruningToInclusiveEventSeqId
+            AND activates.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+          )
+          -- only if no other witnessed event defines it above pruning
+          AND NOT EXISTS (
+            SELECT 1
+            FROM lapi_events_various_witnessed witnessed
+            WHERE witnessed.event_sequential_id > $pruningToInclusiveEventSeqId
+            AND witnessed.internal_contract_id = lapi_events_various_witnessed.internal_contract_id
+          )
+        """.execute().discard
+        logger.info("Analyze lapi_pruning_contract_candidate table")
+        SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate")}".execute().discard
+
+        def pruneByDeactivatedCandidates(candidateColumn: String)(tableName: String): Unit =
+          pruneWithLogging(s"Pruning $tableName table") {
+            SQL"""
+            DELETE from #$tableName
+            WHERE EXISTS (
+              SELECT 1
+              FROM lapi_pruning_candidate_deactivated
+              WHERE #$tableName.event_sequential_id = lapi_pruning_candidate_deactivated.#$candidateColumn
+            )"""
+          }
+
+        // prune activate tables
+        Seq(
+          "lapi_filter_activate_stakeholder",
+          "lapi_filter_activate_witness",
+          "lapi_filter_achs_stakeholder",
+          "lapi_events_activate_contract",
+        ).foreach(pruneByDeactivatedCandidates(candidateColumn = "activate_event_sequential_id"))
+
+        // prune deactivate tables
+        Seq(
+          "lapi_filter_deactivate_stakeholder",
+          "lapi_filter_deactivate_witness",
+          "lapi_events_deactivate_contract",
+        ).foreach(pruneByDeactivatedCandidates(candidateColumn = "deactivate_event_sequential_id"))
+      }
 
       // prune witnessed tables
       def pruneWitnessed(tableName: String): Unit =
@@ -929,14 +926,18 @@ abstract class EventStorageBackendTemplate(
               FROM lapi_pruning_contract_candidate_temp"""
             .asVectorOf(long("internal_contract_id"))
 
-        pruneWithLogging(s"Pruning ${prunedContractIds.size} contracts from par_contracts table") {
-          SQL"""
-              DELETE from par_contracts
-              WHERE EXISTS (
-                SELECT 1
-                FROM lapi_pruning_contract_candidate_temp
-                WHERE par_contracts.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
-              )"""
+        queryStrategy.withMergeAndHashJoinsDisabledForPostgres {
+          pruneWithLogging(
+            s"Pruning ${prunedContractIds.size} contracts from par_contracts table"
+          ) {
+            SQL"""
+                DELETE from par_contracts
+                WHERE EXISTS (
+                  SELECT 1
+                  FROM lapi_pruning_contract_candidate_temp
+                  WHERE par_contracts.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
+                )"""
+          }
         }
 
         logger.info(s"Drop temporary table lapi_pruning_contract_candidate_temp")
@@ -976,29 +977,31 @@ abstract class EventStorageBackendTemplate(
     // Please note: these queries are deliberately not constraint by the ledger end watermark, as the actively
     // inserted events must be also considered for pruning.
     logger.info(s"Start removing pruning contract candidates")
-    val removedActivate = SQL"""
-    DELETE FROM lapi_pruning_contract_candidate_temp
-    WHERE
-      EXISTS (
-        SELECT 1
-        FROM lapi_events_activate_contract
-        WHERE
-          lapi_events_activate_contract.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
-      )""".executeUpdate()
-    // Please note: deactivations do not need to be considered separately as those are not defining any further contracts
-    logger.info(
-      s"Removed $removedActivate contract pruning candidates used by activate/deactivate events"
-    )
-    val removedWitnessed = SQL"""
-    DELETE FROM lapi_pruning_contract_candidate_temp
-    WHERE
-      EXISTS (
-        SELECT 1
-        FROM lapi_events_various_witnessed
-        WHERE
-          lapi_events_various_witnessed.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
-      )""".executeUpdate()
-    logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
+    queryStrategy.withMergeAndHashJoinsDisabledForPostgres {
+      val removedActivate = SQL"""
+      DELETE FROM lapi_pruning_contract_candidate_temp
+      WHERE
+        EXISTS (
+          SELECT 1
+          FROM lapi_events_activate_contract
+          WHERE
+            lapi_events_activate_contract.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
+        )""".executeUpdate()
+      // Please note: deactivations do not need to be considered separately as those are not defining any further contracts
+      logger.info(
+        s"Removed $removedActivate contract pruning candidates used by activate/deactivate events"
+      )
+      val removedWitnessed = SQL"""
+      DELETE FROM lapi_pruning_contract_candidate_temp
+      WHERE
+        EXISTS (
+          SELECT 1
+          FROM lapi_events_various_witnessed
+          WHERE
+            lapi_events_various_witnessed.internal_contract_id = lapi_pruning_contract_candidate_temp.internal_contract_id
+        )""".executeUpdate()
+      logger.info(s"Removed $removedWitnessed contract pruning candidates used by witnessed events")
+    }
     logger.info("Analyze lapi_pruning_contract_candidate_temp table")
     SQL"${queryStrategy.analyzeTable("lapi_pruning_contract_candidate_temp")}".execute().discard
   }
@@ -1219,36 +1222,40 @@ abstract class EventStorageBackendTemplate(
   override def addActivationsToAchs(
       params: AchsAddActivationsParams
   )(connection: Connection): Unit =
-    SQL"""
-      INSERT INTO lapi_filter_achs_stakeholder
-      SELECT *
-      FROM lapi_filter_activate_stakeholder filters
-      WHERE
-        filters.event_sequential_id >= ${params.range.startInclusive}
-        AND filters.event_sequential_id <= ${params.range.endInclusive}
-        AND NOT EXISTS (
-          SELECT 1
-          FROM lapi_events_deactivate_contract deactivate_evs
-          WHERE
-            filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
-            AND deactivate_evs.event_sequential_id <= ${params.activeAt}
-        )
-    """.execute()(connection).discard
+    queryStrategy.withMergeAndHashJoinsDisabledForPostgres {
+      SQL"""
+        INSERT INTO lapi_filter_achs_stakeholder
+        SELECT *
+        FROM lapi_filter_activate_stakeholder filters
+        WHERE
+          filters.event_sequential_id >= ${params.range.startInclusive}
+          AND filters.event_sequential_id <= ${params.range.endInclusive}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM lapi_events_deactivate_contract deactivate_evs
+            WHERE
+              filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
+              AND deactivate_evs.event_sequential_id <= ${params.activeAt}
+          )
+      """.execute()(connection).discard
+    }(connection)
 
   override def removeDeactivatedFromAchs(
       range: EventSeqIdRange
   )(connection: Connection): Unit =
-    SQL"""
-      DELETE FROM lapi_filter_achs_stakeholder
-      WHERE EXISTS (
-        SELECT 1
-        FROM lapi_events_deactivate_contract deactivate_evs
-        WHERE
-          lapi_filter_achs_stakeholder.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
-          AND deactivate_evs.event_sequential_id <= ${range.endInclusive}
-          AND deactivate_evs.event_sequential_id >= ${range.startInclusive}
-      )
-    """.execute()(connection).discard
+    queryStrategy.withMergeAndHashJoinsDisabledForPostgres {
+      SQL"""
+        DELETE FROM lapi_filter_achs_stakeholder
+        WHERE EXISTS (
+          SELECT 1
+          FROM lapi_events_deactivate_contract deactivate_evs
+          WHERE
+            lapi_filter_achs_stakeholder.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
+            AND deactivate_evs.event_sequential_id <= ${range.endInclusive}
+            AND deactivate_evs.event_sequential_id >= ${range.startInclusive}
+        )
+      """.execute()(connection).discard
+    }(connection)
 
   override def deletePartiallyIngestedAchsData(fromExclusiveEventSeqId: Long)(
       connection: Connection

@@ -12,11 +12,21 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Confirmation, Submission}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
-import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TopologyTransaction}
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantPermission,
+  PartyToParticipant,
+  SignedTopologyTransaction,
+  SingleTransactionSignature,
+  TopologyChangeOp,
+  TopologyTransaction,
+  TopologyTransactionSignature,
+}
 import com.digitalasset.canton.topology.{Namespace, PartyId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -27,7 +37,9 @@ import java.security.KeyPairGenerator
   * external and local parties.
   *
   * Setup:
-  *   - 4 participants connected to 1 synchronizer.
+  *   - 5 participants connected to 1 synchronizer. Each of participant2 to participant5 is the
+  *     target of one onboarding only, as a participant cannot be the target of concurrent
+  *     onboardings yet (#23097).
   *   - "Emil" (external) and "Alice" (local) hosted on participant1.
   *   - "Diana" (decentralized) hosted across participant1, participant2, and participant3.
   *
@@ -41,6 +53,11 @@ import java.security.KeyPairGenerator
   *        target participant submits the signatures.
   *   1. Verify the mapping becomes effective on the target participant with the `onboarding` flag
   *      set to true.
+  *
+  * Two-step authorization, on protocol version 37 with a transaction of protocol version 36, which
+  * protocol version 37 admits: the external party's signature reaches the target participant
+  * through the topology admin API, and the target participant then appends its own signature with
+  * `AuthorizePartyUpdate` without signatures.
   */
 class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
     extends CommunityIntegrationTest
@@ -60,7 +77,7 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
   private var nsLucina: Namespace = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P4_S1M1
+    EnvironmentDefinition.P5_S1M1
       .addConfigTransforms(ConfigTransforms.enableAlphaOnlinePartyReplicationSupport()*)
       .withSetup { implicit env =>
         import env.*
@@ -186,6 +203,55 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
       targetParticipantNode.onboarding shouldBe true
       targetParticipantNode.permission shouldBe permission
     }
+
+  private def generateEmilUpdate(target: ParticipantReference)(implicit
+      env: TestConsoleEnvironment
+  ): TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant] = {
+    import env.*
+
+    val generated = source.ledger_api.parties.generate_party_topology_update(
+      partyId = emil,
+      synchronizerId = daId,
+      targetParticipantId = target.id,
+      participantPermission = Confirmation,
+    )
+    TopologyTransaction
+      .fromByteString(testedProtocolVersion, testedTopologyTransactionContext)(
+        generated.transaction
+      )
+      .valueOrFail("Failed to parse topology transaction")
+      .select[TopologyChangeOp.Replace, PartyToParticipant]
+      .value
+  }
+
+  // Emil's signature reaches the target through the topology admin API; the target then appends
+  // its own signature with AuthorizePartyUpdate.
+  private def authorizeEmilUpdateInTwoSteps(
+      target: ParticipantReference,
+      transaction: TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant],
+  )(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+
+    val emilSignature: TopologyTransactionSignature = SingleTransactionSignature(
+      transaction.hash,
+      generateSignature(transaction.hash.hash.getCryptographicEvidence),
+    )
+    val signedByEmil = SignedTopologyTransaction
+      .create(
+        transaction,
+        NonEmpty(Set, emilSignature),
+        isProposal = true,
+        testedProtocolVersion,
+      )
+      .valueOrFail("Failed to sign topology transaction")
+    target.topology.transactions.load(Seq(signedByEmil), daId, synchronize = None)
+
+    target.ledger_api.parties.authorize_party_update(
+      transaction = transaction.toByteStringChecked,
+      signatures = Seq.empty,
+      synchronizerId = daId,
+    )
+  }
 
   "PartyManagementAlphaService" should {
 
@@ -315,7 +381,7 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
             synchronizerId = daId,
           ),
           _.errorMessage should include(
-            "Failed to propose and authorize topology transaction: Failure(ReferencedAuthorizations"
+            "Failed to authorize topology transaction: Failure(ReferencedAuthorizations"
           ),
         )
     }
@@ -337,6 +403,25 @@ class PartyManagementAlphaServiceTopologyAuthorizationIntegrationTest
             s"Target participant ${source.id} is already hosting party $alice"
           ),
         )
+    }
+
+    "authorize an external party's update of protocol version 36 in two steps" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+      implicit env =>
+        import env.*
+
+        val generated = generateEmilUpdate(participant5)
+        val transaction = TopologyTransaction.tryCreate(
+          generated.operation,
+          generated.serial,
+          generated.mapping,
+          ProtocolVersion.v36,
+        )
+        transaction.representativeProtocolVersion shouldBe TopologyTransaction
+          .protocolVersionRepresentativeFor(ProtocolVersion.v36)
+
+        authorizeEmilUpdateInTwoSteps(participant5, transaction)
+
+        assertEffectiveTopologyTx(emil, daId, participant5, Confirmation, participant5)
     }
 
   }

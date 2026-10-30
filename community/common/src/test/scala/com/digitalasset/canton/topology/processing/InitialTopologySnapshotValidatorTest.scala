@@ -23,13 +23,17 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
+  HostingParticipant,
   NamespaceDelegation,
+  ParticipantPermission,
+  PartyToParticipant,
   SignedTopologyTransaction,
   TopologyChangeOp,
   TopologyMapping,
+  TopologyTransaction,
 }
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
@@ -414,6 +418,64 @@ abstract class InitialTopologySnapshotValidatorTest
         .rejectionReason
         .value
         .str shouldBe "Not fully authorized"
+    }
+
+    "accept a hosting state move that the protocol version it was sequenced under accepted" in {
+      // A synchronizer on protocol version 36 accepted setting the onboarding flag of an Active
+      // entry, i.e. moving it back to Onboarding. A successor on protocol version 37, which
+      // rejects such a move, validates this history when it is initialized from its predecessor.
+      val timestampForInit = SignedTopologyTransaction.InitialTopologySequencingTime
+      def partyToParticipant(serial: PositiveInt, onboarding: Boolean) =
+        mkTrans(
+          TopologyTransaction.tryCreate(
+            TopologyChangeOp.Replace,
+            serial,
+            PartyToParticipant.tryCreate(
+              party1b,
+              PositiveInt.one,
+              Seq(
+                HostingParticipant(
+                  participant1,
+                  ParticipantPermission.Confirmation,
+                  onboarding = onboarding,
+                )
+              ),
+            ),
+            ProtocolVersion.v36,
+          )
+        )
+      def stored(
+          transaction: GenericSignedTopologyTransaction,
+          sequenced: CantonTimestamp,
+          validUntil: Option[CantonTimestamp],
+      ) = StoredTopologyTransaction(
+        SequencedTime(sequenced),
+        EffectiveTime(sequenced),
+        validUntil.map(EffectiveTime(_)),
+        transaction,
+        rejectionReason = None,
+      )
+      val history = StoredTopologyTransactions(
+        Seq(ns1k1_k1, dmp1_k1, okm1bk5k1E_k1, dtcp1_k1).map(
+          stored(_, timestampForInit, None)
+        ) ++ Seq(
+          stored(partyToParticipant(PositiveInt.one, onboarding = false), ts(1), Some(ts(2))),
+          stored(partyToParticipant(PositiveInt.two, onboarding = true), ts(2), None),
+        )
+      )
+      val (validator, _) = mk(
+        new InMemoryTopologyStore(
+          TopologyStoreId.SynchronizerStore(Factory.physicalSynchronizerId1a),
+          predecessor = None,
+          ProtocolVersion.v37,
+          loggerFactory.appendUnnamedKey("testName", "initial-validation-successor"),
+          timeouts,
+        )
+      )
+
+      validator.validateAndApplyInitialTopologySnapshot(history).value.futureValueUS shouldBe Right(
+        ()
+      )
     }
 
     "detect inconsistencies between the snapshot and the result of processing the transactions" in {

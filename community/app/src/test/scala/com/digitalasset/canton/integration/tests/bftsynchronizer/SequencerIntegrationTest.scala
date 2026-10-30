@@ -183,6 +183,7 @@ trait SequencerIntegrationTest
             .futureValueUS
             .value
         ),
+        testedProtocolVersion,
       )
 
     val maliciousParticipant = MaliciousParticipantNode(

@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplica
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AgreementStatus.{
   Exists,
   NotProposed,
+  ProposalSent,
   Proposed,
 }
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.{
@@ -127,7 +128,7 @@ final class GeneratorsParticipant(
       rejectionCause <- Arbitrary.arbitrary[RejectionCause]
       physicalSynchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       transactionHash <- Gen.option(Arbitrary.arbitrary[Hash])
-    } yield TransactionSubmissionTrackingData(
+    } yield TransactionSubmissionTrackingData.create(
       completionInfo,
       rejectionCause,
       physicalSynchronizerId,
@@ -200,7 +201,8 @@ final class GeneratorsParticipant(
     Arbitrary(
       Gen.oneOf[AgreementStatus](
         Gen.const(NotProposed),
-        Gen.const(Proposed),
+        Gen.const(ProposalSent),
+        Arbitrary.arbitrary[LfContractId].map(Proposed(_)),
         existingSequencerChannelAgreementArb.arbitrary,
       )
     )

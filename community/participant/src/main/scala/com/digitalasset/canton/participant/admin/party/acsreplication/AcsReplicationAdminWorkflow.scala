@@ -11,8 +11,9 @@ import com.daml.ledger.api.v2.event.{Event, CreatedEvent as ScalaCreatedEvent}
 import com.daml.ledger.api.v2.reassignment.Reassignment
 import com.daml.ledger.api.v2.state_service.ActiveContract
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.daml.ledger.api.v2.transaction_filter.EventFormat
-import com.daml.ledger.api.v2.value.Identifier
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.ledger.api.v2.transaction_filter.{EventFormat, TransactionShape}
+import com.daml.ledger.api.v2.value.{Identifier, Value}
 import com.daml.ledger.javaapi.data.{CreatedEvent as JavaCreatedEvent, Identifier as JavaIdentifier}
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -137,6 +138,12 @@ class AcsReplicationAdminWorkflow(
     )
   }
 
+  // ACS Delta events only indicate that a contract was archived.
+  // We need to distinguish between proposal rejection and acceptance,
+  // as both are consuming choices that archive the proposal.
+  // Therefore, this service processes ExerciseEvents instead of Archived events.
+  override private[admin] def transactionShape: TransactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS
+
   override private[admin] def processTransaction(tx: Transaction): Unit = {
     implicit val traceContext: TraceContext =
       LedgerClient.traceContextFromLedgerApi(tx.traceContext)
@@ -146,7 +153,7 @@ class AcsReplicationAdminWorkflow(
         case Event(Event.Event.Created(createdEvent))
             if createdEvent.templateId.exists(isTemplateAcsReplicationRelated) =>
           createEventHandler(
-            processProposalAtSourceParticipant(tx.synchronizerId, _),
+            processProposal(tx.synchronizerId, _),
             { case (agreedAt, agreement) =>
               processAgreementAtSourceOrTargetParticipant(
                 tx.synchronizerId,
@@ -156,18 +163,26 @@ class AcsReplicationAdminWorkflow(
               )
             },
           )(createdEvent)
-        case Event(Event.Event.Archived(archivedEvent))
-            if archivedEvent.templateId.contains(agreementTemplate) =>
-          archivedEvent.templateId match {
-            case Some(`agreementTemplate`) =>
-              processAgreementArchive(archivedEvent.contractId)
-            case _ => ()
-          }
+        case Event(Event.Event.Exercised(exercisedEvent))
+            if exercisedEvent.templateId.contains(
+              proposalTemplate
+            ) && exercisedEvent.choice == M.acsreplication.AcsReplicationProposal.CHOICE_Reject.name =>
+          processProposalRejection(exercisedEvent.contractId, exercisedEvent.choiceArgument)
+        case Event(Event.Event.Exercised(exercisedEvent))
+            if exercisedEvent.templateId.contains(
+              agreementTemplate
+            ) && exercisedEvent.choice == M.acsreplication.AcsReplicationAgreement.CHOICE_Archive.name =>
+          processAgreementArchive(exercisedEvent.contractId)
+        case Event(Event.Event.Exercised(exercisedEvent))
+            if exercisedEvent.templateId.contains(
+              proposalTemplate
+            ) && exercisedEvent.choice == M.acsreplication.AcsReplicationProposal.CHOICE_Archive.name =>
+          processProposalArchive(exercisedEvent.contractId)
         case _ => ()
       }
   }
 
-  private def processProposalAtSourceParticipant(
+  private def processProposal(
       synchronizerIdS: String,
       contract: M.acsreplication.AcsReplicationProposal.Contract,
   )(implicit traceContext: TraceContext): Unit = {
@@ -175,7 +190,26 @@ class AcsReplicationAdminWorkflow(
       s"Received ACS replication proposal ${contract.data.acsReplicationId} for party ${contract.data.partyId} on synchronizer $synchronizerIdS" +
         s" from source participant ${contract.data.sourceParticipant} to target participant ${contract.data.targetParticipant}"
     )
+    lazy val proposalOrError = AcsReplicationProposalParams.fromDaml(
+      contract.id.contractId,
+      contract.data,
+      synchronizerIdS,
+    )
+    if (contract.data.targetParticipant == participantId.adminParty.toProtoPrimitive) {
+      acsReplicationTransactionHandler.get.foreach(
+        _.processAcsReplicationProposalAtTargetParticipant(proposalOrError)
+      )
+    }
+    if (contract.data.sourceParticipant == participantId.adminParty.toProtoPrimitive) {
+      processProposalAtSourceParticipant(synchronizerIdS, contract, proposalOrError)
+    }
+  }
 
+  private def processProposalAtSourceParticipant(
+      synchronizerIdS: String,
+      contract: M.acsreplication.AcsReplicationProposal.Contract,
+      proposalOrError: Either[String, AcsReplicationProposalParams],
+  )(implicit traceContext: TraceContext): Unit = {
     def respondToProposal(
         eitherErrorOrSequencerId: Either[String, AcsReplicationAgreementParams]
     ): Unit = {
@@ -224,16 +258,12 @@ class AcsReplicationAdminWorkflow(
       )
     }
 
-    if (contract.data.sourceParticipant == participantId.adminParty.toProtoPrimitive) {
-      val proposalOrError =
-        AcsReplicationProposalParams.fromDaml(contract.data, synchronizerIdS)
-      acsReplicationTransactionHandler.get.foreach(
-        _.processAcsReplicationProposalAtSourceParticipant(
-          proposalOrError,
-          respondToProposal,
-        ).discard
-      )
-    }
+    acsReplicationTransactionHandler.get.foreach(
+      _.processAcsReplicationProposalAtSourceParticipant(
+        proposalOrError,
+        respondToProposal,
+      ).discard
+    )
   }
 
   // TODO(#35267) Add more parameters: (synchronizerId, contract, sourceParticipant, targetParticipant, partyId...) for client verifications
@@ -249,6 +279,53 @@ class AcsReplicationAdminWorkflow(
           acsReplicationTransactionHandler.get
             .foreach(_.processAcsReplicationAgreementArchival(lfContractId)),
       )
+  }
+
+  // TODO(#35267) Add more parameters: (synchronizerId, contract, sourceParticipant, targetParticipant, partyId...) for client verifications
+  private def processProposalArchive(
+      contractId: String
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.info(s"Received archival of ACS replication proposal $contractId.")
+    LfContractId
+      .fromString(contractId)
+      .fold(
+        err => logger.warn(s"Malformed ACS replication proposal contract id: $err"),
+        lfContractId =>
+          acsReplicationTransactionHandler.get
+            .foreach(_.processAcsReplicationProposalArchival(lfContractId)),
+      )
+  }
+
+  private def processProposalRejection(
+      contractId: String,
+      choiceArgument: Option[Value],
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.info(s"Received rejection of ACS replication proposal $contractId.")
+
+    def parseReason() = {
+      import com.daml.ledger.javaapi.data.Value as JavaValue
+
+      for {
+        v <- choiceArgument.toRight("Missing Reject choice argument")
+        reject <- Either
+          .catchOnly[IllegalArgumentException]( // valueDecoder throws on mismatch
+            M.acsreplication.Reject
+              .valueDecoder()
+              .decode(JavaValue.fromProto(Value.toJavaProto(v)))
+          )
+          .leftMap(e => s"Malformed Reject choice argument: ${e.getMessage}")
+      } yield reject.reason
+    }
+
+    (for {
+      proposalContractId <- LfContractId
+        .fromString(contractId)
+        .leftMap(err => s"Malformed ACS replication proposal contract id: $err")
+      reason <- parseReason()
+    } yield {
+      acsReplicationTransactionHandler.get
+        .foreach(_.processAcsReplicationProposalRejection(proposalContractId, reason))
+    }).fold(logger.warn(_), identity)
   }
 
   private def processAgreementAtSourceOrTargetParticipant(
@@ -323,7 +400,7 @@ class AcsReplicationAdminWorkflow(
       )
       createdEvents.foreach { case (createdEvent, synchronizerIdS) =>
         createEventHandler(
-          processProposalAtSourceParticipant(synchronizerIdS, _),
+          processProposal(synchronizerIdS, _),
           {
             case (agreedAt, onPRAgreement)
                 if onPRAgreement.data.sourceParticipant == participantId.adminParty.toProtoPrimitive =>
@@ -497,6 +574,14 @@ object AcsReplicationAdminWorkflow {
     */
   trait AcsReplicationTransactionHandler {
 
+    /** Processes sequencer channel proposal at target participant.
+      * @param proposalOrError
+      *   proposal if deserialized successfully, error otherwise
+      */
+    private[party] def processAcsReplicationProposalAtTargetParticipant(
+        proposalOrError: Either[String, AcsReplicationProposalParams]
+    )(implicit traceContext: TraceContext): Unit
+
     /** Processes sequencer channel proposal at source participant.
       * @param proposalOrError
       *   proposal if deserialized successfully, error otherwise
@@ -533,6 +618,26 @@ object AcsReplicationAdminWorkflow {
       */
     private[party] def processAcsReplicationAgreementArchival(
         contractId: LfContractId
+    )(implicit traceContext: TraceContext): Unit
+
+    /** Processes archival of sequencer channel agreement proposal on both source and target
+      * participant.
+      * @param contractId
+      *   agreement proposal contract id
+      */
+    private[party] def processAcsReplicationProposalArchival(
+        contractId: LfContractId
+    )(implicit traceContext: TraceContext): Unit
+
+    /** Processes rejection of sequencer channel proposal on both source and target participant.
+      * @param contractId
+      *   proposal contract id
+      * @param reason
+      *   rejection reason
+      */
+    private[party] def processAcsReplicationProposalRejection(
+        contractId: LfContractId,
+        reason: String,
     )(implicit traceContext: TraceContext): Unit
   }
 

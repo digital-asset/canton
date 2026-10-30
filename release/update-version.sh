@@ -37,7 +37,7 @@ update_version_command() {
     info "Version successfully updated"
     echo "HINT: Run 'reload' in any active sbt sessions to pick up the new version"
     echo "Now smoke testing that the release works by running a Ping (this takes ~1-2min)"
-    run "Running SimplestPingIntegrationTest" sbt pingTest
+    CANTON_AUTOMATIC_PROTOCOL_VERSION=1 run "Running SimplestPingIntegrationTest" sbt pingTest
     echo "Ping completed successfully"
   else
     err "Usage: release/update-version.sh new-version"

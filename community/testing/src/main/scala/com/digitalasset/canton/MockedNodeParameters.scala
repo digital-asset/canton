@@ -23,6 +23,8 @@ object MockedNodeParameters {
 
     override def enablePreviewFeatures: Boolean = ???
 
+    override def enableKeyDownload: Boolean = false
+
     override def enableTestingFeatures: Boolean = true
 
     override def enableAdditionalConsistencyChecks: Boolean = _enableAdditionalConsistencyChecks

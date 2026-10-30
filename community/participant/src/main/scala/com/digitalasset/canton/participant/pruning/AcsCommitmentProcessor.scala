@@ -2263,6 +2263,7 @@ class AcsCommitmentProcessor private (
                   commitment,
                   cryptoSnapshot,
                   signingTimestampOverrides,
+                  protocolVersion,
                 )
                 .map(_ -> Recipients.cc(participant))
             } yield signedCommitment

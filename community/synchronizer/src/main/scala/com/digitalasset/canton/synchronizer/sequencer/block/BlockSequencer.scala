@@ -1666,13 +1666,17 @@ class BlockSequencer(
           )
       )
 
-      content = LsuSequencingTestMessageContent.create(psid = cryptoApi.psid, sender = sequencerId)
+      content = LsuSequencingTestMessageContent.create(
+        psid = cryptoApi.psid,
+        sender = sequencerId,
+        protocolVersion = protocolVersion,
+      )
       signedContent <- sign(syncCryptoApi, HashPurpose.LsuSequencingTestMessageContent, content)
 
       batch = Batch.of(
         protocolVersion,
         (
-          LsuSequencingTestMessage(signedContent.content, signedContent.signature),
+          LsuSequencingTestMessage(signedContent.content, signedContent.signature, protocolVersion),
           Recipients.cc(mediatorGroupRecipient),
         ),
       )

@@ -94,6 +94,8 @@ object ConsensusSegment {
     final case class LocalAvailability(message: Consensus.LocalAvailability)
         extends ConsensusMessage
 
+    /** A PBFT internal processing event
+      */
     sealed trait PbftEvent extends ConsensusMessage {
       def blockMetadata: BlockMetadata
       def viewNumber: ViewNumber

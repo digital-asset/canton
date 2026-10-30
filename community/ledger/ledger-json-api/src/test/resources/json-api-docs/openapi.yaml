@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: JSON Ledger API HTTP endpoints
-  version: 3.7.0-SNAPSHOT
+  version: 3.7.1-SNAPSHOT
 paths:
   /v2/commands/submit-and-wait:
     post:
@@ -4282,6 +4282,17 @@ components:
           type: array
           items:
             type: string
+        protocolVersion:
+          description: |-
+            The protocol version to create the topology transactions for, so that clients that only read topology
+            transactions of an older protocol version can read them, e.g. 36 on a synchronizer with protocol version 37.
+            Must be the synchronizer's protocol version or a lower one whose topology transactions the synchronizer admits:
+            from protocol version 37 on, a synchronizer admits those of protocol version 36.
+            Defaults to the synchronizer's protocol version.
+
+            Optional
+          type: integer
+          format: int32
     GenerateExternalPartyTopologyResponse:
       title: GenerateExternalPartyTopologyResponse
       description: Response message with topology transactions and the multi-hash
@@ -4309,8 +4320,8 @@ components:
           description: |-
             The serialized topology transactions which need to be signed and submitted as part of the allocate party process
             Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
-            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
-            supported by the synchronizer.
+            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` for the requested
+            protocol version, or for the synchronizer's protocol version if none is requested.
 
             Required: must be non-empty
           type: array
