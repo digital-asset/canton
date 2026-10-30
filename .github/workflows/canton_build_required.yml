@@ -416,7 +416,7 @@ jobs:
       - variations_test_selected_users
     if: |
       always() &&
-      github.run_attempt >= 2  &&
+      github.event_name == 'push' &&
       (
         contains(needs.*.result, 'failure') ||
         contains(needs.*.result, 'cancelled')

@@ -15,12 +15,16 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- improvement
+- Added AWS KMS support for `Ed25519` signing keys like GCP KMS.
+- Fixed creation of Ed25519 keys in GCP KMS to use only the software protection level, because they are not available with HSM protection level.
+- `canton.features.enable-repair-commands = false` (default) now fully disables the repair service on the participant node.
+- Upgraded bouncycastle in line with blackduck security recommendation.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
+- Fixed slow query tracker mostly reporting `TryUtil.tryCatchInterrupted` instead of the actual originating call. 
 
 ### (YY-nnn, Risk): Title
 
@@ -54,9 +58,3 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
-
-
-## What's Coming
-
-We are currently working on
-

@@ -1208,19 +1208,23 @@ class ParticipantNodeBootstrap(
               executionContext,
             )
           )
-        adminServerRegistry
-          .addServiceU(
-            v30.ParticipantRepairServiceGrpc.bindService(
-              new GrpcParticipantRepairService(
-                sync,
-                acsDigestProcessorManagerO.map(_.asEval),
-                ledgerApiIndexServiceContainer.asEval.map(_.internalIndexService),
-                parameters,
-                loggerFactory,
-              ),
-              executionContext,
+
+        if (parameters.enableRepairService) {
+          adminServerRegistry
+            .addServiceU(
+              v30.ParticipantRepairServiceGrpc.bindService(
+                new GrpcParticipantRepairService(
+                  sync,
+                  acsDigestProcessorManagerO.map(_.asEval),
+                  ledgerApiIndexServiceContainer.asEval.map(_.internalIndexService),
+                  parameters,
+                  loggerFactory,
+                ),
+                executionContext,
+              )
             )
-          )
+        }
+
         adminServerRegistry
           .addServiceU(
             ApiInfoServiceGrpc.bindService(

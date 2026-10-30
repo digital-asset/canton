@@ -854,6 +854,32 @@ manual_nightly_test_sequencer:
         requires:
           - print_tests
 
+# Runs the nightly tests against AWS and GCP KMS, which create (and delete) KMS keys.
+manual_nightly_test_kms:
+  when:
+    equal: [ nightly-test-kms, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+    - nightly_integration_test_kms_only:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
+
 manual_nightly_test_bftordering:
   when:
     equal: [ nightly-test-bftordering, << pipeline.parameters.manual_job >> ]

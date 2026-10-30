@@ -26,6 +26,7 @@ object CantonNodeParameters {
     def enableAdditionalConsistencyChecks: Boolean
     def enablePreviewFeatures: Boolean
     def enableTestingFeatures: Boolean
+    def enableKeyDownload: Boolean
     def processingTimeouts: ProcessingTimeout
     def sequencerClient: SequencerClientConfig
     def cachingConfigs: CachingConfigs
@@ -46,6 +47,7 @@ object CantonNodeParameters {
         override val enableAdditionalConsistencyChecks: Boolean,
         override val enablePreviewFeatures: Boolean,
         override val enableTestingFeatures: Boolean,
+        override val enableKeyDownload: Boolean,
         override val processingTimeouts: ProcessingTimeout,
         override val sequencerClient: SequencerClientConfig,
         override val cachingConfigs: CachingConfigs,
@@ -87,6 +89,7 @@ trait HasGeneralCantonNodeParameters extends CantonNodeParameters.General {
     general.enableAdditionalConsistencyChecks
   override def enablePreviewFeatures: Boolean = general.enablePreviewFeatures
   override def enableTestingFeatures: Boolean = general.enableTestingFeatures
+  override def enableKeyDownload: Boolean = general.enableKeyDownload
   override def processingTimeouts: ProcessingTimeout = general.processingTimeouts
   override def sequencerClient: SequencerClientConfig = general.sequencerClient
   override def cachingConfigs: CachingConfigs = general.cachingConfigs
