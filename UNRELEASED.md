@@ -238,6 +238,8 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- The sequencer client traffic metrics `event-delivered` and `event-rejected` were swapped: rejected events incremented
+  `event-delivered` and delivered events incremented `event-rejected`. Each counter now counts the right events.
 
 ## Compatibility
 
