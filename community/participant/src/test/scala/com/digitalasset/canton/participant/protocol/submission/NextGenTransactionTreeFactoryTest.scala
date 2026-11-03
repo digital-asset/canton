@@ -4,6 +4,8 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -18,7 +20,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.metrics.{CommonMockMetrics, TransactionViewMetrics}
+import com.digitalasset.canton.metrics.{TransactionViewHistograms, TransactionViewMetrics}
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.protocol.*
@@ -40,7 +42,6 @@ import com.digitalasset.daml.lf.data.Ref.{IdString, PackageId}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -49,7 +50,6 @@ import scala.concurrent.Future
 final class NextGenTransactionTreeFactoryTest
     extends AsyncWordSpec
     with BaseTest
-    with BeforeAndAfterEach
     with HasExecutionContext
     with ProtocolVersionChecksAsyncWordSpec {
 
@@ -57,8 +57,12 @@ final class NextGenTransactionTreeFactoryTest
     TransactionViewDecompositionFactory.RollbackState.empty.enterRollback
   private val rollbackContextFactory = RollbackContextFactory(testedProtocolVersion)
   private val rolledBackContext = rollbackContextFactory.fromRollbackState(rolledBackState)
-  private val transactionViewMetrics: TransactionViewMetrics =
-    CommonMockMetrics.transactionViewMetrics
+  // Metrics must not be shared: the gauge would be overwritten by concurrently running suites (e.g. ExampleTransactionConformanceTest)
+  private def newTransactionViewMetrics(): TransactionViewMetrics =
+    new TransactionViewMetrics(
+      new TransactionViewHistograms(MetricName("test"))(new HistogramInventory()),
+      NoOpMetricsFactory,
+    )(MetricsContext.Empty)
 
   private def successfulLookup(example: ExampleTransaction): ContractInstanceOfId = id =>
     EitherT.fromEither[FutureUnlessShutdown](
@@ -145,12 +149,6 @@ final class NextGenTransactionTreeFactoryTest
   private val testedContractIdVersions: Seq[CantonContractIdVersion] =
     CantonContractIdVersion.all
 
-  override def beforeEach(): Unit = {
-    super.beforeEach()
-
-    transactionViewMetrics.treeDepth.updateValue(0)
-  }
-
   forAll(Table("contract id version", testedContractIdVersions*)) { contractIdVersion =>
     val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
       versionOverride = Some(testedProtocolVersion)
@@ -158,7 +156,9 @@ final class NextGenTransactionTreeFactoryTest
 
     s"TransactionTreeFactoryImpl for contract ID version $contractIdVersion" should {
 
-      def createTransactionTreeFactory(): TransactionTreeFactory =
+      def createTransactionTreeFactory(
+          transactionViewMetrics: TransactionViewMetrics = newTransactionViewMetrics()
+      ): TransactionTreeFactory =
         new NextGenTransactionTreeFactory(
           ExampleTransactionFactory.submittingParticipant,
           factory.psid,
@@ -204,7 +204,8 @@ final class NextGenTransactionTreeFactoryTest
 
         "everything is ok" must {
           forEvery(factory.standardHappyCases) { example =>
-            lazy val treeFactory = createTransactionTreeFactory()
+            val transactionViewMetrics = newTransactionViewMetrics()
+            lazy val treeFactory = createTransactionTreeFactory(transactionViewMetrics)
 
             val largestParseDepth = example.rootViews
               .map(_.parseDepth)

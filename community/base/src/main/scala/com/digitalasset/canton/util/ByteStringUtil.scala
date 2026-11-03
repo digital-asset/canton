@@ -13,17 +13,9 @@ import com.digitalasset.canton.serialization.{
 }
 import com.github.luben.zstd.Zstd
 import com.google.protobuf.ByteString
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
-import java.io.{
-  ByteArrayOutputStream,
-  EOFException,
-  FilterInputStream,
-  IOException,
-  InputStream,
-  OutputStream,
-}
-import java.util.zip.{GZIPOutputStream, ZipException}
+import java.io.{EOFException, FilterInputStream, IOException, InputStream, OutputStream}
+import java.util.zip.ZipException
 import scala.annotation.tailrec
 
 object ByteStringUtil {
@@ -55,54 +47,8 @@ object ByteStringUtil {
     */
   val DefaultZstdCompressionLevel: Int = 5
 
-  def compress(
-      bytes: ByteString,
-      algo: CompressionAlgo,
-      zstdLevel: Int = DefaultZstdCompressionLevel,
-  ): ByteString =
-    algo match {
-      case CompressionAlgo.Gzip => compressGzip(bytes)
-      case CompressionAlgo.Zstd => compressZstd(bytes, zstdLevel)
-    }
-
-  def compressGzip(bytes: ByteString): ByteString =
-    compressWith(bytes, new GZIPOutputStream(_))
-
   def compressZstd(bytes: ByteString, level: Int = DefaultZstdCompressionLevel): ByteString =
     ByteString.copyFrom(Zstd.compress(bytes.toByteArray, level))
-
-  private def compressWith(
-      bytes: ByteString,
-      compressor: OutputStream => OutputStream,
-  ): ByteString = {
-    val rawSize = bytes.size()
-    val compressed = new ByteArrayOutputStream(rawSize)
-    ResourceUtil.withResource(compressor(compressed)) { output =>
-      bytes.writeTo(output)
-    }
-    ByteString.copyFrom(compressed.toByteArray)
-  }
-
-  /** We decompress maximum maxBytesLimit bytes, and if the input is larger we throw
-    * MaxBytesToDecompressExceeded error.
-    */
-  def decompress(
-      bytes: ByteString,
-      algo: CompressionAlgo,
-      maxBytesLimit: MaxBytesToDecompress,
-  ): Either[DeserializationError, ByteString] =
-    algo match {
-      case CompressionAlgo.Gzip => decompressGzip(bytes, maxBytesLimit)
-      case CompressionAlgo.Zstd => decompressZstd(bytes, maxBytesLimit)
-    }
-
-  def decompressGzip(
-      bytes: ByteString,
-      maxBytesLimit: MaxBytesToDecompress,
-  ): Either[DeserializationError, ByteString] =
-    // prefer GzipCompressorInputStream over GZIPInputStream, because it doesn't use exceptions for internal
-    // control flow, as GZIPInputStream does.
-    decompressCompressed(new GzipCompressorInputStream(bytes.newInput()), maxBytesLimit)
 
   /** Decompresses a zstd frame produced by [[compressZstd]]. All such frames declare the content
     * size in the frame header, so the limit is enforced before any allocation and the output buffer
@@ -129,27 +75,10 @@ object ByteStringUtil {
       .flatten
   }
 
-  private def maxBytesExceededError(limit: Int): MaxByteToDecompressExceeded =
+  def maxBytesExceededError(limit: Int): MaxByteToDecompressExceeded =
     MaxByteToDecompressExceeded(
       s"Max bytes to decompress is exceeded. The limit is $limit bytes."
     )
-
-  private def decompressCompressed(
-      decompressor: => InputStream,
-      maxBytesLimit: MaxBytesToDecompress,
-  ): Either[DeserializationError, ByteString] =
-    ResourceUtil
-      .withResourceEither(decompressor) { decompressorStream =>
-        val out = ByteString.newOutput()
-        val buf = new Array[Byte](8 * 1024) // 8k is the default used by BufferedInputStream.
-        if (copyNBuffered(maxBytesLimit.limit.value, buf, decompressorStream, out)) {
-          Right(out.toByteString()) // No need to close as data is in-memory.
-        } else {
-          Left(maxBytesExceededError(maxBytesLimit.limit.value))
-        }
-      }
-      .leftMap(errorMapping)
-      .flatten
 
   /** Copies `n` bytes from in to out. Returns false if the input contained more than `n` bytes.
     *
@@ -208,7 +137,7 @@ object ByteStringUtil {
       else bytes.substring(0, bytes.size() + padSize)
     }
 
-  private def errorMapping(err: Throwable): DeserializationError =
+  def errorMapping(err: Throwable): DeserializationError =
     err match {
       // all exceptions that were observed when testing these methods (see also `GzipCompressionTests`)
       case ex: ZipException => DefaultDeserializationError(ex.getMessage)

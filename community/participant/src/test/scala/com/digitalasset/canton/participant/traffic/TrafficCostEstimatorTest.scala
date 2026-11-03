@@ -254,8 +254,10 @@ class TrafficCostEstimatorTest extends FixtureAnyWordSpec with BaseTest with Has
   private val confirmationRequest: TransactionConfirmationRequest = {
     val example = new ExampleTransactionFactory()().standardHappyCases.head
     TransactionConfirmationRequest(
-      InformeeMessage(example.fullInformeeTree, SymbolicCrypto.emptySignature)(
-        testedProtocolVersion
+      InformeeMessage(
+        example.fullInformeeTree,
+        SymbolicCrypto.emptySignature,
+        testedProtocolVersion,
       ),
       viewEnvelopes = Seq.empty,
       protocolVersion = testedProtocolVersion,

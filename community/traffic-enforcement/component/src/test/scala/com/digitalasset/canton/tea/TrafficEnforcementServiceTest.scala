@@ -35,6 +35,8 @@ import com.digitalasset.canton.tea.projection.{
 import com.digitalasset.canton.tea.v1.RegisterSubmissionRequest.ChargedAccount
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
+  ListAccountsPageTokenPayload,
+  ListAccountsRequest,
   PruneRequest,
   PruneResponse,
   RegisterSubmissionRequest,
@@ -45,6 +47,8 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{BaseTest, DefaultDamlValues, FailOnShutdown}
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.wordspec.AsyncWordSpec
+
+import java.util.Base64
 
 class TrafficEnforcementServiceTest extends AsyncWordSpec with BaseTest with FailOnShutdown {
 
@@ -137,6 +141,133 @@ class TrafficEnforcementServiceTest extends AsyncWordSpec with BaseTest with Fai
           )
         )
       }
+    }
+  }
+
+  "listAccounts" should {
+    "page through the accounts and filter by prefix" in {
+      val clock = new SimClock(loggerFactory = loggerFactory)
+      val store = new TeaMemoryTrafficStore(loggerFactory)
+      val service = newService(store, clock)
+      val names = Seq("acme/a", "acme/b", "acme/c", "acmeX", "bob")
+
+      for {
+        _ <- names.foldLeft(FutureUnlessShutdown.pure(())) { (previous, name) =>
+          previous.flatMap(_ =>
+            store
+              .persistTrafficDelta(
+                AccountId.tryCreate(name),
+                EventId.tryCreate(name),
+                EventSource.TeaAPI,
+                TrafficDelta.creditBalanceDelta(10),
+                clock.now,
+              )
+              .valueOrFail("persist")
+              .map(_ => ())
+          )
+        }
+        page1 <- service.listAccounts(listRequest(pageSize = Some(3)))
+        page2 <- service.listAccounts(
+          listRequest(pageSize = Some(3), pageToken = page1.value.nextPageToken)
+        )
+        prefixed <- service.listAccounts(listRequest(accountIdPrefix = Some("acme/")))
+
+        emptyPrefixAndToken <- service.listAccounts(
+          listRequest(pageToken = Some(""), accountIdPrefix = Some(""))
+        )
+        exactlyFull <- service.listAccounts(
+          listRequest(pageSize = Some(3), accountIdPrefix = Some("acme/"))
+        )
+        allExactlyFull <- service.listAccounts(listRequest(pageSize = Some(names.size)))
+      } yield {
+        page1.value.accounts.map(_.accountId) shouldBe Seq("acme/a", "acme/b", "acme/c")
+        page1.value.accounts.map(_.balance).distinct shouldBe Seq(10L)
+        // Base64 encoding of page token payload
+        page1.value.nextPageToken shouldBe Some("CgZhY21lL2M=")
+        page2.value.accounts.map(_.accountId) shouldBe Seq("acmeX", "bob")
+        page2.value.nextPageToken shouldBe None
+        prefixed.value.accounts.map(_.accountId) shouldBe Seq("acme/a", "acme/b", "acme/c")
+        prefixed.value.nextPageToken shouldBe None
+        // Populated empty prefix acts the same as not unpopulated
+        emptyPrefixAndToken.value.accounts.map(_.accountId) shouldBe names
+        emptyPrefixAndToken.value.nextPageToken shouldBe None
+        // No next page token when the last page is exactly full
+        exactlyFull.value.accounts.map(_.accountId) shouldBe Seq("acme/a", "acme/b", "acme/c")
+        exactlyFull.value.nextPageToken shouldBe None
+        allExactlyFull.value.accounts.map(_.accountId) shouldBe names
+        allExactlyFull.value.nextPageToken shouldBe None
+      }
+    }
+
+    "page past accounts stored with a legacy-format ID" in {
+      val clock = new SimClock(loggerFactory = loggerFactory)
+      val store = new TeaMemoryTrafficStore(loggerFactory)
+      val service = newService(store, clock)
+
+      // "b%" is a legacy valid Account ID
+      val accounts = Seq("a", "b%", "c").map(AccountId.fromLegacyFormat(_).value)
+
+      for {
+        _ <- FutureUnlessShutdown.sequence(accounts.zipWithIndex.map { case (account, idx) =>
+          store
+            .persistTrafficDelta(
+              account,
+              EventId.tryCreate(s"event-$idx"),
+              EventSource.TeaAPI,
+              TrafficDelta.creditBalanceDelta(10),
+              clock.now,
+            )
+            .valueOrFail("persist")
+        })
+        page1 <- service.listAccounts(listRequest(pageSize = Some(2)))
+        page2 <- service.listAccounts(
+          listRequest(pageSize = Some(2), pageToken = page1.value.nextPageToken)
+        )
+      } yield {
+        page1.value.accounts.map(_.accountId) shouldBe Seq("a", "b%")
+        page1.value.nextPageToken should not be empty
+        page2.value.accounts.map(_.accountId) shouldBe Seq("c")
+        page2.value.nextPageToken shouldBe None
+      }
+    }
+
+    "reject malformed requests" in {
+      def encodeToken(accountId: String): Option[String] =
+        Some(
+          Base64.getUrlEncoder.encodeToString(
+            ListAccountsPageTokenPayload(accountIdLowerBoundExcl = accountId).toByteArray
+          )
+        )
+
+      val clock = new SimClock(loggerFactory = loggerFactory)
+      val service = newService(new TeaMemoryTrafficStore(loggerFactory), clock)
+
+      for {
+        zeroPageSize <- service.listAccounts(listRequest(pageSize = Some(0)))
+        negativePageSize <- service.listAccounts(listRequest(pageSize = Some(-1)))
+        tooLargePageSize <- service.listAccounts(
+          listRequest(pageSize = Some(TrafficEnforcementService.MaxListAccountsPageSize + 1))
+        )
+        badPrefix <- service.listAccounts(listRequest(accountIdPrefix = Some("acme%")))
+        longPrefix <- service.listAccounts(listRequest(accountIdPrefix = Some("a" * 256)))
+        longToken <- service.listAccounts(listRequest(pageToken = encodeToken("a" * 256)))
+        notBase64Token <- service.listAccounts(listRequest(pageToken = Some("acme/c")))
+        notProtoToken <- service.listAccounts(
+          // No payload token proto wrapper
+          listRequest(pageToken = Some(Base64.getUrlEncoder.encodeToString(Array(0xff.toByte))))
+        )
+      } yield forEvery(
+        Seq(
+          zeroPageSize,
+          negativePageSize,
+          tooLargePageSize,
+          badPrefix,
+          longPrefix,
+          longToken,
+          notBase64Token,
+          notProtoToken,
+        )
+      )(inside(_) { case Left(error) => error.code.id shouldBe ProtoDeserializationFailure.id })
     }
   }
 
@@ -271,4 +402,10 @@ class TrafficEnforcementServiceTest extends AsyncWordSpec with BaseTest with Fai
       }
     }
   }
+
+  private def listRequest(
+      pageSize: Option[Int] = None,
+      pageToken: Option[String] = None,
+      accountIdPrefix: Option[String] = None,
+  ): ListAccountsRequest = ListAccountsRequest(pageSize, pageToken, accountIdPrefix)
 }

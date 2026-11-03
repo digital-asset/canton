@@ -84,6 +84,14 @@ class EventQueryServiceRequestValidatorTest
           metadata = Map.empty,
         )
       }
+
+      "fail on event format without filters" in {
+        mustFailWithoutFilters(
+          EventQueryServiceRequestValidator.validateEventsByContractId(
+            req.update(_.eventFormat.filtersByParty := Map.empty)
+          )
+        )
+      }
     }
 
     // TODO(i16065): Re-enable getEventsByContractKey tests

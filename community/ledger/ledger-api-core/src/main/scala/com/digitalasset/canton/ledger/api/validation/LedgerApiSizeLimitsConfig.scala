@@ -39,10 +39,15 @@ import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   * @param sharedSizeConfig
   *   limits shared by several message-specific limits. A message-specific limit that is set
   *   explicitly takes precedence.
+  * @param eventFormatTotalFiltersSizeLimit
+  *   max number of filters of the event formats of a request, after decomposing the template and
+  *   interface filters across the requested parties. A template or wildcard filter counts as 1, an
+  *   interface filter as 5.
   */
 final case class LedgerApiSizeLimitsConfig(
     publicLapiSizeConfig: PublicLapiSizeConfig,
     private val sharedSizeConfig: SharedSizeConfig,
+    eventFormatTotalFiltersSizeLimit: PositiveInt,
 )
 
 /** Limits shared by several message-specific limits of the Ledger API
@@ -65,6 +70,7 @@ object LedgerApiSizeLimitsConfig {
     LedgerApiSizeLimitsConfig(
       publicLapiSizeConfig = publicLapiDefaultsWithShared(sharedSizeConfig),
       sharedSizeConfig = sharedSizeConfig,
+      eventFormatTotalFiltersSizeLimit = PositiveInt.MaxValue,
     )
 
   private def publicLapiDefaultsWithShared(shared: SharedSizeConfig): PublicLapiSizeConfig =

@@ -310,21 +310,36 @@ object Util {
 
   def collectIdentifiers(mod: Module): Iterable[Ref.Identifier] = {
     import iterable.{ExprIterable, TypeIterable}
-    def identifiersInTypes(typ: Type): Iterator[Ref.Identifier] = {
-      val ids = typ match {
-        case TTyCon(typeConId) => Iterator.single(typeConId)
-        case TSynApp(typeSynName, args @ _) => Iterator.single(typeSynName)
-        case otherwise @ _ => Iterator.empty
-      }
-      ids ++ TypeIterable(typ).iterator.flatMap(identifiersInTypes)
+
+    def identifiersInTypes(root: Type): Iterator[Ref.Identifier] = {
+      @tailrec
+      def loop(todo: List[Type], acc: List[Ref.Identifier]): List[Ref.Identifier] =
+        todo match {
+          case Nil => acc
+          case typ :: rest =>
+            val acc1 = typ match {
+              case TTyCon(id) => id :: acc
+              case TSynApp(id, _) => id :: acc
+              case _ => acc
+            }
+            loop(TypeIterable(typ).toList ::: rest, acc1)
+        }
+      loop(List(root), Nil).iterator
     }
 
     def identifiersInExpr(expr: Expr): Iterator[Ref.Identifier] = {
-      val ids = expr match {
-        case EVal(valRef) => Iterator.single(valRef)
-        case otherwise @ _ => Iterator.empty
-      }
-      ids ++ ExprIterable(expr).flatMap(identifiersInExpr)
+      @tailrec
+      def loop(todo: List[Expr], acc: List[Ref.Identifier]): List[Ref.Identifier] =
+        todo match {
+          case Nil => acc
+          case expr :: rest =>
+            val acc1 = expr match {
+              case EVal(valRef) => valRef :: acc
+              case _ => acc
+            }
+            loop(ExprIterable(expr).toList ::: rest, acc1)
+        }
+      loop(List(expr), Nil).iterator
     }
 
     TypeIterable(mod).flatMap(identifiersInTypes) ++

@@ -133,11 +133,18 @@ object LedgerApiIndexer {
 
   val healthComponentName: String = "ledger api indexer"
 
+  /** Thrown into the indexer pipeline when post processing is aborted due to shutdown, e.g., when
+    * the participant becomes passive. Not a failure worth a WARN.
+    */
+  final class PostProcessingAbortedDueToShutdown
+      extends RuntimeException("Post processing aborted due to shutdown")
+
   private val defaultLogLevelIsInfo: Throwable => Boolean = {
     case s: StatusRuntimeException =>
       DecodedCantonError.fromStatusRuntimeException(s).exists(_.isRetryable)
     // PollingChecker errors will be rethrown on initialization, so there is no urgency to log them on WARN
     case _: PollingCheckException => true
+    case _: PostProcessingAbortedDueToShutdown => true
     case _ => false
   }
 

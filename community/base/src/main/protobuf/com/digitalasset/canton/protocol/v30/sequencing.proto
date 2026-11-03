@@ -69,10 +69,3 @@ message StaticSynchronizerParameters {
 
   google.protobuf.Duration topology_change_delay = 10;
 }
-
-message CompressedBatch {
-  enum CompressionAlgorithm {
-    COMPRESSION_ALGORITHM_UNSPECIFIED = 0;
-    COMPRESSION_ALGORITHM_GZIP = 1;
-  }
-}

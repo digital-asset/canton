@@ -292,6 +292,9 @@ object ProtocolVersion {
       s"Found: ${Map("deprecated" -> deprecated, "deleted" -> deleted.forgetNE, "beta" -> beta, "alpha" -> alpha, "dev" -> List(dev), "stable" -> stable.forgetNE)}",
   )
 
+  // The earliest stable protocol version
+  val earliest: ProtocolVersion = stable.head1
+
   /** The latest stable protocol version.
     *
     * NOTE: Do not use in tests, use `testedProtocolVersion` instead. To bootstrap a synchronizer
@@ -308,7 +311,7 @@ object ProtocolVersion {
     *   if the environment variable's value cannot be parsed to a protocol version
     */
   private val CANTON_PROTOCOL_VERSION = "CANTON_PROTOCOL_VERSION"
-  val forSynchronizer: ProtocolVersion = {
+  lazy val forSynchronizer: ProtocolVersion = {
     val shouldPvBeSet =
       sys.env.contains("CI") && !sys.env.contains("CANTON_AUTOMATIC_PROTOCOL_VERSION")
 

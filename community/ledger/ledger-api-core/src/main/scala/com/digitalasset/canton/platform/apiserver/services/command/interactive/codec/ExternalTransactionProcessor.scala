@@ -33,7 +33,7 @@ import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.transaction.{SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -287,20 +287,9 @@ class ExternalTransactionProcessor(
         syncService
           .physicalSynchronizerIdForSynchronizerId(decoded.synchronizer.logical)
           .filter(_.forExternalTransactionHashing != decoded.synchronizer)
-          .map { physicalSynchronizerId =>
+          .map { _ =>
             InteractiveSubmissionExecuteError.Reject(
-              {
-                val protocolVersionOfSelectedSync =
-                  s"The selected synchronizer $physicalSynchronizerId is on Protocol Version ${physicalSynchronizerId.protocolVersion}."
-                physicalSynchronizerId.protocolVersion match {
-                  case atOrBefore34 if atOrBefore34 <= ProtocolVersion.v34 =>
-                    protocolVersionOfSelectedSync +
-                      s" Please use a Logical Synchronizer ID in the prepared transaction metadata on PVs <= 34"
-                  case _ =>
-                    protocolVersionOfSelectedSync +
-                      s" Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
-                }
-              }
+              "Please use a Physical Synchronizer ID in the prepared transaction metadata."
             )
           }
           .toLeft(())

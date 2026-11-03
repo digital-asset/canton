@@ -30,6 +30,7 @@ import com.digitalasset.canton.{LfPackageId, protocol}
 import com.digitalasset.daml.lf.data.Ref.IdString
 import monocle.Monocle.toAppliedFocusOps
 
+import scala.collection.immutable.Map
 import scala.jdk.CollectionConverters.{CollectionHasAsScala, SeqHasAsJava}
 
 class AssignmentValidationPackageIntegrationTest
@@ -40,6 +41,7 @@ class AssignmentValidationPackageIntegrationTest
     with EntitySyntax {
 
   private val aliceName = "Alice"
+  private val bobName = "Bob"
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
@@ -80,7 +82,8 @@ class AssignmentValidationPackageIntegrationTest
 
         PartiesAllocator(Set(participant1, participant2))(
           newParties = Seq(
-            aliceName -> participant1
+            aliceName -> participant1,
+            bobName -> participant1,
           ),
           targetTopology = Map(
             aliceName -> Map(
@@ -91,7 +94,15 @@ class AssignmentValidationPackageIntegrationTest
                 (participant1.id, ParticipantPermission.Submission),
                 (participant2.id, ParticipantPermission.Submission),
               )),
-            )
+            ),
+            bobName -> Map(
+              daId -> (PositiveInt.one, Set(
+                (participant1.id, ParticipantPermission.Submission)
+              )),
+              acmeId -> (PositiveInt.one, Set(
+                (participant1.id, ParticipantPermission.Submission)
+              )),
+            ),
           ),
         )
       }
@@ -175,6 +186,62 @@ class AssignmentValidationPackageIntegrationTest
 
   }
 
+  "Disable package choosing prior PV37" in { implicit env =>
+    import env.*
+
+    val bob = bobName.toPartyId(participant1)
+
+    val quote =
+      JavaDecodeUtil
+        .decodeAllCreated(QuoteV1.COMPANION)(
+          participant1.ledger_api.javaapi.commands.submit(
+            actAs = Seq(bob),
+            commands = new QuoteV1(
+              List(bob.toProtoPrimitive).asJava,
+              List(bob.toProtoPrimitive).asJava,
+              "DA",
+              101,
+            ).create.commands.asScala.toSeq,
+            synchronizerId = Some(synchronizer1Id),
+            userPackageSelectionPreference = Seq(v1PackageId),
+          )
+        )
+        .loneElement
+
+    val quoteCid = LfContractId.assertFromString(quote.id.contractId)
+
+    // The chosen validation package will be V2 if running >= PV37
+    val expected =
+      if (testedProtocolVersion >= ProtocolVersion.v37) QuoteV2.PACKAGE_ID else QuoteV1.PACKAGE_ID
+
+    participant1.ledger_api.commands.submit_reassign(
+      submitter = bob,
+      contractIds = Seq(quoteCid),
+      source = daId,
+      target = acmeId,
+    )
+
+    participant1.ledger_api.state.acs
+      .of_party(bob)
+      .loneElement
+      .event
+      .representativePackageId shouldBe expected
+
+    participant1.ledger_api.commands.submit_reassign(
+      submitter = bob,
+      contractIds = Seq(quoteCid),
+      source = acmeId,
+      target = daId,
+    )
+
+    participant1.ledger_api.state.acs
+      .of_party(bob)
+      .loneElement
+      .event
+      .representativePackageId shouldBe expected
+
+  }
+
   "Fail if the target validation package is not vetted on the target topology" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
     implicit env =>
       import env.*
@@ -245,6 +312,36 @@ class AssignmentValidationPackageIntegrationTest
         source = acmeId,
         target = daId,
         overrideSourceValidationPackageIds = Map(quoteCid -> v2PackageId),
+      )
+
+  }
+
+  "Assign the contract to a synchronizer that only has V2 of the package by default" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
+
+      val (alice, quoteCid) = aliceQuote()
+
+      participant1.ledger_api.commands.submit_reassign(
+        submitter = alice,
+        contractIds = Seq(quoteCid),
+        source = daId,
+        target = acmeId,
+      )
+
+  }
+
+  "Assign the contract from a synchronizer that only has V2 of the package by default" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+    implicit env =>
+      import env.*
+
+      val (alice, quoteCid) = aliceQuote()
+
+      participant1.ledger_api.commands.submit_reassign(
+        submitter = alice,
+        contractIds = Seq(quoteCid),
+        source = acmeId,
+        target = daId,
       )
 
   }

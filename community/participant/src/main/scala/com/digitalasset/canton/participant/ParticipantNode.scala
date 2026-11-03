@@ -302,7 +302,6 @@ class ParticipantNodeBootstrap(
           dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
-          protocolVersion = authorizedStore.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(
@@ -627,7 +626,7 @@ class ParticipantNodeBootstrap(
                     .processPublications(_)(_)
                     .failOnShutdownTo(
                       // This will be thrown in the Indexer pekko-stream pipeline, and handled gracefully there
-                      new RuntimeException("Post processing aborted due to shutdown")
+                      new LedgerApiIndexer.PostProcessingAbortedDueToShutdown
                     ),
                   sequentialPostProcessor = sequentialPostProcessor,
                   loggerFactory = loggerFactory,
@@ -1298,19 +1297,23 @@ class ParticipantNodeBootstrap(
               executionContext,
             )
           )
-        adminServerRegistry
-          .addServiceU(
-            v30.ParticipantRepairServiceGrpc.bindService(
-              new GrpcParticipantRepairService(
-                sync,
-                acsDigestProcessorManagerO.map(_.asEval),
-                ledgerApiIndexServiceContainer.asEval.map(_.internalIndexService),
-                parameters,
-                loggerFactory,
-              ),
-              executionContext,
+
+        if (parameters.enableRepairService) {
+          adminServerRegistry
+            .addServiceU(
+              v30.ParticipantRepairServiceGrpc.bindService(
+                new GrpcParticipantRepairService(
+                  sync,
+                  acsDigestProcessorManagerO.map(_.asEval),
+                  ledgerApiIndexServiceContainer.asEval.map(_.internalIndexService),
+                  parameters,
+                  loggerFactory,
+                ),
+                executionContext,
+              )
             )
-          )
+        }
+
         adminServerRegistry
           .addServiceU(
             ApiInfoServiceGrpc.bindService(

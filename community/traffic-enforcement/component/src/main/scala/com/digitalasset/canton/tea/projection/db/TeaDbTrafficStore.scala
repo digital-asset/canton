@@ -461,6 +461,32 @@ class TeaDbTrafficStore(
       .as[AccountState]
       .map(_.headOption)
 
+  override def listBalances(
+      accountIdPrefix: Option[String],
+      afterExclusive: Option[AccountId],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Seq[AccountState]] = {
+    val after = afterExclusive.fold("")(_.unwrap)
+    val pattern = TeaDbTrafficStore.likePrefixPattern(accountIdPrefix.getOrElse(""))
+
+    val query = sql"""select account_id, total_debits, total_credits, updated_at
+              from par_traffic_enforcement_balance
+              where account_id like $pattern escape '!' and account_id > $after
+              order by account_id limit $limit"""
+
+    storage
+      .queryWithStatementTimeout(
+        query.as[AccountState].map(states => states: Seq[AccountState]),
+        databaseQueryTimeout,
+        "list_traffic_balances",
+        maxRetries = 0,
+      )
+      .attemptT
+      .leftMap(TeaDbTrafficStore.classifyFailure)
+  }
+
   /** Reads the balance totals as raw Longs so a transiently negative running total can be detected
     * instead of failing the NonNegativeLong conversion.
     */
@@ -549,6 +575,15 @@ object TeaDbTrafficStore {
   private val LastCompletionOffsetKey: String = "debit_projection.last_completion_offset"
 
   private[db] val NoActiveConnectionMaxRetries: Int = 10
+
+  /** LIKE pattern matching IDs that start with `prefix`. Escapes the LIKE wildcards (`%`, `_`) and
+    * the escape character itself (`!`), so the query must use `escape '!'`.
+    */
+  private[db] def likePrefixPattern(prefix: String): String =
+    prefix.flatMap {
+      case c @ ('!' | '%' | '_') => s"!$c"
+      case c => c.toString
+    } + "%"
 
   /** Retries only a write that the HA pool rejected before handing out a connection, and only until
     * `stopRetryingAt`.

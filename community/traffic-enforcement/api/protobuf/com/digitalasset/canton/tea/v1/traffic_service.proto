@@ -27,6 +27,20 @@ service TrafficService {
   // WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
   // WARNING: If a submission's correlation is pruned before its completion arrives, the submission is NOT debited.
   rpc Prune(PruneRequest) returns (PruneResponse);
+
+  // List accounts and their details.
+  // Accounts that were never credited or debited are not listed.
+  //
+  // Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights.
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+
+  // Deprecated since Canton 3.7, disabled by default since Canton 3.8 and removed in Canton 3.9.
+  // Use Prune instead.
+  // Served by Prune, and returns only the number of pruned events.
+  // Permissioned only to Ledger API admin users.
+  rpc PruneEvents(PruneEventsRequest) returns (PruneEventsResponse) {
+    option deprecated = true;
+  }
 }
 
 message GetAccountRequest {
@@ -99,4 +113,64 @@ message PruneResponse {
   //
   // Required
   int32 pruned_uncharged_completion_count = 3;
+}
+
+message ListAccountsRequest {
+  // The maximum account details to return on a page response.
+  // If unset, defaults to 100.
+  // Values above 1000 or below 1 are rejected with INVALID_ARGUMENT.
+  //
+  // Optional
+  optional int32 page_size = 1;
+
+  // Next page token.
+  // Leave unset or empty to fetch the first page or set to the `next_page_token`
+  // of the previous response to fetch the next page.
+  //
+  // Optional
+  optional string page_token = 2;
+
+  // Prefix filter for the returned account IDs.
+  // Empty acts as a wildcard filter.
+  //
+  // Optional
+  optional string account_id_prefix = 3;
+}
+
+message ListAccountsResponse {
+  // List of accounts and their details, ordered lexicographically by account ID,
+  // up to the requested page size.
+  //
+  // Optional: may be empty
+  repeated GetAccountResponse accounts = 1;
+
+  // Token to fetch the next page.
+  // Not set, if there are no further results.
+  //
+  // Optional
+  optional string next_page_token = 2;
+}
+
+// Structures the payload of a page token for listing accounts.
+// The page token is opaque and should not be directly constructed by client applications.
+message ListAccountsPageTokenPayload {
+  // Next page starts with accounts whose account_id is larger than account_id_lower_bound_excl.
+  //
+  // Required
+  string account_id_lower_bound_excl = 1;
+}
+
+message PruneEventsRequest {
+  // The timestamp before which events should be pruned.
+  // Events with a timestamp less than or equal to this value will be pruned.
+  //
+  // Required
+  google.protobuf.Timestamp before_or_at = 1;
+}
+
+message PruneEventsResponse {
+  // The number of events that were pruned.
+  //
+  // Required
+  int32 pruned_event_count = 1;
 }

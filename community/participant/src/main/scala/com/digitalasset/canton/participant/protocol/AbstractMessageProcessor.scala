@@ -95,6 +95,7 @@ abstract class AbstractMessageProcessor(
           validityPeriodEnd = Some(maxSequencingTime),
         )
       ),
+      ips.psid.protocolVersion,
     )
 
   protected def maxSequencingTimeForConfirmationResponse(

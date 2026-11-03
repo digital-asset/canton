@@ -100,6 +100,7 @@ object ConfigValidations extends NamedLogging {
       atLeastOneNode,
       sequencerClientRetryDelays,
       awsKmsDisableSSLVerificationRequiresNonStandard,
+      gcpKmsDestroyScheduledDurationRangeValidation,
       defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
       validateLegacyContractsV11Enabled,
@@ -980,6 +981,26 @@ object ConfigValidations extends NamedLogging {
 
   def awsKmsDisableSSLVerificationRequiresNonStandardError(nodeType: String, nodeName: String) =
     s"Disabling SSL verification for AWS KMS on $nodeType $nodeName requires you to explicitly set canton.parameters.non-standard-config = yes"
+
+  private def gcpKmsDestroyScheduledDurationRangeValidation(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val min = PositiveFiniteDuration.ofHours(24)
+    val max = PositiveFiniteDuration.ofDays(120)
+
+    val errors = config.allLocalNodes.toSeq.flatMap { case (nodeName, nodeConfig) =>
+      nodeConfig.crypto.kms.collect { case gcp: KmsConfig.Gcp =>
+        Option.when(
+          gcp.destroyScheduledDuration.duration < min.duration ||
+            gcp.destroyScheduledDuration.duration > max.duration
+        )(
+          s"${nodeConfig.nodeTypeName} $nodeName: GCP KMS destroyScheduledDuration must be between 24 hours and 120 days, but is ${gcp.destroyScheduledDuration}."
+        )
+      }.flatten
+    }
+
+    toValidated(errors)
+  }
 
   private def defaultUpdatesPageSizeMustBeLeqMaximalPageSize(
       config: CantonConfig

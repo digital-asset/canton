@@ -50,7 +50,7 @@ import TransactionRoutingError.RoutingInternalError.InputContractsOnDifferentSyn
 import TransactionRoutingError.TopologyErrors.NoSynchronizerForSubmission
 import TransactionRoutingError.{UnableToGetStaticParameters, UnableToQueryTopologySnapshot}
 
-class SynchronizerSelectorTest
+final class SynchronizerSelectorTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
@@ -159,17 +159,15 @@ class SynchronizerSelectorTest
       pickSynchronizer(repair) shouldBe repair
     }
 
-    /*
-    Running with pv=dev does not make any sense since we want oldPV < newPV=dev
-    Running with 35 <= pv < dev would make sense but makes the test setup more complicated and does change the scenario.
-     */
-    "take minimum protocol version into account" onlyRunWith ProtocolVersion.v34 in {
-      val oldPV = ProtocolVersion.v34
+    // Running with pv=dev does not make any sense since we want oldPV < newPV=dev
+    "take minimum protocol version into account" onlyRunWith ProtocolVersion.latest in {
+      val oldPV = ProtocolVersion.latest
 
       val serializationVersion = LfSerializationVersion.VDev
       val newPV = LfSerializationVersionToProtocolVersions.getMinimumSupportedProtocolVersion(
         serializationVersion
       )
+      newPV shouldBe ProtocolVersion.dev
 
       val selectorOldPV = selectorForExerciseByInterface(
         serializationVersion = serializationVersion, // requires protocol version dev

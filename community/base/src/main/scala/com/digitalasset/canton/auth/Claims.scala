@@ -252,6 +252,19 @@ object ClaimSet {
       )
     }
 
+    /** Returns true if the set of claims authorize the user to list local traffic accounts on the
+      * participant. This applies for users holding CanDebitTrafficFromAnyAccount rights
+      * Additionally, when acceptExecuteRights is true, also CanExecuteAsAnyParty or
+      * CanActAsAnyParty are supported.
+      */
+    def canListTrafficAccounts(acceptExecuteRights: Boolean): Either[AuthorizationError, Unit] =
+      Either.cond(
+        claims.contains(ClaimDebitTrafficFromAnyAccount)
+          || (acceptExecuteRights && canExecuteAsAnyParty.isRight),
+        (),
+        AuthorizationError.MissingListAccountsClaims,
+      )
+
     /** Returns true if the set of claims authorizes the user to execute interactive commands as any
       * party, unless the claims expired.
       */

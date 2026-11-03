@@ -14,7 +14,7 @@ import scala.annotation.nowarn
 final class BasicDataContinuityTestPostgresShard1
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).first
 }
@@ -22,7 +22,7 @@ final class BasicDataContinuityTestPostgresShard1
 final class BasicDataContinuityTestPostgresShard2
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).second
@@ -31,7 +31,7 @@ final class BasicDataContinuityTestPostgresShard2
 final class BasicDataContinuityTestPostgresShard3
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).third
@@ -40,7 +40,7 @@ final class BasicDataContinuityTestPostgresShard3
 final class BasicDataContinuityTestPostgresShard4
     extends BasicDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).fourth
@@ -49,7 +49,7 @@ final class BasicDataContinuityTestPostgresShard4
 final class SynchronizerChangeDataContinuityTestPostgresShard1
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).first
 }
@@ -57,7 +57,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard1
 final class SynchronizerChangeDataContinuityTestPostgresShard2
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).second
 }
@@ -65,7 +65,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard2
 final class SynchronizerChangeDataContinuityTestPostgresShard3
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).third
@@ -74,7 +74,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard3
 final class SynchronizerChangeDataContinuityTestPostgresShard4
     extends SynchronizerChangeDataContinuityTest
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
     SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).fourth
 }

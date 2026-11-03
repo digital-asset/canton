@@ -36,17 +36,15 @@ import com.google.protobuf.ByteString
   * also checks that all payloads have the same serialization and, if it can parse the mediator
   * confirmation request envelope, that the payload fits to the mediator confirmation request.
   */
-final case class RootHashMessage[+Payload <: RootHashMessagePayload](
+final case class RootHashMessage[+Payload <: RootHashMessagePayload] private (
     rootHash: RootHash,
     override val psid: PhysicalSynchronizerId,
     viewType: ViewType,
     submissionTopologyTimestamp: CantonTimestamp,
     payload: Payload,
-) extends UnsignedProtocolMessage
+)(override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type])
+    extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[RootHashMessage[RootHashMessagePayload]] {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type] =
-    RootHashMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
     v32.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
@@ -90,7 +88,7 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
       viewType,
       submissionTopologyTime,
       payload,
-    )
+    )(representativeProtocolVersion)
 
   @transient override protected lazy val companionObj: RootHashMessage.type = RootHashMessage
 }
@@ -100,6 +98,22 @@ object RootHashMessage
       RootHashMessagePayload
     ], ByteString => ParsingResult[RootHashMessagePayload]]
     with PrettyPrintingCompanion[RootHashMessage[RootHashMessagePayload]] {
+
+  def apply[Payload <: RootHashMessagePayload](
+      rootHash: RootHash,
+      psid: PhysicalSynchronizerId,
+      viewType: ViewType,
+      submissionTopologyTimestamp: CantonTimestamp,
+      payload: Payload,
+      protocolVersion: ProtocolVersion,
+  ): RootHashMessage[Payload] =
+    RootHashMessage(
+      rootHash,
+      psid,
+      viewType,
+      submissionTopologyTimestamp,
+      payload,
+    )(protocolVersionRepresentativeFor(protocolVersion))
 
   override protected val pretty: Pretty[RootHashMessage[RootHashMessagePayload]] =
     prettyOfClass(
@@ -140,13 +154,14 @@ object RootHashMessage
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       submissionTopologyTime <- CantonTimestamp.fromProtoPrimitive(submissionTopologyTimeP)
       payloadO <- payloadDeserializer(payloadP)
+      rpv <- RootHashMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield RootHashMessage(
       rootHash,
       synchronizerId,
       viewType,
       submissionTopologyTime,
       payloadO,
-    )
+    )(rpv)
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit

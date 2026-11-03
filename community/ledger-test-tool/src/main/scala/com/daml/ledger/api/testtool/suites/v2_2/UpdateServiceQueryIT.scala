@@ -8,6 +8,8 @@ import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.{ExternalParty, LedgerTestSuite}
 import com.daml.ledger.api.v2.event.CreatedEvent
+import com.daml.ledger.api.v2.transaction_filter.UpdateFormat
+import com.daml.ledger.api.v2.update_service.GetUpdateByHashRequest
 import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.daml.ledger.test.java.model.test.{Dummy, DummyWithParam}
 import com.digitalasset.base.error.ErrorResource
@@ -753,6 +755,40 @@ class UpdateServiceQueryIT(testDars: TestDars) extends LedgerTestSuite {
         failure,
         RequestValidationErrors.MissingField,
         Some("The submitted command is missing a mandatory field: transaction_hash"),
+      )
+    }
+  })
+
+  test(
+    "TXUpdateByHashRejectEmptyFilter",
+    "Return INVALID_ARGUMENT when looking up an update by hash with an empty event format",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    val request = GetUpdateByHashRequest(
+      // never looked up: the update format is rejected first
+      transactionHash = ByteString.copyFrom(Array.fill(32)(1.toByte)),
+      updateFormat = Some(
+        UpdateFormat(
+          includeTransactions = Some(
+            ledger
+              .transactionFormat(parties = Some(Seq(party)))
+              .update(_.eventFormat.filtersByParty := Map.empty)
+          ),
+          includeReassignments = None,
+          includeTopologyEvents = None,
+          includeTransactionsAndReassignments = None,
+        )
+      ),
+    )
+    for {
+      failure <- ledger
+        .updateByHash(request)
+        .mustFail("looking up an update by hash with an empty event format")
+    } yield {
+      assertGrpcError(
+        failure,
+        RequestValidationErrors.InvalidArgument,
+        Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
       )
     }
   })

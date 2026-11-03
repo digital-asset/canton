@@ -42,10 +42,8 @@ final case class OpenEnvelope[+M <: ProtocolMessage](
     subtrees.map(s => this.copy(recipients = s))
   }
 
-  override def toClosedCompressedEnvelope(
-      algo: com.digitalasset.canton.util.CompressionAlgo
-  ): ClosedCompressedEnvelope =
-    toClosedUncompressedEnvelope.toClosedCompressedEnvelope(algo)
+  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope =
+    toClosedUncompressedEnvelope.toClosedCompressedEnvelope
 
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     toClosedUncompressedEnvelope.asRight

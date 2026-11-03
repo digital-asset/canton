@@ -1185,6 +1185,27 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
   })
 
   test(
+    "AcsRejectEmptyFilter",
+    "Fail if the event format has no filters",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      end <- ledger.currentEnd()
+      _ <- ledger
+        .activeContracts(
+          ledger
+            .activeContractsRequest(parties = Some(Seq(party)), activeAtOffset = end)
+            .update(_.eventFormat.filtersByParty := Map.empty)
+        )
+        .mustFailWith(
+          "event format without filters",
+          RequestValidationErrors.InvalidArgument,
+          Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
+        )
+    } yield ()
+  })
+
+  test(
     "ACSMultipleContracts",
     "The ActiveContractService should return all newly created contracts",
     partyAllocation = allocate(SingleParty),
@@ -1380,6 +1401,34 @@ class ActiveContractsServiceIT(testDars: TestDars) extends LedgerTestSuite {
           Some(
             "The submitted command has a field with invalid value: Invalid field page_token: Invalid page token for GetActiveContractsPageRequest"
           ),
+        )
+    } yield ()
+  })
+
+  test(
+    "AcsPageRejectEmptyFilter",
+    "Fail if the event format of a page request has no filters",
+    partyAllocation = allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      _ <- ledger
+        .activeContractsPage(
+          GetActiveContractsPageRequest(
+            eventFormat = Some(
+              ledger
+                .eventFormat(verbose = true, Some(Seq(party)))
+                .update(_.filtersByParty := Map.empty)
+            ),
+            activeAtOffset = None,
+            maxPageSize = Some(2),
+            pageToken = None,
+            includeIncompleteReassignments = false,
+          )
+        )
+        .mustFailWith(
+          "event format without filters",
+          RequestValidationErrors.InvalidArgument,
+          Some("filtersByParty and filtersForAnyParty cannot be empty simultaneously"),
         )
     } yield ()
   })

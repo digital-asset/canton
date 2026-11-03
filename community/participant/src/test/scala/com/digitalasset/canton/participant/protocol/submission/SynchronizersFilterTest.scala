@@ -30,7 +30,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.ExecutionContext
 
-class SynchronizersFilterTest
+final class SynchronizersFilterTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
@@ -160,15 +160,12 @@ class SynchronizersFilterTest
       )
     }
 
-    /*
-    Running with pv=dev does not make any sense since we want oldPV < newPV=dev
-    Running with 35 <= pv < dev would make sense but makes the test setup more complicated and does change the scenario.
-     */
-    "reject synchronizers when the minimum protocol version is not satisfied " onlyRunWith ProtocolVersion.v34 in {
+    // For this test, we prescribe all protocol versions so restricting the run to latest makes sense.
+    "reject synchronizers when the minimum protocol version is not satisfied" onlyRunWith ProtocolVersion.latest in {
       import SimpleTopology.*
 
-      // LanguageVersion.VDev needs pv=dev so we use pv=6
-      val currentSynchronizerPV = ProtocolVersion.v34
+      // LanguageVersion.VDev needs pv=dev so we use latest stable pv
+      val currentSynchronizerPV = ProtocolVersion.latest
       val filter =
         SynchronizersFilterForTx(
           Transactions.Create.tx(LfSerializationVersion.VDev),

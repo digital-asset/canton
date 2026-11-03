@@ -337,14 +337,10 @@ final class GrpcSequencerServiceTest
         .focus(_.batch.envelopes)
         .modify(_.map {
           case closedEnvelope: ClosedEnvelope =>
-            val compressed = closedEnvelope
-              .toClosedCompressedEnvelope(
-                com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
-              )
+            val compressed = closedEnvelope.toClosedCompressedEnvelope
             ClosedCompressedEnvelope.create(
               ByteString.empty,
               compressed.recipients,
-              compressed.algorithm,
             )(
               DecompressionBudget(MaxBytesToDecompress.HardcodedDefault),
               testedProtocolVersionValidation,

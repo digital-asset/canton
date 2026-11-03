@@ -182,7 +182,7 @@ class SequencedEventTestFixture(
     import cats.syntax.option.*
     val message = {
       val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+      InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
     }
     val envelope = ClosedUncompressedEnvelope.create(
       serializedOverride.getOrElse(
@@ -199,6 +199,7 @@ class SequencedEventTestFixture(
       MessageId.tryCreate("test").some,
       Batch(List(envelope), testedProtocolVersion),
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
     for {

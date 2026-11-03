@@ -15,7 +15,10 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   ContractInfo,
   TopologyTransactionEffective,
 }
-import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
+import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerKnownPartiesPage,
+  IndexerPartyDetails,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -213,9 +216,11 @@ private class JdbcLedgerWriteDao(
       fromExcl: Option[Party],
       filterParty: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]] = readDao.listKnownParties(fromExcl, filterParty, maxResults)
+  ): Future[IndexerKnownPartiesPage] =
+    readDao.listKnownParties(fromExcl, filterParty, maxResults, validAtEventSeqId)
 
   /** Prunes the events and command completions tables.
     *

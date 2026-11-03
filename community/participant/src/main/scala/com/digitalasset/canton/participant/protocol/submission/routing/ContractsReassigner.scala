@@ -164,8 +164,8 @@ private[routing] class ContractsReassigner(
           contractIds,
           targetSynchronizerId,
           sourceTopology,
-          overrideSourceValidationPkgIds = Map.empty,
-          overrideTargetValidationPkgIds = Map.empty,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
           accounting,
         )
         .mapK(FutureUnlessShutdown.outcomeK)

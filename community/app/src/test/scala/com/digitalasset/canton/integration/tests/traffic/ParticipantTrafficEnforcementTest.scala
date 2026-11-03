@@ -49,6 +49,9 @@ import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCredit
 import com.digitalasset.canton.tea.projection.{ActAsCategory, UnchargedReason}
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
+  ListAccountsResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   PruneRequest,
   PruneResponse,
   UpdateAccountRequest,
@@ -69,6 +72,7 @@ import java.net.{URI, URLEncoder}
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.util.UUID
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 import scala.jdk.DurationConverters.*
@@ -239,6 +243,13 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
 final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficEnforcementTest {
   registerPlugin(new UsePostgres(loggerFactory))
 
+  // The tests also call the deprecated PruneEvents endpoints, which are disabled by default.
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
+    ConfigTransforms.updateParticipantConfig("participant1")(
+      _.focus(_.features.deprecated.enableDeprecatedEndpoints37).replace(true)
+    )
+  )
+
   "Participant" when {
     "traffic enforcement is enabled" should {
       "serve traffic service operations" in { implicit env =>
@@ -270,8 +281,8 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         balance(participant1, alice) shouldBe (aliceBalance - deductAmount)
 
         // Prune the first event
-        val rsp = participant1.ledger_api.traffic
-          .prune(startTime)
+        val rsp = (participant1.ledger_api.traffic
+          .prune_events(startTime): @nowarn("cat=deprecation"))
 
         rsp.prunedEventCount shouldBe 1
 
@@ -279,6 +290,59 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           .prune(startTime)
 
         rsp2.prunedEventCount shouldBe 0
+      }
+
+      "list accounts, filtered by prefix and paged" in { implicit env =>
+        import env.*
+
+        val traffic = participant1.ledger_api.traffic
+        // Distinct prefix for uniquely scoping the accounts in this test
+        val prefix = "ac/"
+        val accounts = Seq(s"${prefix}bc" -> 1L, s"${prefix}cc" -> 2L, s"${prefix}dc" -> 3L)
+
+        // Credit in reverse order, to check the listing is ordered by account ID
+        accounts.reverse.foreach { case (accountId, credit) =>
+          traffic.update_account(accountId, balanceDelta = Some(credit))
+        }
+
+        // Insert other account without the prefix
+        traffic.update_account("list-accounts-other", balanceDelta = Some(1L))
+
+        def listed(response: ListAccountsResponse): Seq[(String, Long)] =
+          response.accounts.map(account => account.accountId -> account.balance)
+
+        val allPrefixed = traffic.list_accounts(accountIdPrefix = Some(prefix))
+        listed(allPrefixed) shouldBe accounts
+        allPrefixed.nextPageToken shouldBe None
+
+        val firstPage = traffic.list_accounts(accountIdPrefix = Some(prefix), pageSize = Some(2))
+        listed(firstPage) shouldBe accounts.take(2)
+        firstPage.nextPageToken should not be empty
+
+        val lastPage = traffic.list_accounts(
+          accountIdPrefix = Some(prefix),
+          pageSize = Some(2),
+          pageToken = firstPage.nextPageToken,
+        )
+        listed(lastPage) shouldBe accounts.drop(2)
+        lastPage.nextPageToken shouldBe None
+
+        def all(pageToken: Option[String], pageSize: Option[Int]): Seq[GetAccountResponse] = {
+          val responsePage = traffic.list_accounts(pageSize = pageSize, pageToken = pageToken)
+          responsePage.nextPageToken match {
+            case Some(nextPageToken) =>
+              responsePage.accounts ++ all(Some(nextPageToken), pageSize)
+            case None => responsePage.accounts
+          }
+        }
+
+        // Check fetching in different chunk sizes yield same results
+        val fetchedInSingletonChunks = all(pageToken = None, pageSize = Some(1))
+        fetchedInSingletonChunks.size should be > 3
+        fetchedInSingletonChunks should contain theSameElementsInOrderAs all(
+          pageToken = None,
+          pageSize = None,
+        )
       }
 
       "reject a prune inside the minimum pruning retention, with its own error code" in {
@@ -459,6 +523,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         val accountUrl = s"http://localhost:$port/v2/traffic/accounts/$encodedAccount"
         val accountsUrl = s"http://localhost:$port/v2/traffic/accounts"
         val pruneUrl = s"http://localhost:$port/v2/traffic/prune"
+        val pruneEventsUrl = s"http://localhost:$port/v2/traffic/events/prune"
 
         def balance(): Long =
           decode[GetAccountResponse](httpGet(accountUrl)).value.balance
@@ -474,12 +539,27 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           ).value.response.value.balance
         }
 
+        def list(prefix: String, pageSize: Int): ListAccountsResponse = {
+          val query =
+            s"accountIdPrefix=${URLEncoder.encode(prefix, StandardCharsets.UTF_8)}&pageSize=$pageSize"
+          decode[ListAccountsResponse](httpGet(s"$accountsUrl?$query")).value
+        }
+
         def prune(beforeOrAt: CantonTimestamp): Int = {
           val requestBody = PruneRequest(
             beforeOrAt = Some(beforeOrAt.toProtoTimestamp)
           ).asJson.noSpaces
           decode[PruneResponse](
             httpPost(pruneUrl, requestBody)
+          ).value.prunedEventCount
+        }
+
+        def pruneEvents(beforeOrAt: CantonTimestamp): Int = {
+          val requestBody = PruneEventsRequest(
+            beforeOrAt = Some(beforeOrAt.toProtoTimestamp)
+          ).asJson.noSpaces
+          decode[PruneEventsResponse](
+            httpPost(pruneEventsUrl, requestBody)
           ).value.prunedEventCount
         }
 
@@ -499,7 +579,13 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         update(-deductAmount) shouldBe (credit - deductAmount)
         balance() shouldBe (credit - deductAmount)
 
-        prune(clock.now) shouldBe 2
+        // List accounts filtered by prefix
+        val listed = list(accountId, pageSize = 10)
+        listed.accounts.map(a => a.accountId -> a.balance) shouldBe
+          Seq(accountId -> (credit - deductAmount))
+        listed.nextPageToken shouldBe None
+
+        pruneEvents(clock.now) shouldBe 2
       }
 
       "traffic enforcement does not apply for multi-act-as submissions" in { implicit env =>

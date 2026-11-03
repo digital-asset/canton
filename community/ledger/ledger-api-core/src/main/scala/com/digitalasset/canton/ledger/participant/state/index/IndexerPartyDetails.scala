@@ -16,3 +16,15 @@ final case class IndexerPartyDetails(
     party: Ref.Party,
     isLocal: Boolean,
 )
+
+/** A page of known parties.
+  *
+  * @param parties
+  *   The parties on the page.
+  * @param validAtEventSeqId
+  *   The event sequence ID at which the page was computed.
+  */
+final case class IndexerKnownPartiesPage(
+    parties: List[IndexerPartyDetails],
+    validAtEventSeqId: Long,
+)

@@ -70,7 +70,8 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
     with NamedLogging {
 
   private val lock = new Mutex()
-  private val balances = scala.collection.mutable.Map.empty[BalanceKey, AccountState]
+  private val balances =
+    scala.collection.mutable.SortedMap.empty[BalanceKey, AccountState](Ordering.by(_.accountId))
   // Mapping Account -> Map[EventKey -> Event]
   // use a VectorMap to maintain insertion order
   private val events =
@@ -105,6 +106,24 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]] =
     EitherT.rightT(balances.get(BalanceKey(accountId)))
+
+  override def listBalances(
+      accountIdPrefix: Option[String],
+      afterExclusive: Option[AccountId],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Seq[AccountState]] =
+    EitherT.rightT(lock.exclusive {
+      balances.view
+        .filter { case (BalanceKey(accountId), _) =>
+          accountIdPrefix.forall(accountId.unwrap.startsWith) &&
+          afterExclusive.forall(after => accountId.unwrap > after.unwrap)
+        }
+        .values
+        .take(limit)
+        .toSeq
+    })
 
   override def persistTrafficDelta(
       accountId: AccountId,

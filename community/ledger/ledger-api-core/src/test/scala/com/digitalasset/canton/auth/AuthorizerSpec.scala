@@ -42,6 +42,10 @@ class AuthorizerSpec
     RequiredClaim.DebitTrafficFrom[String]("party", acceptExecuteRights = true)
   private val debitIgnoringExecute =
     RequiredClaim.DebitTrafficFrom[String]("party", acceptExecuteRights = false)
+  private val listAcceptingExecute =
+    RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = true)
+  private val listIgnoringExecute =
+    RequiredClaim.ListTrafficAccounts[String](acceptExecuteRights = false)
 
   private def withClaims(claims: Claim*): ClaimSet.Claims =
     ClaimSet.Claims.Empty.copy(claims = claims)
@@ -270,6 +274,41 @@ class AuthorizerSpec
     ) -> expectedPermissionDenied,
   ).foreach { case (claims, expected) =>
     generateAuthorizationTest(TestDefinition(debitIgnoringExecute, claims, expected))
+  }
+
+  behavior of s"$className.authorize for RequiredClaim.ListTrafficAccounts accepting execute rights"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
+    withClaims(ClaimExecuteAsAnyParty) -> ExpectedSuccess,
+    withClaims(ClaimActAsAnyParty) -> ExpectedSuccess,
+    ClaimSet.Claims.Wildcard -> ExpectedSuccess,
+    withClaims(
+      ClaimDebitTrafficFromAccount(account),
+      ClaimExecuteAsParty(party),
+      ClaimActAsParty(party),
+      ClaimReadAsAnyParty,
+      ClaimPublic,
+    ) -> expectedPermissionDenied,
+    ClaimSet.Claims.Empty -> expectedPermissionDenied,
+    ClaimSet.Claims.Admin -> expectedPermissionDenied,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(listAcceptingExecute, claims, expected))
+  }
+
+  behavior of s"$className.authorize for RequiredClaim.ListTrafficAccounts ignoring execute rights"
+
+  List[(ClaimSet.Claims, ExpectedResult)](
+    withClaims(ClaimDebitTrafficFromAnyAccount) -> ExpectedSuccess,
+    withClaims(
+      ClaimDebitTrafficFromAccount(account),
+      ClaimActAsParty(party),
+      ClaimExecuteAsParty(party),
+      ClaimActAsAnyParty,
+      ClaimExecuteAsAnyParty,
+    ) -> expectedPermissionDenied,
+  ).foreach { case (claims, expected) =>
+    generateAuthorizationTest(TestDefinition(listIgnoringExecute, claims, expected))
   }
 
   behavior of s"$className.authorize for RequiredClaim.ReadAsAnyParty"

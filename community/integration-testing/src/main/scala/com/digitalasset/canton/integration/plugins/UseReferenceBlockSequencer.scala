@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.plugins
 import cats.syntax.parallel.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -25,15 +24,12 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
   ReferenceSequencerDriver,
   ReferenceSequencerDriverFactory,
 }
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.FutureInstances.parallelFuture
-import com.digitalasset.canton.{TempDirectory, TempFile}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import monocle.macros.syntax.lens.*
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{Await, ExecutionContext}
 import scala.reflect.ClassTag
 
 /** @param sequencerGroups
@@ -225,78 +221,6 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
         config.parameters.timeouts.processing.io.duration,
       )
     }
-
-  def dumpDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false): Future[Unit] =
-    dumpDatabases(dbNames, tempDirectory, forceLocal)
-
-  private def dumpDatabases(
-      names: Seq[String],
-      tempDirectory: TempDirectory,
-      forceLocal: Boolean,
-  ): Future[Unit] =
-    pgPlugin match {
-      case Some(postgresPlugin) =>
-        val pgDumpRestore = PostgresDumpRestore(postgresPlugin, forceLocal)
-        names.parTraverse_(db => pgDumpRestore.saveDump(db, dumpTempFile(tempDirectory, db)))
-      case _ =>
-        warnNoPlugin(functionFullName)
-    }
-
-  def dumpAllDatabases(
-      config: CantonConfig,
-      tempDirectory: TempDirectory,
-      forceLocal: Boolean = false,
-  ): Future[Unit] =
-    forAllDatabaseDumps(functionFullName, config)(dumpDatabases(_, tempDirectory, forceLocal))
-
-  def restoreDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] =
-    restoreDatabases(dbNames, tempDirectory, forceLocal)
-
-  private def restoreDatabases(
-      names: Seq[String],
-      tempDirectory: TempDirectory,
-      forceLocal: Boolean,
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    pgPlugin match {
-      case Some(postgresPlugin) =>
-        val pgDumpRestore = PostgresDumpRestore(postgresPlugin, forceLocal)
-        names.parTraverse_(db =>
-          pgDumpRestore.restoreDump(db, dumpTempFile(tempDirectory, db).path)
-        )
-      case _ =>
-        warnNoPlugin(functionFullName)
-    }
-
-  def restoreAllDatabases(
-      config: CantonConfig,
-      tempDirectory: TempDirectory,
-      forceLocal: Boolean = false,
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    forAllDatabaseDumps(functionFullName, config)(restoreDatabases(_, tempDirectory, forceLocal))
-
-  private def forAllDatabaseDumps(functionName: String, config: CantonConfig)(
-      op: Seq[String] => Future[Unit]
-  ): Future[Unit] =
-    pgPlugin match {
-      case Some(postgresPlugin) =>
-        val nodeDatabases =
-          config.nodeNamesInStartupOrder.map(name => name.unwrap)
-        op(dbNames.forgetNE ++ nodeDatabases)
-      case _ =>
-        warnNoPlugin(functionName)
-    }
-
-  private def dumpTempFile(tempDirectory: TempDirectory, dbName: String): TempFile =
-    tempDirectory.toTempFile(s"pg-dump-$dbName.tar")
-
-  private def warnNoPlugin(functionName: String): Future[Unit] = {
-    logger.underlying.warn(
-      s"`$functionName` was called on a test without UsePostgres plugin, which is not supported!"
-    )
-    Future.unit
-  }
 }
 
 object UseReferenceBlockSequencer {

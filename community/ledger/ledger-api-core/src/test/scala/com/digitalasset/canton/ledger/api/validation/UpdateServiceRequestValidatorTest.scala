@@ -18,6 +18,7 @@ import com.daml.ledger.api.v2.update_service.{
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.platform.v1.page_tokens.UpdatesPageToken
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashBuilder, HashPurpose}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
@@ -34,6 +35,7 @@ import org.scalatest.wordspec.AnyWordSpec
 class UpdateServiceRequestValidatorTest
     extends AnyWordSpec
     with ValidatorTestUtils
+    with SizeLimitTestUtils
     with MockitoSugar {
   private implicit val noLogging: ErrorLoggingContext = NoLogging
 
@@ -263,32 +265,24 @@ class UpdateServiceRequestValidatorTest
       }
 
       "return the correct error without filters in the event format of transactions" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validate(
             txReq.update(
               _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
             ),
             ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
-          metadata = Map.empty,
+          )
         )
       }
 
       "return the correct error without filters in the event format of reassignments" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validate(
             reassignmentsReq.update(
               _.updateFormat.includeReassignments.filtersByParty := Map.empty
             ),
             ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
-          metadata = Map.empty,
+          )
         )
       }
 
@@ -688,6 +682,45 @@ class UpdateServiceRequestValidatorTest
 
     }
 
+    "validating the size limits of the update format" should {
+      "reject event formats exceeding the total filters limit across transactions and reassignments" in {
+        val maxTotalFilters = 1
+        // a template wildcard per event format: each event format is within the limit on its own
+        val eventFormat = EventFormat(Map(party -> Filters(Nil)), None, verbose = false)
+        requestMustFailWith(
+          request = UpdateServiceRequestValidator.validate(
+            GetUpdatesRequest(
+              beginExclusive = 0L,
+              endInclusive = Some(offsetLong),
+              updateFormat = Some(
+                UpdateFormat(
+                  includeTransactions = Some(
+                    TransactionFormat(
+                      Some(eventFormat),
+                      TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+                    )
+                  ),
+                  includeReassignments = Some(eventFormat),
+                  includeTopologyEvents = None,
+                  includeTransactionsAndReassignments = None,
+                )
+              ),
+              descendingOrder = false,
+            ),
+            ledgerEnd,
+          )(
+            noLogging,
+            sizeLimitsConfig.copy(eventFormatTotalFiltersSizeLimit =
+              PositiveInt.tryCreate(maxTotalFilters)
+            ),
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            totalFiltersLimitExceeded(actual = maxTotalFilters + 1, limit = maxTotalFilters),
+        )
+      }
+    }
+
     "validating transaction by id requests" should {
 
       "fail on empty updateId" in {
@@ -710,6 +743,16 @@ class UpdateServiceRequestValidatorTest
           description =
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: update_format",
           metadata = Map.empty,
+        )
+      }
+
+      "return the correct error without filters in the event format of transactions" in {
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validateUpdateById(
+            updateByIdReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
+            )
+          )
         )
       }
     }
@@ -749,6 +792,16 @@ class UpdateServiceRequestValidatorTest
           description =
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: update_format",
           metadata = Map.empty,
+        )
+      }
+
+      "return the correct error without filters in the event format of transactions" in {
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validateUpdateByOffset(
+            txByOffsetReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
+            )
+          )
         )
       }
 
@@ -858,6 +911,24 @@ class UpdateServiceRequestValidatorTest
       )
 
       result.isRight shouldBe true
+    }
+
+    "return the correct error without filters in the event format of transactions" in {
+      mustFailWithoutFilters(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = GetUpdatesPageRequest(
+            beginOffsetExclusive = None,
+            endOffsetInclusive = None,
+            maxPageSize = None,
+            updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+            descendingOrder = false,
+            pageToken = None,
+          ).update(_.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty),
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      )
     }
 
     "reject request with pager token that cannot be parsed" in {

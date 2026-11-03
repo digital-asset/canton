@@ -117,6 +117,8 @@ Currently, the following events make use of this mechanism:
 - A penalty of 1 is given to a sequencer when it refuses a submission request with `SEQUENCER_OVERLOADED`.
 
 ### Minor Improvements
+- The traffic enforcement endpoints deprecated in 3.7 (`TrafficService.PruneEvents`, the JSON endpoint `POST /v2/traffic/events/prune` and the console command `ledger_api.traffic.prune_events`) are now disabled by default, and calls fail with `DEPRECATED_API_DISABLED`. Use `TrafficService.Prune` instead.
+  Setting `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = true` re-enables them until their removal in 3.9.
 - Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
 - Deprecated the `canton.participants.<participant>.parameters.ledger-api-server.indexer.batching-parallelism` configuration setting, which is no longer supported.
 - ConvertRecordTimeToOffset API call was not detecting situation where the requested record time at which there were multiple updates and some of them were already pruned was returning earliest not pruned offset, now the request is rejected with `RECORD_TIME_NOT_FOUND` error code.
@@ -152,11 +154,16 @@ Currently, the following events make use of this mechanism:
 - The JSON Ledger API HTTPS server now uses the `PKIX` trust manager and key manager instead of the legacy `SunX509` ones.
   `PKIX` performs full RFC 5280 certification path validation, so certificate chains that were previously accepted
   but violate constraints such as the name constraints of an intermediate CA are now rejected.
-- Bump da-base-image to 1.0.18
 - The `canton-participant`, `canton-mediator`, and `canton-sequencer` Docker images now enable the HTTP readiness endpoint (`/health/ready` on port 5071) by default.
 - The `HEALTHCHECK` of the `canton-participant` Docker image now uses the HTTP readiness endpoint (`/health/ready` on port 5071) instead of the gRPC health service.
   Readiness is now only reported once database migrations and storage initialization have completed, so after an upgrade with long-running migrations the container stays unhealthy for longer.
   Tooling that waits for the container to become healthy (e.g., `docker compose up --wait` or `condition: service_healthy`) may need longer timeouts.
+- Subsequent `com.daml.ledger.api.v2.admin.PartyManagementService.ListKnownParties` pages return the topology state seen when the first page was requested.
+  Paging tokens acquired before the upgrade will be rejected. Page tokens issued by another participant will also be rejected.
+- Previously `canton.remote-participants.<remoteParticipant>.token` was used for both ledger API and admin API commands in the Canton Console.
+  Now, an optional `canton.remote-participants.<remoteParticipant>.admin-api-token` can be specified to use a different token for admin API
+  commands in case that admin API auth differs from ledger API auth.
+- When reassigning if no validation package override is provided pick the highest commonly vetted package version.
 
 ### Preview Features
 - preview feature

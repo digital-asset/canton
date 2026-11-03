@@ -237,8 +237,8 @@ final class CommandsValidator(
                 sourceSynchronizerId = Source(sourceSynchronizerId),
                 targetSynchronizerId = Target(targetSynchronizerId),
                 contractId = cid,
-                overrideSourceValidationPkgId = overrideSourceValidationPkgId,
-                overrideTargetValidationPkgId = overrideTargetValidationPkgId,
+                overrideSourceValidationPkgId = Source(overrideSourceValidationPkgId),
+                overrideTargetValidationPkgId = Target(overrideTargetValidationPkgId),
               )
             )
         }

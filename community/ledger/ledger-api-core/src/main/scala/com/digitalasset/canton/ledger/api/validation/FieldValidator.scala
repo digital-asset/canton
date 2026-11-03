@@ -27,7 +27,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.validation.ProtoValidation.{validateLength, validateSeqLength}
+import com.digitalasset.canton.validation.ProtoValidation.validateLength
 import com.digitalasset.canton.validation.ValidationParam
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
@@ -135,14 +135,14 @@ object FieldValidator {
     }
 
   def validateCardinality(
-      values: Seq[Any],
+      values: Iterable[?],
       fieldName: String,
       limit: PositiveInt,
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Unit] =
-    validateSeqLength(
-      seq = values,
+    validateLength(
+      iterable = values,
       field = fieldName,
       pvv = ProtocolVersionValidation.AlwaysValidation,
       maxLength = ValidationParam(ProtocolVersion.minimum -> limit),

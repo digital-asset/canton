@@ -61,6 +61,10 @@ object AuthorizationError {
     override val reason = s"Claims do not authorize to debit account '$accountId'"
   }
 
+  case object MissingListAccountsClaims extends AuthorizationError {
+    override val reason = "Claims do not authorize listing traffic accounts"
+  }
+
   final object MissingExecuteAsAnyPartyClaim extends AuthorizationError {
     override val reason =
       s"Claims do not authorize to execute as any party (super-executor wildcard)"

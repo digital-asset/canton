@@ -188,7 +188,7 @@ object Errors {
       details: Option[String],
   ): Nothing =
     throw new IllegalStateException(
-      s"Cannot get versioning entry of instance of $name with $versionKind $version" + details.fold(
+      s"Cannot get versioning entry for instance $name with $versionKind $version" + details.fold(
         ""
       )(str => s": $str")
     )

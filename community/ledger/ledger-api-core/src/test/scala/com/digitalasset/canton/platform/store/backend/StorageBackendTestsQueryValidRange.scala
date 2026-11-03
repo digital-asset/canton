@@ -27,6 +27,108 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
 
   implicit val ec: ExecutionContext = directExecutionContext
 
+  behavior of "QueryValidRange.withEventSeqIdNotAfterLedgerEnd"
+
+  it should "allow event sequential ID in the valid range" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(updateLedgerEnd(offset(10), 10L))
+    QueryValidRangeImpl(
+      ledgerEndCache = backend.ledgerEndCache,
+      pruningOffsetService = backend.pruningOffsetService,
+      loggerFactory = this.loggerFactory,
+    ).withEventSeqIdNotAfterLedgerEnd(
+      eventSeqId = 5L,
+      errorLedgerEnd = _ => "",
+    )(Future.unit)
+      .futureValue
+  }
+
+  it should "allow event sequential ID in the valid range lower boundary even if pruned" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(updateLedgerEnd(offset(10), 10L))
+    when(backend.pruningOffsetService.pruningOffset(any[TraceContext]))
+      .thenReturn(Future.successful(Some(offset(3))))
+    QueryValidRangeImpl(
+      ledgerEndCache = backend.ledgerEndCache,
+      pruningOffsetService = backend.pruningOffsetService,
+      loggerFactory = this.loggerFactory,
+    ).withEventSeqIdNotAfterLedgerEnd(
+      eventSeqId = 0L,
+      errorLedgerEnd = _ => "",
+    )(Future.unit)
+      .futureValue
+  }
+
+  it should "allow event sequential ID in the valid range higher boundary" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(updateLedgerEnd(offset(10), 10L))
+    QueryValidRangeImpl(
+      ledgerEndCache = backend.ledgerEndCache,
+      pruningOffsetService = backend.pruningOffsetService,
+      loggerFactory = this.loggerFactory,
+    ).withEventSeqIdNotAfterLedgerEnd(
+      eventSeqId = 10L,
+      errorLedgerEnd = _ => "",
+    )(Future.unit)
+      .futureValue
+  }
+
+  it should "allow event sequential ID zero when ledger end is none" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    QueryValidRangeImpl(
+      ledgerEndCache = backend.ledgerEndCache,
+      pruningOffsetService = backend.pruningOffsetService,
+      loggerFactory = this.loggerFactory,
+    ).withEventSeqIdNotAfterLedgerEnd(
+      eventSeqId = 0L,
+      errorLedgerEnd = _ => "",
+    )(Future.unit)
+      .futureValue
+  }
+
+  it should "deny in-valid event sequential ID: later than ledger end when ledger is not empty" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    executeSql(updateLedgerEnd(offset(10), 10L))
+    loggerFactory
+      .assertThrowsAndLogsSuppressingAsync[StatusRuntimeException](
+        SuppressionRule.Level(Level.INFO)
+      )(
+        within = QueryValidRangeImpl(
+          ledgerEndCache = backend.ledgerEndCache,
+          pruningOffsetService = backend.pruningOffsetService,
+          loggerFactory = this.loggerFactory,
+        ).withEventSeqIdNotAfterLedgerEnd(
+          eventSeqId = 11L,
+          errorLedgerEnd = ledgerEndEventSeqId => s"ledger-end issue: $ledgerEndEventSeqId",
+        )(Future.unit),
+        assertions = _.infoMessage should include(
+          "PARTICIPANT_DATA_ACCESSED_AFTER_LEDGER_END(9,0): ledger-end issue: 10"
+        ),
+      )
+      .futureValue
+  }
+
+  it should "deny in-valid event sequential ID: later than ledger end when ledger end is none" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams))
+    loggerFactory
+      .assertThrowsAndLogsSuppressingAsync[StatusRuntimeException](
+        SuppressionRule.Level(Level.INFO)
+      )(
+        within = QueryValidRangeImpl(
+          ledgerEndCache = backend.ledgerEndCache,
+          pruningOffsetService = backend.pruningOffsetService,
+          loggerFactory = this.loggerFactory,
+        ).withEventSeqIdNotAfterLedgerEnd(
+          eventSeqId = 1L,
+          errorLedgerEnd = ledgerEndEventSeqId => s"ledger-end issue: $ledgerEndEventSeqId",
+        )(Future.unit),
+        assertions = _.infoMessage should include(
+          "PARTICIPANT_DATA_ACCESSED_AFTER_LEDGER_END(9,0): ledger-end issue: 0"
+        ),
+      )
+      .futureValue
+  }
+
   behavior of "QueryValidRange.withRangeNotPruned"
 
   it should "allow valid range if no pruning and before ledger end" in {

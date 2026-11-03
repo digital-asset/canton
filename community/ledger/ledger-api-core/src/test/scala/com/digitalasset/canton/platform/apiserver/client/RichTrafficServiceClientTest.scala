@@ -16,6 +16,10 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  ListAccountsRequest,
+  ListAccountsResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   PruneRequest,
   PruneResponse,
   RegisterSubmissionRequest,
@@ -55,6 +59,12 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
 
     override def prune(request: PruneRequest): Future[PruneResponse] =
       Future.successful(PruneResponse(0, 0, 0))
+
+    override def listAccounts(request: ListAccountsRequest): Future[ListAccountsResponse] =
+      Future.successful(ListAccountsResponse(Seq.empty, None))
+
+    override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
+      Future.successful(PruneEventsResponse(0))
   }
 
   private val conflictingSubmissionId = "conflicting"

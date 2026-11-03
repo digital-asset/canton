@@ -226,7 +226,6 @@ private[execution] class TapsCommandExecutionFactory(
             packageMetadataSnapshot = packageMetadataSnapshot,
             packageFilter = packageFilter,
             requirements = partyPackageRequirements,
-            synchronizerProtocolVersion = syncId.protocolVersion,
           )
           syncId -> applyRootPackageNamesRestriction(candidates, rootLevelPackageNames)
         }

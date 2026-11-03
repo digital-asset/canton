@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.util.MaxBytesToDecompress
-import com.digitalasset.canton.version.ProtocolVersion
 
 /** Hands out the [[DecompressionBudget]]s for one batch: call [[nextEnvelopeBudget]] once per
   * envelope.
@@ -52,14 +51,7 @@ object DecompressionPolicy {
     }
   }
 
-  def forProtocolVersion(
-      protocolVersion: ProtocolVersion,
-      limit: MaxBytesToDecompress,
-  ): DecompressionPolicy =
-    if (protocolVersion > ProtocolVersion.v35) Cumulative(limit) else PerEnvelope(limit)
-
-  /** Still used in a few places on protocol version 35. Must not be used from protocol version 36
-    * on: derive the policy from the topology snapshot via [[forProtocolVersion]] instead.
+  /** Must not be used from protocol version 36 on: derive the policy from the topology snapshot
     */
   val HardcodedDefault: DecompressionPolicy = PerEnvelope(MaxBytesToDecompress.HardcodedDefault)
 

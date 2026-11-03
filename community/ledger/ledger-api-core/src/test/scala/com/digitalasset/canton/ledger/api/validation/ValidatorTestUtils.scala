@@ -96,6 +96,15 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
       retryDelay: Seq[Duration] = Seq.empty,
   ): Assertion =
     inside(request)(isError(code, description, metadata, retryDelay))
+
+  protected def mustFailWithoutFilters(request: Either[StatusRuntimeException, ?]): Assertion =
+    requestMustFailWith(
+      request = request,
+      code = Code.INVALID_ARGUMENT,
+      description =
+        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
+    )
+
   protected def isError(
       expectedCode: Code,
       expectedDescription: String,
@@ -162,7 +171,11 @@ trait SizeLimitTestUtils extends AnyWordSpecLike with ValidatorTestUtils {
 
   protected def cardinalityLimitExceeded(field: String, actual: Int, limit: Int): String =
     s"FIELD_CARDINALITY_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
-      s"repeated field has $actual elements, exceeding the maximum of $limit"
+      s"repeated or map field has $actual elements, exceeding the maximum of $limit"
+
+  protected def totalFiltersLimitExceeded(actual: Int, limit: Int): String =
+    s"EVENT_FORMAT_FILTERS_LIMIT_EXCEEDED(8,0): The total number of decomposed filters in the event format(s) ($actual) exceeds the maximum allowed number of $limit " +
+      s"(a template or wildcard filter counts as 1, an interface filter as ${FormatValidator.decomposedInterfaceFilterSize})"
 
   protected def sizeLimitExceeded(field: String, actual: Int, limit: Int): String =
     s"FIELD_SIZE_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +

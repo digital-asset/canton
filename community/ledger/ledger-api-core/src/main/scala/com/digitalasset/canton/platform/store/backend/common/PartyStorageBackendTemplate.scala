@@ -46,73 +46,76 @@ class PartyStorageBackendTemplate(
   private def queryParties(
       partyFilter: ComposableQuery.CompositeSql,
       limitClause: ComposableQuery.CompositeSql,
+      validAtEventSeqId: Long,
       connection: Connection,
-  ): Vector[IndexerPartyDetails] =
-    ledgerEndCache() match {
-      case None => Vector.empty
-      case Some(ledgerEnd) =>
-        // -1 is never a valid interned id, so a not-yet-interned participant matches no rows.
-        val participantInternedId =
-          stringInterning.participantId.tryInternalize(participantId).getOrElse(-1)
-        val rows =
-          SQL"""
-            SELECT
-              page.party,
-              CASE
-                WHEN EXISTS (
-                  SELECT 1
-                  FROM lapi_events_party_to_participant latest
-                  WHERE latest.party_id = page.party_id
-                    AND latest.participant_id = $participantInternedId
-                    AND latest.event_sequential_id <= ${ledgerEnd.lastEventSeqId}
-                    AND latest.participant_authorization_event <> $revokedAuthorizationEvent
-                    AND latest.event_sequential_id = (
-                      SELECT MAX(event.event_sequential_id)
-                      FROM lapi_events_party_to_participant event
-                      WHERE event.party_id = latest.party_id
-                        AND event.participant_id = latest.participant_id
-                        AND event.synchronizer_id = latest.synchronizer_id
-                        AND event.event_sequential_id <= ${ledgerEnd.lastEventSeqId}
-                    )
+  ): Vector[IndexerPartyDetails] = {
+    val eventSeqIdBound = validAtEventSeqId
+    // -1 is never a valid interned id, so a not-yet-interned participant matches no rows.
+    val participantInternedId =
+      stringInterning.participantId.tryInternalize(participantId).getOrElse(-1)
+    val rows =
+      SQL"""
+        SELECT
+          page.party,
+          CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM lapi_events_party_to_participant latest
+              WHERE latest.party_id = page.party_id
+                AND latest.participant_id = $participantInternedId
+                AND latest.event_sequential_id <= $eventSeqIdBound
+                AND latest.participant_authorization_event <> $revokedAuthorizationEvent
+                AND latest.event_sequential_id = (
+                  SELECT MAX(event.event_sequential_id)
+                  FROM lapi_events_party_to_participant event
+                  WHERE event.party_id = latest.party_id
+                    AND event.participant_id = latest.participant_id
+                    AND event.synchronizer_id = latest.synchronizer_id
+                    AND event.event_sequential_id <= $eventSeqIdBound
                 )
-                THEN 1
-                ELSE 0
-              END is_local
-            FROM (
-              SELECT DISTINCT ON (party)
-              party, party_id
-              FROM lapi_events_party_to_participant
-              WHERE event_sequential_id <= ${ledgerEnd.lastEventSeqId}
-                $partyFilter
-              ORDER BY party
-              $limitClause
-            ) page
-            ORDER BY page.party
-          """.asVectorOf(partyRowParser)(connection)
+            )
+            THEN 1
+            ELSE 0
+          END is_local
+        FROM (
+          SELECT DISTINCT ON (party)
+          party, party_id
+          FROM lapi_events_party_to_participant
+          WHERE event_sequential_id <= $eventSeqIdBound
+            $partyFilter
+          ORDER BY party
+          $limitClause
+        ) page
+        ORDER BY page.party
+      """.asVectorOf(partyRowParser)(connection)
 
-        rows.map { case (party, isLocal) =>
-          IndexerPartyDetails(
-            party = Party.assertFromString(party),
-            isLocal = isLocal,
-          )
-        }
+    rows.map { case (party, isLocal) =>
+      IndexerPartyDetails(
+        party = Party.assertFromString(party),
+        isLocal = isLocal,
+      )
     }
+  }
 
   override def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails] = {
     val requestedParties = parties.view.map(p => (p: String)).toSet
-    if (requestedParties.isEmpty) Nil
-    else
-      queryParties(
-        partyFilter = cSQL"AND party IN ($requestedParties)",
-        limitClause = cSQL"",
-        connection = connection,
-      ).toList
+    ledgerEndCache() match {
+      case Some(ledgerEnd) if requestedParties.nonEmpty =>
+        queryParties(
+          partyFilter = cSQL"AND party IN ($requestedParties)",
+          limitClause = cSQL"",
+          validAtEventSeqId = ledgerEnd.lastEventSeqId,
+          connection = connection,
+        ).toList
+      case _ => Nil
+    }
   }
 
   override def knownParties(
       fromExcl: Option[Party],
       filterString: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Long,
   )(
       connection: Connection
   ): List[IndexerPartyDetails] = {
@@ -130,6 +133,7 @@ class PartyStorageBackendTemplate(
     queryParties(
       partyFilter = cSQL"$fromExclFilter $prefixFilter",
       limitClause = QueryStrategy.limitClause(Some(maxResults)),
+      validAtEventSeqId = validAtEventSeqId,
       connection = connection,
     ).toList
   }

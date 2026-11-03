@@ -16,6 +16,8 @@ import java.time.{Duration, Instant}
 
 class SubmitAndWaitRequestValidator(
     commandsValidator: CommandsValidator
+)(implicit
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig
 ) {
 
   def validate(

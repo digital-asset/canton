@@ -28,17 +28,17 @@ import com.google.protobuf.ByteString
 
 /** Used to test ordering and sequencing on the LSU successor, before upgrade time.
   */
-final case class LsuSequencingTestMessage(
+final case class LsuSequencingTestMessage private (
     content: LsuSequencingTestMessageContent,
     signature: Signature,
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      LsuSequencingTestMessage.type
+    ]
 ) extends UnsignedProtocolMessage
     with HasProtocolVersionedWrapper[LsuSequencingTestMessage] {
 
   override val psid: PhysicalSynchronizerId = content.psid
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    LsuSequencingTestMessage.type
-  ] = LsuSequencingTestMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   @transient override protected lazy val companionObj: LsuSequencingTestMessage.type =
     LsuSequencingTestMessage
@@ -60,6 +60,15 @@ object LsuSequencingTestMessage extends VersioningCompanion[LsuSequencingTestMes
       case m: LsuSequencingTestMessage => Some(m)
       case _ => None
     }
+
+  def apply(
+      content: LsuSequencingTestMessageContent,
+      signature: Signature,
+      protocolVersion: ProtocolVersion,
+  ): LsuSequencingTestMessage =
+    new LsuSequencingTestMessage(content, signature)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v36)(
@@ -86,8 +95,8 @@ object LsuSequencingTestMessage extends VersioningCompanion[LsuSequencingTestMes
         "signature",
         signatureP,
       )
-
-    } yield LsuSequencingTestMessage(content, signature)
+      rpv <- LsuSequencingTestMessage.protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield LsuSequencingTestMessage(content, signature)(rpv)
   }
 
   def verifySignature(verifier: SyncCryptoVerifier, snapshot: TopologySnapshot)(
@@ -115,13 +124,12 @@ object LsuSequencingTestMessage extends VersioningCompanion[LsuSequencingTestMes
 final case class LsuSequencingTestMessageContent private (
     psid: PhysicalSynchronizerId,
     sender: Member,
-)(override val deserializedFrom: Option[ByteString])
-    extends HasProtocolVersionedWrapper[LsuSequencingTestMessageContent]
+)(override val deserializedFrom: Option[ByteString])(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      LsuSequencingTestMessageContent.type
+    ]
+) extends HasProtocolVersionedWrapper[LsuSequencingTestMessageContent]
     with ProtocolVersionedMemoizedEvidence {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    LsuSequencingTestMessageContent.type
-  ] = LsuSequencingTestMessageContent.protocolVersionRepresentativeFor(psid.protocolVersion)
 
   @transient override protected lazy val companionObj: LsuSequencingTestMessageContent.type =
     LsuSequencingTestMessageContent
@@ -146,8 +154,14 @@ object LsuSequencingTestMessageContent
     )
   )
 
-  def create(psid: PhysicalSynchronizerId, sender: Member): LsuSequencingTestMessageContent =
-    LsuSequencingTestMessageContent(psid, sender)(None)
+  def create(
+      psid: PhysicalSynchronizerId,
+      sender: Member,
+      protocolVersion: ProtocolVersion,
+  ): LsuSequencingTestMessageContent =
+    LsuSequencingTestMessageContent(psid, sender)(None)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   private[messages] def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -167,6 +181,7 @@ object LsuSequencingTestMessageContent
       sender <- ProtoValidation.validateThen(senderP, "sender", pvv)(
         Member.fromProtoPrimitive
       )
-    } yield LsuSequencingTestMessageContent(psid, sender)(Some(bytes))
+      rpv <- LsuSequencingTestMessageContent.protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield LsuSequencingTestMessageContent(psid, sender)(Some(bytes))(rpv)
   }
 }

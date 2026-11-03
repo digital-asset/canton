@@ -172,8 +172,8 @@ final class UseBftSequencer(
     new SingleUseCell()
 
   override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
-    if (shouldGenerateEndpointsOnly) generateEndpoints(config, sequencingParameters)
-    else createFullConfig(config, sequencingParameters)
+    if (shouldGenerateEndpointsOnly) generateEndpoints(config)
+    else createFullConfig(config)
 
   override def afterEnvironmentCreated(
       config: CantonConfig,
@@ -194,8 +194,7 @@ final class UseBftSequencer(
 
   // Only called if `shouldGenerateEndpointsOnly` is true
   private def generateEndpoints(
-      config: CantonConfig,
-      sequencingParameters: Option[topology.SequencingParameters],
+      config: CantonConfig
   ): CantonConfig = {
     val instanceNameToPort =
       config.sequencers.keys.map(_ -> UniquePortGenerator.next).toMap
@@ -212,10 +211,6 @@ final class UseBftSequencer(
                 blockSequencerConfig,
                 bftOrdererConfig
                   .copy(
-                    leaderSelectionPolicyConfigForPv34 = getLeaderSelectionPolicyConfigForPv34(
-                      sequencingParameters,
-                      bftOrdererConfig,
-                    ),
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
                     consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
                     consensusWindowSizeForRetransmissionOfCommitCertificates =
@@ -309,8 +304,7 @@ final class UseBftSequencer(
 
   // Only called if `shouldGenerateEndpointsOnly` is false
   private def createFullConfig(
-      config: CantonConfig,
-      sequencingParameters: Option[topology.SequencingParameters],
+      config: CantonConfig
   ): CantonConfig = {
     // Contains all sequencers from the environment definition. Typically, the environment definition also contains
     //  sequencers that are onboarded dynamically by tests (i.e, not initialized from the very beginning).
@@ -387,10 +381,6 @@ final class UseBftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(
               initialNetwork = Some(network),
-              leaderSelectionPolicyConfigForPv34 = getLeaderSelectionPolicyConfigForPv34(
-                sequencingParameters,
-                BftBlockOrdererConfig(),
-              ),
               consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
               consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
               consensusWindowSizeForRetransmissionOfCommitCertificates =
@@ -549,14 +539,6 @@ final class UseBftSequencer(
           probabilityOfGrpcReady,
         )
     })
-
-  private def getLeaderSelectionPolicyConfigForPv34(
-      sequencingParameters: Option[topology.SequencingParameters],
-      bftOrdererConfig: BftBlockOrdererConfig,
-  ): Option[BlacklistLeaderSelectionPolicyConfig] =
-    sequencingParameters
-      .map(_.blacklistLeaderSelectionPolicyConfig)
-      .orElse(bftOrdererConfig.leaderSelectionPolicyConfigForPv34)
 
   private def standaloneSequencerId(instanceName: InstanceName): String =
     SequencerId

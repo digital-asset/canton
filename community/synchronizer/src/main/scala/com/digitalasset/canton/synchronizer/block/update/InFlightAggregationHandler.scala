@@ -354,7 +354,7 @@ class InFlightAggregationHandler(
             SubmissionOutcome.Reject.logAndCreate(
               submissionRequest,
               sequencingTimestamp,
-              SequencerErrors.AggregateSubmissionAlreadySent.apply(message, protocolVersion),
+              SequencerErrors.AggregateSubmissionAlreadySent(message),
             )
           case InFlightAggregation.AggregationStuffing(_, at) =>
             val message =

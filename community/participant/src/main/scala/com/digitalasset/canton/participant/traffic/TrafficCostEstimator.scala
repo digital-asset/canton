@@ -221,8 +221,8 @@ class TrafficCostEstimator(
           ),
           contractIds = contractIds,
           targetSynchronizer = targetSynchronizer,
-          overrideSourceValidationPkgIds = Map.empty,
-          overrideTargetValidationPkgIds = Map.empty,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
           // Estimation never sends the batch, so the traffic hook never reads this.
           accounting = SubmissionAccounting.NoAccount,
         )
@@ -471,6 +471,7 @@ class TrafficCostEstimator(
           confirmationResponses,
           client,
           None, // `ConfirmationResponses` are always signed with a `fixed` timestamp.
+          psid.protocolVersion,
         )
       }
       batch = Batch.of(

@@ -174,12 +174,13 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       fromExcl: Option[Party],
       filterString: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]] =
+  ): Future[IndexerKnownPartiesPage] =
     Timed.future(
       metrics.services.index.listKnownParties,
-      delegate.listKnownParties(fromExcl, filterString, maxResults),
+      delegate.listKnownParties(fromExcl, filterString, maxResults, validAtEventSeqId),
     )
 
   override def prune(

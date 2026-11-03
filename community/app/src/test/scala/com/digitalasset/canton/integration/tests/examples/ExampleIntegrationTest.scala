@@ -68,6 +68,10 @@ abstract class ExampleIntegrationTest(configPaths: File*)
     EnvironmentDefinition
       .fromFiles(configPaths*)
       .addConfigTransforms(additionalConfigTransform*)
+
+  // Examples run with default canton.features.enable-repair-commands = false,
+  // which disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 }
 
 trait HasConsoleScriptRunner { this: NamedLogging =>

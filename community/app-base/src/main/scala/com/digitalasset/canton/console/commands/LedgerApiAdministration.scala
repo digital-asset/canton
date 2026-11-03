@@ -116,7 +116,13 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.tea.v1.{GetAccountResponse, PruneResponse, UpdateAccountResponse}
+import com.digitalasset.canton.tea.v1.{
+  GetAccountResponse,
+  ListAccountsResponse,
+  PruneEventsResponse,
+  PruneResponse,
+  UpdateAccountResponse,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
@@ -155,7 +161,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
 
   protected val name: String
 
-  private[canton] lazy val userId: String = token
+  private[canton] lazy val userId: String = ledgerApiToken
     .flatMap(encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption)
     .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
     .map {
@@ -3961,6 +3967,29 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           ledgerApiCommand(LedgerApiCommands.Traffic.GetAccount(accountId))
         }
 
+      @Help.Summary("List accounts", FeatureFlag.Stable)
+      @Help.Description(
+        """List the accounts and their balance, ordered by account-id.
+          |Accounts that were never credited or debited are not listed.
+          |Parameters:
+          |- accountIdPrefix: Only account IDs starting with the given prefix
+          |  are returned. If not set, all accounts are returned.
+          |- pageSize: Maximum size of the returned response page.
+          |  If not set, the server default size is used.
+          |- pageToken: To fetch the next page, pass the nextPageToken
+          |  of the previous response as pageToken, until it is not set.
+          |  Leave unset to fetch from the beginning"""
+      )
+      def list_accounts(
+          accountIdPrefix: Option[String] = None,
+          pageSize: Option[Int] = None,
+          pageToken: Option[String] = None,
+      ): ListAccountsResponse = consoleEnvironment.run {
+        ledgerApiCommand(
+          LedgerApiCommands.Traffic.ListAccounts(pageSize, pageToken, accountIdPrefix)
+        )
+      }
+
       @Help.Summary("Update details for the account-id", FeatureFlag.Stable)
       @Help.Description(
         """Update the account details (by adding the balance delta) for the specified account-id.
@@ -4007,6 +4036,21 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       ): PruneResponse = consoleEnvironment.run {
         ledgerApiCommand(
           LedgerApiCommands.Traffic.Prune(beforeOrAt)
+        )
+      }
+
+      @deprecated("Use prune instead", since = "3.7.0")
+      @Help.Summary("Deprecated, use prune instead", FeatureFlag.Stable)
+      @Help.Description(
+        """Prune events before or at the given timestamp.
+          |Deprecated since Canton 3.7, disabled by default since Canton 3.8
+          |and removed in Canton 3.9. Use prune instead."""
+      )
+      def prune_events(
+          beforeOrAt: CantonTimestamp
+      ): PruneEventsResponse = consoleEnvironment.run {
+        ledgerApiCommand(
+          LedgerApiCommands.Traffic.PruneEvents(beforeOrAt)
         )
       }
     }

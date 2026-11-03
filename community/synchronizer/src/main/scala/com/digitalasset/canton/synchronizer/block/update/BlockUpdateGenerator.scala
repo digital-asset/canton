@@ -224,7 +224,7 @@ class BlockUpdateGeneratorImpl(
           // topology snapshot the dynamic `maxRequestSize` depends on. We therefore use the
           // hardcoded value, which only bounds the eager decompression of the recipients (needed
           // for chunking). The envelope contents are decompressed later, in the block chunk
-          // processor, with the dynamic `maxRequestSize` value (for protocol versions >= 36).
+          // processor, with the dynamic `maxRequestSize` value.
           val decompressionPolicy = DecompressionPolicy.HardcodedDefault
           // Synchronizer limits for collection sizes are part of the static synchronizer parameters,
           // so they can be applied here before we resolve the topology snapshot for this event.

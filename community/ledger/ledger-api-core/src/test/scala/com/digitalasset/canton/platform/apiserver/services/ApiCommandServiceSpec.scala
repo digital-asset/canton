@@ -41,6 +41,8 @@ class ApiCommandServiceSpec
 
   import ApiCommandServiceSpec.*
 
+  private implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
+
   "ApiCommandService" should {
     "generate a submission ID if it's empty" in {
       val submissionCounter = new AtomicInteger

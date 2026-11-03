@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.either.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.serialization.{
@@ -10,21 +11,55 @@ import com.digitalasset.canton.serialization.{
   DeserializationError,
   MaxByteToDecompressExceeded,
 }
+import com.digitalasset.canton.util.ByteStringUtil.{
+  copyNBuffered,
+  errorMapping,
+  maxBytesExceededError,
+}
 import com.digitalasset.canton.util.MaxBytesToDecompress
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.scalactic.Uniformity
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.{ByteArrayInputStream, IOException}
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, IOException, OutputStream}
 import java.nio.charset.Charset
+import java.util.zip.GZIPOutputStream
 
 // Herein contained compressed test data conforms to pre-Java 16
 // Reused among compression methods that work on arrays and byte strings
-trait GzipCompressionTests extends AnyWordSpec with BaseTest {
+sealed trait GzipCompressionTests extends AnyWordSpec with BaseTest {
 
-  def compressGzip(str: ByteString): ByteString
-  def decompressGzip(str: ByteString): Either[DeserializationError, ByteString]
+  /*
+  We keep here a reasonable implementation of gzip compression and decompression for testing purposes.
+   */
+  protected def compressGzip(str: ByteString): ByteString = {
+    val compressor: OutputStream => OutputStream = new GZIPOutputStream(_)
+    val rawSize = str.size()
+    val compressed = new ByteArrayOutputStream(rawSize)
+    ResourceUtil.withResource(compressor(compressed)) { output =>
+      str.writeTo(output)
+    }
+    ByteString.copyFrom(compressed.toByteArray)
+  }
+
+  protected def decompressGzip(str: ByteString): Either[DeserializationError, ByteString] = {
+    val maxBytesLimit = MaxBytesToDecompress.MaxValueUnsafe
+
+    ResourceUtil
+      .withResourceEither(new GzipCompressorInputStream(str.newInput())) { decompressorStream =>
+        val out = ByteString.newOutput()
+        val buf = new Array[Byte](8 * 1024) // 8k is the default used by BufferedInputStream.
+        if (copyNBuffered(maxBytesLimit.limit.value, buf, decompressorStream, out)) {
+          Right(out.toByteString()) // No need to close as data is in-memory.
+        } else {
+          Left(maxBytesExceededError(maxBytesLimit.limit.value))
+        }
+      }
+      .leftMap(errorMapping)
+      .flatten
+
+  }
 
   "compress and decompress Bytestrings" in {
     val tests = Table[String, String](
@@ -111,10 +146,12 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
 // Herein contained compressed test data was produced by the zstd CLI (v1.5.7) from files, so the
 // frames declare the content size in the frame header (required by single-call decompression)
 // Reused among compression methods that work on arrays and byte strings
-trait ZstdCompressionTests extends AnyWordSpec with BaseTest {
+sealed trait ZstdCompressionTests extends AnyWordSpec with BaseTest {
 
-  def compressZstd(str: ByteString): ByteString
-  def decompressZstd(str: ByteString): Either[DeserializationError, ByteString]
+  protected def compressZstd(str: ByteString): ByteString = ByteStringUtil.compressZstd(str)
+
+  protected def decompressZstd(str: ByteString): Either[DeserializationError, ByteString] =
+    ByteStringUtil.decompressZstd(str, MaxBytesToDecompress.MaxValueUnsafe)
 
   "zstd compress and decompress Bytestrings" in {
     val tests = Table[String, String](
@@ -207,20 +244,11 @@ private object OsHeaderFieldIgnored extends Uniformity[ByteString] {
   override def normalizedCanHandle(o: Any): Boolean = o.isInstanceOf[ByteString]
 }
 
-class ByteStringUtilTest
+final class ByteStringUtilTest
     extends AnyWordSpec
     with BaseTest
     with GzipCompressionTests
     with ZstdCompressionTests {
-  override def compressGzip(str: ByteString): ByteString = ByteStringUtil.compressGzip(str)
-
-  override def decompressGzip(str: ByteString): Either[DeserializationError, ByteString] =
-    ByteStringUtil.decompressGzip(str, MaxBytesToDecompress.MaxValueUnsafe)
-
-  override def compressZstd(str: ByteString): ByteString = ByteStringUtil.compressZstd(str)
-
-  override def decompressZstd(str: ByteString): Either[DeserializationError, ByteString] =
-    ByteStringUtil.decompressZstd(str, MaxBytesToDecompress.MaxValueUnsafe)
 
   "ByteStringUtilTest" should {
 
@@ -302,25 +330,6 @@ class ByteStringUtilTest
       }
     }
 
-    "decompress with max bytes to read" in {
-      val uncompressed = "a" * 1000000
-      val uncompressedByteString = ByteString.copyFrom(uncompressed, Charset.defaultCharset())
-      val compressed = compressGzip(uncompressedByteString)
-
-      val res1 = ByteStringUtil.decompressGzip(
-        compressed,
-        MaxBytesToDecompress(NonNegativeInt.tryCreate(1000000)),
-      )
-      res1 shouldBe Right(uncompressedByteString)
-      val res2 = ByteStringUtil.decompressGzip(
-        compressed,
-        MaxBytesToDecompress(NonNegativeInt.tryCreate(777)),
-      )
-      res2 shouldBe Left(
-        MaxByteToDecompressExceeded("Max bytes to decompress is exceeded. The limit is 777 bytes.")
-      )
-    }
-
     "decompress zstd with max bytes to read" in {
       val uncompressed = "a" * 1000000
       val uncompressedByteString = ByteString.copyFrom(uncompressed, Charset.defaultCharset())
@@ -340,21 +349,12 @@ class ByteStringUtilTest
       )
     }
 
-    "compress and decompress using CompressionAlgo" in {
+    "compress and decompress" in {
       val input = ByteString.copyFromUtf8("generic-compression-roundtrip")
 
-      Seq(
-        CompressionAlgo.Gzip -> ProtocolVersion.v35,
-        CompressionAlgo.Zstd -> ProtocolVersion.v36,
-      ).foreach { case (algo, pv) =>
-        withClue(s"algorithm=$algo, protocolVersion=$pv") {
-          CompressionAlgo(pv) shouldBe algo
-
-          val compressed = ByteStringUtil.compress(input, algo)
-          ByteStringUtil
-            .decompress(compressed, algo, MaxBytesToDecompress.MaxValueUnsafe) shouldBe Right(input)
-        }
-      }
+      ByteStringUtil
+        .decompressZstd(ByteStringUtil.compressZstd(input), MaxBytesToDecompress.MaxValueUnsafe)
+        .value shouldBe input
     }
 
     "correctly pad or truncate a ByteString" in {

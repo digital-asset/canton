@@ -68,11 +68,42 @@ ROTATION_COLUMNS: dict[str, int] = {"flaky-canton": 3}
 DEFAULT_ROTATION_COLUMNS = 1
 
 # CircleCI job name -> rotation to ping when that job fails on main (the red-main ping).
-# Jobs not listed here ping the CI rota. Keep in sync with the jobs that invoke
-# slack_red_main_with_volunteer.
+# Exact matches win, then TEST_JOB_PREFIXES, then everything else pings the CI rota. Keep in
+# sync with the jobs that invoke slack_red_main_with_volunteer.
 JOB_ROTATION: dict[str, str] = {
     "blackduck": "release-blackduck",
 }
+
+# Test jobs ping the Flaky Canton rota, since fixing a broken test is theirs, while the CI
+# rota keeps build and infrastructure failures. Matched as prefixes of the CircleCI workflow
+# job name (CIRCLE_JOB), so a version bump (test_36 to test_38) is covered without an edit.
+# "test_3" is deliberately not "test_", which would also catch the infra jobs
+# test_docker_images and test_ping_*. A new test job family needs a new prefix here.
+# The GHA red-main action calls this too, with the failed infra job name, and the prefixes
+# also cover the GHA test job names (the flaky pipeline pings Flaky Canton for those anyway).
+# crash_recovery_test_36* are GHA infra jobs on purpose, they are tests, so they ping Flaky
+# Canton like the CircleCI crash_recovery_test_37.
+TEST_JOB_PREFIXES: tuple[str, ...] = (
+    "test_3",
+    "test_dev",
+    "test_scala",
+    "nightly_",
+    "external_parties_test_",
+    "model_based_test_",
+    "ledger_api_compatibility_test",
+    "test_data_continuity",
+    "protocol_continuity_test_",
+    "postgres_conformance_test_",
+    "toxiproxy_test_",
+    "crash_recovery_test",
+    "stability_",
+    "topology_chaos_test",
+    "unstable_test",
+    "sequential_test",
+    "variations_test",
+    "smoke_test",
+)
+TEST_JOB_ROTATION = "flaky-canton"
 DEFAULT_JOB_ROTATION = "ci"
 
 # Slack Web API plumbing shared by the rota tools that write to Slack (topic updates,
@@ -84,7 +115,25 @@ SLACK_TOKEN_ENV = "SLACK_BOT_QA_NOTIFICATIONS"
 
 def rotation_for_job(job: str) -> str:
     """Map a CircleCI job name to the rotation that should be pinged when it fails."""
-    return JOB_ROTATION.get(job, DEFAULT_JOB_ROTATION)
+    if job in JOB_ROTATION:
+        return JOB_ROTATION[job]
+    if job.startswith(TEST_JOB_PREFIXES):
+        return TEST_JOB_ROTATION
+    return DEFAULT_JOB_ROTATION
+
+
+def rotations_for_jobs(jobs: str) -> list[str]:
+    """Map a comma-separated failed-job list (as the GHA red-main alert passes) to its rotations.
+
+    Each job is resolved on its own, the result is deduplicated and keeps first-seen order,
+    so simultaneous infra and test failures reach every owning rota.
+    """
+    rotations: list[str] = []
+    for job in jobs.split(","):
+        rotation = rotation_for_job(job.strip())
+        if rotation not in rotations:
+            rotations.append(rotation)
+    return rotations
 
 
 def log(msg: str) -> None:
@@ -274,6 +323,38 @@ def send_dm(token: str, user_id: str, text: str) -> None:
     slack_post(SLACK_POST_MESSAGE_URL, token, {"channel": channel, "text": text})
 
 
+def resolve_rotation_ids(
+    values: list[list[Any]],
+    rotations: list[str],
+    monday: dt.date,
+    slack_id_by_name: dict[str, str],
+) -> tuple[list[str], dict[str, Exception | None]]:
+    """Resolve each rotation on its own, so one bad rotation never discards another's result.
+
+    Returns the deduplicated Slack IDs (first-seen order) of the rotations that resolved, and
+    the unresolved rotations mapped to their error, or None when the shift was just empty.
+    """
+    slack_ids: list[str] = []
+    unresolved: dict[str, Exception | None] = {}
+    for rot in rotations:
+        try:
+            expected_cols = ROTATION_COLUMNS.get(rot, DEFAULT_ROTATION_COLUMNS)
+            header_row, cols = find_header_columns(values, ROTATION_HEADERS[rot], expected_cols)
+            names = names_for_week(values, header_row, cols, monday)
+            found = resolve_slack_ids(names, slack_id_by_name)
+        except Exception as exc:
+            # failure-surfaced: returned in unresolved, main() sends the tooling-failure DM
+            unresolved[rot] = exc
+            continue
+        if not found:
+            unresolved[rot] = None
+            continue
+        for uid in found:
+            if uid not in slack_ids:
+                slack_ids.append(uid)
+    return slack_ids, unresolved
+
+
 def notify_tooling_failure(
     message: str,
     roster: dict[str, Any],
@@ -331,13 +412,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Print Slack ID(s) for the current rota shift.")
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--rotation", choices=sorted(ROTATION_HEADERS))
-    target.add_argument("--job", help="CircleCI job name, mapped to a rotation via JOB_ROTATION")
+    target.add_argument(
+        "--job",
+        help="CircleCI job name, or a comma-separated list of GHA job names, mapped to rotations",
+    )
     parser.add_argument("--date", help="ISO date to evaluate (default: today); for testing")
     parser.add_argument(
         "--values-file", help="local JSON of sheet rows instead of fetching; for testing"
     )
     args = parser.parse_args()
-    rotation = args.rotation or rotation_for_job(args.job)
+    rotations = [args.rotation] if args.rotation else rotations_for_jobs(args.job)
+    rotation = ",".join(rotations)
 
     try:
         roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
@@ -354,9 +439,9 @@ def main() -> int:
         dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(dt.timezone.utc).date()
     )
     monday = current_monday(today)
-    headers = ROTATION_HEADERS[rotation]
 
     values: list[list[Any]] | None = None
+    slack_ids: list[str] = []
     try:
         if args.values_file:
             values = json.loads(Path(args.values_file).read_text())
@@ -369,14 +454,28 @@ def main() -> int:
             sheet_id = os.environ.get("ROTA_SHEET_ID", DEFAULT_SHEET_ID)
             values = fetch_tab_values(token, sheet_id, half_year_tab(monday))
 
-        expected_cols = ROTATION_COLUMNS.get(rotation, DEFAULT_ROTATION_COLUMNS)
-        header_row, cols = find_header_columns(values, headers, expected_cols)
-        names = names_for_week(values, header_row, cols, monday)
-        slack_ids = resolve_slack_ids(names, roster["slack_id_by_name"])
-        if slack_ids:
+        slack_ids, unresolved = resolve_rotation_ids(
+            values, rotations, monday, roster["slack_id_by_name"]
+        )
+        if not unresolved:
             print(" ".join(slack_ids))
             return 0
-        log("warning: sheet had no resolvable name for this rotation/week")
+        log(
+            f"warning: no resolvable name for rotation(s) {', '.join(unresolved)}, "
+            "adding the fallback pick to the ones that resolved"
+        )
+        errors = {rot: exc for rot, exc in unresolved.items() if exc is not None}
+        if errors:
+            notify_tooling_failure(
+                f":warning: select_rota.py failed to resolve the `{','.join(errors)}` rotation "
+                f"for the week of {monday.isoformat()}: {list(errors.values())!r}. It added the "
+                "fallback pick to the ping, can someone check the rota sheet / select_rota.py?",
+                roster,
+                os.environ.get(SLACK_TOKEN_ENV),
+                ",".join(errors),
+                monday,
+                values,
+            )
     except (
         Exception
     ) as exc:  # any failure must degrade to the fallback (never break CI notifications)
@@ -395,11 +494,14 @@ def main() -> int:
     # Last resort: a deterministic pick from the roster pool. This must never raise,
     # an unhandled error here would crash with a traceback instead of a clean message.
     try:
-        print(fallback_pick(roster))
+        fallback = fallback_pick(roster)
+        print(" ".join([*slack_ids, *([fallback] if fallback not in slack_ids else [])]))
     except Exception as exc:
         # Nobody was pinged at all: exit 1 so this does not look like a clean run.
         log(f"warning: fallback pick failed ({exc!r}), no responder emitted")
-        return 1
+        if not slack_ids:
+            return 1
+        print(" ".join(slack_ids))
     return 0
 
 
@@ -420,9 +522,46 @@ def self_test() -> None:
 
     # rotation_for_job: mapped jobs route to their rota, everything else to CI
     assert rotation_for_job("blackduck") == "release-blackduck"
+    assert rotation_for_job("nightly_integration_test_36") == "flaky-canton"
+    assert rotation_for_job("test_36") == "flaky-canton"
+    assert rotation_for_job("test_38") == "flaky-canton"  # a version bump needs no edit
+    assert rotation_for_job("postgres_conformance_test_19") == "flaky-canton"
+    assert rotation_for_job("compile") == "ci"
+    # resolve_rotation_ids: a bad rotation must not discard the ones that resolved
+    rota_map = {"Ada": "UCI", "Bjarne": "UB", "Carla": "UC", "Dee": "UD"}
+    rota_week = dt.date(2025, 6, 30)
+    rota_serial = (rota_week - SHEETS_EPOCH).days
+    flaky_hdr = ["Week", "CI", "Flaky Canton", "Flaky Canton", "Flaky Canton"]
+    ok_sheet = [flaky_hdr, [rota_serial, "Ada", "Bjarne", "Carla", "Dee"]]
+    ids, bad = resolve_rotation_ids(ok_sheet, ["ci", "flaky-canton"], rota_week, rota_map)
+    assert ids == ["UCI", "UB", "UC", "UD"] and not bad
+    blank_sheet = [flaky_hdr, [rota_serial, "Ada", "", "", ""]]  # flaky shift unresolvable
+    ids, bad = resolve_rotation_ids(blank_sheet, ["ci", "flaky-canton"], rota_week, rota_map)
+    assert ids == ["UCI"] and bad == {"flaky-canton": None}
+    no_flaky = [["Week", "CI"], [rota_serial, "Ada"]]  # missing header keeps the CI person
+    ids, bad = resolve_rotation_ids(no_flaky, ["ci", "flaky-canton"], rota_week, rota_map)
+    assert ids == ["UCI"] and isinstance(bad["flaky-canton"], LookupError)
+    ids, bad = resolve_rotation_ids(no_flaky, ["flaky-canton"], rota_week, rota_map)
+    assert ids == [] and list(bad) == ["flaky-canton"]  # all unresolved, caller falls back
+
+    # a comma-separated GHA failure list resolves each job, order-independent owners
+    assert rotations_for_jobs("build_docs, crash_recovery_test_36") == ["ci", "flaky-canton"]
+    assert rotations_for_jobs("crash_recovery_test_36, build_docs") == ["flaky-canton", "ci"]
+    assert rotations_for_jobs("compile, build_docs") == ["ci"]
+    assert rotations_for_jobs("blackduck") == ["release-blackduck"]
+    assert rotation_for_job("test_docker_images") == "ci"  # infra job despite the test_ name
+    assert rotation_for_job("test_ping_arm") == "ci"
+    assert rotation_for_job("crash_recovery_test_37") == "flaky-canton"
+    assert rotation_for_job("stability_test") == "flaky-canton"
+    assert rotation_for_job("crash_recovery_test_36") == "flaky-canton"  # GHA infra job, a test
+    assert rotation_for_job("ledger_api_compatibility_tests_36") == "flaky-canton"
+    assert rotation_for_job("test_data_continuity_dumps") == "flaky-canton"
     assert rotation_for_job("unit_test") == "ci"
     assert rotation_for_job("") == "ci"
-    for mapped in JOB_ROTATION.values():  # every mapping targets a real rotation
+    for mapped in [
+        *JOB_ROTATION.values(),
+        TEST_JOB_ROTATION,
+    ]:  # every mapping targets a real rotation
         assert mapped in ROTATION_HEADERS, mapped
 
     # _b64url: URL-safe alphabet, no padding

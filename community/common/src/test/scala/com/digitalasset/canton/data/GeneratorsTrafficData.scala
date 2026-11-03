@@ -33,6 +33,7 @@ final class GeneratorsTrafficData(
       serial,
       trafficPurchased,
       psid,
+      protocolVersion,
     )
   )
 

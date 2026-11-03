@@ -8,7 +8,10 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidator
+import com.digitalasset.canton.ledger.api.validation.{
+  LedgerApiSizeLimitsConfig,
+  UpdateServiceRequestValidator,
+}
 import com.digitalasset.canton.ledger.api.{UpdateFormat, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
@@ -44,6 +47,7 @@ final class ApiUpdateService(
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
     mat: Materializer,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends UpdateServiceGrpc.UpdateService
     with StreamingServiceLifecycleManagement
     with NamedLogging {
@@ -147,7 +151,7 @@ final class ApiUpdateService(
     val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
 
     UpdateServiceRequestValidator
-      .validateUpdateById(req)(errorLoggingContext)
+      .validateUpdateById(req)(errorLoggingContext, sizeLimitsConfig)
       .fold(
         t =>
           Future
@@ -264,7 +268,7 @@ final class ApiUpdateService(
       ErrorLoggingContext(logger, loggingContextWithTrace)
 
     UpdateServiceRequestValidator
-      .validateUpdateByHash(request)(errorLoggingContext)
+      .validateUpdateByHash(request)(errorLoggingContext, sizeLimitsConfig)
       .fold(
         t =>
           Future.failed(

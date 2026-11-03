@@ -722,9 +722,6 @@ trait VettedPackagesSnapshotClient {
     *   the set of packages that should be vetted
     * @param ledgerTime
     *   the ledger time at which the vetting state should be checked
-    * @param checkDependencyVetting
-    *   Whether check the vetting state of the dependencies of the given packages. If false, only
-    *   the given packages are checked
     * @return
     *   Right the set of unvetted packages (which is empty if all packages are vetted) Left if a
     *   package is missing locally such that we can not verify the vetting state of the package
@@ -758,6 +755,11 @@ trait VettedPackagesSnapshotClient {
   def vettedPackages(participantId: ParticipantId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[VettedPackage]]
+
+  def vettedPackages(participants: Set[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[ParticipantId, Set[VettedPackage]]]
+
 }
 
 trait SynchronizerGovernanceSnapshotClient {
@@ -1324,6 +1326,11 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient with Vet
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[VettedPackage]] =
     loadVettedPackages(participantId).map(vettedPackages => vettedPackages.values.toSet)
+
+  override def vettedPackages(participants: Set[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[ParticipantId, Set[VettedPackage]]] =
+    loadVettedPackages(participants).map(_.view.mapValues(_.values.toSet).toMap)
 }
 
 trait SynchronizerGovernanceSnapshotLoader extends SynchronizerGovernanceSnapshotClient {

@@ -116,9 +116,7 @@ final class GeneratorsProtocol(
   )
 
   val closedCompressedEnvelopeArb: Arbitrary[ClosedCompressedEnvelope] = Arbitrary(
-    closedUncompressedEnvelopeArb.arbitrary.map(
-      _.toClosedCompressedEnvelope(com.digitalasset.canton.util.CompressionAlgo(protocolVersion))
-    )
+    closedUncompressedEnvelopeArb.arbitrary.map(_.toClosedCompressedEnvelope)
   )
 
   val openEnvelopeArb: Arbitrary[OpenEnvelope[ProtocolMessage]] = Arbitrary(
@@ -279,6 +277,7 @@ final class GeneratorsProtocol(
       messageId,
       error,
       Option.empty[TrafficReceipt],
+      protocolVersion,
     )
   )
 
@@ -347,5 +346,6 @@ final class GeneratorsProtocol(
     messageIdO,
     batch,
     trafficReceipt,
+    protocolVersion,
   )
 }

@@ -344,7 +344,7 @@ object SequencerAdminCommands {
     }
 
     override protected def createRequest(): Either[String, Unit] =
-      checkSspCompatibility(synchronizerParameters, serverVersion)
+      checkSspCompatibility(serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromGenesisStateResponse
@@ -355,23 +355,18 @@ object SequencerAdminCommands {
   }
 
   private def checkSspCompatibility(
-      synchronizerParameters: InternalSsp,
-      serverVersion: Option[ReleaseVersion],
+      serverVersion: Option[ReleaseVersion]
   ): Either[String, Unit] =
-    if (synchronizerParameters.protocolVersion < ProtocolVersion.v36) {
-      Either.unit
-    } else {
-      serverVersion
-        .toRight("Server version is not known")
-        .flatMap { sv =>
-          import scala.math.Ordered.orderingToOrdered
-          EitherUtil.condUnit(
-            // sv >= ReleaseVersion(3, 6, 0) does not work with pre-releases: 3.6.0-SNAPSHOT < 3.6.0 :-/
-            sv.majorMinor >= (3, 6),
-            s"Server version $sv does not support protocol version 36",
-          )
-        }
-    }
+    serverVersion
+      .toRight("Server version is not known")
+      .flatMap { sv =>
+        import scala.math.Ordered.orderingToOrdered
+        EitherUtil.condUnit(
+          // sv >= ReleaseVersion(3, 6, 0) does not work with pre-releases: 3.6.0-SNAPSHOT < 3.6.0 :-/
+          sv.majorMinor >= (3, 6),
+          s"Server version $sv does not support protocol version 36",
+        )
+      }
 
   final case class InitializeFromLsuPredecessor(
       topologySnapshotStream: InputStream,
@@ -432,7 +427,7 @@ object SequencerAdminCommands {
     }
 
     override protected def createRequest(): Either[String, Unit] =
-      checkSspCompatibility(synchronizerParameters, serverVersion)
+      checkSspCompatibility(serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromLsuPredecessorResponse
@@ -496,7 +491,7 @@ object SequencerAdminCommands {
     }
 
     override protected def createRequest(): Either[String, Unit] =
-      checkSspCompatibility(synchronizerParameters, serverVersion)
+      checkSspCompatibility(serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromGenesisStateV2Response

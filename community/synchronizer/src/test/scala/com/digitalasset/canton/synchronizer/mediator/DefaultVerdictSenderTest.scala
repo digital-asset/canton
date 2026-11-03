@@ -241,13 +241,14 @@ final class DefaultVerdictSenderTest
     val mediatorRecipient: MediatorGroupRecipient = factory.mediatorGroup
     val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
     val informeeMessage =
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+      InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
     val rootHashMessage = RootHashMessage(
       fullInformeeTree.updateId.toRootHash,
       psid,
       ViewType.TransactionViewType,
       testTopologyTimestamp,
       SerializedRootHashMessagePayload.empty,
+      testedProtocolVersion,
     )
     val participant: ParticipantId = ExampleTransactionFactory.submittingParticipant
     val rhmEnvelope = OpenEnvelope(

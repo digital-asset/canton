@@ -540,6 +540,7 @@ object ViewParticipantData
         NoPathRollbackContext(rolledBackP),
         createdCore,
         protocolVersion,
+        ProtoVersion(32),
         bytes,
       )(
         saltP,
@@ -558,6 +559,7 @@ object ViewParticipantData
       rollbackContext: RollbackContext,
       createdCore: Seq[CreatedContract],
       protocolVersion: ProtocolVersion,
+      protoVersion: ProtoVersion,
       bytes: ByteString,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
@@ -585,6 +587,7 @@ object ViewParticipantData
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
         .leftMap(_.inField("salt"))
+      rpv <- ViewParticipantData.protocolVersionRepresentativeFor(protoVersion)
       viewParticipantData <- ViewParticipantData(
         coreInputs = coreInputs,
         createdCore = createdCore,
@@ -596,7 +599,7 @@ object ViewParticipantData
         externalCallResults = externalCallResults,
       )(
         hashOps,
-        protocolVersionRepresentativeFor(protocolVersion),
+        rpv,
         deserializedFrom = Some(bytes),
       ).validated(protocolVersion)
         .leftMap(ProtoDeserializationError.OtherError.apply)

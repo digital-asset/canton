@@ -13,6 +13,9 @@ import re
 
 from collections import defaultdict
 from datetime import datetime, UTC
+from itertools import pairwise
+
+MIN_TRIMMED_SAMPLES = 20
 
 filename = sys.argv[1]
 prefix = sys.argv[2]
@@ -42,14 +45,42 @@ if len(sys.argv) == 7 and sys.argv[6].lower() == "calc_test_time":
     print(f'{prefix}_START_TIME="{test_start_time}Z"')
     print(f'{prefix}_DURATION_IN_SECS={test_duration_in_secs}')
 
-total_rows = len(rows)
+
+def filter_active_rows(rows):
+    """
+    The rows where a series' count changed, each with the row before it.
+    The row before a change is the baseline of that change, so the first increment of a run is
+    counted, and a run with a single change still covers one interval.
+    """
+    by_attr = defaultdict(list)
+    for r in rows:
+        by_attr[r['attributes']].append(r)
+    filtered_rows = {}
+    for attr_rows in by_attr.values():
+        for prev, curr in pairwise(attr_rows):
+            if int(curr['count']) != int(prev['count']):
+                filtered_rows[id(prev)] = prev
+                filtered_rows[id(curr)] = curr
+    return sorted(filtered_rows.values(), key=lambda row: int(row['timestamp'])) or None
+
+
+active_rows = filter_active_rows(rows)
+
+if not active_rows:
+    active_rows = rows
+
+if len(active_rows) < MIN_TRIMMED_SAMPLES:
+    early_event_percentile, late_event_percentile = 0, 100
+
+
+total_rows = len(active_rows)
 
 # Determine early and late row indices based on percentiles
 early_idx = int((total_rows - 1) * early_event_percentile / 100)
 late_idx = int((total_rows - 1) * late_event_percentile / 100)
 
-early_ts = int(rows[early_idx]['timestamp'])
-late_ts = int(rows[late_idx]['timestamp'])
+early_ts = int(active_rows[early_idx]['timestamp'])
+late_ts = int(active_rows[late_idx]['timestamp'])
 
 # Group rows by attributes so each series is evaluated independently and then combined together
 # This is important because if the filtering logic contains independent attributes
@@ -90,16 +121,16 @@ if "SEQUENCER_BLOCK" in prefix or is_block_events_file:
 else:
     # If we have more than one attribute group after filtering, we need to raise an error
     # because then the filter doesn't seem good enough for collecting the final count
-    if len(series_dict) > 1 and len(sys.argv) >= 6 and sys.argv[5]:
-        pattern = sys.argv[5]
+    if len(series_dict) > 1:
+        pattern = sys.argv[5] if len(sys.argv) >= 6 else ""
         raise ValueError(
-            f"Ambiguous filter '{pattern}' matched {len(series_dict)} distinct metric series "
+            f"Filter '{pattern}' matched {len(series_dict)} distinct metric series "
             f"for non-aggregated prefix '{prefix}'. Please provide a more specific filter."
         )
 
     # For single series, pick the count closest to global row indices
-    calculated_early_count = int(rows[early_idx]['count'])
-    calculated_late_count = int(rows[late_idx]['count'])
+    calculated_early_count = int(active_rows[early_idx]['count'])
+    calculated_late_count = int(active_rows[late_idx]['count'])
 
 # Output unified shell metrics
 print(f'{prefix}_EARLY_TS={early_ts}')

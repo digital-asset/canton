@@ -116,7 +116,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.collection.IterableUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SequencerCounter, time}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -356,21 +355,19 @@ abstract class SequencerClientImpl(
       request: SubmissionRequest,
       maxRequestSize: MaxRequestSize,
   ): Either[SendAsyncClientError, Unit] =
-    if (protocolVersion == ProtocolVersion.v35) Either.unit
-    else
-      for {
-        uncompressedBatch <- request.batch.toClosedUncompressedBatchResult.leftMap(err =>
-          SendAsyncClientError.RequestInvalid(s"Unable to compute uncompressed batch size: $err")
-        )
-        uncompressedRequestSize = uncompressedBatch.envelopes.map(_.uncompressedByteSize.toLong).sum
-        _ <- Either.cond(
-          uncompressedRequestSize <= maxRequestSize.unwrap.toLong,
-          (),
-          SendAsyncClientError.RequestInvalid(
-            s"Uncompressed batch size ($uncompressedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $psid"
-          ),
-        )
-      } yield ()
+    for {
+      uncompressedBatch <- request.batch.toClosedUncompressedBatchResult.leftMap(err =>
+        SendAsyncClientError.RequestInvalid(s"Unable to compute uncompressed batch size: $err")
+      )
+      uncompressedRequestSize = uncompressedBatch.envelopes.map(_.uncompressedByteSize.toLong).sum
+      _ <- Either.cond(
+        uncompressedRequestSize <= maxRequestSize.unwrap.toLong,
+        (),
+        SendAsyncClientError.RequestInvalid(
+          s"Uncompressed batch size ($uncompressedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $psid"
+        ),
+      )
+    } yield ()
 
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
@@ -463,6 +460,7 @@ abstract class SequencerClientImpl(
                 messageIdO = None,
                 Batch(List.empty, protocolVersion),
                 Option.empty[TrafficReceipt],
+                protocolVersion = protocolVersion,
               )
             )
 
@@ -1843,8 +1841,8 @@ class RichSequencerClientImpl(
   private def waitForHandlerToComplete(): Unit = {
     import TraceContext.Implicits.Empty.*
     logger.trace(s"Wait for the handler to become idle")
-    // This logs a warn if the handle does not become idle within 60 seconds.
-    // This happen because the handler is not making progress, for example due to a db outage.
+    // This logs a warning if the handle does not become idle within 60 seconds.
+    // This happens because the handler is not making progress, for example due to a db outage.
     val fut = postAggregationHandlerRef.get.map(_.handlerIsIdleF).getOrElse(Future.unit)
     valueOrLog(
       FutureUnlessShutdown.outcomeF(fut),

@@ -657,7 +657,7 @@ final class GeneratorsData(
       targetSynchronizer,
       targetTimestamp,
       unassignmentTs,
-    )
+    )(UnassignmentData.protocolVersionRepresentativeFor(sourceSynchronizer.unwrap.protocolVersion))
   )
 
   private val fullyBlindedTransactionViewWithEmptyTransactionSubviewArb

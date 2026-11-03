@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import com.daml.ledger.api.v2.command_service.SubmitAndWaitForTransactionRequest
+import com.daml.ledger.api.v2.command_service.{
+  SubmitAndWaitForReassignmentRequest,
+  SubmitAndWaitForTransactionRequest,
+}
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod as DeduplicationPeriodProto
 import com.daml.ledger.api.v2.commands.{Command, Commands, CreateCommand, PrefetchContractKey}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
@@ -291,6 +294,37 @@ class SubmitRequestValidatorTest
         )
       }
 
+      "reject a request with transaction format exceeding the total filters limit" in {
+        val maxTotalFilters = 1
+        requestMustFailWith(
+          new SubmitAndWaitRequestValidator(testedCommandValidator)(
+            sizeLimitsConfig = sizeLimitsConfig.copy(eventFormatTotalFiltersSizeLimit =
+              PositiveInt.tryCreate(maxTotalFilters)
+            )
+          ).validate(
+            req = SubmitAndWaitForTransactionRequest(
+              commands = Some(api.commands),
+              transactionFormat = Some(
+                TransactionFormat(
+                  // a template wildcard for party and one for any party
+                  eventFormat = Some(
+                    EventFormat(Map(party -> Filters(Nil)), Some(Filters(Nil)), verbose = false)
+                  ),
+                  transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+                )
+              ),
+            ),
+            currentLedgerTime = internal.ledgerTime,
+            currentUtcTime = internal.submittedAt,
+            maxDeduplicationDuration = internal.maxDeduplicationDuration,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            totalFiltersLimitExceeded(actual = maxTotalFilters + 1, limit = maxTotalFilters),
+          metadata = Map.empty,
+        )
+      }
+
       "reject a request without transaction format" in {
         requestMustFailWith(
           testedSubmitAndWaitRequestValidator.validate(
@@ -306,6 +340,18 @@ class SubmitRequestValidatorTest
           description =
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: transaction_format",
           metadata = Map.empty,
+        )
+      }
+
+      "reject a reassignment request with an event format without filters" in {
+        mustFailWithoutFilters(
+          testedSubmitAndWaitRequestValidator.validate(
+            SubmitAndWaitForReassignmentRequest(
+              // not validated: the event format is rejected first
+              reassignmentCommands = Some(ReassignmentCommands.defaultInstance),
+              eventFormat = Some(EventFormat(Map.empty, None, verbose = false)),
+            )
+          )
         )
       }
     }

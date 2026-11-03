@@ -41,13 +41,13 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   private lazy val traceContext1 = TraceContext.withNewTraceContext("test")(Predef.identity)
   private lazy val completionInfo = DefaultParticipantStateValues.completionInfo(List.empty)
   private lazy val trackingData1 =
-    TransactionSubmissionTrackingData(
+    TransactionSubmissionTrackingData.create(
       completionInfo,
       TransactionSubmissionTrackingData.TimeoutCause,
       SynchronizerId.tryFromString("da::default").toPhysical,
       transactionHash = Some(TestHash.digest("in-flight-tx-hash")),
     )
-  private lazy val trackingData3 = TransactionSubmissionTrackingData(
+  private lazy val trackingData3 = TransactionSubmissionTrackingData.create(
     completionInfo,
     TransactionSubmissionTrackingData.CauseWithTemplate(
       SequencerErrors

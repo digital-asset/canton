@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   AllocatePartyRequest,
   GenerateExternalPartyTopologyRequest,
   GenerateExternalPartyTopologyResponse,
+  ListKnownPartiesRequest,
   PartyDetails as ProtoPartyDetails,
 }
 import com.daml.ledger.api.v2.crypto.SignatureFormat.SIGNATURE_FORMAT_RAW
@@ -35,6 +36,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.Submission
 import com.digitalasset.canton.ledger.participant.state.index.{
   IndexPartyManagementService,
+  IndexerKnownPartiesPage,
   IndexerPartyDetails,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -1005,6 +1007,66 @@ class ApiPartyManagementServiceSpec
             case Failure(other) =>
               fail("Unexpected error", other)
           }
+      }
+    }
+
+    "return a next page token for full known parties pages only" in {
+      val pinnedEventSeqId = 5L
+      val partyA = Ref.Party.assertFromString("a")
+      val partyB = Ref.Party.assertFromString("b")
+      val partyC = Ref.Party.assertFromString("c")
+      def request(pageToken: String) = ListKnownPartiesRequest(
+        identityProviderId = "",
+        pageToken = pageToken,
+        pageSize = 2,
+        filterParty = "",
+      )
+
+      when(mockIndexPartyManagementService.getParticipantId())
+        .thenReturn(Future.successful(participantId.toLf))
+      when(
+        mockIndexPartyManagementService.listKnownParties(
+          eqTo(None),
+          eqTo(None),
+          eqTo(2),
+          eqTo(None),
+        )(any[LoggingContextWithTrace])
+      ).thenReturn(
+        Future.successful(
+          IndexerKnownPartiesPage(
+            List(
+              IndexerPartyDetails(partyA, isLocal = true),
+              IndexerPartyDetails(partyB, isLocal = true),
+            ),
+            pinnedEventSeqId,
+          )
+        )
+      )
+      // The continuation resumes after the last party at the event sequence ID pinned by page one.
+      when(
+        mockIndexPartyManagementService.listKnownParties(
+          eqTo(Some(partyB)),
+          eqTo(None),
+          eqTo(2),
+          eqTo(Some(pinnedEventSeqId)),
+        )(any[LoggingContextWithTrace])
+      ).thenReturn(
+        Future.successful(
+          IndexerKnownPartiesPage(
+            List(IndexerPartyDetails(partyC, isLocal = true)),
+            pinnedEventSeqId,
+          )
+        )
+      )
+
+      for {
+        pageOne <- apiService.listKnownParties(request(pageToken = ""))
+        pageTwo <- apiService.listKnownParties(request(pageToken = pageOne.nextPageToken))
+      } yield {
+        pageOne.partyDetails.map(_.party) shouldBe Seq("a", "b")
+        pageOne.nextPageToken should not be empty
+        pageTwo.partyDetails.map(_.party) shouldBe Seq("c")
+        pageTwo.nextPageToken shouldBe empty
       }
     }
 

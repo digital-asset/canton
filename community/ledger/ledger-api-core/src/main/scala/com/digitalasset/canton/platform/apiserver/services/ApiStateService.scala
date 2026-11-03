@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePrese
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
   FormatValidator,
+  LedgerApiSizeLimitsConfig,
   ParticipantOffsetValidator,
   StateServiceRequestValidator,
 }
@@ -67,6 +68,7 @@ final class ApiStateService(
     mat: Materializer,
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends StateServiceGrpc.StateService
     with StreamingServiceLifecycleManagement
     with GrpcApiService

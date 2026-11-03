@@ -8,8 +8,8 @@ import com.daml.ledger.api.v2.CommandsOuterClass
 import com.daml.ledger.javaapi.data.DisclosedContract
 import com.digitalasset.canton.admin.api.client.data.SynchronizerLimits
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel.Ignore
-import com.digitalasset.canton.config.{DbConfig, RequireTypes, StorageConfig}
 import com.digitalasset.canton.console.{
   LocalInstanceReference,
   LocalMediatorReference,
@@ -35,7 +35,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetupPlugin,
   HasCycleUtils,
   HasTrailingNoneUtils,
   SharedEnvironment,
@@ -89,11 +88,7 @@ trait DataContinuityTest
     with HasTempDirectory
     with HasExecutionContext
     with S3Synchronization {
-  implicit def plugin: EnvironmentSetupPlugin
-
-  protected val referenceBlockSequencerPlugin: UseReferenceBlockSequencer[
-    ? <: StorageConfig
-  ]
+  implicit def pgPlugin: UsePostgres
 
   def dumpRestore: DbDumpRestore
 
@@ -151,10 +146,10 @@ trait DataContinuityTest
     // DataContinuityTest.baseDbDumpPath (inside /tmp/), either locally
     // or inside the docker image.
     local.list.toList.foreach(dumpRestore.copy(_, DataContinuityTest.baseDbDumpPath))
-    referenceBlockSequencerPlugin.pgPlugin.foreach { plugin =>
-      val dumpRestore = PostgresDumpRestore(plugin, forceLocal = forceLocalDumps)
-      local.list.toList.foreach(dumpRestore.copy(_, DataContinuityTest.baseDbDumpPath))
-    }
+    local.list.toList.foreach(
+      PostgresDumpRestore(pgPlugin, forceLocal = forceLocalDumps)
+        .copy(_, DataContinuityTest.baseDbDumpPath)
+    )
   }
 
   protected def saveDumps(
@@ -226,11 +221,7 @@ trait DataContinuityTest
 
     // stop participants, then synchronizer (order intentional)
     nodes.foreach(_.stop())
-    val res =
-      for {
-        _ <- saveDumps(nodes, protocolVersion)
-        _ <- referenceBlockSequencerPlugin.dumpDatabases(getDumpSaveDirectory(protocolVersion))
-      } yield ()
+    val res = saveDumps(nodes, protocolVersion)
     Await.result(res, 30.minutes) // DB dump can be a bit slow
     nodes.foreach(_.start())
     participants.foreach(_.synchronizers.reconnect_all())
@@ -302,13 +293,7 @@ trait DataContinuityTest
         (sequencers: Seq[LocalInstanceReference]) ++
         (mediators: Seq[LocalInstanceReference])
     nodes.foreach(_.stop())
-    val res =
-      for {
-        _ <- MonadUtil.sequentialTraverse_(nodes)(restoreDump(_, dumpDirectory))
-        _ <- referenceBlockSequencerPlugin.restoreDatabases(
-          TempDirectory(dumpDirectory) / folderName.name / dbName
-        )
-      } yield ()
+    val res = MonadUtil.sequentialTraverse_(nodes)(restoreDump(_, dumpDirectory))
     Await.result(res, 15.minutes)
     nodes.foreach(_.db.migrate())
     nodes.foreach(_.start())
@@ -359,10 +344,10 @@ trait DataContinuityTest
 }
 
 trait DataContinuityTestFixturePostgres extends DataContinuityTest {
-  implicit lazy val plugin: UsePostgres = new UsePostgres(loggerFactory)
+  implicit lazy val pgPlugin: UsePostgres = new UsePostgres(loggerFactory)
 
   lazy val dumpRestore: PostgresDumpRestore =
-    PostgresDumpRestore(plugin, forceLocal = forceLocalDumps)
+    PostgresDumpRestore(pgPlugin, forceLocal = forceLocalDumps)
 
   val dumpFileExtension: String = "pg_dump"
   val dbName: String = "postgres"
@@ -375,7 +360,7 @@ trait DataContinuityTestFixturePostgres extends DataContinuityTest {
 
   private def ensureDBUsernameIsTest(): Unit =
     assert(
-      plugin.getDbUsernameOrThrow == "test",
+      pgPlugin.getDbUsernameOrThrow == "test",
       "You need to use the DB username `test` when using the data continuity tests because otherwise the tests will fail on CI. " +
         "Most likely you changed the username as described in `UsePostgres`. " +
         "You can disable this check if you only care about running the tests locally. ",
@@ -383,10 +368,7 @@ trait DataContinuityTestFixturePostgres extends DataContinuityTest {
 }
 
 trait BasicDataContinuityTestEnvironment extends CommunityIntegrationTest with SharedEnvironment {
-
-  protected val referenceBlockSequencerPlugin =
-    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
-  registerPlugin(referenceBlockSequencerPlugin)
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
@@ -574,8 +556,8 @@ trait SynchronizerChangeDataContinuityTestSetup
     with DataContinuityTest
     with HasExecutionContext {
 
-  override protected val referenceBlockSequencerPlugin =
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+  registerPlugin(
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(
@@ -584,8 +566,7 @@ trait SynchronizerChangeDataContinuityTestSetup
         )
       ),
     )
-
-  registerPlugin(referenceBlockSequencerPlugin)
+  )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   // overriding this to disable globally unique ports

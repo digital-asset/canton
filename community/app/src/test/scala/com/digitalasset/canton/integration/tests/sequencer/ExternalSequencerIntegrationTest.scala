@@ -107,9 +107,7 @@ abstract class ExternalSequencerIntegrationTest(override val name: String)
         ),
         features = CantonFeatures(enableRepairCommands = true),
       )
-    )
-      .addConfigTransforms(ConfigTransforms.defaultsForNodes*)
-      .withManualStart
+    ).withManualStart
       .withSetup { implicit env =>
         import env.*
         val sequencers = sequencerNamesList.map(rs)

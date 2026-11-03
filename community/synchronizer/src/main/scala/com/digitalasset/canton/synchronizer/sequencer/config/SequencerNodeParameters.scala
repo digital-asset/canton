@@ -49,9 +49,6 @@ trait SequencerParameters {
   *   strictly greater to this value will not be delivered. Important notes:
   *   - SHOULD be set only in disaster recovery scenarios.
   *   - MUST be the same value in all sequencers of a synchronizer
-  * @param enableRejectDeliveredAggregationsOnPv35
-  *   No effect on pv34. On pv35, if true, the sequencer will reject aggregations that have already
-  *   been delivered for mediators. On pv36, this is always enabled, for all nodes.
   * @param disableSubmissionChecksForTesting
   *   Whether to disable submission checks for testing purposes. This should only be used in tests.
   * @param disableReleaseVersionHandshakeCheck
@@ -76,7 +73,6 @@ final case class SequencerNodeParameters(
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,
     delayRequestsBeforeLsuTrafficInit: Boolean,
-    enableRejectDeliveredAggregationsOnPv35: Seq[String],
     disableSubmissionChecksForTesting: Boolean = false,
     lsuConfig: SequencerLsuConfig,
     disableReleaseVersionHandshakeCheck: Boolean = false,

@@ -8,6 +8,7 @@ import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilt
 import com.daml.ledger.api.v2.transaction_filter.{
   Filters,
   WildcardFilter,
+  CumulativeFilter as ProtoCumulativeFilter,
   EventFormat as ProtoEventFormat,
   InterfaceFilter as ProtoInterfaceFilter,
   ParticipantAuthorizationTopologyFormat as ProtoParticipantAuthorizationTopologyFormat,
@@ -42,12 +43,19 @@ object FormatValidator {
   import ValidationErrors.*
 
   def validate(eventFormat: ProtoEventFormat)(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, EventFormat] =
     if (eventFormat.filtersByParty.isEmpty && eventFormat.filtersForAnyParty.isEmpty) {
       Left(invalidArgument("filtersByParty and filtersForAnyParty cannot be empty simultaneously"))
     } else {
       for {
+        _ <- validateCardinality(
+          values = eventFormat.filtersByParty,
+          fieldName = "filters_by_party",
+          limit = sizeLimitsConfig.publicLapiSizeConfig.eventFormat.filtersByPartySizeLimit,
+        )
+        _ <- validateTotalFiltersSize(numberOfFilters(eventFormat))
         convertedFilters <- eventFormat.filtersByParty.toList.traverse { case (party, filters) =>
           for {
             key <- requireParty(party)
@@ -69,20 +77,27 @@ object FormatValidator {
   def validate(
       protoParticipantAuthorizationTopologyFormat: ProtoParticipantAuthorizationTopologyFormat
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, ParticipantAuthorizationFormat] =
-    protoParticipantAuthorizationTopologyFormat.parties.toList
-      .traverse(requirePartyField(_, "parties"))
-      .map(parties =>
-        ParticipantAuthorizationFormat(
-          // empty means: for all parties
-          if (parties.isEmpty) None
-          else Some(parties.toSet)
-        )
+    for {
+      _ <- validateCardinality(
+        values = protoParticipantAuthorizationTopologyFormat.parties,
+        fieldName = "parties",
+        limit =
+          sizeLimitsConfig.publicLapiSizeConfig.participantAuthorizationTopologyFormat.partiesSizeLimit,
       )
+      parties <- protoParticipantAuthorizationTopologyFormat.parties.toList
+        .traverse(requirePartyField(_, "parties"))
+    } yield ParticipantAuthorizationFormat(
+      // empty means: for all parties
+      if (parties.isEmpty) None
+      else Some(parties.toSet)
+    )
 
   def validate(protoTopologyFormat: ProtoTopologyFormat)(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, TopologyFormat] =
     for {
       participantAuthorizationPartiesO <- validateOptional(
@@ -112,7 +127,8 @@ object FormatValidator {
   }
 
   def validate(protoTransactionFormat: ProtoTransactionFormat)(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, TransactionFormat] =
     for {
       transactionShape <- validate(protoTransactionFormat.transactionShape)
@@ -120,7 +136,8 @@ object FormatValidator {
     } yield TransactionFormat(eventFormat, transactionShape)
 
   def validate(protoUpdateFormat: ProtoUpdateFormat)(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, UpdateFormat] =
     for {
       _ <- Either.cond(
@@ -139,6 +156,7 @@ object FormatValidator {
           "include_transactions_and_reassignments and include_reassignments cannot both be set"
         ),
       )
+      _ <- validateTotalFiltersSize(numberOfFilters(protoUpdateFormat))
       includeTransactionsAndReassignments <- validateOptional(
         protoUpdateFormat.includeTransactionsAndReassignments
       )(validate)
@@ -163,8 +181,21 @@ object FormatValidator {
       includeAcsChanges = None,
     )
 
-  // Allow using deprecated Protobuf fields for backwards compatibility
   private def validateFilters(filters: Filters)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, CumulativeFilter] =
+    for {
+      _ <- validateCardinality(
+        values = filters.cumulative,
+        fieldName = "cumulative",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.filters.cumulativeSizeLimit,
+      )
+      cumulativeFilter <- validateCumulativeFilters(filters)
+    } yield cumulativeFilter
+
+  // Allow using deprecated Protobuf fields for backwards compatibility
+  private def validateCumulativeFilters(filters: Filters)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, CumulativeFilter] = {
     val extractedFilters = filters.cumulative.map(_.identifierFilter)
@@ -270,4 +301,53 @@ object FormatValidator {
         )
       )
 
+  // the calculation for the total number of decomposed filters supposes that an interface will resolve to 5 templates
+  private[validation] val decomposedInterfaceFilterSize = 5
+
+  private[validation] def filtersSize(filters: Filters): Int = {
+    val identifierFilters = filters.cumulative.map(_.identifierFilter)
+    // filters without any identifier filter are converted to a template wildcard filter
+    if (identifierFilters.forall(_.isEmpty)) 1
+    else
+      identifierFilters.view.map {
+        case ProtoCumulativeFilter.IdentifierFilter.TemplateFilter(_) => 1
+        case ProtoCumulativeFilter.IdentifierFilter.InterfaceFilter(_) =>
+          decomposedInterfaceFilterSize
+        case ProtoCumulativeFilter.IdentifierFilter.WildcardFilter(_) => 1
+        case ProtoCumulativeFilter.IdentifierFilter.Empty => 0
+      }.sum
+  }
+
+  private[validation] def numberOfFilters(eventFormat: ProtoEventFormat): Int = {
+    val filtersByParty = eventFormat.filtersByParty.valuesIterator.map(filtersSize).sum
+    val wildcardFilters = eventFormat.filtersForAnyParty.fold(0)(filtersSize)
+    filtersByParty + wildcardFilters
+  }
+
+  private[validation] def numberOfFilters(updateFormat: ProtoUpdateFormat): Int = {
+    val transactionFilters =
+      updateFormat.includeTransactions.flatMap(_.eventFormat).fold(0)(numberOfFilters)
+    val reassignmentFilters = updateFormat.includeReassignments.fold(0)(numberOfFilters)
+    val transactionsAndReassignmentsFilters =
+      updateFormat.includeTransactionsAndReassignments
+        .flatMap(_.eventFormat)
+        .fold(0)(numberOfFilters)
+    transactionFilters + reassignmentFilters + 2 * transactionsAndReassignmentsFilters
+  }
+
+  private def validateTotalFiltersSize(totalDecomposedFilters: Int)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] =
+    Either.cond(
+      totalDecomposedFilters <= sizeLimitsConfig.eventFormatTotalFiltersSizeLimit.value,
+      (),
+      RequestValidationErrors.EventFormatFiltersLimitExceeded
+        .Reject(
+          actualSize = totalDecomposedFilters.toLong,
+          maxLimit = sizeLimitsConfig.eventFormatTotalFiltersSizeLimit.value.toLong,
+          interfaceFilterSize = decomposedInterfaceFilterSize,
+        )
+        .asGrpcError,
+    )
 }

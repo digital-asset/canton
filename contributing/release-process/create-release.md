@@ -99,7 +99,7 @@ Before starting the release, check the following:
 
 - The Daml version can be read in `project/project/DamlVersions.scala`.
 
-- The Daml version must be a non-snapshot (== a stable) version.
+- The Daml version must be a stable version.
 
 - The Canton and Daml versions may be different.
 
@@ -145,7 +145,7 @@ the [Canton Release Owners](https://github.com/orgs/DACH-NY/teams/canton-release
 **Important**
 Merge strategy of the PR should be ***rebase and merge***, otherwise the release will not be done.
 
-Once the PR is merged, the release commit (`release: 3.4.4`) will be tagged (`3.4.4`) and the last part of the release
+Once the PR is merged, the release commit (`release: 3.4.4`) will be tagged (`v3.4.4`) and the last part of the release
 process will kick off.
 You can follow the process on CircleCI:
 
@@ -153,7 +153,7 @@ You can follow the process on CircleCI:
 
   [https://github.com/DACH-NY/canton/commits/release-line-3.4](https://github.com/DACH-NY/canton/commits/release-line-3.4)
 
-- Open the CircleCI workflow of the release-commit (`release: 3.4.4`)
+- Open the CircleCI workflow of the release-commit tag (`v3.4.4`)
 
 - Code freeze can be lifted by sending another slack message to `#team-canton`
 
@@ -280,4 +280,8 @@ First, create and merge a PR to bump Daml.
 
 ## Clean up
 
-A PR targeting main should be opened to add the release notes (`release-notes/2.3.13.md`) and the data continuity dumps.
+- A PR targeting main should be opened to add the release notes (`release-notes/2.3.13.md`) and the data continuity dumps.
+- It makes sense to check the following release sensitive still test pass on `main`:
+  - `ConfigContinuityReaderTest`
+  - `ProtobufCompatibilityReaderTest`
+

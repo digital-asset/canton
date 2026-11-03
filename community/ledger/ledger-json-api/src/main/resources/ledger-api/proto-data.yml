@@ -983,9 +983,10 @@ fileComments:
           fieldComments:
             page_token: |-
               Pagination token to determine the specific page to fetch. Using the token guarantees that parties on a subsequent
-              page are all lexically greater than the last party on a previous page. Server does not store intermediate results
-              between calls chained by a series of page tokens. As a consequence, if new parties are being added and a page is
-              requested twice using the same token, more parties can be returned on the second call.
+              page are all lexically greater than the last party on a previous page.
+              Subsequent pages use the same topology snapshot as the first page, keeping known parties and their ``is_local``
+              property consistent. Continuation tokens must be used on the same participant. If pruning invalidates the
+              snapshot, restart the listing without a page token.
               Leave empty to fetch the first page.
 
               Optional

@@ -29,7 +29,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   Sequencer,
 }
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
@@ -124,116 +123,115 @@ class AggregationAmplificationIntegrationTest
 
   }
 
-  "validate that participants properly react to already exists sync rejections" onlyRunWithOrGreaterThan
-    ProtocolVersion.v36 in { implicit env =>
-      import env.*
+  "validate that participants properly react to already exists sync rejections" in { implicit env =>
+    import env.*
 
-      val seq1 = getProgrammableSequencer(sequencer1.name)
-      val seq2 = getProgrammableSequencer(sequencer2.name)
+    val seq1 = getProgrammableSequencer(sequencer1.name)
+    val seq2 = getProgrammableSequencer(sequencer2.name)
 
-      val numRequests = new AtomicInteger(0)
-      val numResponses = new AtomicInteger(0)
+    val numRequests = new AtomicInteger(0)
+    val numResponses = new AtomicInteger(0)
 
-      val delayRequestSync = Promise[Unit]()
-      val delayResponseSync = Promise[Unit]()
-      val delayRequestAsync = Promise[Unit]()
-      val delayResponseAsync = Promise[Unit]()
+    val delayRequestSync = Promise[Unit]()
+    val delayResponseSync = Promise[Unit]()
+    val delayRequestAsync = Promise[Unit]()
+    val delayResponseAsync = Promise[Unit]()
 
-      // the following test will validate that both request and responses are properly amplified,
-      // but deal with the synchronous rejections properly.
-      //
-      // however, the amplification will only happen if the synchronous request is processed.
-      // therefore, we need to perform a bit of a dance between holding back on the post processing
-      // versus synchronous part.
-      //
-      // we receive r1 => we process it sync, but block async
-      // we receive r1' => we hold it back sync but release the r1 held back async
-      // we receive v1 => we process it sync, but block async, we also release r1' held sync
-      // we receive v1' => we hold it back sync, but release v1 held back async
-      // we receive m1 => we release v1' held back sync
-      def sendPolicy(sequencer: Sequencer, name: String)(
-          submissionRequest: SubmissionRequest
-      ): SendDecision = {
-        logger.debug(s"Custom Policy on $name received $submissionRequest")
-        if (submissionRequest.sender == participant1.id) {
-          if (submissionRequest.isConfirmationRequest) {
-            numRequests.getAndIncrement() match {
-              case 0 =>
-                sequencer.applyPostProcessingLockForTesting(delayRequestAsync.future)
-                SendDecision.Process
-              case 1 =>
-                delayRequestAsync.trySuccess(())
-                SendDecision.HoldBack(delayRequestSync.future)
-              case _ =>
-                logger.error("Unexpected confirmation request from participant1")
-                SendDecision.Process
-            }
-          } else if (submissionRequest.isConfirmationResponse) {
-            numResponses.getAndIncrement() match {
-              case 0 =>
-                sequencer.applyPostProcessingLockForTesting(delayResponseAsync.future)
-                delayRequestSync.trySuccess(())
-                SendDecision.Process
-              case 1 =>
-                delayResponseAsync.trySuccess(())
-                SendDecision.HoldBack(delayResponseSync.future)
-              case _ =>
-                logger.error("Unexpected confirmation response from participant1")
-                SendDecision.Process
-            }
-          } else SendDecision.Process
-        } else if (
-          // if the submission request is a verdict, release the response
-          submissionRequest.sender.code == MediatorId.Code && submissionRequest.batch.allMembers
-            .map(_.code)
-            .contains(ParticipantId.Code)
-        ) {
-          delayResponseSync.trySuccess(())
-          SendDecision.Process
+    // the following test will validate that both request and responses are properly amplified,
+    // but deal with the synchronous rejections properly.
+    //
+    // however, the amplification will only happen if the synchronous request is processed.
+    // therefore, we need to perform a bit of a dance between holding back on the post processing
+    // versus synchronous part.
+    //
+    // we receive r1 => we process it sync, but block async
+    // we receive r1' => we hold it back sync but release the r1 held back async
+    // we receive v1 => we process it sync, but block async, we also release r1' held sync
+    // we receive v1' => we hold it back sync, but release v1 held back async
+    // we receive m1 => we release v1' held back sync
+    def sendPolicy(sequencer: Sequencer, name: String)(
+        submissionRequest: SubmissionRequest
+    ): SendDecision = {
+      logger.debug(s"Custom Policy on $name received $submissionRequest")
+      if (submissionRequest.sender == participant1.id) {
+        if (submissionRequest.isConfirmationRequest) {
+          numRequests.getAndIncrement() match {
+            case 0 =>
+              sequencer.applyPostProcessingLockForTesting(delayRequestAsync.future)
+              SendDecision.Process
+            case 1 =>
+              delayRequestAsync.trySuccess(())
+              SendDecision.HoldBack(delayRequestSync.future)
+            case _ =>
+              logger.error("Unexpected confirmation request from participant1")
+              SendDecision.Process
+          }
+        } else if (submissionRequest.isConfirmationResponse) {
+          numResponses.getAndIncrement() match {
+            case 0 =>
+              sequencer.applyPostProcessingLockForTesting(delayResponseAsync.future)
+              delayRequestSync.trySuccess(())
+              SendDecision.Process
+            case 1 =>
+              delayResponseAsync.trySuccess(())
+              SendDecision.HoldBack(delayResponseSync.future)
+            case _ =>
+              logger.error("Unexpected confirmation response from participant1")
+              SendDecision.Process
+          }
         } else SendDecision.Process
-      }
-
-      seq1.setPolicy_("trigger amplification on s1")(
-        sendPolicy(sequencer1.underlying.value.sequencer.sequencer, "sequencer1")(_)
-      )
-      seq2.setPolicy_("trigger amplification on s2")(
-        sendPolicy(sequencer2.underlying.value.sequencer.sequencer, "sequencer2")(_)
-      )
-
-      // modify synchronizer connection so we amplify the confirmation response immediately
-      val cfg = participant1.synchronizers.list_registered().loneElement._1
-      val alias = cfg.synchronizerAlias
-      participant1.synchronizers.modify(
-        alias,
-        cfg =>
-          cfg.copy(sequencerConnections = {
-            cfg.sequencerConnections
-              .withSubmissionRequestAmplification(
-                SubmissionRequestAmplification(
-                  PositiveInt.tryCreate(5), // amplify immediately
-                  config.NonNegativeFiniteDuration.Zero,
-                )
-              )
-              .withSequencerTrustThreshold(
-                sequencerTrustThreshold =
-                  PositiveInt.two // make sure that we've read from both sequencers so that the aggregation state is in sync
-              )
-              .value
-          }),
-      )
-      participant1.synchronizers.disconnect_all()
-      participant1.synchronizers.reconnect(alias)
-
-      // we don't want to see a warning or an error in the logs
-      val alice = participant1.parties.find("alice")
-      loggerFactory.assertLogs(SuppressionRule.LevelAndAbove(Level.WARN))({
-        IouSyntax.createIou(participant1)(alice, alice)
-        Threading.sleep(5000)
-      })
-
-      assertResult(2)(numRequests.get())
-      assertResult(2)(numResponses.get())
-
+      } else if (
+        // if the submission request is a verdict, release the response
+        submissionRequest.sender.code == MediatorId.Code && submissionRequest.batch.allMembers
+          .map(_.code)
+          .contains(ParticipantId.Code)
+      ) {
+        delayResponseSync.trySuccess(())
+        SendDecision.Process
+      } else SendDecision.Process
     }
+
+    seq1.setPolicy_("trigger amplification on s1")(
+      sendPolicy(sequencer1.underlying.value.sequencer.sequencer, "sequencer1")(_)
+    )
+    seq2.setPolicy_("trigger amplification on s2")(
+      sendPolicy(sequencer2.underlying.value.sequencer.sequencer, "sequencer2")(_)
+    )
+
+    // modify synchronizer connection so we amplify the confirmation response immediately
+    val cfg = participant1.synchronizers.list_registered().loneElement._1
+    val alias = cfg.synchronizerAlias
+    participant1.synchronizers.modify(
+      alias,
+      cfg =>
+        cfg.copy(sequencerConnections = {
+          cfg.sequencerConnections
+            .withSubmissionRequestAmplification(
+              SubmissionRequestAmplification(
+                PositiveInt.tryCreate(5), // amplify immediately
+                config.NonNegativeFiniteDuration.Zero,
+              )
+            )
+            .withSequencerTrustThreshold(
+              sequencerTrustThreshold =
+                PositiveInt.two // make sure that we've read from both sequencers so that the aggregation state is in sync
+            )
+            .value
+        }),
+    )
+    participant1.synchronizers.disconnect_all()
+    participant1.synchronizers.reconnect(alias)
+
+    // we don't want to see a warning or an error in the logs
+    val alice = participant1.parties.find("alice")
+    loggerFactory.assertLogs(SuppressionRule.LevelAndAbove(Level.WARN))({
+      IouSyntax.createIou(participant1)(alice, alice)
+      Threading.sleep(5000)
+    })
+
+    assertResult(2)(numRequests.get())
+    assertResult(2)(numResponses.get())
+
+  }
 
 }

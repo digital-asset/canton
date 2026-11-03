@@ -97,6 +97,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           acsCommitment = oversizedAcs,
           signature = dummySignature,
           sizeLimit = defaultMaxCommitmentSize,
+          protocolVersion = testedProtocolVersion,
         )
 
         // Assertions
@@ -186,7 +187,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           val error = ProtoDeserializationError.InvariantViolation(
             field = "addressed_counterparticipants",
             error =
-              s"repeated field has ${defaultMaxAddressedCounterparticipants.value + 1} elements, exceeding the maximum of $defaultMaxAddressedCounterparticipants",
+              s"repeated or map field has ${defaultMaxAddressedCounterparticipants.value + 1} elements, exceeding the maximum of $defaultMaxAddressedCounterparticipants",
           )
           inboundResult.left.value shouldBe error
           outboundResult.left.value shouldBe error.message
@@ -235,7 +236,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           val error = ProtoDeserializationError.InvariantViolation(
             field = "unsent_digests",
             error =
-              s"repeated field has ${defaultMaxUnsentDigests.value + 1} elements, exceeding the maximum of $defaultMaxUnsentDigests",
+              s"repeated or map field has ${defaultMaxUnsentDigests.value + 1} elements, exceeding the maximum of $defaultMaxUnsentDigests",
           )
           inboundResult.left.value shouldBe error
           outboundResult.left.value shouldBe error.message
@@ -284,6 +285,7 @@ class AcsCommitmentLimitsTest extends AnyWordSpec with BaseTest with AcsCommitme
           acsCommitmentSummary = oversizedSummary,
           signature = dummySignature,
           sizeLimit = defaultMaxCommitmentSummarySize,
+          protocolVersion = testedProtocolVersion,
         )
 
         if (limitsEnforced) {

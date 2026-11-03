@@ -19,8 +19,8 @@ object ReassignmentCommand {
       sourceSynchronizer: Source[SynchronizerId],
       targetSynchronizer: Target[SynchronizerId],
       contractId: Value.ContractId,
-      overrideSourceValidationPkgId: Option[LfPackageId],
-      overrideTargetValidationPkgId: Option[LfPackageId],
+      overrideSourceValidationPkgId: Source[Option[LfPackageId]],
+      overrideTargetValidationPkgId: Target[Option[LfPackageId]],
   ) extends ReassignmentCommand
 
   final case class Assign(

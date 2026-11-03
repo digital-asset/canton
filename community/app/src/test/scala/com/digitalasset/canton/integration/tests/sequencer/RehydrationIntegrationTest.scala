@@ -27,7 +27,6 @@ import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlo
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -111,8 +110,7 @@ abstract class RehydrationIntegrationTest
         ),
         features = CantonFeatures(enableRepairCommands = true),
       )
-    ).addConfigTransforms(ConfigTransforms.defaultsForNodes*)
-      .withManualStart
+    ).withManualStart
       .withSetup { implicit env =>
         import env.*
 

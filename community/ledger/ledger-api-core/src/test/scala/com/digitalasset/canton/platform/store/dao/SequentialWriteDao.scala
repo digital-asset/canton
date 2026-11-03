@@ -131,6 +131,10 @@ private[dao] final case class SequentialWriteDaoImpl[DbBatch](
         )
       case e: DbDto.EventVariousWitnessed =>
         e.copy(event_sequential_id = nextEventSeqId)
+      case e: DbDto.EventPartyToParticipant =>
+        e.copy(event_sequential_id = nextEventSeqId)
+      case e: DbDto.GenericTopologyEvent =>
+        e.copy(event_sequential_id = nextEventSeqId)
       case e: DbDto.IdFilterDbDto =>
         e.withEventSequentialId(lastEventSeqId)
       case e: DbDto.TransactionMeta =>

@@ -59,6 +59,10 @@ slack_red_main_with_volunteer:
             SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
           fi
 
+          # select_rota.py prints a multi-person rota (Flaky Canton) space-separated, the
+          # slack orb expects a comma-separated list, so one invalid mention is not rendered.
+          SELECTED_VOLUNTEER=$(printf '%s' "$SELECTED_VOLUNTEER" | tr -s ' ' ',')
+
           echo "$SELECTED_VOLUNTEER"
           echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
           echo "export PING_REASON=\"${PING_REASON}\"" >> $BASH_ENV

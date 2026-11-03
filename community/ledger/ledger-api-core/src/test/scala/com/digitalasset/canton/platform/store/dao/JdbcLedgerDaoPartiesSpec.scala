@@ -9,6 +9,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetail
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import io.grpc.StatusRuntimeException
 import org.scalatest.OptionValues
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -34,7 +35,7 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
       _ = response should be(PersistenceResponse.Ok)
       response <- storePartyEntry(bob, nextOffset())
       _ = response should be(PersistenceResponse.Ok)
-      parties <- ledgerDao.listKnownParties(None, filterParty = None, 1000)
+      parties <- listKnownParties(None, filterParty = None, 1000)
     } yield {
       parties should contain.allOf(alice, bob)
     }
@@ -55,17 +56,17 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
     )(storePartyEntry(_, nextOffset()))
     for {
       _ <- storeF
-      onlyAlicePartial <- ledgerDao.listKnownParties(
+      onlyAlicePartial <- listKnownParties(
         None,
         filterParty = Some(String185.tryCreate("FilterAlice")),
         1000,
       )
-      onlyAliceFull <- ledgerDao.listKnownParties(
+      onlyAliceFull <- listKnownParties(
         None,
         filterParty = Some(String185.tryCreate(alice.party)),
         1000,
       )
-      bothFilter <- ledgerDao.listKnownParties(
+      bothFilter <- listKnownParties(
         None,
         filterParty = Some(String185.tryCreate("Filter")),
         1000,
@@ -87,10 +88,10 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
     val newParties = List("Wes", "Zeb", "Les", "Mel").map(genParty)
 
     for {
-      partiesBefore <- ledgerDao.listKnownParties(None, filterParty = None, 1000)
+      partiesBefore <- listKnownParties(None, filterParty = None, 1000)
       _ <- MonadUtil.sequentialTraverse_(newParties)(storePartyEntry(_, nextOffset()))
-      parties1 <- ledgerDao.listKnownParties(None, filterParty = None, partiesBefore.size + 1)
-      parties2 <- ledgerDao.listKnownParties(
+      parties1 <- listKnownParties(None, filterParty = None, partiesBefore.size + 1)
+      parties2 <- listKnownParties(
         parties1.lastOption.map(_.party),
         filterParty = None,
         partiesBefore.size + newParties.size,
@@ -102,11 +103,66 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
     }
   }
 
+  it should "list known parties consistently at a pinned event sequence ID" in {
+    val randomSuffix = UUID.randomUUID()
+    def genParty(name: String) =
+      IndexerPartyDetails(
+        party = Ref.Party.assertFromString(s"Pinned$name-$randomSuffix"),
+        isLocal = true,
+      )
+    val early = genParty("Early")
+    val late = genParty("Late")
+    val prefix = Some(String185.tryCreate("Pinned"))
+
+    for {
+      _ <- storePartyEntry(early, nextOffset())
+      firstPage <- ledgerDao.listKnownParties(None, prefix, 1000, validAtEventSeqId = None)
+      _ <- storePartyEntry(late, nextOffset())
+      pinnedPage <- ledgerDao.listKnownParties(
+        None,
+        prefix,
+        1000,
+        validAtEventSeqId = Some(firstPage.validAtEventSeqId),
+      )
+      currentPage <- ledgerDao.listKnownParties(None, prefix, 1000, validAtEventSeqId = None)
+    } yield {
+      pinnedPage.validAtEventSeqId shouldBe firstPage.validAtEventSeqId
+      pinnedPage.parties should contain(early)
+      pinnedPage.parties should not contain late
+      currentPage.parties should contain.allOf(early, late)
+      currentPage.validAtEventSeqId should be > firstPage.validAtEventSeqId
+    }
+  }
+
+  it should "reject listing known parties beyond the ledger end event sequence ID" in {
+    for {
+      current <- ledgerDao.listKnownParties(None, None, 1, validAtEventSeqId = None)
+      beyondLedgerEnd = current.validAtEventSeqId + 1000L
+      failure <- recoverToExceptionIf[StatusRuntimeException](
+        ledgerDao.listKnownParties(
+          None,
+          None,
+          1,
+          validAtEventSeqId = Some(beyondLedgerEnd),
+        )
+      )
+    } yield {
+      failure.getStatus.getDescription should include("beyond the ledger end event sequential ID")
+    }
+  }
+
   it should "retrieve zero parties" in {
     for {
       noPartyDetails <- ledgerDao.getParties(Seq.empty)
     } yield {
       noPartyDetails should be(Seq.empty)
+    }
+  }
+
+  it should "return no parties at event sequence ID zero" in {
+    ledgerDao.listKnownParties(None, None, 10, validAtEventSeqId = Some(0L)).map { page =>
+      page.validAtEventSeqId shouldBe 0L
+      page.parties shouldBe empty
     }
   }
 
@@ -150,6 +206,15 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
       parties should contain.only(dan, eve)
     }
   }
+
+  private def listKnownParties(
+      fromExcl: Option[Ref.Party],
+      filterParty: Option[String185],
+      maxResults: Int,
+  ) =
+    ledgerDao
+      .listKnownParties(fromExcl, filterParty, maxResults, validAtEventSeqId = None)
+      .map(_.parties)
 
   private def storePartyEntry(
       partyDetails: IndexerPartyDetails,

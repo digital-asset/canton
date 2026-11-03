@@ -330,6 +330,7 @@ class ConfirmationRequestAndResponseProcessorTest
             confirmationResponses,
             snapshot,
             None,
+            testedProtocolVersion,
           )
       )
   }
@@ -369,6 +370,7 @@ class ConfirmationRequestAndResponseProcessorTest
             response,
             snapshot,
             None,
+            testedProtocolVersion,
           )
       )
       .failOnShutdown
@@ -410,6 +412,7 @@ class ConfirmationRequestAndResponseProcessorTest
           TransactionViewType,
           testTopologyTimestamp,
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         ),
         Recipients.cc(MemberRecipient(participant), mediatorGroupRecipient),
       )(testedProtocolVersion)
@@ -419,7 +422,9 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val testMediatorRequest =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion) {
+        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+          InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+        ) {
           val (firstFaultyViewPosition: ViewPosition, _) =
             super.informeesAndConfirmationParamsByViewPosition.head
 
@@ -466,7 +471,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
 
       for {
         _ <- loggerFactory.assertLogs(
@@ -505,7 +510,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
 
       val requestTimestamp = CantonTimestamp.Epoch.plusSeconds(12345)
       val reqId = RequestId(requestTimestamp)
@@ -538,8 +543,9 @@ class ConfirmationRequestAndResponseProcessorTest
           testedProtocolVersion,
         )
         signedResponse = SignedProtocolMessage(
-          TypedSignedProtocolMessageContent(response),
+          TypedSignedProtocolMessageContent(response, testedProtocolVersion),
           NonEmpty(Seq, Signature.noSignature),
+          testedProtocolVersion,
         )
         _ <- loggerFactory.assertLogs(
           sut.processor
@@ -565,7 +571,9 @@ class ConfirmationRequestAndResponseProcessorTest
       val correctRootHash = fullInformeeTree.tree.rootHash
       // Create a custom informee message with several recipient participants
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion) {
+        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+          InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+        ) {
           override val informeesAndConfirmationParamsByViewPosition
               : Map[ViewPosition, ViewConfirmationParameters] =
             Map(
@@ -598,6 +606,7 @@ class ConfirmationRequestAndResponseProcessorTest
           correctViewType,
           testTopologyTimestamp,
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         )
 
       val tests = List[(String, Seq[Recipients])](
@@ -645,7 +654,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val rootHash = informeeMessage.rootHash
       val wrongRootHash =
         RootHash(
@@ -661,6 +670,7 @@ class ConfirmationRequestAndResponseProcessorTest
           correctViewType,
           testTopologyTimestamp,
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         )
       val wrongRootHashMessage = correctRootHashMessage.copy(rootHash = wrongRootHash)
       val wrongViewTypeRHM = correctRootHashMessage.copy(viewType = wrongViewType)
@@ -844,13 +854,14 @@ class ConfirmationRequestAndResponseProcessorTest
       val fullInformeeTreeOther =
         factoryOtherMediatorId.MultipleRootsAndViewNestings.fullInformeeTree
       val mediatorRequest =
-        InformeeMessage(fullInformeeTreeOther, sign(fullInformeeTreeOther))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTreeOther, sign(fullInformeeTreeOther), testedProtocolVersion)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash,
         synchronizerId,
         mediatorRequest.viewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       val sc = 10L
@@ -891,7 +902,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val wrongRecipients = Recipients.cc(MediatorGroupRecipient(MediatorGroupIndex.one))
       val expectedRecipients = Recipients.cc(mediatorGroupRecipient)
 
@@ -929,13 +940,14 @@ class ConfirmationRequestAndResponseProcessorTest
     "correct series of mediator events" in {
       val sut = new Fixture()
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.updateId.toRootHash,
         synchronizerId,
         ViewType.TransactionViewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
       val mockTopologySnapshot = mock[TopologySnapshot]
       when(
@@ -1169,7 +1181,9 @@ class ConfirmationRequestAndResponseProcessorTest
 
       // Create a custom informee message with many quorums such that the first Malformed rejection doesn't finalize the request
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion) {
+        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+          InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+        ) {
           override val informeesAndConfirmationParamsByViewPosition
               : Map[ViewPosition, ViewConfirmationParameters] = {
             val allNodesViewConfirmationParameters = ViewConfirmationParameters.tryCreate(
@@ -1232,6 +1246,7 @@ class ConfirmationRequestAndResponseProcessorTest
         ViewType.TransactionViewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       val requestIdTs = CantonTimestamp.Epoch
@@ -1330,7 +1345,9 @@ class ConfirmationRequestAndResponseProcessorTest
     "raise an alarm when a participant send two contradictory verdicts" in {
       val sut = new Fixture(identityFactory4.forOwnerAndSynchronizer(sequencer, synchronizerId))
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion) {
+        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+          InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+        ) {
           override val informeesAndConfirmationParamsByViewPosition = Map(
             view0Position -> ViewConfirmationParameters.tryCreate(
               Set(signatory),
@@ -1350,6 +1367,7 @@ class ConfirmationRequestAndResponseProcessorTest
         ViewType.TransactionViewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       def approve(participantId: ParticipantId) = createConfirmationResponses(
@@ -1489,7 +1507,9 @@ class ConfirmationRequestAndResponseProcessorTest
 
       // Create a custom informee message with a quorum such that the first rejection or abstain doesn't finalize the request
       val informeeMessage =
-        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion) {
+        new InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(
+          InformeeMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
+        ) {
           override val informeesAndConfirmationParamsByViewPosition = Map(
             view0Position -> ViewConfirmationParameters.tryCreate(
               Set(submitter, signatory, observer),
@@ -1513,6 +1533,7 @@ class ConfirmationRequestAndResponseProcessorTest
         ViewType.TransactionViewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       val abstainMsg = "this is a test abstain response"
@@ -1612,13 +1633,14 @@ class ConfirmationRequestAndResponseProcessorTest
       val responseTs = participantResponseDeadline.addMicros(1)
 
       val informeeMessage =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.updateId.toRootHash,
         synchronizerId,
         ViewType.TransactionViewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       for {
@@ -1681,9 +1703,11 @@ class ConfirmationRequestAndResponseProcessorTest
               ),
             ),
             testedProtocolVersion,
-          )
+          ),
+          testedProtocolVersion,
         ),
         NonEmpty(Seq, Signature.noSignature),
+        testedProtocolVersion,
       )
 
     "discard a late response before querying the topology snapshot at the request timestamp" in {
@@ -1796,7 +1820,7 @@ class ConfirmationRequestAndResponseProcessorTest
           val sut = new Fixture()
 
           val informeeMessage =
-            InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+            InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
 
           loggerFactory
             .assertLogs(
@@ -1825,13 +1849,14 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture()
 
       val mediatorRequest =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash,
         synchronizerId,
         mediatorRequest.viewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       val sc = 10L
@@ -1889,7 +1914,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture(synchronizerSyncCryptoApi)
 
       val request =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
 
       for {
         _ <- loggerFactory.assertLogs(
@@ -1945,7 +1970,7 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture(synchronizerSyncCryptoApi)
 
       val request =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
 
       for {
         _ <- loggerFactory.assertLogs(
@@ -1977,13 +2002,14 @@ class ConfirmationRequestAndResponseProcessorTest
       val sut = new Fixture(synchronizerSyncCryptoApi3)
 
       val mediatorRequest =
-        InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+        InformeeMessage(fullInformeeTree, sign(fullInformeeTree), testedProtocolVersion)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash,
         synchronizerId,
         mediatorRequest.viewType,
         testTopologyTimestamp,
         SerializedRootHashMessagePayload.empty,
+        testedProtocolVersion,
       )
 
       val sc = SequencerCounter(100)

@@ -20,7 +20,6 @@ import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.tests.vettingmain
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser}
 import org.slf4j.event.Level
 
@@ -74,7 +73,7 @@ class ProtocolVettingChecksIntegrationTest
       .toSeq
 
   "A submitting participant" when {
-    s"connected to a PV ${ProtocolVersion.v35} or higher synchronizer" should {
+    "connected to any synchronizer" should {
       "be able to submit a command with a vetted package that has an unvetted dependency that doesn't appear in a transaction action node" taggedAs_ (ledgerIntegrity
         .setHappyCase(_)) in { implicit env =>
         import env.*
@@ -86,9 +85,7 @@ class ProtocolVettingChecksIntegrationTest
         // Creating a MainT contract should be possible as the unvetted dependency (Dep) is not used in the transaction
         participant1.ledger_api.javaapi.commands.submit(Seq(alice), createMainCommand(alice))
       }
-    }
 
-    "connected to any synchronizer" should {
       "reject a command submission if the resulting transaction uses an unvetted dependency of a package in a transaction action node" taggedAs ledgerIntegrity
         .setAttack(
           Attack(

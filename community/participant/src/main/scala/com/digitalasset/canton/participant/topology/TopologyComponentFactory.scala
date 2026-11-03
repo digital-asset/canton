@@ -222,7 +222,6 @@ class TopologyComponentFactory(
           dryRunSnapshot = dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags = forceFlags,
           disableUpgradeValidation = disableUpgradeValidation,
-          protocolVersion = store.protocolVersion,
         )
 
       override def checkCannotDisablePartyWithActiveContracts(

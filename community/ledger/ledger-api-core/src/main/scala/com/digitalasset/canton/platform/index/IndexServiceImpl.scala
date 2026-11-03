@@ -528,10 +528,11 @@ private[index] class IndexServiceImpl(
       fromExcl: Option[Party],
       filterString: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]] =
-    ledgerDao.listKnownParties(fromExcl, filterString, maxResults)
+  ): Future[IndexerKnownPartiesPage] =
+    ledgerDao.listKnownParties(fromExcl, filterString, maxResults, validAtEventSeqId)
 
   override def prune(
       previousPruneUpToInclusive: Option[Offset],

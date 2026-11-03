@@ -18,6 +18,8 @@ import com.digitalasset.canton.config.ConfigErrors.{
 import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.api.DeprecatedApiGate
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -29,7 +31,11 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
-import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ApiDeprecation,
+  ProtocolVersionCompatibility,
+  ReleaseVersion,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.Assertion
@@ -328,7 +334,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         |public-lapi-size-config.completion-stream-request.parties-size-limit = 10""".stripMargin
     ) { result =>
       val sizeLimits = result.value
-      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, sharedSizeConfig) =>
+      inside(sizeLimits) { case LedgerApiSizeLimitsConfig(_, sharedSizeConfig, _) =>
         sharedSizeConfig.completionsRequestPartiesSizeLimit shouldBe PositiveInt.tryCreate(5)
       }
       sizeLimits.publicLapiSizeConfig.getCompletionsRequest.partiesSizeLimit shouldBe
@@ -336,6 +342,12 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
       // the message-specific limit that is set takes over the shared limit
       sizeLimits.publicLapiSizeConfig.completionStreamRequest.partiesSizeLimit shouldBe
         PositiveInt.tryCreate(10)
+    }
+
+    "read the event format total filters size limit" in withSizeLimits(
+      "event-format-total-filters-size-limit = 7"
+    ) { result =>
+      result.value.eventFormatTotalFiltersSizeLimit shouldBe PositiveInt.tryCreate(7)
     }
 
     "reject an invalid shared limit" in loggerFactory.assertLogs(
@@ -541,6 +553,31 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
             ),
           )
         )
+    }
+  }
+
+  "the deprecated API feature flags" should {
+    // The key named in the errors and docs must be the key the config reader reads.
+    val deprecation = ApiDeprecation.Canton37.Endpoints
+
+    def participantGate(files: Seq[File]): DeprecatedApiGate =
+      DeprecatedApiGate(
+        CantonConfig
+          .parseAndLoad(files.map(_.toJava), Some(DefaultPorts.create()))
+          .valueOrFail("config should load")
+          .participantNodeParametersByString("participant1")
+          .deprecatedApis
+      )
+
+    "disable the deprecated endpoints by default" in {
+      participantGate(Seq(simpleConf)).isEnabled(deprecation) shouldBe false
+    }
+
+    "enable the deprecated endpoints when the flag is true" in {
+      val flag = File.newTemporaryFile(suffix = ".conf").deleteOnExit()
+      val key = deprecation.featureFlag.replace("<participant>", "participant1")
+      flag.overwrite(s"$key = true").discard
+      participantGate(Seq(simpleConf, flag)).isEnabled(deprecation) shouldBe true
     }
   }
 

@@ -26,10 +26,11 @@ runs:
 
     - name: Choose volunteer
       id: choose_volunteer
-      # Pick the rota for the failed job from the rota Google Sheet: a blackduck
-      # job maps to the Release & Blackduck rota, everything else to the CI rota
-      # (see JOB_ROTATION in select_rota.py). This mirrors the CircleCI path,
-      # which passes --job "$CIRCLE_JOB". Runs under .ci/nix-exec for the
+      # Pick the rota for the failed job(s) from the rota Google Sheet: a blackduck
+      # job maps to the Release & Blackduck rota, test jobs to Flaky Canton, everything
+      # else to the CI rota (see rotation_for_job in select_rota.py). FAILED_JOB can be
+      # a comma-separated list, each job is resolved and the IDs combined. This
+      # mirrors the CircleCI path, which passes --job "$CIRCLE_JOB". Runs under .ci/nix-exec for the
       # cryptography dep. select_rota.py falls back to the roster pool if the
       # sheet is unreadable, so it never fails.
       env:
@@ -62,9 +63,11 @@ runs:
         TEXT="$TEXT Can you have a look? <$RUN_URL|View workflow run>"
         # Only add the mention if select_rota actually returned someone, an empty
         # value would render as a broken "<@>" in Slack.
-        if [ -n "$VOLUNTEER" ]; then
-          TEXT="$TEXT <@$VOLUNTEER>"
-        fi
+        # A rota can be several people (Flaky Canton is three), so mention each ID.
+        for ID in $VOLUNTEER
+        do
+          TEXT="$TEXT <@$ID>"
+        done
         # Build the payload with jq so the text is JSON-escaped, the job name can
         # contain quotes or other special characters without breaking the payload.
         PAYLOAD=$(jq -cn --arg text "$TEXT" '{text: $text}')

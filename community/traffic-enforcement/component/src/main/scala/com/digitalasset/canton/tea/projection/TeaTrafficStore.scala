@@ -106,4 +106,21 @@ trait TeaTrafficStore {
   def getUnchargedCompletions(fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[UnchargedCompletion]]
+
+  /** List accounts and their details ordered by account ID.
+    *
+    * @param accountIdPrefix
+    *   only accounts whose ID starts with this prefix are returned, wildcard if None
+    * @param afterExclusive
+    *   only accounts with an ID strictly greater (lexicographically) than this one are returned
+    * @param limit
+    *   maximum number of accounts to return
+    */
+  def listBalances(
+      accountIdPrefix: Option[String],
+      afterExclusive: Option[AccountId],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Seq[AccountState]]
 }

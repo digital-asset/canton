@@ -29,7 +29,6 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   PartyDetails as ProtoPartyDetails,
 }
 import com.daml.logging.LoggingContext
-import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
 import com.digitalasset.canton.config.CantonRequireTypes.String185
@@ -101,8 +100,6 @@ import io.grpc.Status.Code.ALREADY_EXISTS
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
 
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Try}
@@ -202,53 +199,70 @@ private[apiserver] final class ApiPartyManagementService private (
 
     val ListKnownPartiesRequest(pageToken, pageSize, identityProviderId, filterString) = request
     logger.info("Listing known parties.")
-    withValidation(
-      for {
-        fromExcl <- decodePartyFromPageToken(pageToken)
-        _ <- Either.cond(
-          pageSize >= 0,
-          pageSize,
-          RequestValidationErrors.InvalidArgument
-            .Reject("Page size must be non-negative")
-            .asGrpcError,
+    partyManagementService.getParticipantId().flatMap { participantId =>
+      withValidation(
+        for {
+          payload <- ListKnownPartiesPageToken.decode(pageToken)
+          fromToken <- payload.traverse(ListKnownPartiesPageToken.validate(_, participantId))
+          _ <- Either.cond(
+            pageSize >= 0,
+            pageSize,
+            RequestValidationErrors.InvalidArgument
+              .Reject("Page size must be non-negative")
+              .asGrpcError,
+          )
+          _ <- Either.cond(
+            pageSize <= maxPartiesPageSize.value,
+            pageSize,
+            RequestValidationErrors.InvalidArgument
+              .Reject(s"Page size must not exceed the server's maximum of $maxPartiesPageSize")
+              .asGrpcError,
+          )
+          identityProviderId <- optionalIdentityProviderId(
+            identityProviderId,
+            "identity_provider_id",
+          )
+          pageSizeOrDefault =
+            if (pageSize == 0) maxPartiesPageSize.value
+            else pageSize
+          filterStringParsed <- parsePartyFilter(filterString)
+        } yield {
+          (fromToken, pageSizeOrDefault, identityProviderId, filterStringParsed)
+        }
+      ) { case (fromToken, pageSizeOrDefault, identityProviderId, filterStringParsed) =>
+        for {
+          page <- partyManagementService.listKnownParties(
+            fromExcl = fromToken.map(_.partyIdLowerBoundExcl),
+            filterString = filterStringParsed,
+            maxResults = pageSizeOrDefault,
+            // The first page pins the event sequence ID; subsequent pages use the same snapshot.
+            validAtEventSeqId = fromToken.map(_.validAtEventSeqId),
+          )
+          partyRecords <- fetchPartyRecords(page.parties)
+          protoDetails = page.parties
+            .zip(partyRecords)
+            .map(blindAndConvertToProto(identityProviderId))
+        } yield ListKnownPartiesResponse(
+          protoDetails,
+          nextPageToken(page, pageSizeOrDefault, participantId).getOrElse(""),
         )
-        _ <- Either.cond(
-          pageSize <= maxPartiesPageSize.value,
-          pageSize,
-          RequestValidationErrors.InvalidArgument
-            .Reject(s"Page size must not exceed the server's maximum of $maxPartiesPageSize")
-            .asGrpcError,
-        )
-        identityProviderId <- optionalIdentityProviderId(
-          identityProviderId,
-          "identity_provider_id",
-        )
-        pageSizeOrDefault =
-          if (pageSize == 0) maxPartiesPageSize.value
-          else pageSize
-        filterStringParsed <- parsePartyFilter(filterString)
-      } yield {
-        (fromExcl, pageSizeOrDefault, identityProviderId, filterStringParsed)
-      }
-    ) { case (fromExcl, pageSizeOrDefault, identityProviderId, filterStringParsed) =>
-      for {
-        partyDetailsSeq <- partyManagementService.listKnownParties(
-          fromExcl,
-          filterStringParsed,
-          pageSizeOrDefault,
-        )
-        partyRecords <- fetchPartyRecords(partyDetailsSeq)
-      } yield {
-        val protoDetails = partyDetailsSeq
-          .zip(partyRecords)
-          .map(blindAndConvertToProto(identityProviderId))
-        val lastParty =
-          if (partyDetailsSeq.sizeIs < pageSizeOrDefault) None
-          else partyDetailsSeq.lastOption.map(_.party)
-        ListKnownPartiesResponse(protoDetails, encodeNextPageToken(lastParty))
       }
     }
   }
+
+  private def nextPageToken(
+      page: IndexerKnownPartiesPage,
+      pageSize: Int,
+      participantId: Ref.ParticipantId,
+  ): Option[String] =
+    for {
+      last <- page.parties.lastOption
+      if page.parties.sizeIs >= pageSize
+    } yield ListKnownPartiesPageToken.encode(
+      last.party,
+      page.validAtEventSeqId,
+      participantId,
+    )
 
   implicit object PartyAllocationErrors extends StreamTracker.Errors[PartyAllocation.TrackerKey] {
     import com.digitalasset.canton.ledger.error.CommonErrors
@@ -1210,49 +1224,6 @@ private[apiserver] object ApiPartyManagementService {
       pendingPartyAllocations,
       loggerFactory,
     )
-
-  def decodePartyFromPageToken(pageToken: String)(implicit
-      errorLoggingContext: ErrorLoggingContext
-  ): Either[StatusRuntimeException, Option[Ref.Party]] =
-    if (pageToken.isEmpty) {
-      Right(None)
-    } else {
-      val bytes = pageToken.getBytes(StandardCharsets.UTF_8)
-      for {
-        decodedBytes <- Try[Array[Byte]](Base64.getUrlDecoder.decode(bytes)).toEither.left
-          .map(_ => invalidPageToken("failed base64 decoding"))
-        tokenPayload <- Try[ListPartiesPageTokenPayload] {
-          ListPartiesPageTokenPayload.parseFrom(decodedBytes)
-        }.toEither.left
-          .map(_ => invalidPageToken("failed proto decoding"))
-        party <- Ref.Party
-          .fromString(tokenPayload.partyIdLowerBoundExcl)
-          .map(Some(_))
-          .left
-          .map(_ => invalidPageToken("invalid party string in the token"))
-      } yield {
-        party
-      }
-    }
-
-  private def invalidPageToken(details: String)(implicit
-      errorLogger: ErrorLoggingContext
-  ): StatusRuntimeException = {
-    errorLogger.info(s"Invalid page token: $details")
-    RequestValidationErrors.InvalidArgument
-      .Reject("Invalid page token")
-      .asGrpcError
-  }
-
-  def encodeNextPageToken(token: Option[Ref.Party]): String =
-    token
-      .map { id =>
-        val bytes = Base64.getUrlEncoder.encode(
-          ListPartiesPageTokenPayload(partyIdLowerBoundExcl = id).toByteArray
-        )
-        new String(bytes, StandardCharsets.UTF_8)
-      }
-      .getOrElse("")
 
   trait CreateSubmissionId {
     def apply(
