@@ -354,7 +354,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "feature_flags",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -428,7 +428,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "mappings",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -476,7 +476,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "owners",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -572,7 +572,7 @@ final class TopologyTransactionTest
       "reject a mapping above it, naming the field" in {
         val keys = signingKeys(limits.maxSigningKeysPerEntity.unwrap + 1)
         val exceeded =
-          s"repeated field has ${keys.size} elements, exceeding the maximum of ${limits.maxSigningKeysPerEntity.unwrap}"
+          s"repeated or map field has ${keys.size} elements, exceeding the maximum of ${limits.maxSigningKeysPerEntity.unwrap}"
 
         OwnerToKeyMapping
           .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, limits, ownerToKeyP(keys))
@@ -591,14 +591,14 @@ final class TopologyTransactionTest
         )
       }
 
-      "bound the keys to MaxKeys from PV35 until ProtocolVersion.newBoundsOnPV37" in {
+      "bound the keys to MaxKeys until ProtocolVersion.newBoundsOnPV37" in {
         val keys = signingKeys(MaxKeys.unwrap + 1)
         val higher =
           TopologyLimits.default.copy(maxSigningKeysPerEntity = PositiveInt.tryCreate(keys.size))
         val exceeded =
-          s"repeated field has ${keys.size} elements, exceeding the maximum of $MaxKeys"
+          s"repeated or map field has ${keys.size} elements, exceeding the maximum of $MaxKeys"
 
-        forAll(Seq(ProtocolVersion.v35, pvBeforeValidationBound)) { pv =>
+        forAll(Seq(ProtocolVersion.earliest, pvBeforeValidationBound)) { pv =>
           val pvv = ProtocolVersionValidation(pv)
 
           OwnerToKeyMapping
@@ -622,7 +622,7 @@ final class TopologyTransactionTest
       "apply a synchronizer limit below MaxKeys from ProtocolVersion.newBoundsOnPV37" in {
         val keys = signingKeys(limits.maxSigningKeysPerEntity.unwrap + 1)
         val exceeded =
-          s"repeated field has ${keys.size} elements, exceeding the maximum of ${limits.maxSigningKeysPerEntity.unwrap}"
+          s"repeated or map field has ${keys.size} elements, exceeding the maximum of ${limits.maxSigningKeysPerEntity.unwrap}"
         val nextBound = ProtocolVersionValidation(ProtocolVersion.newBoundsOnPV37)
 
         OwnerToKeyMapping
@@ -677,13 +677,13 @@ final class TopologyTransactionTest
         val keys = signingKeys(MaxKeys.unwrap + 1)
         val higher = PositiveInt.tryCreate(keys.size)
 
-        forAll(Seq(ProtocolVersion.v35, pvBeforeValidationBound)) { pv =>
+        forAll(Seq(ProtocolVersion.earliest, pvBeforeValidationBound)) { pv =>
           SigningKeysWithThreshold
             .fromProtoV30(ProtocolVersionValidation(pv), higher, partySigningKeysP(keys))
             .left
             .value shouldBe ProtoDeserializationError.InvariantViolation(
             "keys",
-            s"repeated field has ${keys.size} elements, exceeding the maximum of $MaxKeys",
+            s"repeated or map field has ${keys.size} elements, exceeding the maximum of $MaxKeys",
           )
         }
       }
@@ -738,7 +738,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "participants",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -796,7 +796,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "packages",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -806,7 +806,7 @@ final class TopologyTransactionTest
           .left
           .value shouldBe ProtoDeserializationError.InvariantViolation(
           "package_ids",
-          s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+          s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
         )
       }
 
@@ -1017,7 +1017,7 @@ final class TopologyTransactionTest
           signedTopoTxP(0, Seq(multiTxSigP(maxHashes + 1, 1))),
         ).left.value shouldBe ProtoDeserializationError.InvariantViolation(
           "transaction_hashes",
-          s"repeated field has ${maxHashes + 1} elements, exceeding the maximum of $maxHashes",
+          s"repeated or map field has ${maxHashes + 1} elements, exceeding the maximum of $maxHashes",
         )
       }
 
@@ -1082,7 +1082,7 @@ final class TopologyTransactionTest
         parse(ProtocolVersionValidation.AlwaysValidation, max + 1).left.value shouldBe
           ProtoDeserializationError.InvariantViolation(
             "signed_transactions",
-            s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+            s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
           )
       }
 
@@ -1137,7 +1137,7 @@ final class TopologyTransactionTest
         parse(ProtocolVersionValidation.AlwaysValidation, max + 1).left.value shouldBe
           ProtoDeserializationError.InvariantViolation(
             "endpoints",
-            s"repeated field has ${max + 1} elements, exceeding the maximum of $max",
+            s"repeated or map field has ${max + 1} elements, exceeding the maximum of $max",
           )
       }
 

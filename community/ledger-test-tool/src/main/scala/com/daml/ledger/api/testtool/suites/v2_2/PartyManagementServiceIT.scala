@@ -10,6 +10,7 @@ import com.daml.ledger.api.testtool.infrastructure.{
   ExternalPartyAllocationHelper,
   NamePicker,
   Party,
+  TestConstraints,
 }
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.DeleteIdentityProviderConfigRequest
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
@@ -25,14 +26,17 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 }
 import com.daml.ledger.javaapi.data.Party as ApiParty
 import com.daml.ledger.test.java.model.test.Dummy
+import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.error.groups.{AdminServiceErrors, RequestValidationErrors}
+import com.digitalasset.canton.platform.apiserver.services.admin.ListKnownPartiesPageToken
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.matchers.should.Matchers
 
-import java.util.UUID
+import java.nio.charset.StandardCharsets
 import java.util.regex.Pattern
+import java.util.{Base64, UUID}
 import scala.concurrent.Future
 import scala.util.Random
 
@@ -1014,6 +1018,111 @@ final class PartyManagementServiceIT(testDars: TestDars)
       )
     }
 
+  })
+
+  test(
+    "PMPagedListKnownPartiesWithIncompatiblePageToken",
+    "Exercise ListKnownParties rpc: Using a page token issued by an older version, by another participant, or beyond the ledger end results in an error",
+    allocate(NoParties),
+    enabled = _.partyManagement.maxPartiesPageSize > 0,
+  )(implicit ec => { case Participants(Participant(ledger, Seq())) =>
+    def listWithToken(pageToken: String) =
+      ledger.listKnownParties(
+        ListKnownPartiesRequest(
+          pageToken = pageToken,
+          pageSize = 1,
+          identityProviderId = "",
+          filterParty = "",
+        )
+      )
+    val lowerBound = Ref.Party.assertFromString("a")
+    // a page token as issued before the ledger end was pinned in the token
+    val legacyToken = new String(
+      Base64.getUrlEncoder.encode(
+        ListPartiesPageTokenPayload(partyIdLowerBoundExcl = lowerBound).toByteArray
+      ),
+      StandardCharsets.UTF_8,
+    )
+    val otherParticipantToken = ListKnownPartiesPageToken.encode(
+      lowerBound,
+      0L,
+      Ref.ParticipantId.assertFromString("other-participant"),
+    )
+
+    for {
+      participantId <- ledger.getParticipantId()
+      _ <- listWithToken(legacyToken).mustFailWith(
+        "using a page token issued by an older version",
+        RequestValidationErrors.InvalidArgument,
+        Some("the page token was issued by an incompatible Canton version (token version 0)"),
+      )
+      _ <- listWithToken(otherParticipantToken).mustFailWith(
+        "using a page token issued by another participant",
+        RequestValidationErrors.InvalidArgument,
+        Some("the page token was issued by a different participant"),
+      )
+      _ <- listWithToken(
+        ListKnownPartiesPageToken.encode(
+          lowerBound,
+          Long.MaxValue,
+          Ref.ParticipantId.assertFromString(participantId),
+        )
+      ).mustFailWith(
+        "using a page token beyond the ledger end",
+        RequestValidationErrors.ParticipantDataAccessedAfterLedgerEnd,
+        Some("as it is beyond the ledger end"),
+      )
+    } yield ()
+  })
+
+  test(
+    "PMPagedListKnownPartiesAfterPruning",
+    "Exercise ListKnownParties rpc: A page token remains usable after pruning",
+    allocate(SingleParty),
+    enabled = _.partyManagement.maxPartiesPageSize > 0,
+    runConcurrently = false,
+    limitation = TestConstraints.GrpcOnly("Pruning not available in JSON API"),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    val continuationRequest = ListKnownPartiesRequest(
+      pageToken = "",
+      pageSize = 1,
+      identityProviderId = "",
+      filterParty = "",
+    )
+    for {
+      // the allocated party guarantees a full first page, hence a next page token
+      firstPage <- ledger.listKnownParties(
+        ListKnownPartiesRequest(
+          pageToken = "",
+          pageSize = 1,
+          identityProviderId = "",
+          filterParty = "",
+        )
+      )
+      _ = assert(firstPage.nextPageToken.nonEmpty, "The first page should have a next page token")
+      secondPageBeforePruning <- ledger.listKnownParties(
+        continuationRequest.copy(pageToken = firstPage.nextPageToken)
+      )
+      _ <- ledger.create(party, new Dummy(party))
+      pruneUpTo <- ledger.currentEnd()
+      _ <- ledger.create(party, new Dummy(party))
+      _ <- ledger.pruneCantonSafe(
+        pruneUpTo = pruneUpTo,
+        party = party,
+        p => new Dummy(p).create.commands,
+      )
+      secondPage <- ledger.listKnownParties(
+        continuationRequest.copy(pageToken = firstPage.nextPageToken)
+      )
+      _ = assert(
+        secondPage.partyDetails == secondPageBeforePruning.partyDetails,
+        "The continuation should remain at its original snapshot",
+      )
+      _ = assert(
+        secondPage.nextPageToken == secondPageBeforePruning.nextPageToken,
+        "The continuation token should remain stable",
+      )
+    } yield ()
   })
 
   test(

@@ -229,6 +229,20 @@ object SyncService {
         assignmentRequestCost +
         assignmentResponseCost
   }
+
+  final case class CostEstimateWithReassignments(
+      transactionCost: NonNegativeLong,
+      reassignments: Seq[ReassignmentCostEstimation],
+  ) {
+    def total: NonNegativeLong =
+      reassignments.foldLeft(transactionCost)(_ + _.totalCost)
+  }
+
+  object CostEstimateWithReassignments {
+    val empty: CostEstimateWithReassignments =
+      CostEstimateWithReassignments(NonNegativeLong.zero, Seq.empty)
+  }
+
   final case class ConnectedSynchronizerRequest(
       party: Option[LfPartyId],
       participantId: Option[ParticipantId],

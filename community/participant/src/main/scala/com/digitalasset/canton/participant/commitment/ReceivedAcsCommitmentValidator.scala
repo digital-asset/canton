@@ -183,8 +183,7 @@ class ReceivedAcsCommitmentValidatorImpl(
       timestamp: CantonTimestamp,
       messages: NonEmpty[Seq[AcsCommitmentProtocolMessage]],
   )(implicit traceContext: TraceContext): ReceivedAcsCommitment = {
-    val serializedMessages =
-      ReceivedAcsCommitments(messages).toByteString(ProtocolVersion.v36)
+    val serializedMessages = ReceivedAcsCommitments(messages).toByteString(ProtocolVersion.latest)
     ReceivedAcsCommitment(
       synchronizerId = physicalSynchronizerId.logical,
       recordTime = timestamp,

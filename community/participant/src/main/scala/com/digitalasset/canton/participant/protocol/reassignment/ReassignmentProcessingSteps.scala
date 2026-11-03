@@ -76,7 +76,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPackageName, LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.collection.concurrent
@@ -785,6 +785,16 @@ object ReassignmentProcessingSteps {
   }
 
   final case class ContractError(message: String) extends ReassignmentProcessorError
+
+  final case class NoCommonPackage(
+      contractId: LfContractId,
+      packageName: LfPackageName,
+      participants: Set[ParticipantId],
+  ) extends ReassignmentProcessorError {
+    override def message: String =
+      s"Contract $contractId requires package $packageName, which is not available on participants ${participants
+          .mkString(", ")}"
+  }
 
   final case class UnknownPhysicalSynchronizer(
       physicalSynchronizerId: PhysicalSynchronizerId,

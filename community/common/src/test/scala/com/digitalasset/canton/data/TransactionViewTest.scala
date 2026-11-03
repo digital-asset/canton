@@ -720,17 +720,6 @@ final class TransactionViewTest
       }
     }
 
-    "external call results on a protocol version before v36" must {
-      "reject creation" onlyRunWithOrLessThan ProtocolVersion.v35 in {
-        create(
-          actionDescription = exerciseActionDescription,
-          coreInputs = exerciseCoreInputs,
-          externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7)),
-        ).left.value shouldBe
-          s"External call results are supported only from protocol version ${ProtocolVersion.v36} onwards"
-      }
-    }
-
     "deserialized" must {
 
       "reconstruct unkeyed view participant data" in {

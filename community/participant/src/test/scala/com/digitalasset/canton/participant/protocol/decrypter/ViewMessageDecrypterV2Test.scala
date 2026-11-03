@@ -399,7 +399,6 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
             pureCrypto,
             groupKey,
             TransactionViewType,
-            testedProtocolVersion,
           )(
             NonEmpty(Seq, rootOLvt, grandchild110Lvt),
             MaxBytesToDecompress.HardcodedDefault,

@@ -895,26 +895,6 @@ private[lf] final class TransactionConductor(
     }
   }
 
-  // Crashes if the ledger returned a contract whose key does not match the requested key.
-  private def assertKeyMatches(
-      globalKey: GlobalKey,
-      result: Vector[(FatContractInstance, Hash.HashingMethod, Hash => Boolean)],
-  ): Unit =
-    result
-      .collectFirst {
-        case (contract, _, _)
-            if contract.contractKeyWithMaintainers.forall(_.globalKey != globalKey) =>
-          contract
-      }
-      .foreach { contract =>
-        throw SError.Crash(
-          NameOf.qualifiedNameOfCurrentFunc,
-          s"Contract key mismatch: the ledger returned a contract whose key does not " +
-            s"match the requested key. Requested key: $globalKey, returned " +
-            s"contract id: ${contract.contractId}",
-        )
-      }
-
   private def resolveContractKey(
       context: => String,
       tmplId: Ref.TypeConId,
@@ -937,7 +917,6 @@ private[lf] final class TransactionConductor(
         case Left(NeedKey(n, progression, resume)) =>
           needKeys(keyWithM.globalKey, n, progression)
             .flatMap { case (result, newProgression) =>
-              assertKeyMatches(keyWithM.globalKey, result)
               loop(keyWithM, resume(result.view.map(_._1.contractId), newProgression))
             }
         case Right(Right((mapping, next))) =>
@@ -1079,7 +1058,6 @@ private[lf] final class TransactionConductor(
         case Left(NeedKey(needN, progression, resume)) =>
           needKeys(keyWithM.globalKey, needN, progression)
             .flatMap { case (result, newProgression) =>
-              assertKeyMatches(keyWithM.globalKey, result)
               loop(keyWithM, resume(result.view.map(_._1.contractId), newProgression))
             }
         case Right(Right((mapping, next))) =>

@@ -50,6 +50,7 @@ build_docs_snippets:
         paths:
           - snippet_json_data
     - cleanup_test_job
+    - slack_red_main_with_volunteer
 
 # Fan-in: build the Sphinx site once from the snippet JSON generated in parallel
 # by `build_docs_snippets`.

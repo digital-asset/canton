@@ -46,6 +46,8 @@ final case class ParticipantNodeParameters(
     crashAfterFailedValidation: Boolean,
     validateLegacyContractsV11: Boolean,
     acsCommitments: AcsCommitmentConfig,
+    deprecatedApis: DeprecatedApiConfig,
+    enableRepairService: Boolean,
     damlTopUpEnabled: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
@@ -125,6 +127,8 @@ object ParticipantNodeParameters {
     crashAfterFailedValidation = false,
     validateLegacyContractsV11 = true,
     acsCommitments = AcsCommitmentConfig(),
+    deprecatedApis = DeprecatedApiConfig(),
+    enableRepairService = false,
     damlTopUpEnabled = false,
   )
 }

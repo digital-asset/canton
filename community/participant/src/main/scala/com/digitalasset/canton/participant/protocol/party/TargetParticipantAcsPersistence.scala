@@ -134,7 +134,7 @@ class TargetParticipantAcsPersistence(
       repairCounter = checkpoint.nextPersistenceCounter
       toc = TimeOfChange(partyOnboardingAt, Some(repairCounter))
       replicatedContracts = validatedActivations.map {
-        // TODO(#26468): Use validation packages
+        // TODO(#37238): Figure out representative package
         case ContractReassignment(contract, _, _, reassignmentCounter) =>
           (
             contract.contractId,

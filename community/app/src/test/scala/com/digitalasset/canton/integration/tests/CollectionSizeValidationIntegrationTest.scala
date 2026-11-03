@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests
 
 import com.daml.ledger.api.v2.commands.Command
-import com.daml.ledger.api.v2.transaction.Transaction
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.InstanceReference
@@ -29,7 +28,6 @@ import com.digitalasset.canton.protocol.LocalRejectError
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 import java.util.concurrent.atomic.AtomicReference
@@ -69,13 +67,12 @@ sealed trait CollectionSizeValidationIntegrationTest
             synchronizerThreshold = PositiveInt.one,
             sequencers = Seq(sequencer1),
             mediators = Seq(mediator1),
-            overrideStaticSynchronizerParameters =
-              Option.when(testedProtocolVersion >= ProtocolVersion.v36)(
-                defaultSsp
-                  .focus(_.synchronizerLimits.transactionProtocolLimits.maxActAs)
-                  // 1 under the nb of parties used in the test, i.e. 1 + nbExtraParties - 1
-                  .replace(PositiveInt.tryCreate(nbExtraParties))
-              ),
+            overrideStaticSynchronizerParameters = Option(
+              defaultSsp
+                .focus(_.synchronizerLimits.transactionProtocolLimits.maxActAs)
+                // 1 under the nb of parties used in the test, i.e. 1 + nbExtraParties - 1
+                .replace(PositiveInt.tryCreate(nbExtraParties))
+            ),
           )
         )
       }
@@ -114,68 +111,60 @@ sealed trait CollectionSizeValidationIntegrationTest
       .map(c => Command.fromJavaProto(c.toProtoCommand))
 
     clue("submit command") {
-      if (testedProtocolVersion >= ProtocolVersion.v36) {
-        val invariantViolation = InvariantViolation(
-          Some("act_as"),
-          s"repeated field has ${nbExtraParties + 1} elements, exceeding the maximum of $nbExtraParties",
-        )
+      val invariantViolation = InvariantViolation(
+        Some("act_as"),
+        s"repeated or map field has ${nbExtraParties + 1} elements, exceeding the maximum of $nbExtraParties",
+      )
 
-        val commandsWithMetadata = CommandsWithMetadata(
-          actAs = List(participant1.adminParty) ++ extraParties,
-          commands = commands,
-        )
+      val commandsWithMetadata = CommandsWithMetadata(
+        actAs = List(participant1.adminParty) ++ extraParties,
+        commands = commands,
+      )
 
-        loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          {
-            // Use a malicious participant, otherwise the command already fails in Phase 1
-            val (_, trackingResult) =
-              trackingLedgerEvents(Seq(participant1), extraTrackedParties = Seq.empty) {
-                maliciousNode.submitCommand(commandsWithMetadata).futureValueUS.value
-              }
-            trackingResult.assertNoTransactions()
-          },
-          LogEntry.assertLogSeq(
-            mustContainWithClue = Seq(
-              (
-                _.shouldBeCantonError(
-                  MediatorError.MalformedMessage.code,
-                  _ should include(invariantViolation.toString),
-                ),
-                "Mediator detects invalid message",
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          // Use a malicious participant, otherwise the command already fails in Phase 1
+          val (_, trackingResult) =
+            trackingLedgerEvents(Seq(participant1), extraTrackedParties = Seq.empty) {
+              maliciousNode.submitCommand(commandsWithMetadata).futureValueUS.value
+            }
+          trackingResult.assertNoTransactions()
+        },
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq(
+            (
+              _.shouldBeCantonError(
+                MediatorError.MalformedMessage.code,
+                _ should include(invariantViolation.toString),
               ),
-              (
-                _.warningMessage should (include(
-                  "Decryption error: SymmetricDecryptError"
+              "Mediator detects invalid message",
+            ),
+            (
+              _.warningMessage should (include(
+                "Decryption error: SymmetricDecryptError"
+              ) and include(invariantViolation.message)),
+              "Participant cannot decrypt message",
+            ),
+            (
+              _.shouldBeCantonError(
+                LocalRejectError.MalformedRejects.Payloads.code,
+                _ should (include(
+                  "Rejected transaction due to malformed payload within views"
                 ) and include(invariantViolation.message)),
-                "Participant cannot decrypt message",
               ),
-              (
-                _.shouldBeCantonError(
-                  LocalRejectError.MalformedRejects.Payloads.code,
-                  _ should (include(
-                    "Rejected transaction due to malformed payload within views"
-                  ) and include(invariantViolation.message)),
-                ),
-                "Participant rejects locally",
+              "Participant rejects locally",
+            ),
+            (
+              _.shouldBeCantonError(
+                MediatorError.InvalidMessage.code,
+                _ should include("unknown request id"),
               ),
-              (
-                _.shouldBeCantonError(
-                  MediatorError.InvalidMessage.code,
-                  _ should include("unknown request id"),
-                ),
-                "Mediator does not know locally rejected request",
-              ),
-            )
-          ),
-        )
-      } else {
-        // Bounds are not checked in this protocol version, so the command should succeed
-        participant1.ledger_api.commands
-          .submit(
-            actAs = List(participant1.adminParty) ++ extraParties,
-            commands,
-          ) shouldBe a[Transaction]
-      }
+              "Mediator does not know locally rejected request",
+            ),
+          )
+        ),
+      )
+
     }
   }
 }

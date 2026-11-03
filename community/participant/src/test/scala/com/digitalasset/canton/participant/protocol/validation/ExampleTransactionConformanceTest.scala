@@ -37,7 +37,6 @@ import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.{ContractValidator, TestContractHasher}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -593,64 +592,6 @@ class ExampleTransactionConformanceTest
           unhostedPartyArguments shouldBe expectedReplayData
         }
       }
-
-      "observe empty external-call replay data" onlyRunWithOrLessThan ProtocolVersion.v35 in {
-        val example = factory.SingleExercise(factory.deriveNodeSeed(0))
-        val observed = new AtomicReference[Option[ExternalCallReplayData]](None)
-        val recordingReinterpreter = new HasReinterpret {
-          override def reinterpret(
-              contracts: ReplayContractLookup,
-              contractAuthenticator: ContractAuthenticatorFn,
-              submitters: Set[LfPartyId],
-              command: LfCommand,
-              topologySnapshot: TopologySnapshot,
-              ledgerTime: CantonTimestamp,
-              preparationTime: CantonTimestamp,
-              rootSeed: Option[LfHash],
-              packageResolution: Map[PackageName, PackageId],
-              expectFailure: Boolean,
-              getEngineAbortStatus: GetEngineAbortStatus,
-              externalCallReplayData: () => ExternalCallReplayData,
-          )(implicit traceContext: TraceContext): EitherT[
-            FutureUnlessShutdown,
-            DAMLe.ReinterpretationError,
-            ReInterpretationResult,
-          ] = {
-            observed.set(Some(externalCallReplayData()))
-            reinterpretExample(example).reinterpret(
-              contracts,
-              contractAuthenticator,
-              submitters,
-              command,
-              topologySnapshot,
-              ledgerTime,
-              preparationTime,
-              rootSeed,
-              packageResolution,
-              expectFailure,
-              getEngineAbortStatus,
-              externalCallReplayData,
-            )
-          }
-        }
-
-        val viewTree = example.rootTransactionViewTrees.loneElement
-        buildUnderTest(recordingReinterpreter)
-          .reInterpret(
-            view = viewTree.view,
-            ledgerTime = viewTree.ledgerTime,
-            preparationTime = viewTree.preparationTime,
-            getEngineAbortStatus = () => EngineAbortStatus.notAborted,
-            topologySnapshot = factory.topologySnapshot,
-          )
-          .value
-          .failOnShutdown
-          .map { result =>
-            inside(result) { case Right(_) => succeed }
-            observed.get() shouldBe Some(ExternalCallReplayData.empty)
-          }
-      }
-
     }
   }
 }

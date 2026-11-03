@@ -28,7 +28,7 @@ private[party] object ReceivedContractValidation {
           contractInstance <- ContractInstance.create(repairContract.contract)
 
         } yield {
-          // TODO(#26468): Use representative package
+          // TODO(#37238): Figure out representative package
           ContractReassignment(
             contractInstance,
             ReassignmentTag.Source(contractInstance.templateId.packageId),

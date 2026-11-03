@@ -1,5 +1,5 @@
 module Triparty.Bootstrap where
--- 
+--
 -- Utility templates to bootstrap the triparty test
 ---
 
@@ -7,7 +7,7 @@ import Triparty.Asset
 import Triparty.Settle
 import Triparty.TriPartyAgreement
 import DA.List
-import DA.Foldable 
+import DA.Foldable
 import DA.Either
 import DA.Optional
 import DA.Action (foldlA)
@@ -29,18 +29,18 @@ crossProduct xs ys zs = [(x, y, z) | x <- xs, y <- ys, z <- zs]
 zipWithIndex : [a] -> [(a, Int)]
 zipWithIndex xs = zip xs [0..(DA.List.length xs - 1)]
 
-template Debug 
-  with 
-    actor : Party 
+template Debug
+  with
+    actor : Party
     message : Text
-  where 
-    signatory actor  
+  where
+    signatory actor
 
 
 
 template RegistryData
-  with 
-    registry : Party 
+  with
+    registry : Party
     subregisters : [(Party, ContractId SubRegister, ContractId SettlementApp)]
     observers : [Party]
   where
@@ -59,7 +59,7 @@ template ForceAccept
         cid : ContractId TriPartyAgreementProposal
       controller registry
       do
-        exercise cid AcceptTriPartyAgreementProposal with auth = forced       
+        exercise cid AcceptTriPartyAgreementProposal with auth = forced
 
     nonconsuming choice ForceMint : ([ContractId Asset], ContractId Registry)
       with
@@ -70,7 +70,7 @@ template ForceAccept
         exercise registryCid Mint with requests = requests
 
     nonconsuming choice ForceCreateMintRequest : ContractId BootstrapAsset
-      with     
+      with
         request : MintRequest
         force : ContractId ForceAccept
         subregister: Party
@@ -95,25 +95,28 @@ template PreBootstrap
     subregisters : [SubregisterInfo]
     takers : [TakerInfo]
     numAgents : Int
-    numAssetsPerIssuer : Int 
-    numAccountsPerIssuer: Int        
-  where 
-    signatory registry
+    numAssetsPerIssuer : Int
+    numAccountsPerIssuer: Int
+  where
+    signatory registry, (map fst subregisters)
 
     choice AddCashIssuer : ContractId PreBootstrap
       with
-        cashIssuer : Party
-      controller cashIssuer
-      do        
-        create Registry with registry = registry, issuer = cashIssuer, id = cashId, outstanding = 0.0
-        fa <- create ForceAccept with registry = registry, forced = cashIssuer
-        create this with cashIssuer = Some (cashIssuer, fa)
+        cashIssuerParty : Party
+      controller cashIssuerParty
+      do
+        assertMsg "Cash issuer already added" (isNone cashIssuer)
+        create Registry with registry = registry, issuer = cashIssuerParty, id = cashId, outstanding = 0.0
+        fa <- create ForceAccept with registry = registry, forced = cashIssuerParty
+        create this with cashIssuer = Some (cashIssuerParty, fa)
 
     choice AddIssuer : ContractId PreBootstrap
       with
         issuer : Party
       controller issuer
       do
+        assertMsg "Issuer already added" (issuer `notElem` (map fst issuers))
+        assertMsg "Already at capacity for issuers" (DA.List.length issuers < numAgents)
         let assetIds = computeAssetIds (DA.List.length issuers) numAssetsPerIssuer
         forA_ assetIds (\id -> create Registry with registry = registry, issuer = issuer, id = id, outstanding = 0.0)
         fa <- create ForceAccept with registry = registry, forced = issuer
@@ -125,7 +128,7 @@ template PreBootstrap
       controller agent
       do
         assertMsg "Agent already added" (agent `notElem` (map fst agents))
-        assertMsg "Cannot add more agents than specified" (DA.List.length agents < numAgents)
+        assertMsg "Already at capacity for agents" (DA.List.length agents < numAgents)
         fa <- create ForceAccept with registry = registry, forced = agent
         create this with agents = agents ++ [(agent, fa)]
 
@@ -134,10 +137,9 @@ template PreBootstrap
         subregister : Party
       controller subregister
       do
-        assertMsg "Subregister already added" (subregister `notElem` (map fst subregisters))
-        assertMsg "Cannot add more subregisters than specified" (DA.List.length subregisters < numAgents)
+        assertMsg "Subregister already added" (subregister `notElem` (map (\x -> x._1) subregisters))
+        assertMsg "Already at capacity for subregisters" (DA.List.length subregisters < numAgents)
         sb <- create SubRegister with registry = registry, subRegistry = subregister
-        create SettlementApp with registry = subregister
         create this with subregisters = subregisters ++ [(subregister, sb)]
 
     choice AddTaker : ContractId PreBootstrap
@@ -146,18 +148,18 @@ template PreBootstrap
       controller taker
       do
         assertMsg "Taker already added" (taker `notElem` (map fst takers))
-        assertMsg "Cannot add more takers than specified" (DA.List.length takers < numAgents)
+        assertMsg "Already at capacity for takers" (DA.List.length takers < numAgents)
         fa <- create ForceAccept with registry = registry, forced = taker
         create this with takers = takers ++ [(taker, fa)]
 
-    choice ReadyForBootstrap : ContractId Bootstrap 
+    choice ReadyForBootstrap : ContractId Bootstrap
       controller registry
       do
         let cashIssuerS = fromSome cashIssuer
         assertMsg "Not enough agents" (DA.List.length agents == numAgents)
         assertMsg "Not enough takers" (DA.List.length takers == numAgents)
         assertMsg "Not enough subregisters" (DA.List.length subregisters == numAgents)
-        assertMsg "Not enough issuers" (not (DA.List.null issuers))        
+        assertMsg "Not enough issuers" (not (DA.List.null issuers))
         create Bootstrap with
           registry = registry
           cashIssuer = cashIssuerS
@@ -166,7 +168,7 @@ template PreBootstrap
           subregisters = subregisters
           takers = takers
           numAssetsPerIssuer = numAssetsPerIssuer
-          numAccountsPerIssuer = numAccountsPerIssuer      
+          numAccountsPerIssuer = numAccountsPerIssuer
           custodianIndex = 0
 
 template Bootstrap
@@ -176,26 +178,28 @@ template Bootstrap
     issuers : [IssuerInfo]
     agents : [AgentInfo]
     subregisters : [SubregisterInfo]
-    takers : [TakerInfo]    
-    numAssetsPerIssuer : Int 
-    numAccountsPerIssuer: Int 
+    takers : [TakerInfo]
+    numAssetsPerIssuer : Int
+    numAccountsPerIssuer: Int
     custodianIndex : Int
   where
-    signatory registry
+    signatory registry, (map fst subregisters)
 
     choice AddCustodian : ()
       with
         custodian : Party
       controller custodian
-      do        
+      do
+        forA_ (map fst subregisters) $ \subregister -> do
+          create SettlementApp with registry = subregister, user = custodian
         _ <- create this with custodianIndex = custodianIndex + 1
         let iterateOver = crossProduct (zipWithIndex (zip3 subregisters agents takers)) (zipWithIndex issuers) [0..(numAccountsPerIssuer - 1)]
         forA_ iterateOver (bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer cashIssuer)
-        
 
-bootstrapCustodianAccount: Party -> Int -> Party -> Int -> CashIssuerInfo -> (((SubregisterInfo, AgentInfo, TakerInfo), Int), (IssuerInfo, Int), Int) -> Update (ContractId BootstrapCustodianAccount)
-bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer cashIssuer (((subregister, agent, taker), sIdx), (issuer, iIdx), accountIndex) = do  
-  create BootstrapCustodianAccount with
+
+bootstrapCustodianAccount: Party -> Int -> Party -> Int -> CashIssuerInfo -> (((SubregisterInfo, AgentInfo, TakerInfo), Int), (IssuerInfo, Int), Int) -> Update ()
+bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer cashIssuer (((subregister, agent, taker), sIdx), (issuer, iIdx), accountIndex) = do
+  bca <- create BootstrapCustodianAccount with
     registry = registry
     custodian = custodian
     custodianIndex = custodianIndex
@@ -208,47 +212,49 @@ bootstrapCustodianAccount registry custodianIndex custodian numAssetsPerIssuer c
     issuer = issuer
     issuerIndex = iIdx
     accountIndex = accountIndex
+  exercise bca ProcessBootstrap
+  return ()
 
 template BootstrapAsset
-  with 
-    registry : Party     
+  with
+    registry : Party
     request : MintRequest
     force : ContractId ForceAccept
     subregister: Party
     subregisterCid: ContractId SubRegister
-  where 
+  where
     signatory request.owner, registry
 
     nonconsuming choice BatchApprove : ()
-      with 
+      with
         registryCid : ContractId Registry
         other : [ContractId BootstrapAsset]
       controller registry
       do
         foldlA (\acc item -> do
           ret <- exercise item Approve with registryCid = acc
-          return (snd ret)) registryCid (self :: other)                    
-        return ()        
+          return (snd ret)) registryCid (self :: other)
+        return ()
 
     choice Approve : (ContractId Asset, ContractId Registry)
       with
-        registryCid : ContractId Registry      
+        registryCid : ContractId Registry
       controller registry
-      do        
+      do
         -- create the mint request
         mr <- create request
-        -- mint the asset        
+        -- mint the asset
         (assets, registryCid) <- exercise force ForceMint with registryCid = registryCid, requests = [mr]
         -- transfer it to the subregister
-        reassigned <- exercise subregisterCid Reassign with assetCid = head assets, newRegister = subregister, owner = request.owner          
+        reassigned <- exercise subregisterCid Reassign with assetCid = head assets, newRegister = subregister, owner = request.owner
         return (reassigned, registryCid)
 
 template BootstrapCustodianAccount
-  with 
+  with
     registry : Party
     custodian : Party
-    custodianIndex : Int     
-    numAssetsPerIssuer : Int 
+    custodianIndex : Int
+    numAssetsPerIssuer : Int
     cashIssuer : CashIssuerInfo
     subregister : SubregisterInfo
     agent : AgentInfo
@@ -264,13 +270,13 @@ template BootstrapCustodianAccount
       controller registry
       do
         let accountId = mkAccountId custodianIndex subregisterIndex issuerIndex accountIndex
-        let assetIds = computeAssetIds issuerIndex numAssetsPerIssuer                
+        let assetIds = computeAssetIds issuerIndex numAssetsPerIssuer
         let (subregisterParty, subregisterCid) = subregister
-        let (takerParty, takerFA) = taker        
+        let (takerParty, takerFA) = taker
         let (agentParty, forceAgent) = agent
         let (cashIssuerParty, forceCashIssuer) = cashIssuer
         let (issuerParty, forceIssuer) = issuer
-        -- create asset requests for this account        
+        -- create asset requests for this account
         forA_ assetIds (\assetId -> do
           let request = MintRequest with issuer = issuerParty, id = assetId, qty = 100.0, owner = custodian, account = accountId, viewer = custodian
           create BootstrapAsset with registry = registry, request = request, force = forceIssuer, subregister = subregisterParty, subregisterCid = subregisterCid)
@@ -279,13 +285,13 @@ template BootstrapCustodianAccount
         -- in the real world, the cash disclosure would need to be handled separately
         let cashRequest = (MintRequest with issuer = cashIssuerParty, id = cashId, qty = 1000000.0, owner = takerParty, account = accountId, viewer = custodian)
         exercise takerFA ForceCreateMintRequest with request = cashRequest, force = forceCashIssuer, subregister = subregisterParty, subregisterCid = subregisterCid
-                        
-        -- create an eligibility list for the assets 
+
+        -- create an eligibility list for the assets
         let eligibility = map (\(assetId, index) -> (assetId, 100.0 + intToDecimal index)) (zipWithIndex assetIds)
         -- create tri-party agreemnt
         proposal <- create TriPartyAgreementProposal with agent = agentParty, collateralGiver = custodian, collateralTaker = takerParty, account = accountId, eligibility = eligibility, signed = []
         proposal1 <- fromLeft proposal <$> exercise forceAgent ForceAcceptTriPartyAgreement with cid = proposal
         exercise takerFA ForceAcceptTriPartyAgreement with cid = proposal1
         return ()
-        
-        
+
+

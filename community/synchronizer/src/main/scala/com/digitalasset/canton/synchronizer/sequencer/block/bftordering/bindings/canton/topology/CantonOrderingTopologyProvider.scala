@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology
 
 import cats.syntax.traverse.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveLong}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{
   SigningPublicKey,
   SynchronizerCryptoClient,
@@ -25,19 +25,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
-  BftNodeId,
-  EpochLength,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
   SequencingParameters,
@@ -52,7 +47,6 @@ import scala.concurrent.ExecutionContext
 
 private[canton] final class CantonOrderingTopologyProvider(
     cryptoApi: SynchronizerCryptoClient,
-    config: BftBlockOrdererConfig,
     publicServerConfig: PublicServerConfig,
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
@@ -146,7 +140,7 @@ private[canton] final class CantonOrderingTopologyProvider(
           s"queried successfully on snapshot at $snapshotTimestamp: $maxRequestSize"
       )
 
-      sequencingParameters <- getSequencingParameters(config, snapshot.ipsSnapshot)
+      sequencingParameters <- getSequencingParameters(snapshot.ipsSnapshot)
       _ = logger.debug(
         s"Sequencing parameters queried successfully on snapshot at $snapshotTimestamp: $sequencingParameters"
       )
@@ -163,7 +157,7 @@ private[canton] final class CantonOrderingTopologyProvider(
       val topology =
         OrderingTopology(
           nodesTopologyInfo,
-          getEpochLength(sequencingParameters, sequencers),
+          sequencingParameters.segmentLength.epochLength(sequencers.size.toLong),
           sequencingParameters,
           maxRequestSize,
           TopologyActivationTime(snapshot.ipsSnapshot.timestamp),
@@ -175,20 +169,6 @@ private[canton] final class CantonOrderingTopologyProvider(
       s"get ordering topology at activation time $activationTime",
       () => topologyWithCryptoProvider,
     )
-  }
-
-  private def getEpochLength(
-      sequencingParameters: SequencingParameters,
-      sequencers: Seq[SequencerId],
-  ): EpochLength = {
-    val oldSegmentLength = for {
-      _ <- Option.when(synchronizerProtocolVersion == ProtocolVersion.v34)(())
-      segmentLengthInt <- config.segmentLengthForPv34
-      segmentLength <- PositiveLong.create(segmentLengthInt).toOption
-    } yield SegmentLength(segmentLength)
-    oldSegmentLength
-      .getOrElse(sequencingParameters.segmentLength)
-      .epochLength(sequencers.size.toLong)
   }
 
   private def getSnapshot(
@@ -287,8 +267,7 @@ private[canton] final class CantonOrderingTopologyProvider(
   }
 
   private def getSequencingParameters(
-      config: BftBlockOrdererConfig,
-      snapshot: TopologySnapshot,
+      snapshot: TopologySnapshot
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[SequencingParameters] =
     for {
       parametersE <-
@@ -298,31 +277,21 @@ private[canton] final class CantonOrderingTopologyProvider(
       sequencingParametersO = payloadO.map(
         SequencingParameters.fromByteString(synchronizerProtocolVersion, _)
       )
-    } yield (
-      synchronizerProtocolVersion,
-      config.leaderSelectionPolicyConfigForPv34,
-      sequencingParametersO,
-    ) match {
-      case (pv, blacklistPolicyFromConfigForPv34O, _) if pv <= ProtocolVersion.v34 =>
-        logger.debug("PV <= 34: using leader selection policy from config, if set, or defaults")
-        blacklistPolicyFromConfigForPv34O
-          .map(p => SequencingParameters.Default.update(blacklistLeaderSelectionPolicyConfig = p))
-          .getOrElse(SequencingParameters.Default)
-      case (_, _, sequencingParametersO) =>
-        sequencingParametersO match {
-          case None =>
-            logger.debug("PV > 34: sequencing parameters not set in topology, using defaults")
-            SequencingParameters.Default
-          case Some(Right(sequencingParametersFromTopology)) =>
-            logger.debug(
-              s"PV > 34: using sequencing parameters from topology $sequencingParametersFromTopology"
-            )
-            sequencingParametersFromTopology
-          case Some(Left(error)) =>
-            logger.warn(
-              s"PV > 34: sequencing parameters from topology couldn't be parsed ($error), using defaults"
-            )
-            SequencingParameters.Default
-        }
+    } yield {
+      sequencingParametersO match {
+        case None =>
+          logger.debug("PV > 34: sequencing parameters not set in topology, using defaults")
+          SequencingParameters.Default
+        case Some(Right(sequencingParametersFromTopology)) =>
+          logger.debug(
+            s"PV > 34: using sequencing parameters from topology $sequencingParametersFromTopology"
+          )
+          sequencingParametersFromTopology
+        case Some(Left(error)) =>
+          logger.warn(
+            s"PV > 34: sequencing parameters from topology couldn't be parsed ($error), using defaults"
+          )
+          SequencingParameters.Default
+      }
     }
 }

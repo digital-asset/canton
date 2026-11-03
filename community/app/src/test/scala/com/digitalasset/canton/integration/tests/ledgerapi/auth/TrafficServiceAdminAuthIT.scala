@@ -11,10 +11,11 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.platform.config.TrafficAccountingConfig
-import com.digitalasset.canton.tea.v1.{TrafficServiceGrpc, UpdateAccountRequest}
+import com.digitalasset.canton.tea.v1.{PruneEventsRequest, TrafficServiceGrpc, UpdateAccountRequest}
 import monocle.Monocle.toAppliedFocusOps
 
 import java.util.UUID
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
 abstract class TrafficServiceAdminAuthIT extends AdminServiceCallAuthTests {
@@ -58,5 +59,25 @@ final class PruneAuthIT extends TrafficServiceAdminAuthIT {
         com.digitalasset.canton.tea.v1.PruneRequest(
           beforeOrAt = Some(CantonTimestamp.MinValue.toProtoTimestamp)
         )
+      )
+}
+
+final class PruneEventsAuthIT extends TrafficServiceAdminAuthIT {
+  override def serviceCallName: String = "TrafficService#PruneEvents"
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition.addConfigTransform(
+      ConfigTransforms.updateParticipantConfig("participant1")(
+        _.focus(_.features.deprecated.enableDeprecatedEndpoints37).replace(true)
+      )
+    )
+
+  @nowarn("cat=deprecation")
+  override def serviceCall(
+      context: ServiceCallContext
+  )(implicit env: TestConsoleEnvironment): Future[Any] =
+    stub(TrafficServiceGrpc.stub(channel), context.token)
+      .pruneEvents(
+        PruneEventsRequest(beforeOrAt = Some(CantonTimestamp.MinValue.toProtoTimestamp))
       )
 }

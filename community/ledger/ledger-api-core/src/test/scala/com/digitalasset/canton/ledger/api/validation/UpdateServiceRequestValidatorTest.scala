@@ -11,6 +11,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   *,
 }
 import com.daml.ledger.api.v2.update_service.{
+  GetUpdateByHashRequest,
   GetUpdateByIdRequest,
   GetUpdateByOffsetRequest,
   GetUpdatesPageRequest,
@@ -18,8 +19,13 @@ import com.daml.ledger.api.v2.update_service.{
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.platform.v1.page_tokens.UpdatesPageToken
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashBuilder, HashPurpose}
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
+  GetUpdateByHashRequestSizeConfig,
+  GetUpdatesPageRequestSizeConfig,
+}
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, InterfaceFilter, TemplateFilter}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
@@ -34,6 +40,7 @@ import org.scalatest.wordspec.AnyWordSpec
 class UpdateServiceRequestValidatorTest
     extends AnyWordSpec
     with ValidatorTestUtils
+    with SizeLimitTestUtils
     with MockitoSugar {
   private implicit val noLogging: ErrorLoggingContext = NoLogging
 
@@ -263,32 +270,24 @@ class UpdateServiceRequestValidatorTest
       }
 
       "return the correct error without filters in the event format of transactions" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validate(
             txReq.update(
               _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
             ),
             ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
-          metadata = Map.empty,
+          )
         )
       }
 
       "return the correct error without filters in the event format of reassignments" in {
-        requestMustFailWith(
-          request = UpdateServiceRequestValidator.validate(
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validate(
             reassignmentsReq.update(
               _.updateFormat.includeReassignments.filtersByParty := Map.empty
             ),
             ledgerEnd,
-          ),
-          code = INVALID_ARGUMENT,
-          description =
-            "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
-          metadata = Map.empty,
+          )
         )
       }
 
@@ -688,6 +687,45 @@ class UpdateServiceRequestValidatorTest
 
     }
 
+    "validating the size limits of the update format" should {
+      "reject event formats exceeding the total filters limit across transactions and reassignments" in {
+        val maxTotalFilters = 1
+        // a template wildcard per event format: each event format is within the limit on its own
+        val eventFormat = EventFormat(Map(party -> Filters(Nil)), None, verbose = false)
+        requestMustFailWith(
+          request = UpdateServiceRequestValidator.validate(
+            GetUpdatesRequest(
+              beginExclusive = 0L,
+              endInclusive = Some(offsetLong),
+              updateFormat = Some(
+                UpdateFormat(
+                  includeTransactions = Some(
+                    TransactionFormat(
+                      Some(eventFormat),
+                      TransactionShape.TRANSACTION_SHAPE_ACS_DELTA,
+                    )
+                  ),
+                  includeReassignments = Some(eventFormat),
+                  includeTopologyEvents = None,
+                  includeTransactionsAndReassignments = None,
+                )
+              ),
+              descendingOrder = false,
+            ),
+            ledgerEnd,
+          )(
+            noLogging,
+            sizeLimitsConfig.copy(eventFormatTotalFiltersSizeLimit =
+              PositiveInt.tryCreate(maxTotalFilters)
+            ),
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            totalFiltersLimitExceeded(actual = maxTotalFilters + 1, limit = maxTotalFilters),
+        )
+      }
+    }
+
     "validating transaction by id requests" should {
 
       "fail on empty updateId" in {
@@ -710,6 +748,16 @@ class UpdateServiceRequestValidatorTest
           description =
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: update_format",
           metadata = Map.empty,
+        )
+      }
+
+      "return the correct error without filters in the event format of transactions" in {
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validateUpdateById(
+            updateByIdReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
+            )
+          )
         )
       }
     }
@@ -752,6 +800,37 @@ class UpdateServiceRequestValidatorTest
         )
       }
 
+      "return the correct error without filters in the event format of transactions" in {
+        mustFailWithoutFilters(
+          UpdateServiceRequestValidator.validateUpdateByOffset(
+            txByOffsetReq.update(
+              _.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty
+            )
+          )
+        )
+      }
+
+    }
+
+    "validating transaction by hash requests" should {
+      val maxTransactionHashBytes = 32
+      val sizeLimitsConfigWithLimits = sizeLimitsConfig.copy(
+        publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+          getUpdateByHashRequest = GetUpdateByHashRequestSizeConfig(
+            transactionHashSizeLimit = PositiveInt.tryCreate(maxTransactionHashBytes)
+          )
+        )
+      )
+
+      def validateUpdateByHash(hashSize: Int) =
+        UpdateServiceRequestValidator.validateUpdateByHash(
+          GetUpdateByHashRequest(
+            transactionHash = bytes(hashSize),
+            updateFormat = updateByIdReq.updateFormat,
+          )
+        )(noLogging, sizeLimitsConfigWithLimits)
+
+      byteSizeLimit("transaction_hash", limit = maxTransactionHashBytes)(validateUpdateByHash)
     }
   }
 
@@ -858,6 +937,55 @@ class UpdateServiceRequestValidatorTest
       )
 
       result.isRight shouldBe true
+    }
+
+    "return the correct error without filters in the event format of transactions" in {
+      mustFailWithoutFilters(
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = GetUpdatesPageRequest(
+            beginOffsetExclusive = None,
+            endOffsetInclusive = None,
+            maxPageSize = None,
+            updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+            descendingOrder = false,
+            pageToken = None,
+          ).update(_.updateFormat.includeTransactions.eventFormat.filtersByParty := Map.empty),
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )
+      )
+    }
+
+    {
+      val (request, token) = requestWithMatchingToken(
+        beginOffsetExclusive = None,
+        endOffsetInclusive = None,
+        maxPageSize = None,
+        updateFormat = buildUpdateFormat(Some(Seq(templateId)), None),
+        descendingOrder = false,
+      )
+      val tokenBytes = token.toByteString
+
+      val sizeLimitsConfigWithPageTokenLimit =
+        sizeLimitsConfig.copy(
+          publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+            getUpdatesPageRequest = GetUpdatesPageRequestSizeConfig(
+              pageTokenSizeLimit = PositiveInt.tryCreate(tokenBytes.size())
+            )
+          )
+        )
+
+      byteSizeLimit("page_token", limit = tokenBytes.size())(numberOfBytes =>
+        UpdateServiceRequestValidator.validateUpdatesPageRequest(
+          req = request.update(
+            _.pageToken := tokenBytes.concat(bytes(numberOfBytes - tokenBytes.size()))
+          ),
+          ledgerEnd = Some(Offset.tryFromLong(100L)),
+          participantId = participant,
+          updateServiceConfig = UpdateServiceConfig(),
+        )(noLogging, sizeLimitsConfigWithPageTokenLimit)
+      )
     }
 
     "reject request with pager token that cannot be parsed" in {

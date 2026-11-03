@@ -59,6 +59,7 @@ echo "***** Running Mediator Replay Test..."
 	run-in-namespace.sh "" \
 		sbt -J-Dlogback.configurationFile=logback.xml \
 			-J-Dreplay-tests.enable-recording=true \
+			-J-Dreplay-tests.recording-timeout-minutes=20 \
 			-J-Dreplay-tests.total-cycles="${MEDIATOR_REPLAY_TOTAL_CYCLES:-1000}" \
 			-J-Dcanton.metrics.reporters.csv.directory="$METRICS_DIR" \
 			-J-Dio.opentelemetry.exporter.metrics.csv.directory="$METRICS_DIR" \

@@ -6,7 +6,10 @@ package com.digitalasset.canton.platform.apiserver.services
 import com.daml.ledger.api.v2.event_query_service.{GetEventsByContractIdRequest, *}
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.EventQueryServiceRequestValidator
+import com.digitalasset.canton.ledger.api.validation.{
+  EventQueryServiceRequestValidator,
+  LedgerApiSizeLimitsConfig,
+}
 import com.digitalasset.canton.ledger.participant.state.index.IndexEventQueryService
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,
@@ -24,7 +27,8 @@ final class ApiEventQueryService(
     eventQueryService: IndexEventQueryService,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends EventQueryServiceGrpc.EventQueryService
     with GrpcApiService
     with NamedLogging {

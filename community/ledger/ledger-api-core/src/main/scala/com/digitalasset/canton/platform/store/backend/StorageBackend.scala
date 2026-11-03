@@ -260,7 +260,14 @@ object ParameterStorageBackend {
 
 trait PartyStorageBackend {
   def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails]
-  def knownParties(fromExcl: Option[Party], filterString: Option[String185], maxResults: Int)(
+
+  /** Lists the known parties as of `validAtEventSeqId`. Zero represents an empty ledger. */
+  def knownParties(
+      fromExcl: Option[Party],
+      filterString: Option[String185],
+      maxResults: Int,
+      validAtEventSeqId: Long,
+  )(
       connection: Connection
   ): List[IndexerPartyDetails]
 }

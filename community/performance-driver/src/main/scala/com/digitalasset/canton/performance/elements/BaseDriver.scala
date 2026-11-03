@@ -77,6 +77,13 @@ trait DriverControl {
 
 }
 
+sealed trait CmdStatus
+object CmdStatus {
+  case object CmdNotSubmitted extends CmdStatus
+  case object CmdSubmitted extends CmdStatus
+  case object CmdSucceeded extends CmdStatus
+}
+
 final case class SubCommand(
     baseDesc: String,
     reference: String,
@@ -134,6 +141,7 @@ abstract class BaseDriver(
 
   override def isActive: Boolean = control.active
   protected val listeners = ListBuffer[ContractObserver]()
+  protected val numPending = new AtomicInteger(0)
   protected val pendingCommands = TrieMap[String, Instant]()
   protected val commandIdGen = new AtomicInteger(0)
   protected val currentStatus = new AtomicReference[Option[DriverStatus]](None)
@@ -180,7 +188,6 @@ abstract class BaseDriver(
       ): Unit =
         masterCreated(create)
     }
-
   listeners.append(masterContract)
 
   protected def mapCommand(
@@ -355,11 +362,12 @@ abstract class BaseDriver(
       cs: ContractStore[TC, TCid, T, L],
       cid: ContractId[T],
       fut: Future[Boolean],
+      willArchive: Boolean = true,
   ): Unit = {
     def sp(b: Boolean): Unit = cs.setPending(cid, isPending = b).discard
     sp(true)
     fut.onComplete {
-      case Success(true) => ()
+      case Success(true) => if (willArchive) () else sp(false)
       case Success(false) =>
         logger.debug(s"Command failed making contract $cid not pending")
         sp(false)
@@ -426,13 +434,16 @@ abstract class BaseDriver(
       synchronizerId: Option[SynchronizerId] = None,
       fixedCommandId: Option[String] = None,
   ): Future[Boolean] = {
-    val current = pendingCommands.size
+    val current = numPending.get()
     val commandCtr = commandIdGen.addAndGet(1)
     val tm = Instant.now
     val suffix = s"-$commandCtr-$name-${tm.getEpochSecond}"
     val commandId = fixedCommandId.getOrElse(baseDescription.take(250 - suffix.length) + suffix)
     val command = commandJava.map(c => Command.fromJavaProto(c.toProtoCommand))
-    pendingCommands.put(commandId, tm).discard
+    pendingCommands.put(commandId, tm) match {
+      case None => numPending.incrementAndGet().discard
+      case _ => logger.error(s"Command $commandId already pending, this should not happen")
+    }
     latencyMonitor.foreach(_.schedule(commandId))
 
     logger.debug(
@@ -566,7 +577,10 @@ abstract class BaseDriver(
       result
     ) // add to flush so we don't terminate this process before all commands have finished
 
-    result.onComplete(_ => pendingCommands.remove(commandId))
+    result.onComplete { _ =>
+      if (pendingCommands.remove(commandId).isDefined) numPending.decrementAndGet().discard
+    }
+
     result
   }
 

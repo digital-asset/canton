@@ -201,7 +201,8 @@ class TransactionConfirmationRequestFactory(
         InformeeMessage(
           transactionTree.tryFullInformeeTree(protocolVersion),
           submittingParticipantSignature,
-        )(protocolVersion),
+          protocolVersion,
+        ),
         transactionViewEnvelopes,
         protocolVersion,
       )

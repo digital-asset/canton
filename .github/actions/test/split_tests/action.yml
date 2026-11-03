@@ -44,6 +44,11 @@ outputs:
   selected_tests_file:
     description: File containing the space-separated test list for this shard
     value: ${{ steps.export.outputs.selected_tests_file }}
+  all_buckets_file:
+    description: >
+      File containing the test list of every shard, one '<shard>=<tests>' line per shard.
+      Reruns restore their list from it so all shards keep the same split.
+    value: ${{ steps.export.outputs.all_buckets_file }}
   tests_per_shard:
     description: Number of tests per shard
     value: ${{ steps.export.outputs.tests_per_shard }}
@@ -100,6 +105,7 @@ runs:
           fi
 
           TMP_OUTPUT_FILE=$(mktemp)
+          TMP_ALL_BUCKETS_FILE=$(mktemp)
 
           if [[ "$DEBUG_SPLIT_TESTS" == "true" ]]; then
             EXTRA_ARGS+=("--debug")
@@ -112,7 +118,9 @@ runs:
             "$TIMINGS_FILE" \
             "$FALLBACK_TEST_TIME" \
             "$TMP_OUTPUT_FILE" \
+            --all-buckets-file "$TMP_ALL_BUCKETS_FILE" \
             "${EXTRA_ARGS[@]}"
+          echo "all_buckets_file=$TMP_ALL_BUCKETS_FILE" >> "$TMP_OUTPUT_FILE"
 
           # nix_script_run can expose one output key. Return the temp file path only,
           # so we don't hit GitHub's argument/env size limits on large test sets.
@@ -142,12 +150,20 @@ runs:
         selected_tests=$(grep '^selected_tests=' "$split_result_path" | sed 's/^selected_tests=//')
         tests_per_shard=$(grep '^tests_per_shard=' "$split_result_path" | sed 's/^tests_per_shard=//')
         total_tests=$(grep '^total_tests=' "$split_result_path" | sed 's/^total_tests=//')
+        tmp_all_buckets_file=$(grep '^all_buckets_file=' "$split_result_path" | sed 's/^all_buckets_file=//')
         selected_tests_file="$RUNNER_TEMP/selected_tests_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${SHARD_INDEX}"
         printf '%s' "$selected_tests" > "$selected_tests_file"
 
-        DELIM="EOF_${RANDOM}_$(date +%s%N)"
+        if [[ -z "$tmp_all_buckets_file" || ! -f "$tmp_all_buckets_file" ]]; then
+          echo "::error::All-buckets file does not exist: $tmp_all_buckets_file"
+          exit 1
+        fi
+        all_buckets_file="$RUNNER_TEMP/all_buckets_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${SHARD_INDEX}"
+        mv "$tmp_all_buckets_file" "$all_buckets_file"
+
         {
           echo "selected_tests_file=$selected_tests_file"
+          echo "all_buckets_file=$all_buckets_file"
           echo "tests_per_shard=$tests_per_shard"
           echo "total_tests=$total_tests"
         } >> "$GITHUB_OUTPUT"

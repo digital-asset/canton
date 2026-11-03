@@ -20,7 +20,7 @@ import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.util.TimeProvider
-import com.digitalasset.canton.ledger.api.validation.CommandsValidator
+import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, LedgerApiSizeLimitsConfig}
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -302,7 +302,8 @@ private[apiserver] object CommandServiceImpl {
       maxDeduplicationDuration: config.NonNegativeFiniteDuration,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): CommandServiceGrpc.CommandService & GrpcApiService =
     new ApiCommandService(
       service = new CommandServiceImpl(

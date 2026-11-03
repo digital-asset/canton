@@ -99,7 +99,7 @@ trait FinalizedResponseStoreTest {
     )
   }
   val informeeMessage: InformeeMessage =
-    InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+    InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
   val currentVersion: FinalizedResponse = FinalizedResponse(
     requestId,
     informeeMessage,

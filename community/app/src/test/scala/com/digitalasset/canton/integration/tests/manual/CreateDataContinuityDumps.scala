@@ -25,12 +25,10 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
     DataContinuityTest.synchronizedOperation(
       dumpRestore.copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
     )
-    referenceBlockSequencerPlugin.pgPlugin.foreach { plugin =>
-      val dumpRestore = PostgresDumpRestore(plugin, forceLocal = forceLocalDumps)
-      DataContinuityTest.synchronizedOperation(
-        dumpRestore.copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
-      )
-    }
+    DataContinuityTest.synchronizedOperation(
+      PostgresDumpRestore(pgPlugin, forceLocal = forceLocalDumps)
+        .copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
+    )
     super.afterAll()
   }
 
@@ -151,12 +149,10 @@ trait CreateSynchronizerChangeDataContinuityDumps
     DataContinuityTest.synchronizedOperation(
       dumpRestore.copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
     )
-    referenceBlockSequencerPlugin.pgPlugin.foreach { plugin =>
-      val dumpRestore = PostgresDumpRestore(plugin, forceLocal = forceLocalDumps)
-      DataContinuityTest.synchronizedOperation(
-        dumpRestore.copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
-      )
-    }
+    DataContinuityTest.synchronizedOperation(
+      PostgresDumpRestore(pgPlugin, forceLocal = forceLocalDumps)
+        .copyToLocal(baseDbDumpPath, baseDbDumpPath.path)
+    )
     super.afterAll()
   }
 

@@ -628,11 +628,17 @@ class RequiredTopologyMappingChecks(
   }
 
   /** Checks the following:
-    *   - threshold is less than or equal to the number of confirming participants
+    *   - a party with the uid of a participant on the synchronizer (one with a DTC) is an explicit
+    *     admin party allocation: hosted by that participant only, with Submission permission and
+    *     threshold 1
     *   - new participants have a valid DTC
     *   - new participants have an OTK (valid keys are checked as part of OTK checks)
     *   - from pv=37 on, no participant's hosting state moves backward, except Active -> Onboarding
     *     if the mapping in the store and the proposal are `v30`
+    *
+    * Apart from the admin party case, it accepts any threshold. Only the node that creates the
+    * transaction checks it, in
+    * `TopologyManager.checkConfirmingThresholdIsNotAboveNumberOfHostingNodes`.
     */
   private def checkPartyToParticipant(
       effective: EffectiveTime,
@@ -1271,8 +1277,6 @@ class RequiredTopologyMappingChecks(
           participant.permission == ParticipantPermission.Submission
       )
 
-    // technically we don't need to check for threshold == 1, because we already require that there is only a single participant
-    // and the threshold may not exceed the number of participants. this is checked in PartyToParticipant.create
     val threshold1 = ptp.threshold == PositiveInt.one
 
     EitherTUtil.condUnitET[FutureUnlessShutdown](

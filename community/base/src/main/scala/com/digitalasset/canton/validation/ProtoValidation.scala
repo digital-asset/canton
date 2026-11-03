@@ -106,9 +106,14 @@ object ProtoValidation {
       pvv: ProtocolVersionValidation,
       maxLength: ValidationParam[PositiveInt],
   ): ParsingResult[Seq[E]] =
-    validateSeqLength(seq = seq.elements, field = field, pvv = pvv, maxLength = maxLength)
+    validateLength(
+      iterable = seq.elements,
+      field = field,
+      pvv = pvv,
+      maxLength = maxLength,
+    )
 
-  /** `validateLength` for a plain `Seq`, whose elements are not wrapped in a
+  /** `validateLength` for a plain `Iterable`, e.g. a `Seq` whose elements are not wrapped in a
     * [[ProtoUnvalidatedSeq]]. Prefer `validateLength` when the field is a [[ProtoUnvalidatedSeq]].
     *
     * @param field
@@ -120,19 +125,19 @@ object ProtoValidation {
     * @param maxLength
     *   the largest accepted element count, per protocol version
     */
-  def validateSeqLength[E](
-      seq: Seq[E],
+  def validateLength[C <: Iterable[?]](
+      iterable: C,
       field: String,
       pvv: ProtocolVersionValidation,
       maxLength: ValidationParam[PositiveInt],
-  ): ParsingResult[Seq[E]] =
-    valueForPvv(pvv, maxLength).fold[ParsingResult[Seq[E]]](Right(seq)) { max =>
+  ): ParsingResult[C] =
+    valueForPvv(pvv, maxLength).fold[ParsingResult[C]](Right(iterable)) { max =>
       Either.cond(
-        seq.sizeIs <= max.unwrap,
-        seq,
+        iterable.sizeIs <= max.unwrap,
+        iterable,
         InvariantViolation(
           field,
-          s"repeated field has ${seq.size} elements, exceeding the maximum of ${max.unwrap}",
+          s"repeated or map field has ${iterable.size} elements, exceeding the maximum of ${max.unwrap}",
         ),
       )
     }

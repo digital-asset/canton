@@ -24,6 +24,7 @@ import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -48,6 +49,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     with PrettyPrintingFromCompanion {
 
   private val psid: PhysicalSynchronizerId = sequencerClient.psid
+  private val protocolVersion: ProtocolVersion = sequencerClient.protocolVersion
 
   override def submit(
       transactions: Seq[GenericSignedTopologyTransaction]
@@ -61,6 +63,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     val request = TopologyTransactionsBroadcast(
       sequencerClient.psid,
       transactions,
+      protocolVersion,
     )
     synchronizeWithClosing(functionFullName)(
       sendRequest(request, now, maxSequencingTime, sendCallback)

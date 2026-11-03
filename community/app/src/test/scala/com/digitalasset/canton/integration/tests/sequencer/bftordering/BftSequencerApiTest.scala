@@ -58,7 +58,6 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
       delayRequestsBeforeLsuTrafficInit = false,
-      enableRejectDeliveredAggregationsOnPv35 = Seq("MED", "PAR"),
       lsuConfig = SequencerLsuConfig(),
       enablePrevalidation = true,
     )

@@ -71,6 +71,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
             testedProtocolVersion,
           ),
           Option.empty[TrafficReceipt],
+          testedProtocolVersion,
         ),
         SymbolicCrypto.emptySignature,
         None,

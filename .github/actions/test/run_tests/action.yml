@@ -112,7 +112,7 @@ inputs:
     default: ""
     required: false
   artifact_name_suffix:
-    description: Optional suffix appended to selected-tests artifact names
+    description: Optional suffix appended to test-split artifact names
     required: false
     default: ''
   job_name:
@@ -192,24 +192,100 @@ runs:
 
         echo "selection_shard_index=$effective_selection_shard_index" >> "$GITHUB_OUTPUT"
 
-    - name: Restore selected tests from first attempt
-      id: restore_selected_tests
+    - name: Download the test split of earlier attempts
+      id: download_test_split
       if: inputs.num_test_buckets != '0' && github.run_attempt > 1
       uses: actions/download-artifact@v7
       with:
-        name: >-
+        pattern: >-
           ${{ inputs.job_name != '' && inputs.job_name || github.job
-          }}-selected-tests-${{ github.run_id }}-${{ inputs.shard_index
-          }}${{ inputs.artifact_name_suffix != '' && format('-{0}',
+          }}-test-split-${{ github.run_id }}-attempt-*${{ inputs.artifact_name_suffix != '' && format('-{0}',
           inputs.artifact_name_suffix) || '' }}
-        path: ${{ runner.temp }}/selected-tests-${{ inputs.shard_index }}
+        path: ${{ runner.temp }}/test-split
       continue-on-error: true
+
+    - name: Restore the selected tests from an earlier attempt
+      id: restore_test_split
+      if: inputs.num_test_buckets != '0' && github.run_attempt > 1
+      shell: bash
+      env:
+        RESTORED_ROOT: ${{ runner.temp }}/test-split
+        ARTIFACT_PREFIX: >-
+          ${{ inputs.job_name != '' && inputs.job_name || github.job
+          }}-test-split-${{ github.run_id }}-attempt-
+        ARTIFACT_SUFFIX: >-
+          ${{ inputs.artifact_name_suffix != '' && format('-{0}',
+          inputs.artifact_name_suffix) || '' }}
+        SELECTION_SHARD_INDEX: ${{ steps.validate_sharding.outputs.selection_shard_index }}
+        SHARD_INDEX: ${{ inputs.shard_index }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+        DOWNLOAD_OUTCOME: ${{ steps.download_test_split.outcome }}
+      run: |
+        # A pattern that matches no artifact does not fail the download, so a failure is a real
+        # error. Splitting afresh then could run a split that differs from the one of the shards
+        # that already passed, so fail instead of falling back.
+        if [[ "$DOWNLOAD_OUTCOME" != "success" ]]; then
+          echo "::error::Downloading the test split of earlier attempts failed. Rerun the job or start a new run to split the tests afresh."
+          exit 1
+        fi
+
+        # Every shard of an attempt computes the same split from the same inputs and persists all
+        # of it, so the artifact of any one shard restores the list of every shard. This keeps the
+        # lists consistent even when only some shards are rerun or some artifacts are missing.
+        # The earliest attempt wins: that is the split used by the shards that already passed.
+        # Within that attempt this shard's own artifact wins, so the restored list is the one it
+        # actually ran even if the inputs of the shards somehow differed.
+        chosen_attempt=""
+        chosen_index=""
+        chosen_file=""
+        shopt -s nullglob
+        for dir in "$RESTORED_ROOT"/*/; do
+          name=$(basename "$dir")
+          rest="${name#"$ARTIFACT_PREFIX"}"
+          [[ "$rest" != "$name" ]] || continue
+          # Sibling legs of the same job with another suffix (or none) fall through here.
+          [[ "$rest" == *"$ARTIFACT_SUFFIX" ]] || continue
+          rest="${rest%"$ARTIFACT_SUFFIX"}"
+          [[ "$rest" =~ ^([0-9]+)-([0-9]+)$ ]] || continue
+          attempt="${BASH_REMATCH[1]}"
+          index="${BASH_REMATCH[2]}"
+          file=$(find "$dir" -type f -print -quit)
+          [[ -n "$file" ]] || continue
+          if [[ -z "$chosen_attempt" || "$attempt" -lt "$chosen_attempt" ]] ||
+             [[ "$attempt" -eq "$chosen_attempt" && "$index" == "$SHARD_INDEX" && "$chosen_index" != "$SHARD_INDEX" ]]; then
+            chosen_attempt="$attempt"
+            chosen_index="$index"
+            chosen_file="$file"
+          fi
+        done
+
+        if [[ -z "$chosen_file" ]]; then
+          # Reached when no shard of this job ran in an earlier attempt (e.g. an upstream job failed
+          # and was rerun) or when the test split artifacts expired. This cannot tell the two
+          # apart, so it falls back.
+          echo "::warning::No attempt before $RUN_ATTEMPT persisted its test split. Splitting the tests afresh."
+          echo "restored=false" >> "$GITHUB_OUTPUT"
+          echo "selected_tests_file=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        line=$(grep "^${SELECTION_SHARD_INDEX}=" "$chosen_file" || true)
+        if [[ -z "$line" ]]; then
+          echo "::error::The test split of attempt $chosen_attempt has no bucket $SELECTION_SHARD_INDEX: $chosen_file"
+          exit 1
+        fi
+        selected_tests_file="$RUNNER_TEMP/restored_selected_tests_${GITHUB_RUN_ID}_${RUN_ATTEMPT}_${SHARD_INDEX}"
+        printf '%s' "${line#*=}" > "$selected_tests_file"
+
+        echo "Restored bucket $SELECTION_SHARD_INDEX of the test split of attempt $chosen_attempt from $(basename "$(dirname "$chosen_file")")."
+        echo "restored=true" >> "$GITHUB_OUTPUT"
+        echo "selected_tests_file=$selected_tests_file" >> "$GITHUB_OUTPUT"
 
     - name: Split Tests Evenly
       id: split
       if: >
         inputs.num_test_buckets != '0' &&
-        !(github.run_attempt > 1 && steps.restore_selected_tests.outcome == 'success')
+        !(github.run_attempt > 1 && steps.restore_test_split.outputs.restored == 'true')
       uses: ./.github/actions/test/split_tests
       with:
         shard_index: ${{ steps.validate_sharding.outputs.selection_shard_index }}
@@ -220,17 +296,17 @@ runs:
         include_patterns: ${{ inputs.include_patterns }}
         debug_split_tests: "false"
 
-    - name: Persist selected tests for reruns
-      if: inputs.num_test_buckets != '0' && github.run_attempt == 1
+    - name: Persist the test split for reruns
+      if: inputs.num_test_buckets != '0' && steps.split.outcome == 'success'
       uses: actions/upload-artifact@v7
       with:
         name: >-
           ${{ inputs.job_name != '' && inputs.job_name || github.job
-          }}-selected-tests-${{ github.run_id }}-${{ inputs.shard_index
-          }}${{ inputs.artifact_name_suffix != '' && format('-{0}',
+          }}-test-split-${{ github.run_id }}-attempt-${{ github.run_attempt
+          }}-${{ inputs.shard_index }}${{ inputs.artifact_name_suffix != '' && format('-{0}',
           inputs.artifact_name_suffix) || '' }}
-        path: ${{ steps.split.outputs.selected_tests_file }}
-        retention-days: 1
+        path: ${{ steps.split.outputs.all_buckets_file }}
+        retention-days: 30
         if-no-files-found: error
 
     - name: Resolve selected tests file
@@ -239,17 +315,14 @@ runs:
       shell: bash
       env:
         SPLIT_SELECTED_TESTS_FILE: ${{ steps.split.outputs.selected_tests_file }}
-        RESTORED_DIR: ${{ runner.temp }}/selected-tests-${{ inputs.shard_index }}
+        RESTORED_SELECTED_TESTS_FILE: ${{ steps.restore_test_split.outputs.selected_tests_file }}
       run: |
         selected_tests_file=""
         selected_tests_source="split"
 
-        if [[ -d "$RESTORED_DIR" ]]; then
-          restored_candidate=$(find "$RESTORED_DIR" -type f | head -n1)
-          if [[ -n "$restored_candidate" && -f "$restored_candidate" ]]; then
-            selected_tests_file="$restored_candidate"
-            selected_tests_source="restored"
-          fi
+        if [[ -n "$RESTORED_SELECTED_TESTS_FILE" && -f "$RESTORED_SELECTED_TESTS_FILE" ]]; then
+          selected_tests_file="$RESTORED_SELECTED_TESTS_FILE"
+          selected_tests_source="restored"
         fi
 
         if [[ -z "$selected_tests_file" ]]; then
@@ -392,7 +465,7 @@ runs:
         test_sub_command: ${{ inputs.test_sub_command }}
         shard_index: ${{ steps.validate_sharding.outputs.selection_shard_index }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
-        selected_tests_file: ${{ steps.split.outputs.selected_tests_file }}
+        selected_tests_file: ${{ steps.selected_tests.outputs.selected_tests_file }}
         testcase_timeout_triggered: ${{ env.TESTCASE_TIMEOUT_TRIGGERED }}
 
     - name: Clear canton_test.log before failed-only rerun

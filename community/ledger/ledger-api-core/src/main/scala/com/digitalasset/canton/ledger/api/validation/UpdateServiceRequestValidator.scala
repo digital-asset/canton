@@ -64,7 +64,8 @@ object UpdateServiceRequestValidator {
       req: GetUpdatesRequest,
       ledgerEnd: Option[Offset],
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[update.GetUpdatesRequest] =
     for {
       partial <- commonValidations(req)
@@ -92,7 +93,8 @@ object UpdateServiceRequestValidator {
   def validateUpdateByOffset(
       req: GetUpdateByOffsetRequest
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[update.GetUpdateByOffsetRequest] =
     for {
       offset <- ParticipantOffsetValidator.validatePositive(req.offset, "offset")
@@ -108,7 +110,8 @@ object UpdateServiceRequestValidator {
   def validateUpdateById(
       req: GetUpdateByIdRequest
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[update.GetUpdateByIdRequest] =
     for {
       _ <- requireNonEmptyString(req.updateId, "update_id")
@@ -126,13 +129,20 @@ object UpdateServiceRequestValidator {
   def validateUpdateByHash(
       req: GetUpdateByHashRequest
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[update.GetUpdateByHashRequest] =
     for {
       _ <- Either.cond(
         !req.transactionHash.isEmpty,
         (),
         missingField("transaction_hash"),
+      )
+      _ <- validateByteSizeLimit(
+        bytes = req.transactionHash,
+        fieldName = "transaction_hash",
+        limit =
+          sizeLimitsConfig.publicLapiSizeConfig.getUpdateByHashRequest.transactionHashSizeLimit,
       )
       updateFormatProto <- requirePresence(req.updateFormat, "update_format")
       updateFormat <- FormatValidator.validate(updateFormatProto)
@@ -149,7 +159,8 @@ object UpdateServiceRequestValidator {
       participantId: ParticipantId,
       updateServiceConfig: UpdateServiceConfig,
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[update.GetUpdatesPageRequest] = for {
     token <- UpdatesPageToken.validateToken(req, participantId)
     endOffsetInRequest <- req.endOffsetInclusive.traverse(

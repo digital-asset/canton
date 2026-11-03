@@ -214,7 +214,6 @@ final class BlockSequencerTest
           asyncWriter = AsyncWriterParameters(),
           timeAdvancingTopology = TimeAdvancingTopologyConfig(),
           delayRequestsBeforeLsuTrafficInit = false,
-          enableRejectDeliveredAggregationsOnPv35 = Seq.empty,
           lsuConfig = SequencerLsuConfig(),
           enablePrevalidation = true,
           enableAsyncSequencerLogging = false,

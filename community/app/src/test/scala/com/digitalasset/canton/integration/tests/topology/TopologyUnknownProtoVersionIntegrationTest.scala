@@ -119,7 +119,7 @@ final class TopologyUnknownProtoVersionIntegrationTest
       Batch.of(
         testedProtocolVersion,
         (
-          TopologyTransactionsBroadcast(daId, Seq(signedTransaction)),
+          TopologyTransactionsBroadcast(daId, Seq(signedTransaction), testedProtocolVersion),
           Recipients.cc(TopologyBroadcastAddress.recipient),
         ),
       )

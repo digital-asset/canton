@@ -44,7 +44,7 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.{
-  AggregateSubmissionAlreadySentV2,
+  AggregateSubmissionAlreadySent,
   AggregateSubmissionInvalidRule,
   Overloaded,
   SubmissionRequestRefused,
@@ -119,7 +119,6 @@ import com.digitalasset.canton.util.{
   PekkoUtil,
   SimpleExecutionQueue,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RichGeneratedMessage, SequencerAlias}
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
@@ -547,17 +546,14 @@ class BlockSequencer(
             // We can check if the aggregation has already been delivered by looking at the head
             // state. If the delivered at is not yet cached (after a crash) we just allow the submission
             // to go through for simplicity.
-            (protocolVersion == ProtocolVersion.v35 && // if pv35, only check if sender code is the set of codes
-              !parameters.enableRejectDeliveredAggregationsOnPv35
-                .contains(submission.sender.code.threeLetterId.str)) ||
-              !stateManager.getProcessingHeadState.inFlightAggregations.byId
-                .get(aggregationId)
-                .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
+            !stateManager.getProcessingHeadState.inFlightAggregations.byId
+              .get(aggregationId)
+              .exists(_.cachedDeliveredAt.exists(_.nonEmpty)),
             (), {
               val str =
                 s"Not accepting submission as aggregation ID $aggregationId is already marked as delivered"
               logger.debug(str)
-              AggregateSubmissionAlreadySentV2.apply(str)
+              AggregateSubmissionAlreadySent(str)
             },
           )
         case None => Right(())
@@ -1666,13 +1662,17 @@ class BlockSequencer(
           )
       )
 
-      content = LsuSequencingTestMessageContent.create(psid = cryptoApi.psid, sender = sequencerId)
+      content = LsuSequencingTestMessageContent.create(
+        psid = cryptoApi.psid,
+        sender = sequencerId,
+        protocolVersion = protocolVersion,
+      )
       signedContent <- sign(syncCryptoApi, HashPurpose.LsuSequencingTestMessageContent, content)
 
       batch = Batch.of(
         protocolVersion,
         (
-          LsuSequencingTestMessage(signedContent.content, signedContent.signature),
+          LsuSequencingTestMessage(signedContent.content, signedContent.signature, protocolVersion),
           Recipients.cc(mediatorGroupRecipient),
         ),
       )

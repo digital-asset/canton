@@ -3,9 +3,21 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import com.daml.ledger.api.v2.command_service.SubmitAndWaitForTransactionRequest
+import com.daml.ledger.api.v2.command_service.{
+  SubmitAndWaitForReassignmentRequest,
+  SubmitAndWaitForTransactionRequest,
+}
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod as DeduplicationPeriodProto
-import com.daml.ledger.api.v2.commands.{Command, Commands, CreateCommand, PrefetchContractKey}
+import com.daml.ledger.api.v2.commands.{
+  Command,
+  Commands,
+  CreateAndExerciseCommand,
+  CreateCommand,
+  ExerciseByKeyCommand,
+  ExerciseCommand,
+  PrefetchContractKey,
+  DisclosedContract as ProtoDisclosedContract,
+}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   HashingSchemeVersion as ApiHashingSchemeVersion,
@@ -27,7 +39,15 @@ import com.daml.ledger.api.v2.value.{
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.ApiMocks.{commandId, submissionId, userId, workflowId}
-import com.digitalasset.canton.ledger.api.sizeconfig.v2.ReassignmentCommandsSizeConfig
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
+  CommandsSizeConfig,
+  CreateCommandSizeConfig,
+  DisclosedContractSizeConfig,
+  ExerciseCommandSizeConfig,
+  PrefetchContractKeySizeConfig,
+  PublicLapiSizeConfig,
+  ReassignmentCommandsSizeConfig,
+}
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
 import com.digitalasset.canton.ledger.api.{ApiMocks, DisclosedContract, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -291,6 +311,37 @@ class SubmitRequestValidatorTest
         )
       }
 
+      "reject a request with transaction format exceeding the total filters limit" in {
+        val maxTotalFilters = 1
+        requestMustFailWith(
+          new SubmitAndWaitRequestValidator(testedCommandValidator)(
+            sizeLimitsConfig = sizeLimitsConfig.copy(eventFormatTotalFiltersSizeLimit =
+              PositiveInt.tryCreate(maxTotalFilters)
+            )
+          ).validate(
+            req = SubmitAndWaitForTransactionRequest(
+              commands = Some(api.commands),
+              transactionFormat = Some(
+                TransactionFormat(
+                  // a template wildcard for party and one for any party
+                  eventFormat = Some(
+                    EventFormat(Map(party -> Filters(Nil)), Some(Filters(Nil)), verbose = false)
+                  ),
+                  transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+                )
+              ),
+            ),
+            currentLedgerTime = internal.ledgerTime,
+            currentUtcTime = internal.submittedAt,
+            maxDeduplicationDuration = internal.maxDeduplicationDuration,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            totalFiltersLimitExceeded(actual = maxTotalFilters + 1, limit = maxTotalFilters),
+          metadata = Map.empty,
+        )
+      }
+
       "reject a request without transaction format" in {
         requestMustFailWith(
           testedSubmitAndWaitRequestValidator.validate(
@@ -306,6 +357,18 @@ class SubmitRequestValidatorTest
           description =
             "MISSING_FIELD(8,0): The submitted command is missing a mandatory field: transaction_format",
           metadata = Map.empty,
+        )
+      }
+
+      "reject a reassignment request with an event format without filters" in {
+        mustFailWithoutFilters(
+          testedSubmitAndWaitRequestValidator.validate(
+            SubmitAndWaitForReassignmentRequest(
+              // not validated: the event format is rejected first
+              reassignmentCommands = Some(ReassignmentCommands.defaultInstance),
+              eventFormat = Some(EventFormat(Map.empty, None, verbose = false)),
+            )
+          )
         )
       }
     }
@@ -828,6 +891,262 @@ class SubmitRequestValidatorTest
       cardinalityLimit("commands", limit = maxReassignmentCommands)(numberOfCommands =>
         commandsValidatorWithReassignmentCommandsLimit.validateReassignmentCommands(
           reassignmentCommands(numberOfCommands)
+        )
+      )
+    }
+
+    "validating the size limits of commands" should {
+      val maxElements = 2
+      val maxCreatedEventBlobBytes = 4
+      val maxArgumentBytes = 20
+
+      val publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig
+
+      def validateCommands(commands: Commands, publicLapiSizeConfig: PublicLapiSizeConfig) =
+        new CommandsValidator(ValidateUpgradingPackageResolutions.Empty)(
+          sizeLimitsConfig.copy(publicLapiSizeConfig = publicLapiSizeConfig)
+        ).validateCommands(
+          commands,
+          internal.ledgerTime,
+          internal.submittedAt,
+          internal.maxDeduplicationDuration,
+        )
+
+      val commandsLimits = publicLapiSizeConfig.copy(
+        commands = CommandsSizeConfig(
+          commandsSizeLimit = PositiveInt.tryCreate(maxElements),
+          actAsSizeLimit = PositiveInt.tryCreate(maxElements),
+          readAsSizeLimit = PositiveInt.tryCreate(maxElements),
+          disclosedContractsSizeLimit = PositiveInt.tryCreate(maxElements),
+          packageIdSelectionPreferenceSizeLimit = PositiveInt.tryCreate(maxElements),
+          prefetchContractKeysSizeLimit = PositiveInt.tryCreate(maxElements),
+        ),
+        disclosedContract = DisclosedContractSizeConfig(
+          createdEventBlobSizeLimit = PositiveInt.tryCreate(maxCreatedEventBlobBytes)
+        ),
+      )
+
+      def validateWithCommandsLimits(commands: Commands) =
+        CommandsValidator.validateCommandsSizeLimits(commands)(
+          sizeLimitsConfig.copy(publicLapiSizeConfig = commandsLimits),
+          errorLoggingContext,
+        )
+
+      def disclosedContract(createdEventBlobBytes: Int) = ProtoDisclosedContract(
+        templateId = Some(api.identifier),
+        contractId = contractId.coid,
+        createdEventBlob = bytes(createdEventBlobBytes),
+        synchronizerId = api.synchronizerId,
+      )
+
+      "validate the size limits of the commands when validating commands" in {
+        requestMustFailWith(
+          request = validateCommands(
+            api.commands.copy(actAs = parties(maxElements + 1)),
+            commandsLimits,
+          ),
+          code = INVALID_ARGUMENT,
+          description =
+            cardinalityLimitExceeded("act_as", actual = maxElements + 1, limit = maxElements),
+        )
+      }
+
+      cardinalityLimit("commands", limit = maxElements)(numberOfCommands =>
+        validateWithCommandsLimits(
+          api.commands.copy(commands = Seq.fill(numberOfCommands)(api.command))
+        )
+      )
+
+      cardinalityLimit("act_as", limit = maxElements)(numberOfParties =>
+        validateWithCommandsLimits(api.commands.copy(actAs = parties(numberOfParties)))
+      )
+
+      cardinalityLimit("read_as", limit = maxElements)(numberOfParties =>
+        validateWithCommandsLimits(api.commands.copy(readAs = parties(numberOfParties)))
+      )
+
+      cardinalityLimit("disclosed_contracts", limit = maxElements)(numberOfContracts =>
+        validateWithCommandsLimits(
+          api.commands.copy(disclosedContracts = Seq.fill(numberOfContracts)(disclosedContract(1)))
+        )
+      )
+
+      cardinalityLimit("package_id_selection_preference", limit = maxElements)(numberOfPackageIds =>
+        validateWithCommandsLimits(
+          api.commands.copy(packageIdSelectionPreference =
+            (1 to numberOfPackageIds).map(i => s"packageId$i")
+          )
+        )
+      )
+
+      cardinalityLimit("prefetch_contract_keys", limit = maxElements)(numberOfKeys =>
+        validateWithCommandsLimits(
+          api.commands.copy(prefetchContractKeys = Seq.fill(numberOfKeys)(api.prefetchKey))
+        )
+      )
+
+      byteSizeLimit("created_event_blob", limit = maxCreatedEventBlobBytes)(numberOfBytes =>
+        validateWithCommandsLimits(
+          api.commands.copy(disclosedContracts = Seq(disclosedContract(numberOfBytes)))
+        )
+      )
+
+      val argumentsLimit = PositiveInt.tryCreate(maxArgumentBytes)
+      val smallValue = Value(api.int64)
+      val smallRecord = Record(None, Seq(RecordField("", Some(smallValue))))
+
+      def value(numberOfBytes: Int): Value = {
+        val textValue = Value(Value.Sum.Text("a" * (numberOfBytes - 2)))
+        assert(textValue.serializedSize == numberOfBytes)
+        textValue
+      }
+
+      def record(numberOfBytes: Int): Record = {
+        val record = Record(None, Seq(RecordField("", Some(value(numberOfBytes - 4)))))
+        assert(record.serializedSize == numberOfBytes)
+        record
+      }
+
+      def validateCommand(command: Command.Command, publicLapiSizeConfig: PublicLapiSizeConfig) =
+        validateCommands(
+          api.commands.copy(commands = Seq(Command.of(command))),
+          publicLapiSizeConfig,
+        )
+
+      def exerciseCommand(choiceArgument: Value) =
+        Command.Command.Exercise(
+          ExerciseCommand(
+            templateId = Some(api.identifier),
+            contractId = contractId.coid,
+            choice = "choice",
+            choiceArgument = Some(choiceArgument),
+          )
+        )
+
+      def exerciseByKeyCommand(contractKey: Value, choiceArgument: Value) =
+        Command.Command.ExerciseByKey(
+          ExerciseByKeyCommand(
+            templateId = Some(api.identifier),
+            contractKey = Some(contractKey),
+            choice = "choice",
+            choiceArgument = Some(choiceArgument),
+          )
+        )
+
+      def createAndExerciseCommand(createArguments: Record, choiceArgument: Value) =
+        Command.Command.CreateAndExercise(
+          CreateAndExerciseCommand(
+            templateId = Some(api.identifier),
+            createArguments = Some(createArguments),
+            choice = "choice",
+            choiceArgument = Some(choiceArgument),
+          )
+        )
+
+      serializedSizeLimit(
+        "create_arguments",
+        limit = maxArgumentBytes,
+        limitName = "limit of the create command",
+      )(numberOfBytes =>
+        validateCommand(
+          Command.Command.Create(
+            CreateCommand(
+              templateId = Some(api.identifier),
+              createArguments = Some(record(numberOfBytes)),
+            )
+          ),
+          publicLapiSizeConfig.copy(createCommand = CreateCommandSizeConfig(argumentsLimit)),
+        )
+      )
+
+      serializedSizeLimit(
+        "choice_argument",
+        limit = maxArgumentBytes,
+        limitName = "limit of the exercise command",
+      )(numberOfBytes =>
+        validateCommand(
+          exerciseCommand(value(numberOfBytes)),
+          publicLapiSizeConfig.copy(exerciseCommand = ExerciseCommandSizeConfig(argumentsLimit)),
+        )
+      )
+
+      serializedSizeLimit(
+        "contract_key",
+        limit = maxArgumentBytes,
+        limitName = "limit of the exercise by key command",
+      )(numberOfBytes =>
+        validateCommand(
+          exerciseByKeyCommand(contractKey = value(numberOfBytes), choiceArgument = smallValue),
+          publicLapiSizeConfig.copy(exerciseByKeyCommand =
+            publicLapiSizeConfig.exerciseByKeyCommand.copy(contractKeySizeLimit = argumentsLimit)
+          ),
+        )
+      )
+
+      serializedSizeLimit(
+        "choice_argument",
+        limit = maxArgumentBytes,
+        limitName = "limit of the exercise by key command",
+      )(numberOfBytes =>
+        validateCommand(
+          exerciseByKeyCommand(
+            contractKey = ApiMocks.values.validApiParty,
+            choiceArgument = value(numberOfBytes),
+          ),
+          publicLapiSizeConfig.copy(exerciseByKeyCommand =
+            publicLapiSizeConfig.exerciseByKeyCommand.copy(choiceArgumentSizeLimit = argumentsLimit)
+          ),
+        )
+      )
+
+      serializedSizeLimit(
+        "create_arguments",
+        limit = maxArgumentBytes,
+        limitName = "limit of the create and exercise command",
+      )(numberOfBytes =>
+        validateCommand(
+          createAndExerciseCommand(
+            createArguments = record(numberOfBytes),
+            choiceArgument = smallValue,
+          ),
+          publicLapiSizeConfig.copy(createAndExerciseCommand =
+            publicLapiSizeConfig.createAndExerciseCommand.copy(createArgumentsSizeLimit =
+              argumentsLimit
+            )
+          ),
+        )
+      )
+
+      serializedSizeLimit(
+        "choice_argument",
+        limit = maxArgumentBytes,
+        limitName = "limit of the create and exercise command",
+      )(numberOfBytes =>
+        validateCommand(
+          createAndExerciseCommand(
+            createArguments = smallRecord,
+            choiceArgument = value(numberOfBytes),
+          ),
+          publicLapiSizeConfig.copy(createAndExerciseCommand =
+            publicLapiSizeConfig.createAndExerciseCommand.copy(choiceArgumentSizeLimit =
+              argumentsLimit
+            )
+          ),
+        )
+      )
+
+      serializedSizeLimit(
+        "contract_key",
+        limit = maxArgumentBytes,
+        limitName = "limit of the prefetch contract key",
+      )(numberOfBytes =>
+        validateCommands(
+          api.commands.copy(prefetchContractKeys =
+            Seq(api.prefetchKey.copy(contractKey = Some(value(numberOfBytes))))
+          ),
+          publicLapiSizeConfig.copy(prefetchContractKey =
+            PrefetchContractKeySizeConfig(argumentsLimit)
+          ),
         )
       )
     }

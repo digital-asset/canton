@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
+build-options:
+  - --target=2.2
+name: canton-traffic-credit-test
+source: Canton/Traffic/CreditTest.daml
+version: 1.0.0
+dependencies:
+  - daml-prim
+  - daml-stdlib
+# Relative to the build directory target/daml-default/canton-traffic-credit-test.
+data-dependencies:
+  - ../../../src/main/resources/dar/canton-traffic-credit-1.0.0.dar

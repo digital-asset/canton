@@ -45,6 +45,19 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
           ),
         )
         with TrafficEnforcementError
+
+    final case class EstimateReject(accountId: String, balance: Long, estimatedCost: Long)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"Insufficient balance ($balance) for estimated traffic cost ($estimatedCost) for account $accountId",
+          extraContext = Map(
+            "account_id" -> accountId,
+            "balance" -> balance,
+            "traffic_cost" -> estimatedCost,
+          ),
+        )
+        with TrafficEnforcementError
   }
 
   @Explanation(
@@ -63,6 +76,29 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
     final case class Reject(override val cause: String)(implicit
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(cause = cause)
+        with TrafficEnforcementError
+  }
+
+  @Explanation(
+    "Before sending a submission that needs reassignments, the participant estimates the traffic cost" +
+      " of the whole submission to check the account's balance. This error occurs if that estimate failed."
+  )
+  @Resolution(
+    "Check the reason in the error message. Resubmit once the cause is fixed, for example after the" +
+      " participant reconnects to the synchronizer. Contact the participant operator if it keeps" +
+      " failing."
+  )
+  object CostEstimationFailed
+      extends ErrorCode(
+        id = "TRAFFIC_COST_ESTIMATION_FAILED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Reject(reason: String)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The participant couldn't estimate the traffic cost of the submission and its reassignments: $reason"
+        )
         with TrafficEnforcementError
   }
 
@@ -235,6 +271,7 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
   lazy val allErrorIds: Set[String] = Set(
     InsufficientBalance.id,
     MultiPartySubmissionRejected.id,
+    CostEstimationFailed.id,
     TrafficUpdateOutOfBound.id,
     TopUpNotCredited.id,
     CorrelationConflict.id,

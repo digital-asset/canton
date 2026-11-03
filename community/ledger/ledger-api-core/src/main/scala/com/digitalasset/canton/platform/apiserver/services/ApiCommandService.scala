@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.CommandService
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
+  LedgerApiSizeLimitsConfig,
   SubmitAndWaitRequestValidator,
 }
 import com.digitalasset.canton.ledger.api.{ProxyCloseable, SubmissionIdGenerator, ValidationLogger}
@@ -43,8 +44,10 @@ class ApiCommandService(
     maxDeduplicationDuration: Duration,
     generateSubmissionId: SubmissionIdGenerator,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
-    extends CommandServiceGrpc
+)(implicit
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+) extends CommandServiceGrpc
     with GrpcApiService
     with ProxyCloseable
     with NamedLogging {

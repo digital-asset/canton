@@ -95,11 +95,34 @@ Before starting the release, check the following:
 
 - No blocker is mentioned in release tracker.
 
+#### Polish the release notes with Claude Code
+
+The Claude Code skill [`polish-release-notes`](../../.claude/skills/polish-release-notes/SKILL.md) prepares
+`UNRELEASED.md` of a release line for a minor (`3.x.0`) or patch (`3.x.y`) release. Run it from the repository root:
+
+```
+claude
+> /polish-release-notes 3.7.1
+```
+
+The skill:
+
+- creates the local branch `polish-release-notes-<version>` from the latest release line,
+- restructures the notes along the previous release notes of the same kind and removes the template placeholders,
+- drops entries that already shipped or have no user-facing effect, adds missing user-facing changes from the commit
+  history, and verifies every entry against the code of the release line,
+- commits the result as a single commit "Polish the <version> release notes" without pushing it.
+
+It asks for input it cannot derive from the code, e.g. the baseline commit if the previous tag does not exist yet,
+the advisory id and severity of fixes, the MainNet status of security fixes (Critical or High security fixes are only
+included once the fix is deployed on MainNet), and the timings of expensive database migrations. Review the commit and
+its open questions, then push the branch and open a PR against the release line.
+
 #### Update the release line Daml version
 
 - The Daml version can be read in `project/project/DamlVersions.scala`.
 
-- The Daml version must be a non-snapshot (== a stable) version.
+- The Daml version must be a stable version.
 
 - The Canton and Daml versions may be different.
 
@@ -145,7 +168,7 @@ the [Canton Release Owners](https://github.com/orgs/DACH-NY/teams/canton-release
 **Important**
 Merge strategy of the PR should be ***rebase and merge***, otherwise the release will not be done.
 
-Once the PR is merged, the release commit (`release: 3.4.4`) will be tagged (`3.4.4`) and the last part of the release
+Once the PR is merged, the release commit (`release: 3.4.4`) will be tagged (`v3.4.4`) and the last part of the release
 process will kick off.
 You can follow the process on CircleCI:
 
@@ -153,7 +176,7 @@ You can follow the process on CircleCI:
 
   [https://github.com/DACH-NY/canton/commits/release-line-3.4](https://github.com/DACH-NY/canton/commits/release-line-3.4)
 
-- Open the CircleCI workflow of the release-commit (`release: 3.4.4`)
+- Open the CircleCI workflow of the release-commit tag (`v3.4.4`)
 
 - Code freeze can be lifted by sending another slack message to `#team-canton`
 
@@ -280,4 +303,8 @@ First, create and merge a PR to bump Daml.
 
 ## Clean up
 
-A PR targeting main should be opened to add the release notes (`release-notes/2.3.13.md`) and the data continuity dumps.
+- A PR targeting main should be opened to add the release notes (`release-notes/2.3.13.md`) and the data continuity dumps.
+- It makes sense to check the following release sensitive still test pass on `main`:
+  - `ConfigContinuityReaderTest`
+  - `ProtobufCompatibilityReaderTest`
+

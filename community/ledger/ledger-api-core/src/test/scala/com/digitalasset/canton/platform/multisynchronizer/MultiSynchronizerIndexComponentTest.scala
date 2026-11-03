@@ -7,6 +7,7 @@ import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
   IndexingWatermark,
@@ -385,7 +386,13 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       includeIncompleteReassignments: Boolean = true,
   ) =
     continuationToken.traverse(token =>
-      AcsContinuationToken.decodeAndValidate(AcsContinuationToken.emptyChecksum, token)
+      AcsContinuationToken.decodeAndValidate(
+        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        token = token,
+        fieldName = "stream_continuation_token",
+        limit =
+          LedgerApiSizeLimitsConfig().publicLapiSizeConfig.getActiveContractsRequest.streamContinuationTokenSizeLimit,
+      )
     ) match {
       case Left(error) =>
         fail(s"Failed to decode continuation token: ${error.getStatus.getDescription}")

@@ -31,9 +31,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageVersion
-import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.language.Ast.PackageSignature
 import com.digitalasset.nonempty.NonEmpty
 
@@ -146,7 +144,6 @@ class PackagePreferenceBackend(
           packageMetadataSnapshot = packageMetadataSnapshot,
           packageFilter = packageFilter,
           requirements = extendedRequirements,
-          synchronizerProtocolVersion = syncId.protocolVersion,
         )
         syncId -> PackagePreferenceBackend.selectRequestedPackages(
           candidates,
@@ -267,7 +264,6 @@ object PackagePreferenceBackend extends HasLoggerName {
       packageMetadataSnapshot: PackageMetadata,
       requirements: Map[Party, Set[PackageName]],
       packageFilter: PackageFilter,
-      synchronizerProtocolVersion: ProtocolVersion,
   )(implicit
       loggingContext: NamedLoggingContext
   ): MapView[PackageName, Candidate[SortedPreferences]] =
@@ -291,7 +287,6 @@ object PackagePreferenceBackend extends HasLoggerName {
           packageMetadataSnapshot,
           _,
           requirements.values.flatten.toSet,
-          synchronizerProtocolVersion,
         )
       )
       // Apply package-id filter restriction to the candidate package-ids
@@ -303,7 +298,6 @@ object PackagePreferenceBackend extends HasLoggerName {
       packageMetadataSnapshot: PackageMetadata,
       candidatesForPackageName: Map[PackageName, Candidate[SortedPreferences]],
       requiredPackageNames: Set[PackageName],
-      protocolVersion: ProtocolVersion,
   ): MapView[PackageName, Candidate[SortedPreferences]] = {
     val packageIndex: Map[PackageId, (PackageName, PackageVersion)] =
       packageMetadataSnapshot.packageIdVersionMap
@@ -325,23 +319,14 @@ object PackagePreferenceBackend extends HasLoggerName {
         ),
       )
 
-    if (protocolVersion <= ProtocolVersion.v34)
-      preserveDeeplyVettedPV34(
-        candidatesForPackageName,
-        dependencyGraph,
-        allVettedPackages,
-        packageIndex,
-        getPackageAst,
-      )
-    else
-      preserveDeeplyRequiredVetted(
-        requiredPackageNames,
-        candidatesForPackageName,
-        dependencyGraph,
-        allVettedPackages,
-        packageIndex,
-        getPackageAst,
-      )
+    preserveDeeplyRequiredVetted(
+      requiredPackageNames,
+      candidatesForPackageName,
+      dependencyGraph,
+      allVettedPackages,
+      packageIndex,
+      getPackageAst,
+    )
   }
 
   // Discard packages that have an unvetted direct or transitive dependency package-id
@@ -399,67 +384,6 @@ object PackagePreferenceBackend extends HasLoggerName {
             .from(validCandidates.to(SortedSet))
             .toRight(
               show"Packages with required dependencies not vetted by all interested parties: $packageRefsWithUnvettedDepsForError"
-            )
-        }
-      )
-  }
-
-  // TODO(#25385): Legacy behavior, only supported for backwards compatibility with Protocol Version 34.
-  //               Remove once PV34 support is dropped.
-  private def preserveDeeplyVettedPV34(
-      candidatesForPackageName: Map[PackageName, Candidate[SortedPreferences]],
-      dependencyGraph: Map[PackageId, Set[PackageId]],
-      allVettedPackages: Set[PackageId],
-      packageIndex: Map[PackageId, (PackageName, PackageVersion)],
-      getPackageAst: PackageId => Ast.PackageSignature,
-  ): MapView[PackageName, Candidate[NonEmpty[SortedSet[PackageReference]]]] = {
-    val deepVettingCache: mutable.Map[PackageId, Either[PackageId, Unit]] =
-      mutable.Map.empty
-
-    // Note: Keeping it simple without tailrec since the dependency graph depth should be limited
-    def isDeeplyVetted(pkgId: PackageId): Either[PackageId, Unit] = {
-      val pkg = getPackageAst(pkgId)
-      if (
-        // If a package is vetted or it is not a schema package, we continue with checking its dependencies.
-        // We ignore unvetted non-schema packages to support
-        // disjoint versions across informees (e.g. Daml stdlib packages)
-        allVettedPackages(pkgId) || !isSchemaPackage(pkg)
-      ) {
-        val dependencies =
-          dependencyGraph.getOrElse(
-            pkgId,
-            sys.error(s"Unexpectedly missing dependencies entry for package $pkgId"),
-          )
-
-        dependencies.foldLeft(Right(()): Either[PackageId, Unit]) {
-          case (Right(()), dep) => deepVettingCache.getOrElseUpdate(dep, isDeeplyVetted(dep))
-          case (left, _) => left
-        }
-      } else {
-        // If the schema package is not vetted, return it as an error
-        Left(pkgId)
-      }
-    }
-
-    candidatesForPackageName.view
-      .mapValues(
-        _.flatMap { candidates =>
-          val (packagesWithUnvettedDeps, candidatesWithVettedDeps) = candidates.view
-            .map(pkgRef =>
-              isDeeplyVetted(pkgRef.pkgId).left.map(pkgRef.pkgId -> _).map(_ => pkgRef)
-            )
-            .toList
-            .separate
-
-          val lazyPackageRefsWithUnvettedDepsForError = packagesWithUnvettedDeps.view
-            .map { case (pkg, unvettedDep) =>
-              s"${pkg.toPackageReference(packageIndex).map(_.show).getOrElse(pkg.show)} -> ${unvettedDep.toPackageReference(packageIndex).map(_.show).getOrElse(pkg.show)}"
-            }
-
-          NonEmpty
-            .from(candidatesWithVettedDeps.to(SortedSet))
-            .toRight(
-              show"Packages with required dependencies not vetted by all interested parties: ${lazyPackageRefsWithUnvettedDepsForError.toList}"
             )
         }
       )
@@ -607,8 +531,4 @@ object PackagePreferenceBackend extends HasLoggerName {
         } yield acc + preferencesForName.last1
       }
 
-  private def isSchemaPackage(pkg: Ast.PackageSignature): Boolean =
-    pkg.modules.exists { case (_, module) =>
-      module.interfaces.nonEmpty || module.templates.nonEmpty
-    }
 }

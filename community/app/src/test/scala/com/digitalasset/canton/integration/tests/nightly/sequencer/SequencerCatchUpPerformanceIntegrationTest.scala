@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.RequireTypes.{
 import com.digitalasset.canton.console.{
   LocalInstanceReference,
   LocalMediatorReference,
+  LocalParticipantReference,
   LocalSequencerReference,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -143,6 +144,8 @@ class SequencerCatchUpPerformanceIntegrationTest
     with MetricValues
     with TrafficBalanceSupport {
 
+  private val SequencerCatchUpSystemPropertyPrefix = "sequencer-catchup-tests"
+
   // Manipulate the settings to try different options and scenarios
 
   // Enable to see metrics in Prometheus or Grafana. For some reason, doesn't work with the 'countBlockEvents' flag
@@ -169,6 +172,26 @@ class SequencerCatchUpPerformanceIntegrationTest
 
   // Keep producing load after catch-up. May result in sequencer4 never catching up, depending on the other settings.
   private val produceLoadAfterRestart = false
+
+  // How long the ledger ends must stay unchanged before the participants count as done processing
+  private val ledgerEndsStableFor =
+    Option(
+      System.getProperty(
+        s"$SequencerCatchUpSystemPropertyPrefix.ledger-ends-stable-for-seconds"
+      )
+    )
+      .map(_.toInt.seconds)
+      .getOrElse(5.seconds)
+
+  // How long we at the most wait for participants to be idle
+  private val participantsUntilIdleTimeout =
+    Option(
+      System.getProperty(
+        s"$SequencerCatchUpSystemPropertyPrefix.participants-until-idle-timeout-minutes"
+      )
+    )
+      .map(_.toInt.minutes)
+      .getOrElse(5.minutes)
 
   private val enableTrafficManagement = true
 
@@ -474,6 +497,10 @@ class SequencerCatchUpPerformanceIntegrationTest
     }
 
     if (stopOtherNodesDuringCatchUp) {
+      // Stopping a participant while it processes a transaction leaves contracts without Ledger API
+      // events until crash recovery. The participants are not restarted, so the Ledger API store
+      // integrity check at the end of the test would report these contracts as not pruned.
+      if (!produceLoadAfterRestart) waitUntilParticipantsAreIdle(Seq(participant1, participant2))
       participant1.stop()
       participant2.stop()
       allMediators().foreach(_.stop())
@@ -588,6 +615,22 @@ class SequencerCatchUpPerformanceIntegrationTest
       case None =>
         sequencer4.start()
         assert(sequencer4.is_running)
+    }
+  }
+
+  /** Waits until the participants have no submissions or requests in flight and their ledger ends
+    * have not moved for `ledgerEndsStableFor`, i.e. everything submitted before is processed and
+    * indexed.
+    */
+  private def waitUntilParticipantsAreIdle(
+      localParticipants: Seq[LocalParticipantReference]
+  )(implicit env: FixtureParam): Unit = {
+    import env.*
+    eventually(timeUntilSuccess = participantsUntilIdleTimeout) {
+      localParticipants.filter(_.health.count_in_flight(daName).exists) shouldBe empty
+      val ledgerEndsBefore = localParticipants.map(_.ledger_api.state.end())
+      Threading.sleep(ledgerEndsStableFor.toMillis)
+      localParticipants.map(_.ledger_api.state.end()) shouldBe ledgerEndsBefore
     }
   }
 

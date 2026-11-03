@@ -20,6 +20,15 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import scala.concurrent.{ExecutionContext, Future}
 
 trait QueryValidRange {
+
+  /** Checks only the ledger end, not pruning. Zero represents an empty ledger. */
+  def withEventSeqIdNotAfterLedgerEnd[T](
+      eventSeqId: Long,
+      errorLedgerEnd: Long => String,
+  )(query: => Future[T])(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[T]
+
   def withRangeNotPruned[T](
       offsetRange: OffsetRange,
       errorPruning: Offset => String,
@@ -52,6 +61,26 @@ final case class QueryValidRangeImpl(
     ec: ExecutionContext
 ) extends QueryValidRange
     with NamedLogging {
+
+  override def withEventSeqIdNotAfterLedgerEnd[T](
+      eventSeqId: Long,
+      errorLedgerEnd: Long => String,
+  )(query: => Future[T])(implicit loggingContext: LoggingContextWithTrace): Future[T] = {
+    val ledgerEnd = ledgerEndCache()
+    val latestEventSeqId = ledgerEnd.fold(0L)(_.lastEventSeqId)
+    if (eventSeqId > latestEventSeqId)
+      Future.failed(
+        RequestValidationErrors.ParticipantDataAccessedAfterLedgerEnd
+          .Reject(
+            cause = errorLedgerEnd(latestEventSeqId),
+            latestOffset = ledgerEnd.fold(0L)(_.lastOffset.unwrap),
+          )(
+            ErrorLoggingContext(logger, loggingContext)
+          )
+          .asGrpcError
+      )
+    else query
+  }
 
   /** Runs a query and throws an error if the query accesses an invalid offset range.
     *

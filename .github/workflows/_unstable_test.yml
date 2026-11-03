@@ -99,7 +99,11 @@ jobs:
           num_test_buckets: '0'
           release_path: ${{ env.TMP_WORKSPACE }}
           succeed_on_error: 'true'
-          timeout: '240m'
+          # Must stay below the job's timeout-minutes (120) with room for the setup steps before
+          # sbt starts and the cleanup/bundle upload after it. Otherwise GitHub cancels the job
+          # first, so the sbt wrapper never reports the timeout and the cleanup steps gated by
+          # !cancelled() are skipped.
+          timeout: '110m'
 
       - name: Clean up workspace
         if: always()
@@ -127,3 +131,7 @@ jobs:
       caller_job: unstable_test
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
+      # The set of tests marked with @UnstableTest can legitimately be empty, in which case no
+      # JUnit testcases (and hence no timings) are produced. The timings are not used for
+      # sharding here (num_test_buckets: 0), so an empty result must not fail the leg.
+      allow_empty_current_timings: true

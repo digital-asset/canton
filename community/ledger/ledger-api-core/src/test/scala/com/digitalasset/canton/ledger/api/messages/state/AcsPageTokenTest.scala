@@ -7,23 +7,24 @@ import com.daml.ledger.api.v2.state_service.GetActiveContractsPageRequest
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.daml.platform.v1.acs_page_token.AcsPageTokenPayload
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.api.messages.state.AcsPageToken.{
   calcParticipantChecksum,
   calcRequestChecksum,
 }
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.GetActiveContractsPageRequestSizeConfig
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
+import com.digitalasset.canton.ledger.api.validation.SizeLimitTestUtils
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import com.google.protobuf.ByteString
-import org.scalatest.EitherValues
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.chaining.scalaUtilChainingOps
 
-class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
+class AcsPageTokenTest extends AnyWordSpec with SizeLimitTestUtils {
   private val eventFormat = EventFormat(
     filtersByParty = Map("party" -> Filters(Nil)),
     filtersForAnyParty = None,
@@ -64,6 +65,14 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
 
   private implicit val elc: ErrorLoggingContext =
     ErrorLoggingContext.fromTracedLogger(NamedLogging.noopLogger)(TraceContext.empty)
+  private def sizeLimitsConfigWithTokenLimit(maxTokenBytes: Int) =
+    sizeLimitsConfig.copy(
+      publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+        getActiveContractsPageRequest = GetActiveContractsPageRequestSizeConfig(
+          pageTokenSizeLimit = PositiveInt.tryCreate(maxTokenBytes)
+        )
+      )
+    )
 
   /** Request checksum as calculated by TokenVersion = 1 (which did not include the
     * includeIncompleteReassignments flag)
@@ -91,104 +100,125 @@ class AcsPageTokenTest extends AnyFlatSpec with Matchers with EitherValues {
       requestChecksum = calcRequestChecksumV1(request),
     ).toByteString
 
-  "AcsPageToken" should "successfully decode an untampered token from the request" in {
-    val decoded =
-      AcsPageToken.decodeAndValidate(originalRequestChecksum, participantIdChecksum, originalToken)
-    decoded.value._2 should equal(AcsContinuationPointerActiveContracts(42 - 1)) // decreased seq id
-    decoded.value._1.unwrap should equal(originalActiveAt)
-  }
+  "AcsPageToken" should {
+    "successfully decode an untampered token from the request" in {
+      val decoded =
+        AcsPageToken.decodeAndValidate(
+          originalRequestChecksum,
+          participantIdChecksum,
+          originalToken,
+        )
+      decoded.value._2 should equal(
+        AcsContinuationPointerActiveContracts(42 - 1)
+      ) // decreased seq id
+      decoded.value._1.unwrap should equal(originalActiveAt)
+    }
 
-  it should "fail if used on a different participant" in {
-    val differentParticipantId = Ref.ParticipantId.assertFromString("different")
-    val differentParticipantChecksum = AcsPageToken.calcParticipantChecksum(differentParticipantId)
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(
-        originalRequestChecksum,
-        differentParticipantChecksum,
-        originalToken,
-      )
-    decodedToken.left.value.getStatus.getDescription should equal(differentParticipantError)
-  }
-
-  it should "fail if not the same eventformat is used" in {
-    val requestWithToken = originalRequest.copy(
-      eventFormat = originalRequest.eventFormat.map(_.copy(verbose = true)),
-      pageToken = Some(originalToken),
-    )
-    val requestChecksum = AcsPageToken.calcRequestChecksum(requestWithToken)
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(requestChecksum, participantIdChecksum, originalToken)
-    decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
-  }
-
-  it should "fail if not the same activeAt is used" in {
-    val requestWithToken = originalRequest.copy(
-      activeAtOffset = originalRequest.activeAtOffset.map(_ + 1),
-      pageToken = Some(originalToken),
-    )
-    val checksum = AcsPageToken.calcRequestChecksum(requestWithToken)
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(checksum, participantIdChecksum, originalToken)
-    decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
-  }
-
-  it should "fail if different includeIncompleteReassignments flag is used" in {
-    val requestWithToken = originalRequest.copy(
-      includeIncompleteReassignments = !originalRequest.includeIncompleteReassignments,
-      pageToken = Some(originalToken),
-    )
-    val checksum = AcsPageToken.calcRequestChecksum(requestWithToken)
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(checksum, participantIdChecksum, originalToken)
-    decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
-  }
-
-  it should "reject a token issued with a previous token version" in {
-    val previousVersionToken = encodeV1(
-      originalRequest,
-      originalContinuationToken,
-      activeAtOffset = originalActiveAt,
-      participantId,
-    )
-    val decodedToken =
+    byteSizeLimit("page_token", limit = originalToken.size())(numberOfBytes =>
       AcsPageToken.decodeAndValidate(
         originalRequestChecksum,
         participantIdChecksum,
-        previousVersionToken,
-      )
-    decodedToken.left.value.getStatus.getDescription should equal(differentVersionError)
-  }
-
-  it should "reject an invalid token" in {
-    val tamperedToken = originalToken.substring(5)
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(originalRequestChecksum, participantIdChecksum, tamperedToken)
-    decodedToken.left.value.getStatus.getDescription should equal(
-      "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field page_token: " +
-        "Invalid page token for GetActiveContractsPageRequest"
+        originalToken.concat(bytes(numberOfBytes - originalToken.size())),
+      )(elc, sizeLimitsConfigWithTokenLimit(originalToken.size()))
     )
-  }
 
-  it should "reject a token with different version" in {
-    val tokenWithDifferentVersion = AcsPageTokenPayload(
-      continuationToken = originalContinuationToken,
-      activeAtOffset = originalActiveAt,
-      version = 999,
-      participantIdChecksum = calcParticipantChecksum(participantId),
-      requestChecksum = calcRequestChecksum(originalRequest),
-    ).toByteString
-    val decodedToken =
-      AcsPageToken.decodeAndValidate(
-        originalRequestChecksum,
-        participantIdChecksum,
-        tokenWithDifferentVersion,
+    "fail if used on a different participant" in {
+      val differentParticipantId = Ref.ParticipantId.assertFromString("different")
+      val differentParticipantChecksum =
+        AcsPageToken.calcParticipantChecksum(differentParticipantId)
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(
+          originalRequestChecksum,
+          differentParticipantChecksum,
+          originalToken,
+        )
+      decodedToken.left.value.getStatus.getDescription should equal(differentParticipantError)
+    }
+
+    "fail if not the same eventformat is used" in {
+      val requestWithToken = originalRequest.copy(
+        eventFormat = originalRequest.eventFormat.map(_.copy(verbose = true)),
+        pageToken = Some(originalToken),
       )
-    decodedToken.left.value.getStatus.getDescription should equal(differentVersionError)
-  }
+      val requestChecksum = AcsPageToken.calcRequestChecksum(requestWithToken)
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(requestChecksum, participantIdChecksum, originalToken)
+      decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
+    }
 
-  it should "calculate the same checksum all the time" in {
-    originalRequestChecksum should equal(
-      ByteString.copyFrom(Array[Byte](75, -45, -74, -123))
-    )
+    "fail if not the same activeAt is used" in {
+      val requestWithToken = originalRequest.copy(
+        activeAtOffset = originalRequest.activeAtOffset.map(_ + 1),
+        pageToken = Some(originalToken),
+      )
+      val checksum = AcsPageToken.calcRequestChecksum(requestWithToken)
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(checksum, participantIdChecksum, originalToken)
+      decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
+    }
+
+    "fail if different includeIncompleteReassignments flag is used" in {
+      val requestWithToken = originalRequest.copy(
+        includeIncompleteReassignments = !originalRequest.includeIncompleteReassignments,
+        pageToken = Some(originalToken),
+      )
+      val checksum = AcsPageToken.calcRequestChecksum(requestWithToken)
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(checksum, participantIdChecksum, originalToken)
+      decodedToken.left.value.getStatus.getDescription should equal(differentRequestError)
+    }
+
+    "reject a token issued with a previous token version" in {
+      val previousVersionToken = encodeV1(
+        originalRequest,
+        originalContinuationToken,
+        activeAtOffset = originalActiveAt,
+        participantId,
+      )
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(
+          originalRequestChecksum,
+          participantIdChecksum,
+          previousVersionToken,
+        )
+      decodedToken.left.value.getStatus.getDescription should equal(differentVersionError)
+    }
+
+    "reject an invalid token" in {
+      val tamperedToken = originalToken.substring(5)
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(
+          originalRequestChecksum,
+          participantIdChecksum,
+          tamperedToken,
+        )
+      decodedToken.left.value.getStatus.getDescription should equal(
+        "INVALID_FIELD(8,0): The submitted command has a field with invalid value: Invalid field page_token: " +
+          "Invalid page token for GetActiveContractsPageRequest"
+      )
+    }
+
+    "reject a token with different version" in {
+      val tokenWithDifferentVersion = AcsPageTokenPayload(
+        continuationToken = originalContinuationToken,
+        activeAtOffset = originalActiveAt,
+        version = 999,
+        participantIdChecksum = calcParticipantChecksum(participantId),
+        requestChecksum = calcRequestChecksum(originalRequest),
+      ).toByteString
+      val decodedToken =
+        AcsPageToken.decodeAndValidate(
+          originalRequestChecksum,
+          participantIdChecksum,
+          tokenWithDifferentVersion,
+        )
+      decodedToken.left.value.getStatus.getDescription should equal(differentVersionError)
+    }
+
+    "calculate the same checksum all the time" in {
+      originalRequestChecksum should equal(
+        ByteString.copyFrom(Array[Byte](75, -45, -74, -123))
+      )
+    }
   }
 }

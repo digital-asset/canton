@@ -128,7 +128,7 @@ final class GeneratorsParticipant(
       rejectionCause <- Arbitrary.arbitrary[RejectionCause]
       physicalSynchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       transactionHash <- Gen.option(Arbitrary.arbitrary[Hash])
-    } yield TransactionSubmissionTrackingData(
+    } yield TransactionSubmissionTrackingData.create(
       completionInfo,
       rejectionCause,
       physicalSynchronizerId,

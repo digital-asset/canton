@@ -123,7 +123,7 @@ object SharedDependencies {
   lazy val compilerplugin = "com.thesamet.scalapb" % "compilerplugin_2.13" % scalapb_version
   lazy val protoc_bridge = "com.thesamet.scalapb" % "protoc-bridge_2.13" % scalapb_protoc_version
   lazy val proto_google_common_protos_scalapb_0_11 =
-    "com.thesamet.scalapb.common-protos" % "proto-google-common-protos-scalapb_0.11_2.13" % "2.9.6-0"
+    "com.thesamet.scalapb.common-protos" % "proto-google-common-protos-scalapb_0.11_2.13" % "2.78.0-1"
   lazy val spray_json_derived_codecs =
     "io.github.paoloboni" % "spray-json-derived-codecs_2.13" % "2.3.10"
   lazy val pekko_http_spray_json =

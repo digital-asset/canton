@@ -86,7 +86,7 @@ final class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
       intercept[IllegalStateException](
         protocolVersionRepresentative(ProtocolVersion(-1))
       ).getMessage should include(
-        "Cannot get versioning entry of instance of Message with protocol version -1"
+        "Cannot get versioning entry for instance Message with protocol version -1"
       )
     }
 

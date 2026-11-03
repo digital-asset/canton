@@ -31,7 +31,7 @@ import scala.concurrent.Future
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
-class AutomaticReassignmentCrashIntegrationTest
+final class AutomaticReassignmentCrashIntegrationTest
     extends SynchronizerRouterIntegrationTestSetup
     with HasProgrammableSequencer {
 

@@ -15,7 +15,13 @@ set -eu -o pipefail
 echo
 echo "***** Publishing metrics to datadog..."
 
-timestamp="$TX_LATE_TS"
+# End of the measurement window. TX_LATE_TS is 0 in jobs without transaction metrics (the replay
+# jobs), and Datadog doesn't store points that far in the past, so use LATE_TS, which falls back to
+# the updates metric. Use the current time if neither is known.
+timestamp="${LATE_TS:-0}"
+if [[ "$timestamp" == "0" ]]; then
+	timestamp="$(date +%s)"
+fi
 
 hash="$(cd "$REPOSITORY_ROOT"; git log -1 --pretty=%h)"
 tags="$(jo -a "branch:$BRANCH" "hash:$hash" "job:$CURRENT_JOB_NAME" "host:$HOSTNAME")"

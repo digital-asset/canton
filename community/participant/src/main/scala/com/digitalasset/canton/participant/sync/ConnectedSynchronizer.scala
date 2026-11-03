@@ -290,6 +290,7 @@ class ConnectedSynchronizer(
     testingConfig = testingConfig,
     promiseUSFactory,
     trafficEnforcementBackendO.map(_.value),
+    packageService.getPackageMetadataView,
   )
 
   private val assignmentProcessor: AssignmentProcessor = new AssignmentProcessor(
@@ -1181,8 +1182,8 @@ class ConnectedSynchronizer(
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
-      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
-      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
+      overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
       accounting: SubmissionAccounting,
   )(implicit
       traceContext: TraceContext

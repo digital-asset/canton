@@ -31,8 +31,12 @@ jobs:
     permissions:
       # pull-requests: write converts the PR to draft; issues: write posts the comment,
       # since PR comments go through the issues API.
+      # NOTE: The GraphQL mutation that converts a PR to draft is rejected with "Resource not
+      # accessible by integration" unless the token also has contents: write. The job does not
+      # check out or push anything.
       pull-requests: write
       issues: write
+      contents: write
     steps:
       - name: Move stale PRs to draft
         uses: actions/github-script@v9

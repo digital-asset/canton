@@ -2,7 +2,7 @@ module Triparty.Settle where
 
 import Triparty.Asset
 import DA.Map
-import DA.Foldable 
+import DA.Foldable
 import DA.Optional
 
 data Movement = Movement with from : Party, fromAccount : Text, to : Party, toAccount: Text, id : Text, qty : Decimal deriving (Eq, Show)
@@ -14,7 +14,7 @@ type AssetMap = Map (Text, Party, Text) [AssetWithCid]
 
 -- map movement to a tuple suitable for aggregation
 movementToTuple : Movement -> ((Party, Text, Party, Text, Text), Decimal)
-movementToTuple m 
+movementToTuple m
   | (m.from, m.fromAccount) < (m.to, m.toAccount) = ((m.from, m.fromAccount, m.to, m.toAccount, m.id), m.qty)
   | otherwise = ((m.to, m.toAccount, m.from, m.fromAccount, m.id), (-1.0) * m.qty)
 
@@ -22,7 +22,7 @@ tupleToMovement : ((Party, Text, Party, Text, Text), Decimal) -> Movement
 tupleToMovement ((a, a_acc, b, b_acc, asset_id), qty)
   | qty > 0.0 = Movement with from = a, fromAccount = a_acc, to = b, toAccount = b_acc, id = asset_id, qty = qty
   | otherwise = Movement with from = b, fromAccount = b_acc, to = a, toAccount = a_acc, id = asset_id, qty = - qty
- 
+
 mapToMovement : Map (Party, Text, Party, Text, Text) Decimal -> [Movement]
 mapToMovement m = map tupleToMovement (DA.Map.toList m)
 
@@ -41,10 +41,10 @@ computeAssetMap assetCids = do
 -- returns issuer, src assets and target assets (for utxo compaction)
 lookupAssets : Movement -> AssetMap -> ([AssetWithCid], [AssetWithCid])
 lookupAssets movement assetMap = do
-  let sourceAssets = case DA.Map.lookup (movement.id, movement.from, movement.fromAccount) assetMap of 
+  let sourceAssets = case DA.Map.lookup (movement.id, movement.from, movement.fromAccount) assetMap of
         Some (assets) -> assets
         _ -> error ("Source asset " <> show movement.id <> " of " <> show movement.from <> " not found")
-  let targetAssets = fromOptional [] $ DA.Map.lookup (movement.id, movement.to, movement.toAccount) assetMap 
+  let targetAssets = fromOptional [] $ DA.Map.lookup (movement.id, movement.to, movement.toAccount) assetMap
   (sourceAssets, targetAssets)
 
 type MovementWithAssets = (Movement, [ContractId Asset], [ContractId Asset])
@@ -52,9 +52,9 @@ type MovementWithAssets = (Movement, [ContractId Asset], [ContractId Asset])
 type MovementGroup = Map (Party, Party) [MovementWithAssets]
 
 movementToGroupKey : Movement -> AssetMap -> ((Party, Party), [MovementWithAssets])
-movementToGroupKey m assetMap = 
-   let 
-     (srcAssets, targetAssets) = lookupAssets m assetMap      
+movementToGroupKey m assetMap =
+   let
+     (srcAssets, targetAssets) = lookupAssets m assetMap
      (a, b) = if m.from < m.to then (m.from, m.to) else (m.to, m.from)
      in ((a, b), [(m, map fst srcAssets, map fst targetAssets)])
 
@@ -64,7 +64,7 @@ groupMovements movements assetMap = fromListWithL (++) (map (`movementToGroupKey
 
 transferAssets: MovementWithAssets -> Update ()
 transferAssets (movement, [], _) = abort ("No source assets for movement: " <> show movement)
-transferAssets (movement, sid :: rest, targetAssets) = do 
+transferAssets (movement, sid :: rest, targetAssets) = do
   _ <- exercise sid DirectTransfer with
       newOwner = movement.to
       newAccount = movement.toAccount
@@ -73,33 +73,35 @@ transferAssets (movement, sid :: rest, targetAssets) = do
       otherSrc = rest
       target = targetAssets
   return ()
-   
 
-template SettlementApp 
+
+template SettlementApp
   with
     registry : Party
-  where 
+    user : Party
+  where
     signatory registry
-    
+    observer user
+
     nonconsuming choice BatchTransfer : ()
-      with 
+      with
         movements : [MovementWithAssets]
         auth : [Party]
       controller auth
       do
         forA_ movements transferAssets
-                
+
     nonconsuming choice Settle : ()
-      with 
+      with
         movements : [Movement]
         assetCids : [ContractId Asset]
-        auth : [Party]        
+        auth : [Party]
       controller auth
-      do         
+      do
         assetMap <- computeAssetMap assetCids
-        let netMovement = computeNetMovement movements        
+        let netMovement = computeNetMovement movements
         let movementGroups = groupMovements netMovement assetMap
         forA_ (DA.Map.toList movementGroups) $ \((a, b), movementsWithAssets) -> do
-          exercise self BatchTransfer with 
+          exercise self BatchTransfer with
             movements = movementsWithAssets
-            auth = [a, b]            
+            auth = [a, b]

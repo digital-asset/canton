@@ -824,7 +824,7 @@ def run(
     package_out: str = "flake-pkg",
 ) -> None:
     if not (should_report_issues() or is_dry_run()):
-        print("Skipping flake evidence collection: branch is not reported and no dry run.")
+        print("Skipping flake evidence collection: branch or repo is not reported and no dry run.")
         return
     evidence = collect_evidence(
         Path(reports_dir), Path(log_dir), Path(problems_file), Path(package_out)

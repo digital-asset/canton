@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.config
 
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.PositiveFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.TopologyConfigConverters.*
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.nonempty.NonEmpty
@@ -25,8 +25,10 @@ import pureconfig.{ConfigReader, ConfigWriter}
   *   Whether to enforce traffic cost on submissions. If enabled, the participant will validate that
   *   the account associated with the submission is correctly permissioned and has sufficient
   *   balance to cover the expected traffic cost. If the account has insufficient balance, the
-  *   submission will be rejected. When disabled, the participant still stores which account to
-  *   debit before sending the submission, just without the balance check. Disabled by default.
+  *   submission will be rejected. For transactions needing reassignments, we check the total
+  *   estimated cost once before sending. We don't check the balance again for the reassignments or
+  *   transaction, so it can go negative. When enforcement is off, we still store the account to
+  *   debit before sending. Disabled by default.
   * @param rejectMultiPartySubmissions
   *   Whether to reject submissions that have several actAs parties and no `account_id`. By default
   *   the participant stores a no-account marker for such a submission, and it isn't debited (an
@@ -46,6 +48,11 @@ import pureconfig.{ConfigReader, ConfigWriter}
   *   Whether to charge rejected completions. They can still have a positive cost if the sequencer
   *   consumed traffic, for example when a charged request returns as a `DeliverError`. When
   *   disabled, TEA records these completions as uncharged. Enabled by default.
+  * @param estimateMultiplier
+  *   Scales the estimated traffic cost used for balance checks during interactive preparation and
+  *   before the first send of a transaction that needs reassignments. Also scales the estimates
+  *   returned by preparation. Increase it if estimates are too low and submissions leave a negative
+  *   balance. Must be positive and finite. Defaults to `1.0`.
   * @param trafficEnforcementServer
   *   The configuration for the connection to the traffic server. Currently, only the internal,
   *   in-process server variant is supported.
@@ -56,9 +63,15 @@ final case class TrafficAccountingConfig(
     rejectMultiPartySubmissions: Boolean = false,
     allowSubmissionsOnDegradation: Boolean = false,
     debitRejectedCompletions: Boolean = true,
+    estimateMultiplier: PositiveDouble = PositiveDouble.tryCreate(1.0),
     trafficEnforcementServer: TrafficEnforcementServerConfig =
       TrafficEnforcementServerConfig.Internal(),
 ) {
+  // PositiveDouble accepts infinity and NaN.
+  require(
+    estimateMultiplier.value.isFinite,
+    s"estimateMultiplier ($estimateMultiplier) must be finite",
+  )
 
   /** Returns true if traffic accounting and DamlCredit top-up is enabled.
     */

@@ -20,6 +20,7 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{LocalSequencerReference, ParticipantReference}
 import com.digitalasset.canton.integration.*
@@ -33,7 +34,6 @@ import com.digitalasset.canton.integration.plugins.{
   PostgresDumpRestore,
   UseBftSequencer,
   UsePostgres,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.manual.PerformanceRunnerRecorder.*
 import com.digitalasset.canton.integration.tests.manual.ReplayTestCommon.*
@@ -61,7 +61,6 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, MediatorId, Sync
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.{TempDirectory, config}
 import org.scalatest.concurrent.PatienceConfiguration
 
 import java.time.{Instant, Duration as JDuration}
@@ -163,7 +162,10 @@ trait PerformanceRunnerRecorder
       .getOrElse(200)
 
   /** Overall timeout for doing a recording */
-  private val Timeout: FiniteDuration = 10.minutes
+  private val Timeout: FiniteDuration =
+    Option(System.getProperty(s"$ReplayTestSystemPropertyPrefix.recording-timeout-minutes"))
+      .map(_.toInt.minutes)
+      .getOrElse(10.minutes)
 
   /** Overall timeout for making a database dump */
   private val DumpTimeout: FiniteDuration = 1.minute
@@ -231,9 +233,6 @@ trait PerformanceRunnerRecorder
       customMaxConnectionsByNode = Some(_ => Some(numberOfDbConnectionsPerNode)),
     )
   registerPlugin(postgresPlugin)
-
-  protected val referenceBlockSequencerPlugin: Option[UseReferenceBlockSequencer[?]] =
-    None
 
   private lazy val postgresDumpRestore: PostgresDumpRestore =
     if (isNightlyPerformanceBenchmarkRun) nightlyPostgresDumpRestore(postgresPlugin, loggerFactory)
@@ -480,16 +479,6 @@ trait PerformanceRunnerRecorder
       if (isFirstRound) {
         dumpDirectory(TargetDirectory).delete(swallowIOExceptions = true)
         dumpDirectory(TargetDirectory).toJava.mkdirs()
-      }
-
-      // The reference block sequencer uses a separate database.
-      referenceBlockSequencerPlugin.foreach { plugin =>
-        plugin
-          .dumpDatabases(
-            TempDirectory(dumpDirectory(TargetDirectory)),
-            forceLocal = !isNightlyPerformanceBenchmarkRun,
-          )
-          .futureValue(timeout = PatienceConfiguration.Timeout(DumpTimeout))
       }
 
       // Dumps are overwritten in subsequent rounds and eventually contain full init data (topology state, DARs)

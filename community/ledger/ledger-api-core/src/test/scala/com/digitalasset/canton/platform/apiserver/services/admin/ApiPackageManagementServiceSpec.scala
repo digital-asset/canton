@@ -6,17 +6,25 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import cats.data.EitherT
 import com.daml.ledger.api.v2.admin.package_management_service.{
   PackageManagementServiceGrpc,
+  UpdateVettedPackagesRequest,
   UploadDarFileRequest,
   ValidateDarFileRequest,
   ValidateDarFileResponse,
+  VettedPackagesChange,
 }
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.base.error.{ErrorCode, ErrorsAssertions}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
 import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.admin.{
+  UploadDarFileRequestSizeConfig,
+  ValidateDarFileRequestSizeConfig,
+}
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{
   EnrichedVettedPackages,
   ListVettedPackagesOpts,
@@ -24,6 +32,7 @@ import com.digitalasset.canton.ledger.api.{
   UploadDarVettingChange,
   VettedPackagesPage,
 }
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{
@@ -62,6 +71,7 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.SubmittedTransaction
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.BeforeAndAfterEach
@@ -129,13 +139,76 @@ class ApiPackageManagementServiceSpec
         .validateDarFile(ValidateDarFileRequest(ByteString.EMPTY, aSubmissionId, ""))
         .map { case ValidateDarFileResponse() => succeed }
     }
+
+    "validating the size limits" should {
+      val maxDarFileBytes = 4
+      val maxChanges = 1
+      val sizeLimitsConfig = LedgerApiSizeLimitsConfig()
+      def apiServiceWithLimits = createApiService(
+        sizeLimitsConfig.copy(
+          adminLapiSizeConfig = sizeLimitsConfig.adminLapiSizeConfig.copy(
+            uploadDarFileRequest = UploadDarFileRequestSizeConfig(
+              darFileSizeLimit = PositiveInt.tryCreate(maxDarFileBytes)
+            ),
+            validateDarFileRequest = ValidateDarFileRequestSizeConfig(
+              darFileSizeLimit = PositiveInt.tryCreate(maxDarFileBytes)
+            ),
+            updateVettedPackagesRequest =
+              sizeLimitsConfig.adminLapiSizeConfig.updateVettedPackagesRequest
+                .copy(changesSizeLimit = PositiveInt.tryCreate(maxChanges)),
+          )
+        )
+      )
+      val darFileExceedingTheLimit = ByteString.copyFrom(Array.fill(maxDarFileBytes + 1)(1.toByte))
+
+      def mustFailWith[T](result: Future[T], errorCode: ErrorCode) =
+        result.failed.map {
+          case e: StatusRuntimeException => assertMatchesErrorCode(e, errorCode)
+          case other => fail(s"Expected a StatusRuntimeException, but got $other")
+        }
+
+      "reject a dar upload exceeding the limit" in {
+        mustFailWith(
+          apiServiceWithLimits.uploadDarFile(
+            UploadDarFileRequest(
+              darFileExceedingTheLimit,
+              aSubmissionId,
+              UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES,
+              synchronizerId = "",
+            )
+          ),
+          RequestValidationErrors.FieldSizeLimitExceeded,
+        )
+      }
+
+      "reject a dar validation exceeding the limit" in {
+        mustFailWith(
+          apiServiceWithLimits.validateDarFile(
+            ValidateDarFileRequest(darFileExceedingTheLimit, aSubmissionId, "")
+          ),
+          RequestValidationErrors.FieldSizeLimitExceeded,
+        )
+      }
+
+      "reject vetted packages changes exceeding the limit" in {
+        mustFailWith(
+          apiServiceWithLimits.updateVettedPackages(
+            UpdateVettedPackagesRequest.defaultInstance
+              .copy(changes = Seq.fill(maxChanges + 1)(VettedPackagesChange.defaultInstance))
+          ),
+          RequestValidationErrors.FieldCardinalityLimitExceeded,
+        )
+      }
+    }
   }
 
-  private def createApiService(): PackageManagementServiceGrpc.PackageManagementService =
+  private def createApiService(
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
+  ): PackageManagementServiceGrpc.PackageManagementService =
     ApiPackageManagementService.createApiService(
       TestSyncService(testTelemetrySetup.tracer),
       loggerFactory = loggerFactory,
-    )
+    )(executionContext, sizeLimitsConfig)
 }
 
 object ApiPackageManagementServiceSpec {

@@ -256,12 +256,7 @@ class ParticipantTopologyTerminateProcessing(
 
           // After ensuring the update is persisted (if it was needed), request clearance
           persistOperationFus.map { _ =>
-            val onboardingEffectiveAt =
-              record.operation.onboardingEffectiveAt.getOrElse(effectiveAt)
-            onboardingClearanceScheduler.requestClearanceInBackground(
-              partyId,
-              onboardingEffectiveAt,
-            )
+            onboardingClearanceScheduler.requestClearanceInBackground(partyId, effectiveAt)
           }
       }
   }

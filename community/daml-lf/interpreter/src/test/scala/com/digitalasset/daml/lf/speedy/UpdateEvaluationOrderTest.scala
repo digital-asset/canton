@@ -756,7 +756,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
 
         // This case may happen only if there is a bug in the ledger.
         "wrongly typed contract" in {
-          val (res, msgs) = runCmdFlow(
+          val (res, _) = runCmdFlow(
             pkgs = pkgs,
             test = _ =>
               CmdFlow.submit(
@@ -767,7 +767,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
+          inside(res) { case Left(SError.InterpretationError(IE.WronglyTypedContract(_, _, _))) =>
           }
         }
       }
@@ -837,8 +837,8 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
-          }
+          // The indexer returns an inconsistent answer, so the exact error does not matter.
+          inside(res) { case Left(_) => }
         }
       }
 
@@ -1526,7 +1526,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
-          inside(res) { case Left(SError.Crash(_, _)) =>
+          inside(res) { case Left(SError.InterpretationError(IE.WronglyTypedContract(_, _, _))) =>
           }
         }
       }
@@ -1570,6 +1570,24 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             key.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
+        }
+
+        // TEST_EVIDENCE: Integrity: Evaluation order of fetch_by_key of a wrongly typed cached global contract
+        "wrongly typed contract" in {
+          val (res, _) = runCmdFlow(
+            pkgs = pkgs,
+            setup = CmdFlow.submit(Command.FetchTemplate(Dummy, SValue.SContractId(cId))),
+            test = _ =>
+              CmdFlow.submit(
+                Command.ExerciseByKey(T, keySValue, n"Choice", SEither.Left(SNat.fromInt(0)))
+              ),
+            parties = Set(alice),
+            getContract = getWronglyTypedContract,
+            getKeys = mapKeys(getKeys, getWronglyTypedContract),
+            packageResolution = packageNameMap,
+          )
+          // The indexer returns an inconsistent answer, so the exact error does not matter.
+          inside(res) { case Left(_) => }
         }
       }
 

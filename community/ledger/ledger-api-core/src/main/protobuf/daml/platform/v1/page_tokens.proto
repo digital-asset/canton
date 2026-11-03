@@ -19,6 +19,13 @@ message ListUsersPageTokenPayload {
 message ListPartiesPageTokenPayload {
   // Parties are ordered by ``party_id``, and the next page starts with parties whose ``party_id`` is larger than ``party_id_lower_bound_excl``.
   string party_id_lower_bound_excl = 1;
+  // The ledger end event sequential ID captured when the first page was served. Subsequent pages are computed
+  // against the topology state at this event sequential ID, so that ``is_local`` is stable across pages.
+  int64 valid_at_event_seq_id = 2;
+  // to verify version difference
+  int32 version = 3;
+  // to verify participant difference
+  bytes participant_id_checksum = 4;
 }
 
 // Describes the payload of a page token for listing vetted packages.

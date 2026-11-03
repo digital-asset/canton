@@ -12,7 +12,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 }
 import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
-import com.digitalasset.canton.ledger.api.validation.FormatValidator
+import com.digitalasset.canton.ledger.api.validation.{FormatValidator, LedgerApiSizeLimitsConfig}
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.NoLogging
 import com.google.protobuf.ByteString
@@ -353,7 +353,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
     }
 
     def validated(protoFormat: ProtoUpdateFormat): UpdateFormat =
-      FormatValidator.validate(protoFormat)(NoLogging).value
+      FormatValidator.validate(protoFormat)(NoLogging, LedgerApiSizeLimitsConfig()).value
 
     "include reassignments with the event format of the transactions if set and omit them otherwise" in {
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)

@@ -103,6 +103,7 @@ object ConfigTransforms {
     */
   val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
     Seq(
+      ConfigTransforms.enableAchs,
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,
       ConfigTransforms.enableAdvancedCommands(FeatureFlag.Preview),
@@ -970,9 +971,6 @@ object ConfigTransforms {
         .replace(None)
     )
 
-  def defaultsForNodes: Seq[ConfigTransform] =
-    setProtocolVersion(ProtocolVersion.v35) :+ enableAchs
-
   def setTopologyTransactionRegistrationTimeout(
       timeout: config.NonNegativeFiniteDuration
   ): Seq[ConfigTransform] =
@@ -1060,7 +1058,7 @@ object ConfigTransforms {
     * [[com.digitalasset.canton.integration.util.AutomaticAssignment.disable]].
     */
   def disableAutomaticAssignment: ConfigTransform =
-    if (BaseTest.testedProtocolVersion <= ProtocolVersion.v36) identity
+    if (BaseTest.testedProtocolVersion == ProtocolVersion.v36) identity
     else
       updateAllParticipantConfigs_(
         _.focus(_.parameters.reassignmentsConfig.enableAutomaticAssignment).replace(false)

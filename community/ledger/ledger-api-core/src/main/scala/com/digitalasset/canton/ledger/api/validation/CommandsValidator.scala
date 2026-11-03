@@ -24,6 +24,7 @@ import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampCon
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   Submitters,
   effectiveSubmitters,
+  validateCommandsSizeLimits,
 }
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
@@ -62,6 +63,7 @@ final class CommandsValidator(
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
+    // TODO(#35522) validate the size limits of the PrepareSubmissionRequest
     for {
       userId <- requireUserId(prepareRequest.userId, "user_id")
       commandId <- requireLedgerString(prepareRequest.commandId, "command_id").map(
@@ -125,6 +127,7 @@ final class CommandsValidator(
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
     for {
+      _ <- validateCommandsSizeLimits(commands)
       workflowId <- validateWorkflowId(commands.workflowId)
       userId <- requireUserId(commands.userId, "user_id")
       commandId <- requireLedgerString(commands.commandId, "command_id").map(CommandId(_))
@@ -237,8 +240,8 @@ final class CommandsValidator(
                 sourceSynchronizerId = Source(sourceSynchronizerId),
                 targetSynchronizerId = Target(targetSynchronizerId),
                 contractId = cid,
-                overrideSourceValidationPkgId = overrideSourceValidationPkgId,
-                overrideTargetValidationPkgId = overrideTargetValidationPkgId,
+                overrideSourceValidationPkgId = Source(overrideSourceValidationPkgId),
+                overrideTargetValidationPkgId = Target(overrideTargetValidationPkgId),
               )
             )
         }
@@ -304,6 +307,11 @@ final class CommandsValidator(
           templateId <- requirePresence(c.value.templateId, "template_id")
           typeConRef <- validateTypeConRef(templateId)
           createArguments <- requirePresence(c.value.createArguments, "create_arguments")
+          _ <- validateSerializedSizeLimit(
+            message = createArguments,
+            fieldName = "create_arguments",
+            limit = sizeLimitsConfig.publicLapiSizeConfig.createCommand.createArgumentsSizeLimit,
+          )
           recordId <- createArguments.recordId.traverse(validateIdentifier)
           validatedRecordField <- validateRecordFields(createArguments.fields)
         } yield ApiCommand.Create(
@@ -317,8 +325,13 @@ final class CommandsValidator(
           templateRef <- validateTypeConRef(templateId)
           contractId <- requireContractId(e.value.contractId, "contract_id")
           choice <- requireName(e.value.choice, "choice")
-          value <- requirePresence(e.value.choiceArgument, "value")
-          validatedValue <- validateValue(value)
+          choiceArgument <- requirePresence(e.value.choiceArgument, "choice_argument")
+          _ <- validateSerializedSizeLimit(
+            message = choiceArgument,
+            fieldName = "choice_argument",
+            limit = sizeLimitsConfig.publicLapiSizeConfig.exerciseCommand.choiceArgumentSizeLimit,
+          )
+          validatedValue <- validateValue(choiceArgument)
         } yield ApiCommand.Exercise(
           typeRef = templateRef,
           contractId = contractId,
@@ -331,10 +344,21 @@ final class CommandsValidator(
           templateId <- requirePresence(ek.value.templateId, "template_id")
           templateRef <- validateTypeConRef(templateId)
           contractKey <- requirePresence(ek.value.contractKey, "contract_key")
+          _ <- validateSerializedSizeLimit(
+            message = contractKey,
+            fieldName = "contract_key",
+            limit = sizeLimitsConfig.publicLapiSizeConfig.exerciseByKeyCommand.contractKeySizeLimit,
+          )
           validatedContractKey <- validateValue(contractKey)
           choice <- requireName(ek.value.choice, "choice")
-          value <- requirePresence(ek.value.choiceArgument, "value")
-          validatedValue <- validateValue(value)
+          choiceArgument <- requirePresence(ek.value.choiceArgument, "choice_argument")
+          _ <- validateSerializedSizeLimit(
+            message = choiceArgument,
+            fieldName = "choice_argument",
+            limit =
+              sizeLimitsConfig.publicLapiSizeConfig.exerciseByKeyCommand.choiceArgumentSizeLimit,
+          )
+          validatedValue <- validateValue(choiceArgument)
         } yield ApiCommand.ExerciseByKey(
           templateRef = templateRef,
           contractKey = validatedContractKey,
@@ -347,11 +371,23 @@ final class CommandsValidator(
           templateId <- requirePresence(ce.value.templateId, "template_id")
           templateRef <- validateTypeConRef(templateId)
           createArguments <- requirePresence(ce.value.createArguments, "create_arguments")
+          _ <- validateSerializedSizeLimit(
+            message = createArguments,
+            fieldName = "create_arguments",
+            limit =
+              sizeLimitsConfig.publicLapiSizeConfig.createAndExerciseCommand.createArgumentsSizeLimit,
+          )
           recordId <- createArguments.recordId.traverse(validateIdentifier)
           validatedRecordField <- validateRecordFields(createArguments.fields)
           choice <- requireName(ce.value.choice, "choice")
-          value <- requirePresence(ce.value.choiceArgument, "value")
-          validatedChoiceArgument <- validateValue(value)
+          choiceArgument <- requirePresence(ce.value.choiceArgument, "choice_argument")
+          _ <- validateSerializedSizeLimit(
+            message = choiceArgument,
+            fieldName = "choice_argument",
+            limit =
+              sizeLimitsConfig.publicLapiSizeConfig.createAndExerciseCommand.choiceArgumentSizeLimit,
+          )
+          validatedChoiceArgument <- validateValue(choiceArgument)
         } yield ApiCommand.CreateAndExercise(
           templateRef = templateRef,
           createArgument = Lf.ValueRecord(recordId, validatedRecordField),
@@ -449,6 +485,11 @@ final class CommandsValidator(
       templateId <- requirePresence(templateIdO, "template_id")
       templateRef <- validateTypeConRef(templateId)
       contractKey <- requirePresence(contractKeyO, "contract_key")
+      _ <- validateSerializedSizeLimit(
+        message = contractKey,
+        fieldName = "contract_key",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.prefetchContractKey.contractKeySizeLimit,
+      )
       validatedKey <- validateValue(contractKey)
       validatedLimit <- limitOpt match {
         case None => Right(1)
@@ -501,4 +542,50 @@ object CommandsValidator {
 
   val noSubmitters: Submitters[String] = Submitters(Set.empty, Set.empty)
 
+  def validateCommandsSizeLimits(commands: ProtoCommands)(implicit
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Either[StatusRuntimeException, Unit] = {
+    import FieldValidator.*
+    val commandsSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.commands
+    for {
+      _ <- validateCardinality(
+        values = commands.commands,
+        fieldName = "commands",
+        limit = commandsSizeConfig.commandsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = commands.actAs,
+        fieldName = "act_as",
+        limit = commandsSizeConfig.actAsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = commands.readAs,
+        fieldName = "read_as",
+        limit = commandsSizeConfig.readAsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = commands.disclosedContracts,
+        fieldName = "disclosed_contracts",
+        limit = commandsSizeConfig.disclosedContractsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = commands.packageIdSelectionPreference,
+        fieldName = "package_id_selection_preference",
+        limit = commandsSizeConfig.packageIdSelectionPreferenceSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = commands.prefetchContractKeys,
+        fieldName = "prefetch_contract_keys",
+        limit = commandsSizeConfig.prefetchContractKeysSizeLimit,
+      )
+      _ <- commands.disclosedContracts.traverse(disclosedContract =>
+        validateByteSizeLimit(
+          bytes = disclosedContract.createdEventBlob,
+          fieldName = "created_event_blob",
+          limit = sizeLimitsConfig.publicLapiSizeConfig.disclosedContract.createdEventBlobSizeLimit,
+        )
+      )
+    } yield ()
+  }
 }

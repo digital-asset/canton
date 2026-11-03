@@ -542,6 +542,10 @@ class SynchronizerTroubleshootDocsIntegrationTest
       File("docs-open/src/sphinx/synchronizer/howtos/troubleshoot/index.rst"),
       File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
     ) {
+  // The default canton.features.enable-repair-commands = false
+  // disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override def makeEnvironment: EnvironmentDefinition = super.makeEnvironment
     .addConfigTransform(ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing))
 
@@ -832,6 +836,10 @@ class SequencerConnectivityDocumentationIntegrationTest
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   private val target = File("./tls")
+
+  // The default canton.features.enable-repair-commands = false
+  // disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
@@ -1164,6 +1172,9 @@ class DocsCantonNetworkGlobalSynchronizerCantonConsoleDebuggingWorkflowsTest
       File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
       File("community/app/src/test/resources/documentation-snippets/with-testing-commands.conf"),
     ) {
+  // The default canton.features.enable-repair-commands = false
+  // disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def beforeAll(): Unit = {
     createDarsSimlink()
@@ -1184,6 +1195,9 @@ class DocsCantonNetworkGlobalSynchronizerCantonConsoleEssentialCommandsTest
       File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
       File("community/app/src/test/resources/documentation-snippets/with-testing-commands.conf"),
     ) {
+  // The default canton.features.enable-repair-commands = false
+  // disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def beforeAll(): Unit = {
     createDarsSimlink()

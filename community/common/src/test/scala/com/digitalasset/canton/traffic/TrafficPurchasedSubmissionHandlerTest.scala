@@ -293,6 +293,7 @@ class TrafficPurchasedSubmissionHandlerTest
       messageId,
       Status.defaultInstance.withMessage("BOOM"),
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
     loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.INFO))(

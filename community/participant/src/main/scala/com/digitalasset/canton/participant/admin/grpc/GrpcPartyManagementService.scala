@@ -638,7 +638,9 @@ class GrpcPartyManagementService(
               packageMetadataSnapshot = sync.getPackageMetadataSnapshot,
               representativePackageIdOverride = representativePackageIdOverride,
               workflowIdPrefix = workflowIdPrefix,
-              forceRepairWhenTopologyTransactionAtLedgerEnd = false,
+              // in case of party replication, the topology transaction at the ledger end won't cause any
+              // issues, because it does not affect the replicated party
+              forceRepairWhenTopologyTransactionAtLedgerEnd = true,
             )
             .leftMap(err => PartyManagementServiceError.IOStream.Error(err))
 
@@ -698,7 +700,8 @@ class GrpcPartyManagementService(
         }
       )
 
-      // Query for both effective AND proposed transactions
+      // Query for both effective AND proposed transactions. Filter by the uid only, as the store
+      // returns the transactions that match the uid or the namespace filter.
       effectiveTxs <- EitherT.right[PartyManagementServiceError](
         store.findPositiveTransactions(
           asOf = CantonTimestamp.MaxValue,
@@ -706,7 +709,7 @@ class GrpcPartyManagementService(
           isProposal = false,
           types = Seq(TopologyMapping.Code.PartyToParticipant),
           filterUid = Some(NonEmpty(Seq, partyId.uid)),
-          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+          filterNamespace = None,
         )
       )
 
@@ -717,7 +720,7 @@ class GrpcPartyManagementService(
           isProposal = true,
           types = Seq(TopologyMapping.Code.PartyToParticipant),
           filterUid = Some(NonEmpty(Seq, partyId.uid)),
-          filterNamespace = Some(NonEmpty(Seq, partyId.namespace)),
+          filterNamespace = None,
         )
       )
 

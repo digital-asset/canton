@@ -33,7 +33,8 @@ val paintId = bootstrap
   .logical
 
 // update parameters
-// disable automatic assignments
+// do not enforce the assignment exclusivity period
+// (automatic assignments are disabled in composability1.conf)
 iouSynchronizerOwner.topology.synchronizer_parameters
   .propose_update(iouId, _.update(assignmentExclusivityTimeout = 0 seconds))
 paintSynchronizerOwner.topology.synchronizer_parameters

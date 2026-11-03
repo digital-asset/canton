@@ -4,8 +4,8 @@
 Reads the streaks JSON artifact written by manage_flaky_issues.py and posts a
 single summary to the team Slack channel, @-mentioning whoever is on the
 relevant rota shift (via select_rota.py): a flaky streak pings the Flaky Canton
-rotation (two people), a genuinely-broken nightly streak pings the CI rota.
-Posts nothing when there are no streaks. The nightly/flaky split is derived from the CI
+rotation (three people), as does a genuinely-broken nightly streak.
+Posts nothing when there are no streaks. The nightly/flaky wording is derived from the CI
 job (is_nightly_job).
 
 Usage:
@@ -111,7 +111,7 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
     channel = os.environ.get('SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS', '')
     # We only get here with streaks worth alerting on, and streaks are written
     # only on tracked branches (main / main-2.x, see should_report_issues), never
-    # on PRs or forks. So missing creds here means a branch that must alert has
+    # on PRs, forks or the public repo. So missing creds here means a branch that must alert has
     # not been wired up. Fail loudly instead of swallowing the alert, which is the
     # silent no-op that left main un-alerted. This also self-enforces wiring: a new
     # test job that forgets the creds goes red on its first real streak.
@@ -131,9 +131,9 @@ def send_duplicate_summary(duplicates: list[tuple[str, str, str]]) -> None:
     commit_hash = get_ci_commit_hash()
     commit_link = f"<{REPO_URL}/commit/{commit_hash}|{commit_hash[:8]}>"
     nightly = is_nightly_job(get_ci_job_name())
-    # A genuinely-broken nightly is the CI rota's, a flaky streak is the Flaky
-    # Canton rotation's (two people share it, so both get pinged).
-    responders = select_rota("ci" if nightly else "flaky-canton")
+    # Both a flaky streak and a genuinely-broken nightly are the Flaky Canton
+    # rotation's to fix (three people share it, so all get pinged).
+    responders = select_rota("flaky-canton")
     mention = "".join(f"<@{uid}> " for uid in responders)
     # Label the alert with the CI that produced it so the reader can tell GHA from
     # CircleCI at a glance (they route the rota mention differently). Matches the
@@ -217,11 +217,11 @@ def self_test() -> None:
         subprocess.run = _fake_run(0, "U123 U456\n")
         assert select_rota("flaky-canton") == ["U123", "U456"]
         subprocess.run = _fake_run(0, "noise U999 more")  # non-id tokens are filtered out
-        assert select_rota("ci") == ["U999"]
+        assert select_rota("flaky-canton") == ["U999"]
         subprocess.run = _fake_run(0, "")  # empty output -> no mention
-        assert select_rota("ci") == []
+        assert select_rota("flaky-canton") == []
         subprocess.run = _fake_run(1, "", "boom")  # non-zero exit -> no mention
-        assert select_rota("ci") == []
+        assert select_rota("flaky-canton") == []
     finally:
         subprocess.run = orig_run
 

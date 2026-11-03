@@ -195,6 +195,7 @@ object LedgerApiConformanceBase {
     "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
     "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
     "UpdateServiceStreamsIT:TXPagedAscendingPruningBehindEnd",
+    "PartyManagementServiceIT:PMPagedListKnownPartiesAfterPruning",
     // Exclude ContractIdIT tests except: RejectNonSuffixedV1Cid, AcceptSuffixedV1Cid
     "ContractIdIT:AcceptNonSuffixedV1Cid",
     "ContractIdIT:AcceptSuffixedV1CidExerciseTarget", // Racy with: ABORTED: CONTRACT_NOT_FOUND(14,0): Contract could not be found with id
@@ -361,6 +362,7 @@ trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiC
         "UpdateServiceStreamsIT:TXPagedDynamicStartAscendingPruning",
         "UpdateServiceStreamsIT:TXPagedAscendingPruningCatchesUp",
         "UpdateServiceStreamsIT:TXPagedAscendingPruningBehindEnd",
+        "PartyManagementServiceIT:PMPagedListKnownPartiesAfterPruning",
       )
 
       ledgerApiTestToolPlugin.runSuitesSerially(

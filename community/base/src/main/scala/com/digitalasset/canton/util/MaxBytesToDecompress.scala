@@ -10,8 +10,7 @@ final case class MaxBytesToDecompress(limit: NonNegativeInt) extends AnyVal
 
 object MaxBytesToDecompress {
 
-  /** Still used in a few places on protocol version 35. Must not be used from protocol version 36
-    * on: take the limit from the topology snapshot's `maxRequestSize` instead.
+  /** Must not be used: take the limit from the topology snapshot's `maxRequestSize` instead.
     */
   val HardcodedDefault: MaxBytesToDecompress = MaxBytesToDecompress(
     NonNegativeInt.tryCreate(10 * 1024 * 1024)

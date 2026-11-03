@@ -1055,6 +1055,18 @@ final class PartyFreezeScenario private (
           )
 
         case Request.TimesOut =>
+          // The party's hosts that confirm for it and whose responses are not withheld. The request
+          // must time out although all of them approved before the deadline.
+          val respondingHosts = participants.filter { participant =>
+            mapping.entries.get(participant.id).exists { entry =>
+              entry.state == HostingState.Active &&
+              entry.permission != ParticipantPermission.Observation
+            } && !withholdResponsesOf.contains(participant.id) &&
+            !disconnected.contains(participant.id)
+          }
+          // Their responses and the counterparty's must be sequenced in time, so that only the
+          // party's missing confirmations make the request time out
+          val respondingInTime = (respondingHosts :+ counterpartyParticipant).distinct
           val ledgerEnd = counterpartyParticipant.ledger_api.state.end()
           val completion = loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
@@ -1064,6 +1076,17 @@ final class PartyFreezeScenario private (
                 synchronizerId = Some(synchronizerId.logical),
               )
               Await.result(probeRequestId.future, 1.minute).discard
+              BaseTest.eventually() {
+                approversOfParty(responses.toMap) shouldBe respondingHosts.map(_.id).toSet
+                responses.keySet should contain(counterpartyParticipant.id)
+              }
+              // Their responses must be sequenced before the clock passes the deadline. While the
+              // clock stands still, a participant counts the time it observed last as fresh, so
+              // fetching the time returns at once. After a short step, which keeps the deadline
+              // ahead, each fetch waits for the next event that the participant receives. The
+              // warnings checked below show whether a response missed the deadline anyway.
+              env.environment.simClock.value.advance(java.time.Duration.ofMillis(100))
+              respondingInTime.foreach(_.testing.fetch_synchronizer_time(synchronizerId).discard)
               val confirmationResponseTimeout = source.topology.synchronizer_parameters
                 .latest(synchronizerId)
                 .confirmationResponseTimeout
@@ -1089,10 +1112,14 @@ final class PartyFreezeScenario private (
                   .loneElement
               }
             },
-            // The participants of the request may warn about the timeout
-            forAll(_)(
-              _.warningMessage should include regex "Response message for request .* timed out"
-            ),
+            // The participants whose responses are dropped may warn about the timeout, but not
+            // those whose responses reached the mediator before the deadline
+            forAll(_) { entry =>
+              entry.warningMessage should include regex "Response message for request .* timed out"
+              forAll(respondingInTime)(host =>
+                s"participant=${host.name}\\b".r.findFirstIn(entry.loggerName) shouldBe None
+              )
+            },
           )
           withClue(s"Completion status ${completion.status}: ") {
             CantonBaseError.isStatusErrorCode(

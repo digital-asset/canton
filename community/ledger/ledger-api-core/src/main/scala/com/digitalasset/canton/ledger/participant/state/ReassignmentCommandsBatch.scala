@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import cats.implicits.{toFlatMapOps, toFunctorOps}
+import cats.{FlatMap, Traverse}
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ledger.participant.state.ReassignmentCommand.{Assign, Unassign}
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -20,11 +23,35 @@ object ReassignmentCommandsBatch {
       source: Source[SynchronizerId],
       target: Target[SynchronizerId],
       contractIds: NonEmpty[Seq[LfContractId]],
-      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
-      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
+      overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
   ) extends ReassignmentCommandsBatch {
     def hasPkgValidationOverrides: Boolean =
-      overrideSourceValidationPkgIds.nonEmpty || overrideTargetValidationPkgIds.nonEmpty
+      overrideSourceValidationPkgIds.unwrap.nonEmpty || overrideTargetValidationPkgIds.unwrap.nonEmpty
+    def extend(
+        contractId: LfContractId,
+        overrideSourceValidationPkgId: Source[Option[LfPackageId]],
+        overrideTargetValidationPkgId: Target[Option[LfPackageId]],
+    ): Unassignments = {
+
+      def combine[T[X] <: ReassignmentTag[X]: FlatMap](
+          pkgIdsT: T[Map[LfContractId, LfPackageId]],
+          pkgIdT: T[Option[LfPackageId]],
+      ): T[Map[LfContractId, LfPackageId]] =
+        for {
+          pkgIds <- pkgIdsT
+          pkgId <- pkgIdT
+        } yield pkgId.fold(pkgIds)(pkgId => pkgIds.updated(contractId, pkgId))
+
+      this.copy(
+        contractIds = contractId +: contractIds,
+        overrideSourceValidationPkgIds =
+          combine(overrideSourceValidationPkgIds, overrideSourceValidationPkgId),
+        overrideTargetValidationPkgIds =
+          combine(overrideTargetValidationPkgIds, overrideTargetValidationPkgId),
+      )
+    }
+
   }
 
   final case class Assignments(
@@ -65,13 +92,13 @@ object ReassignmentCommandsBatch {
       case _ => Left(MixedAssignWithOtherCommands)
     }
 
-  private def overridePackageIdMap(
+  private def overridePackageIdMap[T[X] <: ReassignmentTag[X]: Traverse](
       unassign: Unassign,
-      overridePackageId: Unassign => Option[LfPackageId],
-  ): Map[LfContractId, LfPackageId] =
-    overridePackageId(unassign).fold(Map.empty[LfContractId, LfPackageId])(rpId =>
-      Map(unassign.contractId -> rpId)
-    )
+      overridePackageId: Unassign => T[Option[LfPackageId]],
+  ): T[Map[LfContractId, LfPackageId]] =
+    overridePackageId(unassign).map {
+      _.fold(Map.empty[LfContractId, LfPackageId])(rpId => Map(unassign.contractId -> rpId))
+    }
 
   @tailrec
   private def validateUnassigns(
@@ -82,12 +109,10 @@ object ReassignmentCommandsBatch {
     case (head: Unassign) +: tail =>
       if (head.sourceSynchronizer == soFar.source && head.targetSynchronizer == soFar.target)
         validateUnassigns(
-          soFar.copy(
-            contractIds = head.contractId +: soFar.contractIds,
-            overrideSourceValidationPkgIds = soFar.overrideSourceValidationPkgIds ++
-              overridePackageIdMap(head, _.overrideSourceValidationPkgId),
-            overrideTargetValidationPkgIds = soFar.overrideTargetValidationPkgIds ++
-              overridePackageIdMap(head, _.overrideTargetValidationPkgId),
+          soFar.extend(
+            head.contractId,
+            head.overrideSourceValidationPkgId,
+            head.overrideTargetValidationPkgId,
           ),
           tail,
         )

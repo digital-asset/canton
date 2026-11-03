@@ -60,11 +60,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       lastEventSeqId2 = 0L,
       lastInterningId2 = 2,
       checkContentsBefore = () => {
-        val parties = executeSql(backend.party.knownParties(None, None, 10))
+        val parties = executeSql(knownPartiesAtLedgerEnd(None, None, 10))
         parties should have length 1
       },
       checkContentsAfter = () => {
-        val parties = executeSql(backend.party.knownParties(None, None, 10))
+        val parties = executeSql(knownPartiesAtLedgerEnd(None, None, 10))
         parties should have length 1
       },
     )
@@ -76,7 +76,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       lastOffset = 3,
       lastEventSeqId = 0L,
       checkContentsAfter = () => {
-        val parties2 = executeSql(backend.party.knownParties(None, None, 10))
+        val parties2 = executeSql(knownPartiesAtLedgerEnd(None, None, 10))
         parties2 shouldBe empty
       },
     )

@@ -1465,9 +1465,15 @@ object SynchronizerTrustCertificate
 sealed trait ParticipantPermission extends Product with Serializable {
   def toProtoV30: v30.Enums.ParticipantPermission
 
-  // For a participant to be able to confirm, having Submission or Confirmation permission
-  // is a necessary, but not sufficient condition (e.g. HostingParticipant.onboarding must
-  // be false). To prevent accidental use of this method, make canConfirm package-private.
+  // Package-private, as Submission or Confirmation permission alone does not mean that a
+  // participant confirms for a party. Use instead:
+  // - HostingParticipant.canConfirm to judge a participant's entry in a PartyToParticipant mapping
+  //   on its own: confirming permission and hosting state Active. For example, when checking a
+  //   proposed mapping.
+  // - ParticipantAttributes.canConfirm, from a topology snapshot, to know whether a participant
+  //   confirms for a party at a given time. The snapshot also applies the participant's
+  //   synchronizer-level permission, and leaves out participants that do not host the party, e.g.
+  //   all of them while the party is frozen.
   private[transaction] def canConfirm: Boolean
 }
 object ParticipantPermission {
@@ -1959,8 +1965,18 @@ final case class HostingParticipant(
     permission: ParticipantPermission,
     state: HostingState,
 ) {
+
+  /** Whether the entry is Onboarding. Up to 3.6, this was a flag and `!onboarding` meant what is
+    * now Active. Nominated and Freezing entries are not Onboarding either, so `!onboarding` no
+    * longer implies Active.
+    */
   def onboarding: Boolean = state == HostingState.Onboarding
-  def canConfirm: Boolean = permission.canConfirm && !onboarding
+
+  /** Whether this entry lets its participant confirm. It ignores the other entries: while any entry
+    * of the party is Freezing, no participant confirms for the party. To know whether a participant
+    * confirms at a given time, use the hosting view of a topology snapshot.
+    */
+  def canConfirm: Boolean = permission.canConfirm && state == HostingState.Active
 
   // Only Onboarding and Active are representable in v30; PartyToParticipant.canBeSerializedTo rejects the others.
   def toProtoV30: v30.PartyToParticipant.HostingParticipant =

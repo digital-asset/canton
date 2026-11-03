@@ -18,12 +18,23 @@ import com.digitalasset.canton.ledger.client.configuration.CommandClientConfigur
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.MetricsFactoryProvider
-import com.digitalasset.canton.performance.PartyRole.{DvpIssuer, DvpTrader, Master, Transfer}
+import com.digitalasset.canton.performance.PartyRole.{
+  DvpIssuer,
+  DvpTrader,
+  Master,
+  Transfer,
+  TriPartyPassive,
+  TriPartyUser,
+}
 import com.digitalasset.canton.performance.PerformanceRunner.prefix
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings.TargetLatency
 import com.digitalasset.canton.performance.elements.*
 import com.digitalasset.canton.performance.elements.transfer.TransferDriver
+import com.digitalasset.canton.performance.elements.triparty.{
+  TriPartyPassiveDriver,
+  TriPartyUserDriver,
+}
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -186,6 +197,34 @@ object PartyRole {
       RateSettings.defaultCommandClientConfiguration
   }
 
+  /** Passive role during tri-party
+    *
+    * The tri-party test is driven by the "trader" side. Passive roles are not actively sending
+    * commands. Passive roles are agent, subregister, asset taker.
+    */
+  final case class TriPartyPassive(
+      name: String,
+      override val settings: RateSettings,
+  ) extends ActivePartyRole {
+    override def role: M.orchestration.Role = M.orchestration.Role.ISSUER
+    override def commandClientConfiguration: CommandClientConfiguration =
+      RateSettings.defaultCommandClientConfiguration
+  }
+
+  /** Tri party custodian
+    *
+    * During the tri-party test, the custodian is driving the load by performing continuous asset
+    * substitutions.
+    */
+  final case class TriPartyUser(
+      name: String,
+      override val settings: RateSettings,
+  ) extends ActivePartyRole {
+    override def role: M.orchestration.Role = M.orchestration.Role.TRADER
+    override def commandClientConfiguration: CommandClientConfiguration =
+      RateSettings.defaultCommandClientConfiguration
+  }
+
   /** amendable master configuration
     *
     * @param totalCycles:
@@ -236,6 +275,8 @@ object PartyRole {
       quorumIssuers: Int = 1,
       runConfig: MasterDynamicConfig,
       amendments: Seq[AmendMasterConfig] = Seq(),
+      batchSize: Int = 100,
+      maxPending: Int = 10,
   ) extends PartyRole {
     require(quorumIssuers > 0, s"quorumIssuers must be positive: $quorumIssuers.")
     (runConfig.runType: @unchecked) match {
@@ -248,6 +289,11 @@ object PartyRole {
         require(
           quorumParticipants > 1,
           s"quorumParticipants must be more than one: $quorumParticipants.",
+        )
+      case x: M.orchestration.runtype.TriParty =>
+        require(
+          quorumIssuers >= 3 * x.numAgents + 2,
+          "quorum issuers must be at least 3 * numAgents + 2 (cash and asset issuer)",
         )
     }
 
@@ -383,9 +429,9 @@ class PerformanceRunner(
       drivers = startDrivers(masterLf, mapping)
       // wait for them to have finished!
       _ <- master
-      _ = logger.debug("Performance runner master successfully started")
+      _ = logger.debug("Performance runner master successfully completed")
       _ <- drivers
-      _ = logger.debug("Performance runner drivers successfully started")
+      _ = logger.debug("Performance runner drivers successfully completed")
     } yield ()).value
     resultF.thereafter {
       case Success(Right(())) => logger.debug("Performance runner terminated gracefully.");
@@ -454,12 +500,40 @@ class PerformanceRunner(
                   baseSynchronizerId = config.baseSynchronizerId,
                   otherSynchronizers = config.otherSynchronizers,
                 )
+              case trp: TriPartyPassive =>
+                new TriPartyPassiveDriver(
+                  config.ledger,
+                  party,
+                  masterParty,
+                  trp,
+                  PerformanceRunner.prefix,
+                  labeledMetricsFactory,
+                  loggerFactory = lf,
+                  control = this,
+                  baseSynchronizerId = config.baseSynchronizerId,
+                )
+
+              case trp: TriPartyUser =>
+                new TriPartyUserDriver(
+                  config.ledger,
+                  party,
+                  masterParty,
+                  trp,
+                  PerformanceRunner.prefix,
+                  labeledMetricsFactory,
+                  loggerFactory = lf,
+                  control = this,
+                  baseSynchronizerId = config.baseSynchronizerId,
+                  otherSynchronizers = config.otherSynchronizers,
+                )
+
             }
             drivers.append(driver)
             FutureUtil.logOnFailure(driver.start(), s"Failed to start driver $role").flatMap {
               case Left(er) => Future.successful(Left(er))
               case Right(()) =>
                 driver.done().map { _ =>
+                  logger.debug(s"Driver $role / $party completed successfully")
                   Either.unit
                 }
             }
@@ -492,6 +566,7 @@ class PerformanceRunner(
             labeledMetricsFactory,
             loggerFactory.appendUnnamedKey("driver", "master"),
             this,
+            config.baseSynchronizerId,
           )
         drivers.append(driver)
         EitherT(driver.start().flatMap {

@@ -12,6 +12,8 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
   AsyncWriterConfig,
   SequencerNodeParameterConfig,
@@ -76,6 +78,22 @@ trait CantonSharedDeprecations {
           )
         )
     }
+
+  implicit def bftBlockOrdererConfigDeprecations(implicit
+      blacklistLeaderSelectionPolicyConfigConfigReader: ConfigReader[
+        BlacklistLeaderSelectionPolicyConfig
+      ]
+  ): DeprecatedFieldsFor[BftBlockOrdererConfig] =
+    new DeprecatedFieldsFor[BftBlockOrdererConfig] {
+      override def deprecatePath: List[DeprecatedConfigPath[?]] =
+        List(
+          DeprecatedConfigPath[Option[Option[Long]]]("segment-length-for-pv-34", since = "3.8.0"),
+          DeprecatedConfigPath[Option[Option[BlacklistLeaderSelectionPolicyConfig]]](
+            "leader-selection-policy-config-for-pv-34",
+            since = "3.8.0",
+          ),
+        )
+    }
 }
 
 trait CantonSynchronizerNodeDeprecations {
@@ -104,7 +122,11 @@ trait CantonSynchronizerNodeDeprecations {
       )
       override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
         // removed as the feature is now always enabled and the flag is no longer needed (https://github.com/DACH-NY/canton/issues/30769)
-        DeprecatedConfigPath[String]("produce-post-ordering-topology-ticks", since = "3.7.0")
+        DeprecatedConfigPath[String]("produce-post-ordering-topology-ticks", since = "3.8.0"),
+        DeprecatedConfigPath[Seq[String]](
+          "enable-reject-delivered-aggregations-on-pv-35",
+          since = "3.8.0",
+        ),
       )
     }
 
@@ -119,7 +141,6 @@ trait CantonSynchronizerNodeDeprecations {
           )
         )
     }
-
 }
 
 trait CantonParticipantNodeDeprecations {

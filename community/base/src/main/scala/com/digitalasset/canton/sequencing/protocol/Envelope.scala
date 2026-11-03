@@ -23,9 +23,7 @@ trait Envelope[+M] extends PrettyPrinting {
       groupAddresses: Set[GroupRecipient],
   ): Option[Envelope[M]]
 
-  def toClosedCompressedEnvelope(
-      algo: com.digitalasset.canton.util.CompressionAlgo
-  ): ClosedCompressedEnvelope
+  def toClosedCompressedEnvelope: ClosedCompressedEnvelope
 
   def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope]
 

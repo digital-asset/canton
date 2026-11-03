@@ -531,6 +531,8 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         crashAfterFailedValidation = participantParameters.crashAfterFailedValidation,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
         acsCommitments = participantParameters.acsCommitments,
+        deprecatedApis = participantConfig.features.deprecated,
+        enableRepairService = features.enableRepairCommands,
         damlTopUpEnabled = participantConfig.trafficAccounting.damlTopUpEnabled,
       )
     }
@@ -565,8 +567,6 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
             .map(DisasterRecoverySequencingTimeUpperBound(_)),
         delayRequestsBeforeLsuTrafficInit =
           sequencerNodeConfig.parameters.delayRequestsBeforeLsuTrafficInit,
-        enableRejectDeliveredAggregationsOnPv35 =
-          sequencerNodeConfig.parameters.enableRejectDeliveredAggregationsOnPv35,
         disableSubmissionChecksForTesting =
           sequencerNodeConfig.parameters.disableSubmissionChecksForTesting,
         lsuConfig = sequencerNodeConfig.parameters.lsu,

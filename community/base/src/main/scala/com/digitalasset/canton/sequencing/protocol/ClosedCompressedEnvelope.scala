@@ -20,7 +20,6 @@ import monocle.Lens
 final case class ClosedCompressedEnvelope(
     override val bytes: ByteString,
     override val recipients: Recipients,
-    algorithm: CompressionAlgorithm,
 )(
     // Moved the deferred decompression to a separate argument group, so it doesn't affect "equals"
     deferredDecompression: DeferredDecompression,
@@ -45,15 +44,8 @@ final case class ClosedCompressedEnvelope(
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     uncompressedEnvelopeResult
 
-  override def toClosedCompressedEnvelope(
-      algo: com.digitalasset.canton.util.CompressionAlgo
-  ): ClosedCompressedEnvelope = {
-    require(
-      CompressionAlgorithm(algo) == algorithm,
-      s"Cannot re-compress envelope from $algorithm to $algo",
-    )
+  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope =
     this
-  }
 
   private def prepareUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] = for {
     decompressed <- deferredDecompression.decompressed
@@ -81,14 +73,13 @@ final case class ClosedCompressedEnvelope(
     recipients.forMember(member, groupAddresses).map(withRecipients)
 
   override protected def pretty: Pretty[ClosedCompressedEnvelope] = prettyOfClass(
-    param("recipients", _.recipients),
-    param("algorithm", _.algorithm),
+    param("recipients", _.recipients)
   )
 
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedCompressedEnvelope =
     // Share the deferred decompression, so that copies draw the budget at most once
-    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(
+    ClosedCompressedEnvelope(bytes, newRecipients)(
       deferredDecompression,
       pvv,
       maxSignaturesPerEnvelope,
@@ -97,8 +88,8 @@ final case class ClosedCompressedEnvelope(
   override private[protocol] def withDecompressionBudget(
       decompressionBudget: DecompressionBudget
   ): ClosedCompressedEnvelope =
-    ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget, algorithm),
+    ClosedCompressedEnvelope(bytes, recipients)(
+      DeferredDecompression(bytes, decompressionBudget),
       pvv,
       maxSignaturesPerEnvelope,
     )
@@ -111,13 +102,13 @@ object ClosedCompressedEnvelope {
       envelope => envelope.withRecipients(newRecipients)
     )
 
-  def create(bytes: ByteString, recipients: Recipients, algorithm: CompressionAlgorithm)(
+  def create(bytes: ByteString, recipients: Recipients)(
       decompressionBudget: DecompressionBudget,
       pvv: ProtocolVersionValidation,
       maxSignaturesPerEnvelope: PositiveInt,
   ): ClosedCompressedEnvelope =
-    ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget, algorithm),
+    ClosedCompressedEnvelope(bytes, recipients)(
+      DeferredDecompression(bytes, decompressionBudget),
       pvv,
       maxSignaturesPerEnvelope,
     )
@@ -129,11 +120,9 @@ object ClosedCompressedEnvelope {
 private[protocol] final class DeferredDecompression(
     bytes: ByteString,
     budget: DecompressionBudget,
-    algorithm: CompressionAlgorithm,
 ) {
   lazy val decompressed: ParsingResult[ByteString] =
     Batch.decompress(
-      algorithm = algorithm,
       compressed = bytes,
       decompressionBudget = budget,
     )
@@ -143,7 +132,6 @@ private[protocol] object DeferredDecompression {
   def apply(
       bytes: ByteString,
       budget: DecompressionBudget,
-      algorithm: CompressionAlgorithm,
   ): DeferredDecompression =
-    new DeferredDecompression(bytes, budget, algorithm)
+    new DeferredDecompression(bytes, budget)
 }

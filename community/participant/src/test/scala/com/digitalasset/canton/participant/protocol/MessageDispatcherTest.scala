@@ -320,6 +320,7 @@ trait MessageDispatcherTest {
       messageId,
       batch,
       Option.empty[TrafficReceipt],
+      testedProtocolVersion,
     )
 
   private def rootHash(index: Int): RootHash = RootHash(TestHash.digest(index))
@@ -361,8 +362,10 @@ trait MessageDispatcherTest {
         TestViewType,
         requestId,
         TestHash.dummyRootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
+        testedProtocolVersion,
       ),
+      testedProtocolVersion,
       dummySignature,
     )
   private val otherTestMediatorResult =
@@ -372,8 +375,10 @@ trait MessageDispatcherTest {
         OtherTestViewType,
         requestId,
         TestHash.dummyRootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
+        testedProtocolVersion,
       ),
+      testedProtocolVersion,
       dummySignature,
     )
 
@@ -410,6 +415,7 @@ trait MessageDispatcherTest {
     val idTx = TopologyTransactionsBroadcast(
       psid,
       List(factory.ns1k1_k1),
+      testedProtocolVersion,
     )
 
     val legacyRawCommitment = mock[LegacyAcsCommitment]
@@ -431,7 +437,7 @@ trait MessageDispatcherTest {
     )
 
     val legacyCommitment =
-      SignedProtocolMessage.from(legacyRawCommitment, dummySignature)
+      SignedProtocolMessage.from(legacyRawCommitment, testedProtocolVersion, dummySignature)
 
     // AcsCommitment is a PV36+ feature (PV35 uses LegacyAcsCommitment).
     // Hardcoding v36 instead of testedProtocolVersion prevents AcsCommitmentProtocolMessage.create from
@@ -452,15 +458,12 @@ trait MessageDispatcherTest {
         rawCommitment,
         dummySignature,
         AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+        testedProtocolVersion,
       )
       .value
 
     def malformedVerdict(protocolVersion: ProtocolVersion): Verdict.MediatorReject =
-      MediatorReject.tryCreate(
-        MediatorError.MalformedMessage.Reject("").rpcStatusWithoutLoggingContext(),
-        isMalformed = true,
-        protocolVersion,
-      )
+      MediatorReject.fromMediatorError(MediatorError.MalformedMessage.Reject(""), protocolVersion)
 
     val reject = malformedVerdict(testedProtocolVersion)
     val MalformedMediatorConfirmationRequestResult =
@@ -471,7 +474,9 @@ trait MessageDispatcherTest {
           RequestId(CantonTimestamp.MinValue),
           TestHash.dummyRootHash,
           reject,
+          testedProtocolVersion,
         ),
+        testedProtocolVersion,
         dummySignature,
       )
 
@@ -481,7 +486,9 @@ trait MessageDispatcherTest {
         PositiveInt.one,
         NonNegativeLong.tryCreate(1000),
         psid,
+        testedProtocolVersion,
       ),
+      testedProtocolVersion,
       dummySignature,
     )
 
@@ -806,6 +813,7 @@ trait MessageDispatcherTest {
           UnknownTestViewType,
           testTopologyTimestamp,
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         )
       val event = mkDeliver(
         Batch.of[ProtocolMessage](
@@ -841,8 +849,10 @@ trait MessageDispatcherTest {
             UnknownTestViewType,
             requestId,
             TestHash.dummyRootHash,
-            Verdict.Approve(testedProtocolVersion),
+            Verdict.Approve.create(testedProtocolVersion),
+            testedProtocolVersion,
           ),
+          testedProtocolVersion,
           dummySignature,
         )
       val event =
@@ -878,6 +888,7 @@ trait MessageDispatcherTest {
       val txForeignSynchronizer = TopologyTransactionsBroadcast(
         SynchronizerId.tryFromString("foo::bar").toPhysical,
         List(factory.ns1k1_k1),
+        testedProtocolVersion,
       )
       val event =
         mkDeliver(
@@ -924,6 +935,7 @@ trait MessageDispatcherTest {
             viewType,
             testTopologyTimestamp,
             SerializedRootHashMessagePayload.empty,
+            testedProtocolVersion,
           )
         val event =
           mkDeliver(
@@ -950,6 +962,7 @@ trait MessageDispatcherTest {
             viewType,
             testTopologyTimestamp,
             SerializedRootHashMessagePayload.empty,
+            testedProtocolVersion,
           )
         // Batch -> expected alarms -> expected reaction
         val badBatches = List(
@@ -1063,6 +1076,7 @@ trait MessageDispatcherTest {
             viewType,
             testTopologyTimestamp,
             SerializedRootHashMessagePayload.empty,
+            testedProtocolVersion,
           )
         val fatalBatches = List(
           Batch.of[ProtocolMessage](
@@ -1119,6 +1133,7 @@ trait MessageDispatcherTest {
             viewType,
             testTopologyTimestamp,
             SerializedRootHashMessagePayload.empty,
+            testedProtocolVersion,
           )
 
         val goodBatches = List(
@@ -1210,6 +1225,7 @@ trait MessageDispatcherTest {
             viewType,
             testTopologyTimestamp,
             SerializedRootHashMessagePayload.empty,
+            testedProtocolVersion,
           )
         val event =
           mkDeliver(
@@ -1315,6 +1331,7 @@ trait MessageDispatcherTest {
           messageId3,
           SequencerErrors.SubmissionRequestRefused("invalid batch"),
           Some(trafficReceipt),
+          testedProtocolVersion,
         )
 
         val sequencedEvents = Seq(deliver1, deliver2, deliver3, deliverError4).map {
@@ -1402,6 +1419,7 @@ trait MessageDispatcherTest {
           viewType,
           testTopologyTimestamp,
           SerializedRootHashMessagePayload.empty,
+          testedProtocolVersion,
         )
 
         val envelopes = Seq[(ProtocolMessage, Recipients)](

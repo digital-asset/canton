@@ -41,7 +41,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{Future, Promise}
 
-class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+final class GrpcSequencerSubscriptionTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext {
   private lazy val synchronizerId: PhysicalSynchronizerId = SynchronizerId(
     UniqueIdentifier.tryFromProtoPrimitive("da::default")
   ).toPhysical
@@ -53,7 +56,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       Seq.empty,
       testedProtocolVersion,
     )
-    .toClosedCompressedEnvelope(com.digitalasset.canton.util.CompressionAlgo.Gzip)
+    .toClosedCompressedEnvelope
 
   private lazy val messageP: v30Sequencer.SubscriptionResponse = v30Sequencer
     .SubscriptionResponse(

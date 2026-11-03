@@ -709,11 +709,6 @@ abstract class SequencerApiTest
                 include(s"The aggregatable request with aggregation ID") and
                   include("was previously delivered at")
               )
-            case SequencerErrors.AggregateSubmissionAlreadySentV2(reason) =>
-              reason should (
-                include(s"The aggregatable request with aggregation ID") and
-                  include("was previously delivered at")
-              )
           }
         }
       }
@@ -1174,10 +1169,8 @@ trait SequencerApiTestUtils
     override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
       toClosedUncompressedEnvelope.asRight
 
-    override def toClosedCompressedEnvelope(
-        algo: com.digitalasset.canton.util.CompressionAlgo
-    ): ClosedCompressedEnvelope =
-      toClosedUncompressedEnvelope.toClosedCompressedEnvelope(algo)
+    override def toClosedCompressedEnvelope: ClosedCompressedEnvelope =
+      toClosedUncompressedEnvelope.toClosedCompressedEnvelope
 
     override def forRecipient(
         member: Member,

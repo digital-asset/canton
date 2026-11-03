@@ -73,6 +73,7 @@ class SendTrackerTest extends AnyWordSpec with BaseTest with MetricsUtils with F
           Some(msgId),
           Batch.empty(testedProtocolVersion),
           trafficReceipt,
+          testedProtocolVersion,
         )
       )
     )(
@@ -93,6 +94,7 @@ class SendTrackerTest extends AnyWordSpec with BaseTest with MetricsUtils with F
           msgId,
           SequencerErrors.SubmissionRequestRefused("test"),
           trafficReceipt,
+          testedProtocolVersion,
         )
       )
     )(

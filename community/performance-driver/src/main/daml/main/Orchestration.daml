@@ -3,6 +3,8 @@ module Orchestration where
 import DA.Foldable qualified as F
 import DA.Assert
 import DA.Action
+import DA.Text (isPrefixOf)
+import Triparty.Bootstrap
 
 data Mode = PrepareIssuer | PrepareTrader | Throughput | Done deriving (Eq, Show)
 data ParticipantFlag = Initialising | Ready | Finished deriving (Eq, Show)
@@ -25,10 +27,9 @@ data RunType =
       payloadSize: Int |
   TriParty
     with
-      numIssuers : Int
       numAgents : Int
-      numAssetsPerIssuer : Int 
-      numAccountsPerIssuer: Int 
+      numAssetsPerIssuer : Int
+      numAccountsPerIssuer: Int
     deriving (Eq, Show)
 
 validPartyGrowth : PartyGrowth -> Bool
@@ -41,7 +42,7 @@ validRunType : RunType -> Bool
 validRunType a = case a of
   DvpRun numAssets acsGrowth payloadSize partyGrowth -> numAssets > 0 && acsGrowth > -1 && payloadSize >= 0 && validPartyGrowth partyGrowth
   TransferRun numAssetsPerActor transferBatchSize payloadSize -> numAssetsPerActor > 0 && transferBatchSize > 0 && payloadSize >= 0
-  TriParty numIssuers numAgents numAssetsPerIssuer numAccountsPerIssuer -> numIssuers > 0 && numAgents > 0 && numAssetsPerIssuer > 0 && numAccountsPerIssuer > 0
+  TriParty numAgents numAssetsPerIssuer numAccountsPerIssuer -> numAgents > 0 && numAssetsPerIssuer > 0 && numAccountsPerIssuer > 0
 
 runTypeCode : RunType -> Int
 runTypeCode a =  case a of
@@ -188,6 +189,41 @@ template ParticipationRequest
         controller master
         do
           exercise masterCid AddParticipant with party, role
+
+
+    choice AcceptTriPartyIssuer : (ContractId TestRun, ContractId TestParticipant)
+        with
+          masterCid : ContractId TestRun
+          bootstrapCid : ContractId PreBootstrap
+        controller master
+        do
+          let partyName = show party
+          if "'cash" `isPrefixOf` partyName then do
+            exercise bootstrapCid AddCashIssuer with cashIssuerParty = party
+          else if "'issuer" `isPrefixOf` partyName then do
+            exercise bootstrapCid AddIssuer with issuer = party
+          else if "'agent" `isPrefixOf` partyName then do
+            exercise bootstrapCid AddAgent with agent = party
+          else if "'subregister" `isPrefixOf` partyName then do
+            exercise bootstrapCid AddSubregister with subregister = party
+          else if "'taker" `isPrefixOf` partyName then do
+            exercise bootstrapCid AddTaker with taker = party
+          else do
+            abort ("Unknown party type " <> partyName)
+          exercise masterCid AddParticipant with party, role
+
+    choice AcceptTriPartyUser : (ContractId TestRun, ContractId TestParticipant)
+        with
+          masterCid : ContractId TestRun
+          bootstrapCid : ContractId Bootstrap
+        controller master
+        do
+          exercise bootstrapCid AddCustodian with custodian = party
+          exercise masterCid AddParticipant with party, role
+
+
+
+
 
 
 

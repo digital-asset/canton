@@ -44,6 +44,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.{
+  CostEstimateWithReassignments,
   ReassignmentCostEstimation,
   SubmissionCostEstimation,
 }
@@ -115,7 +116,7 @@ import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.{GenericPendingOperationStore, PendingOperationStore}
-import com.digitalasset.canton.tea.AccountId
+import com.digitalasset.canton.tea.{AccountId, TrafficEnforcementErrors}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
@@ -632,14 +633,17 @@ class CantonSyncService(
       traceContext: TraceContext
   ): Future[Either[SubmissionResult, FutureUnlessShutdown[?]]] = {
 
-    def processSubmissionError(
-        error: TransactionError
-    ): Either[SubmissionResult, FutureUnlessShutdown[?]] = {
+    def rejected(error: TransactionError): SubmissionResult = {
       error.logWithContext(
         Map("commandId" -> submitterInfo.commandId, "userId" -> submitterInfo.userId)
       )
-      Left(SubmissionResult.SynchronousError(error.rpcStatus()))
+      SubmissionResult.SynchronousError(error.rpcStatus())
     }
+
+    def processSubmissionError(
+        error: TransactionError
+    ): Either[SubmissionResult, FutureUnlessShutdown[?]] =
+      Left(rejected(error))
 
     if (isClosing) {
       Future.successful(processSubmissionError(SubmissionDuringShutdown.Rejection()))
@@ -658,8 +662,16 @@ class CantonSyncService(
         processSubmissionError(SyncServiceInjectionError.NotConnectedToAnySynchronizer.Error())
       )
     } else {
+      val accounting = SubmissionAccounting.forSubmitter(
+        accountId = submitterInfo.accountId,
+        actAs = submitterInfo.actAs.toSet,
+        adminParty = participantId.adminParty.toLf,
+      )
 
-      val submittedFF = for {
+      val validatedTransaction
+          : EitherT[FutureUnlessShutdown, TransactionError, WellFormedTransaction[
+            WithoutSuffixes
+          ]] = for {
         metadata <- EitherT
           .fromEither[FutureUnlessShutdown](
             TransactionMetadata.fromTransactionMeta(
@@ -688,20 +700,31 @@ class CantonSyncService(
           WellFormedTransaction
             .check(transaction, metadata, WithoutSuffixes, PathRollbackContextFactory)
             .leftMap(RoutingInternalError.IllformedTransaction.apply)
+            .leftWiden[TransactionError]
         )
-        submitted <- transactionRoutingProcessor.submitTransaction(
-          submitterInfo = submitterInfo,
-          accounting = SubmissionAccounting.forSubmitter(
-            accountId = submitterInfo.accountId,
-            actAs = submitterInfo.actAs.toSet,
-            adminParty = participantId.adminParty.toLf,
-          ),
-          synchronizerRankTarget = synchronizerRank,
-          synchronizerState = routingSynchronizerState,
-          wfTransaction = wfTransaction,
-          transactionMeta = transactionMeta,
-          explicitlyDisclosedContracts = explicitlyDisclosedContracts,
+      } yield wfTransaction
+
+      val submittedFF = for {
+        wfTransaction <- validatedTransaction.leftMap(rejected)
+        routedAccounting <- checkEstimatedCostBeforeRouting(
+          accounting,
+          synchronizerRank,
+          transaction,
+          submitterInfo,
+          transactionMeta,
+          explicitlyDisclosedContracts,
         )
+        submitted <- transactionRoutingProcessor
+          .submitTransaction(
+            submitterInfo = submitterInfo,
+            accounting = routedAccounting,
+            synchronizerRankTarget = synchronizerRank,
+            synchronizerState = routingSynchronizerState,
+            wfTransaction = wfTransaction,
+            transactionMeta = transactionMeta,
+            explicitlyDisclosedContracts = explicitlyDisclosedContracts,
+          )
+          .leftMap(rejected)
       } yield submitted
 
       submittedFF.value.unwrap.transform { result =>
@@ -738,7 +761,7 @@ class CantonSyncService(
             }
             Right(loggedF)
           case Success(UnlessShutdown.Outcome(Left(submissionError))) =>
-            processSubmissionError(submissionError)
+            Left(submissionError)
           case Success(UnlessShutdown.AbortedDueToShutdown) =>
             val err = SyncServiceInjectionError.PassiveReplica.Error(
               submitterInfo.userId,
@@ -754,6 +777,51 @@ class CantonSyncService(
       }
     }
   }
+
+  /** Checks the estimated cost of the transaction and reassignments once before sending, so we
+    * don't start reassigning if the account can't cover it. We skip further balance checks, so the
+    * account can go negative.
+    */
+  private def checkEstimatedCostBeforeRouting(
+      accounting: SubmissionAccounting,
+      synchronizerRank: SynchronizerRank,
+      transaction: LfSubmittedTransaction,
+      submitterInfo: SubmitterInfo,
+      transactionMeta: TransactionMeta,
+      explicitlyDisclosedContracts: ImmArray[LfFatContractInst],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SubmissionResult, SubmissionAccounting] =
+    trafficEnforcementBackendO.map(_.value) match {
+      case Some(backend)
+          if backend.checksBalance(accounting) && synchronizerRank.reassignments.nonEmpty =>
+        // Start both so that they run in parallel.
+        val transactionCostET = estimateTrafficCost(
+          synchronizerRank.synchronizerId.logical,
+          transaction,
+          transactionMeta,
+          submitterInfo,
+          explicitlyDisclosedContracts.toSeq.map(c => c.contractId -> c).toMap,
+          CostEstimationHints(),
+        )
+        val reassignmentCostsET = estimateReassignmentCosts(
+          synchronizerRank,
+          submitterInfo,
+          synchronizerRank.synchronizerId,
+        )
+        (for {
+          transactionCost <- transactionCostET
+            .leftMap(TrafficEnforcementErrors.CostEstimationFailed.Reject(_))
+          reassignmentCosts <- reassignmentCostsET
+            .leftMap(TrafficEnforcementErrors.CostEstimationFailed.Reject(_))
+          _ <- backend.checkEstimatedCost(
+            accounting,
+            CostEstimateWithReassignments(transactionCost.totalCost, reassignmentCosts),
+          )
+        } yield accounting.copy(checkBalance = false))
+          .leftMap(error => SubmissionResult.SynchronousError(error.asGrpcStatus))
+      case _ => EitherT.rightT(accounting)
+    }
 
   override def physicalSynchronizerIdForSynchronizerId(
       synchronizerId: SynchronizerId

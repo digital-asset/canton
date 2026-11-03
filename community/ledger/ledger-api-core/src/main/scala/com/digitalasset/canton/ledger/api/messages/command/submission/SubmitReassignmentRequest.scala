@@ -25,8 +25,8 @@ final case class UnassignCommand(
     sourceSynchronizerId: Source[SynchronizerId],
     targetSynchronizerId: Target[SynchronizerId],
     contractId: Value.ContractId,
-    overrideSourceValidationPkgId: Option[LfPackageId],
-    overrideTargetValidationPkgId: Option[LfPackageId],
+    overrideSourceValidationPkgId: Source[Option[LfPackageId]],
+    overrideTargetValidationPkgId: Target[Option[LfPackageId]],
 )
 final case class AssignCommand(
     sourceSynchronizerId: Source[SynchronizerId],

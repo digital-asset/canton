@@ -9,9 +9,11 @@ import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveDouble}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.participant.state.ChangeId
+import com.digitalasset.canton.ledger.participant.state.SyncService.CostEstimateWithReassignments
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.networking.grpc.GrpcError
@@ -135,6 +137,7 @@ class TrafficEnforcementBackendTelemetryTest
       enforceCostOnSubmissions = enforceCostOnSubmissions,
       rejectMultiPartySubmissions = rejectMultiPartySubmissions,
       allowSubmissionsOnDegradation = allowSubmissionsOnDegradation,
+      estimateMultiplier = PositiveDouble.tryCreate(1.0),
       trafficServiceClient = trafficServiceClient,
       adminParty = adminParty,
       metrics = metrics,
@@ -164,6 +167,18 @@ class TrafficEnforcementBackendTelemetryTest
       sys.error(s"Metric ${metrics.enforcementCheckDuration.info.name} not found"),
     )
     .data
+
+  /** Like the span, the timer is stopped by a callback registered on the same future the test
+    * blocks on, so the last sample can lag slightly behind the blocking call returning.
+    */
+  private def recordedDurations(status: String, expectedCount: Int): Seq[Long] = eventually() {
+    val values = enforcementCheckDurations.recordedValues.getOrElse(
+      MetricsContext("status" -> status),
+      Seq.empty,
+    )
+    values should have size expectedCount.toLong
+    values
+  }
 
   private def decisionContext(outcome: String, reason: Option[String]): MetricsContext = {
     val withOutcome =
@@ -209,7 +224,7 @@ class TrafficEnforcementBackendTelemetryTest
         backend
           .checkEstimatedCost(
             SubmissionAccounting.forSubmitter(None, row.actAs, adminParty),
-            trafficCost,
+            CostEstimateWithReassignments(NonNegativeLong.tryCreate(trafficCost), Seq.empty),
           )
           .futureValueUS
       else backend.registerSubmission(info(row.actAs), trafficCost).futureValueUS
@@ -232,15 +247,13 @@ class TrafficEnforcementBackendTelemetryTest
     span.getStatus.getStatusCode shouldBe StatusCode.UNSET
     span.getEvents.asScala.map(_.getName) shouldBe row.expectedSpanEvents
 
+    recordedDurations(row.expectedTimerStatus, expectedCount = 1).discard
+
     // Size, not just the marker: a second recordOutcome under other labels has to fail here.
     decisionMarkers should have size 1
     decisionMarkers(
       decisionContext(row.expectedOutcome, row.expectedReason)
     ).longValue() shouldBe 1L
-
-    enforcementCheckDurations.recordedValues(
-      MetricsContext("status" -> row.expectedTimerStatus)
-    ) should have size 1
   }
 
   private val registered = Some(Right(RegisterSubmissionResponse()))
@@ -421,10 +434,7 @@ class TrafficEnforcementBackendTelemetryTest
         backend.registerSubmission(info(Set(alice)), trafficCost).futureValueUS shouldBe Right(())
       }
 
-      val values = enforcementCheckDurations.recordedValues(
-        MetricsContext("status" -> SuccessStatus)
-      )
-      values.size shouldEqual times
+      val values = recordedDurations(SuccessStatus, expectedCount = times)
       forAll(values)(_ should be >= 1L)
     }
   }

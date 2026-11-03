@@ -58,22 +58,25 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     )
     testee.store(someConnection, offset(2L), singlePartyFixture)
     ledgerEndCache().map(_.lastOffset) shouldBe Some(offset(2L))
-    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(5L)
+    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(6L)
     testee.store(someConnection, offset(3L), allEventsFixture)
     ledgerEndCache().map(_.lastOffset) shouldBe Some(offset(3L))
-    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(7L)
+    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(8L)
     testee.store(someConnection, offset(4L), None)
     ledgerEndCache().map(_.lastOffset) shouldBe Some(offset(4L))
-    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(7L)
+    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(8L)
     testee.store(someConnection, offset(5L), partyAndCreateFixture)
     ledgerEndCache().map(_.lastOffset) shouldBe Some(offset(5L))
-    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(8L)
+    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(10L)
 
-    storageBackendCaptor.captured(0) shouldBe someParty
+    storageBackendCaptor
+      .captured(0)
+      .asInstanceOf[DbDto.EventPartyToParticipant]
+      .event_sequential_id shouldBe 6
     storageBackendCaptor
       .captured(1) shouldBe LedgerEnd(
       offset(2L),
-      5,
+      6,
       1,
       CantonTimestamp.MinValue,
       Map(),
@@ -81,25 +84,25 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     storageBackendCaptor
       .captured(2)
       .asInstanceOf[DbDto.EventActivate]
-      .event_sequential_id shouldBe 6
+      .event_sequential_id shouldBe 7
     storageBackendCaptor
       .captured(3)
       .asInstanceOf[DbDto.IdFilterActivateStakeholder]
       .idFilter
-      .event_sequential_id shouldBe 6
+      .event_sequential_id shouldBe 7
     storageBackendCaptor
       .captured(4)
       .asInstanceOf[DbDto.IdFilterActivateStakeholder]
       .idFilter
-      .event_sequential_id shouldBe 6
+      .event_sequential_id shouldBe 7
     storageBackendCaptor
       .captured(5)
       .asInstanceOf[DbDto.EventDeactivate]
-      .event_sequential_id shouldBe 7
+      .event_sequential_id shouldBe 8
     storageBackendCaptor
       .captured(6) shouldBe LedgerEnd(
       offset(3L),
-      7,
+      8,
       1,
       CantonTimestamp.MinValue,
       Map(),
@@ -107,20 +110,23 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     storageBackendCaptor
       .captured(7) shouldBe LedgerEnd(
       offset(4L),
-      7,
+      8,
       1,
       CantonTimestamp.MinValue,
       Map(),
     )
-    storageBackendCaptor.captured(8) shouldBe someParty
+    storageBackendCaptor
+      .captured(8)
+      .asInstanceOf[DbDto.EventPartyToParticipant]
+      .event_sequential_id shouldBe 9
     storageBackendCaptor
       .captured(9)
       .asInstanceOf[DbDto.EventActivate]
-      .event_sequential_id shouldBe 8
+      .event_sequential_id shouldBe 10
     storageBackendCaptor
       .captured(10) shouldBe LedgerEnd(
       offset(5L),
-      8,
+      10,
       1,
       CantonTimestamp.MinValue,
       Map(),
@@ -143,7 +149,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(0L)
     testee.store(someConnection, offset(4L), partyAndCreateFixture)
     ledgerEndCache().map(_.lastOffset) shouldBe Some(offset(4L))
-    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(1L)
+    ledgerEndCache().map(_.lastEventSeqId) shouldBe Some(2L)
 
     storageBackendCaptor
       .captured(0) shouldBe LedgerEnd(
@@ -153,15 +159,18 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
       CantonTimestamp.MinValue,
       Map(),
     )
-    storageBackendCaptor.captured(1) shouldBe someParty
+    storageBackendCaptor
+      .captured(1)
+      .asInstanceOf[DbDto.EventPartyToParticipant]
+      .event_sequential_id shouldBe 1
     storageBackendCaptor
       .captured(2)
       .asInstanceOf[DbDto.EventActivate]
-      .event_sequential_id shouldBe 1
+      .event_sequential_id shouldBe 2
     storageBackendCaptor
       .captured(3) shouldBe LedgerEnd(
       offset(4L),
-      1,
+      2,
       0,
       CantonTimestamp.MinValue,
       Map(),

@@ -11,6 +11,7 @@ import com.digitalasset.canton.console.{
   CommandFailure,
   InstanceReference,
   LocalParticipantReference,
+  LocalSequencerReference,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -29,6 +30,7 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
 }
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
@@ -48,8 +50,10 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, UniquePortGenerator, config}
+import io.netty.util.ResourceLeakDetector
 import io.scalaland.chimney.dsl.*
 import monocle.macros.syntax.lens.*
+import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 import java.time.Duration
@@ -107,6 +111,24 @@ abstract class LsuRollForwardIntegrationTest
     extends LsuBase
     with LsuTrafficManagement
     with HasExecutionContext {
+
+  override def beforeAll(): Unit = {
+    // Disable Netty's ResourceLeakDetector for this test suite.
+    // Since these tests intentionally freeze a sequencer, the participant's gRPC channel
+    // is expected to hang and eventually terminate via shutdownNow() after the 3s grace period.
+    // This forced teardown orphans raw ByteBufs before the Netty pipeline can call
+    // .release(), which occasionally triggers "ByteBuf.release() was not called" errors.
+    ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.DISABLED)
+    super.beforeAll()
+  }
+
+  // Restore default leak detection
+  override def afterAll(): Unit =
+    try {
+      ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.SIMPLE)
+    } finally {
+      super.afterAll()
+    }
 
   override protected def testName: String =
     s"lsu-roll-forward-" + (if (isOnline) "online" else "offline")
@@ -253,9 +275,27 @@ abstract class LsuRollForwardIntegrationTest
   private def cleanSynchronizerIndex(
       p: LocalParticipantReference
   )(implicit env: TestConsoleEnvironment): SynchronizerIndex =
-    p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore
-      .cleanSynchronizerIndex(env.daId.logical)
-      .value
+    eventually() {
+      p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore
+        .cleanSynchronizerIndex(env.daId.logical)
+        .value
+    }
+
+  private val optionalUngracefulShutdownWarning: (LogEntryOptionality, LogEntry => Assertion) = (
+    LogEntryOptionality.OptionalMany,
+    _.warningMessage should include(
+      "shutdown did not complete gracefully in allotted 3 seconds"
+    ),
+  )
+
+  private def requiredMissingSuccessorWarning(
+      sequencer: LocalSequencerReference
+  ): (LogEntryOptionality, LogEntry => Assertion) = (
+    LogEntryOptionality.Required,
+    _.warningMessage should include(
+      s"Missing successor information for the following sequencers: Set($sequencer). They will be removed from the pool of sequencers."
+    ),
+  )
 
   "LSU should allow roll forward" should {
     "perform first LSU" in { implicit env =>
@@ -365,9 +405,22 @@ abstract class LsuRollForwardIntegrationTest
       What we really want is restarting the sequencer (see comment below).
       Stopping the mediators and participants removes mediators and participants warning due to the sequencers being down.
        */
-      mediator3.stop()
-      mediator4.stop()
-      participants.local.stop()
+      /*
+       * Stopping nodes connected to a frozen sequencer triggers expected gRPC channel warnings:
+       * "shutdown did not complete gracefully in allotted 3 seconds" due to sent periodic
+       * acknowledgements hanging in-flight when the graceful shutdown (`Closeable`)
+       * is triggered. The channel waits for the grace period and then forces a shutdown and
+       * logs these warnings. The warnings are therefore expected and benign in the test scenario,
+       * so we filter them out.
+       */
+      loggerFactory.assertLogsUnorderedOptional(
+        {
+          mediator3.stop()
+          mediator4.stop()
+          participants.local.stop()
+        },
+        optionalUngracefulShutdownWarning,
+      )
 
       /*
       When exporting the topology, the sequencer waits for the sequencerLsuStateTsOverride timestamp to be reached.
@@ -385,6 +438,17 @@ abstract class LsuRollForwardIntegrationTest
         ignorePsidCheck = true,
         sequencerLsuStateTsOverride = Some(lastSequencerObservedTimeS2),
       )
+
+      // Stop mediator3 and mediator4 earlier to avoid the warnings when the test environment
+      // finally tears them down at the end of all tests.
+      loggerFactory.assertLogsUnorderedOptional(
+        {
+          mediator3.stop()
+          mediator4.stop()
+        },
+        optionalUngracefulShutdownWarning,
+      )
+
     }
 
     "LSU sequencing test can be performed on the new synchronizer" in { implicit env =>
@@ -633,7 +697,7 @@ abstract class LsuRollForwardIntegrationTest
 
         val upgradeTime1 = cleanSynchronizerIndex(participant1).recordTime
 
-        loggerFactory.assertLogs(
+        loggerFactory.assertLogsUnorderedOptional(
           participant1.synchronizers.perform_manual_lsu(
             currentPsid = fixture2.currentPsid,
             successorPsid = fixture2.newPsid,
@@ -641,9 +705,8 @@ abstract class LsuRollForwardIntegrationTest
             sequencerSuccessors =
               Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
           ),
-          _.warningMessage should include(
-            s"Missing successor information for the following sequencers: Set($sequencer2). They will be removed from the pool of sequencers."
-          ),
+          requiredMissingSuccessorWarning(sequencer2),
+          optionalUngracefulShutdownWarning,
         )
 
         val upgradeTime2 = cleanSynchronizerIndex(participant2).recordTime
@@ -652,7 +715,9 @@ abstract class LsuRollForwardIntegrationTest
           SuppressionRule.Level(Level.DEBUG) && SuppressionRule
             .forLogger[TrafficStateController] && SuppressionRule.LoggerNameContains(
             s"participant=participant2"
-          )
+          ) || (SuppressionRule.Level(Level.WARN) && SuppressionRule.LoggerNameContains(
+            "GrpcConnection"
+          ))
         )(
           participant2.synchronizers.perform_manual_lsu(
             currentPsid = fixture2.currentPsid,
@@ -691,11 +756,15 @@ abstract class LsuRollForwardIntegrationTest
           Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
       )
 
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
+      loggerFactory.assertThrowsAndLogsUnorderedOptional[CommandFailure](
         performManualLsu(),
-        _.errorMessage should include(
-          "Not enough successors sequencers (1) to meet the sequencer threshold (2)"
+        (
+          LogEntryOptionality.Required,
+          _.errorMessage should include(
+            "Not enough successors sequencers (1) to meet the sequencer threshold (2)"
+          ),
         ),
+        optionalUngracefulShutdownWarning,
       )
 
       // Decrease the threshold from 2 to 1...
@@ -705,20 +774,22 @@ abstract class LsuRollForwardIntegrationTest
       )
 
       // ... so that manual LSU succeeds
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogsUnorderedOptional(
         performManualLsu(),
-        _.warningMessage should include(
-          s"Missing successor information for the following sequencers: Set($sequencer2). They will be removed from the pool of sequencers."
-        ),
+        requiredMissingSuccessorWarning(sequencer2),
+        optionalUngracefulShutdownWarning,
       )
 
       // idempotency test
-      participant3.synchronizers.perform_manual_lsu(
-        currentPsid = fixture2.currentPsid,
-        successorPsid = fixture2.newPsid,
-        upgradeTime = Option.when(isOnline)(upgradeTime3),
-        sequencerSuccessors =
-          Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+      loggerFactory.assertLogsUnorderedOptional(
+        participant3.synchronizers.perform_manual_lsu(
+          currentPsid = fixture2.currentPsid,
+          successorPsid = fixture2.newPsid,
+          upgradeTime = Option.when(isOnline)(upgradeTime3),
+          sequencerSuccessors =
+            Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+        ),
+        optionalUngracefulShutdownWarning,
       )
     }
 
@@ -771,21 +842,27 @@ abstract class LsuRollForwardIntegrationTest
         )
 
       // idempotency after some activity
-      participant3.synchronizers.perform_manual_lsu(
-        currentPsid = fixture2.currentPsid,
-        successorPsid = fixture2.newPsid,
-        upgradeTime = Option.when(isOnline)(upgradeTime3),
-        sequencerSuccessors =
-          Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+      loggerFactory.assertLogsUnorderedOptional(
+        participant3.synchronizers.perform_manual_lsu(
+          currentPsid = fixture2.currentPsid,
+          successorPsid = fixture2.newPsid,
+          upgradeTime = Option.when(isOnline)(upgradeTime3),
+          sequencerSuccessors =
+            Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+        ),
+        optionalUngracefulShutdownWarning,
       )
 
       // idempotency using recent timestamp
-      participant3.synchronizers.perform_manual_lsu(
-        currentPsid = fixture2.currentPsid,
-        successorPsid = fixture2.newPsid,
-        upgradeTime = cleanSynchronizerIndex(participant3).recordTime.some,
-        sequencerSuccessors =
-          Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+      loggerFactory.assertLogsUnorderedOptional(
+        participant3.synchronizers.perform_manual_lsu(
+          currentPsid = fixture2.currentPsid,
+          successorPsid = fixture2.newPsid,
+          upgradeTime = cleanSynchronizerIndex(participant3).recordTime.some,
+          sequencerSuccessors =
+            Map(sequencer1.id -> sequencer5.sequencerConnection.transformInto[GrpcConnection]),
+        ),
+        optionalUngracefulShutdownWarning,
       )
     }
   }

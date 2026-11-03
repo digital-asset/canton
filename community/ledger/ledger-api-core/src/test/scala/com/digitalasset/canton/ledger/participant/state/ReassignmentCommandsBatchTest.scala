@@ -26,8 +26,8 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
       Source(synchronizerId(1)),
       Target(synchronizerId(2)),
       cid1,
-      rpId,
-      rpId,
+      Source(rpId),
+      Target(rpId),
     )
   private val assign = ReassignmentCommand.Assign(
     Source(synchronizerId(1)),
@@ -46,8 +46,8 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
           source = unassign.sourceSynchronizer,
           target = unassign.targetSynchronizer,
           contractIds = NonEmpty.mk(Seq, unassign.contractId),
-          overrideSourceValidationPkgIds = Map.empty,
-          overrideTargetValidationPkgIds = Map.empty,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
         )
       )
     }
@@ -73,8 +73,8 @@ class ReassignmentCommandsBatchTest extends AnyWordSpec with Matchers {
           source = unassign.sourceSynchronizer,
           target = unassign.targetSynchronizer,
           contractIds = NonEmpty.apply(Seq, cid1, cid2, cid3),
-          overrideSourceValidationPkgIds = Map.empty,
-          overrideTargetValidationPkgIds = Map.empty,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
         )
       )
     }

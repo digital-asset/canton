@@ -11,9 +11,11 @@ import scala.util.matching.Regex
 object ResourceAnnotationValidator {
 
   // NOTE: These constraints are based on constraints K8s uses for their annotations and labels
-  private val NamePattern = "([a-zA-Z0-9]+[a-zA-Z0-9-]*)?[a-zA-Z0-9]+"
-  private val KeySegmentRegex: Regex = "^([a-zA-Z0-9]+[a-zA-Z0-9.\\-_]*)?[a-zA-Z0-9]+$".r
-  private val DnsSubdomainRegex: Regex = ("^(" + NamePattern + "[.])*" + NamePattern + "$").r
+  // NOTE: The patterns are written so that every character can be matched in only one way,
+  // avoiding catastrophic (polynomial) backtracking on long or near-matching inputs.
+  private val NamePattern = "[a-zA-Z0-9]+(-+[a-zA-Z0-9]+)*"
+  private val KeySegmentRegex: Regex = "^[a-zA-Z0-9]+([._-]+[a-zA-Z0-9]+)*$".r
+  private val DnsSubdomainRegex: Regex = ("^" + NamePattern + "([.]" + NamePattern + ")*$").r
   val MaxAnnotationsSizeInKiloBytes: Int = 256
   private val MaxAnnotationsSizeInBytes: Int = MaxAnnotationsSizeInKiloBytes * 1024
 
@@ -46,19 +48,17 @@ object ResourceAnnotationValidator {
   def validateAnnotationsFromApiRequest(
       annotations: Map[String, String],
       allowEmptyValues: Boolean,
-  ): Either[MetadataAnnotationsError, Unit] = {
-    val nonEmptyValued = annotations.view.filter { case (_, value) => value.nonEmpty }.toMap
+  ): Either[MetadataAnnotationsError, Unit] =
     for {
       _ <-
         Either.cond(
-          isWithinMaxAnnotationsByteSize(nonEmptyValued),
+          isWithinMaxAnnotationsByteSize(annotations),
           (),
           AnnotationsSizeExceededError,
         )
       _ <- validateAnnotationKeys(annotations)
       _ <- if (allowEmptyValues) Either.unit else validateAnnotationsValues(annotations)
     } yield ()
-  }
 
   private def validateAnnotationsValues(
       annotations: Map[String, String]
@@ -82,7 +82,8 @@ object ResourceAnnotationValidator {
     }
 
   private def isValidKey(key: String): Either[MetadataAnnotationsError, Unit] =
-    key.split('/') match {
+    // Use a negative limit so that trailing empty segments are kept (e.g. "a/" must be rejected)
+    key.split("/", -1) match {
       case Array(name) => isValidKeyNameSegment(name)
       case Array(prefix, name) =>
         for {

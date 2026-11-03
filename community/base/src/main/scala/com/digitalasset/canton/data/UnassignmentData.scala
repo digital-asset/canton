@@ -33,12 +33,12 @@ final case class UnassignmentData(
     targetTimestamp: Target[CantonTimestamp],
     // Data unknown by the submitter
     unassignmentTs: CantonTimestamp,
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      UnassignmentData.type
+    ]
 ) extends HasProtocolVersionedWrapper[UnassignmentData] {
   @transient override protected lazy val companionObj: UnassignmentData.type = UnassignmentData
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    UnassignmentData.type
-  ] = UnassignmentData.protocolVersionRepresentativeFor(sourcePsid.unwrap.protocolVersion)
 
   lazy val reassignmentId: ReassignmentId = ReassignmentId(
     sourcePsid.map(_.logical),
@@ -48,6 +48,25 @@ final case class UnassignmentData(
   )
 
   def stakeholders: Stakeholders = contractsBatch.stakeholders
+
+  def copy(
+      submitterMetadata: ReassignmentSubmitterMetadata = this.submitterMetadata,
+      contractsBatch: ContractsReassignmentBatch = this.contractsBatch,
+      reassigningParticipants: Set[ParticipantId] = this.reassigningParticipants,
+      sourcePsid: Source[PhysicalSynchronizerId] = this.sourcePsid,
+      targetPsid: Target[PhysicalSynchronizerId] = this.targetPsid,
+      targetTimestamp: Target[CantonTimestamp] = this.targetTimestamp,
+      unassignmentTs: CantonTimestamp = this.unassignmentTs,
+  ): UnassignmentData =
+    UnassignmentData(
+      submitterMetadata,
+      contractsBatch,
+      reassigningParticipants,
+      sourcePsid,
+      targetPsid,
+      targetTimestamp,
+      unassignmentTs,
+    )(representativeProtocolVersion)
 
   def toProtoV30: v30.UnassignmentData = v30.UnassignmentData(
     submitterMetadata = submitterMetadata.toProtoV30.some,
@@ -101,6 +120,10 @@ object UnassignmentData
     targetPsid = unassignmentRequest.targetSynchronizer,
     unassignmentTs = unassignmentTs,
     targetTimestamp = unassignmentRequest.targetTimestamp,
+  )(
+    UnassignmentData.protocolVersionRepresentativeFor(
+      unassignmentRequest.sourceSynchronizer.unwrap.protocolVersion
+    )
   )
 
   private def fromProto[P](
@@ -113,6 +136,7 @@ object UnassignmentData
       targetTimestampP: Option[com.google.protobuf.timestamp.Timestamp],
       unassignmentTsP: Option[com.google.protobuf.timestamp.Timestamp],
       parseContract: P => ParsingResult[ContractReassignment],
+      representativeProtocolVersion: RepresentativeProtocolVersion[UnassignmentData.type],
   ): ParsingResult[UnassignmentData] = for {
     submitterMetadata <- ProtoConverter.parseRequired(
       ReassignmentSubmitterMetadata.fromProtoV30(pvv, _),
@@ -180,29 +204,34 @@ object UnassignmentData
     targetPsid = targetSynchronizer,
     targetTimestamp = targetTimestamp,
     unassignmentTs = unassignmentTs,
-  )
+  )(representativeProtocolVersion)
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
       proto: v30.UnassignmentData,
   ): ParsingResult[UnassignmentData] =
-    fromProto(
-      pvv,
-      proto.submitterMetadata,
-      proto.contracts,
-      proto.reassigningParticipantUids,
-      proto.sourcePhysicalSynchronizerId,
-      proto.targetPhysicalSynchronizerId,
-      proto.targetTimestamp,
-      proto.unassignmentTs,
-      ContractReassignment.fromProtoV30,
-    )
+    for {
+      rpv <- UnassignmentData.protocolVersionRepresentativeFor(ProtoVersion(30))
+      parsed <- fromProto(
+        pvv,
+        proto.submitterMetadata,
+        proto.contracts,
+        proto.reassigningParticipantUids,
+        proto.sourcePhysicalSynchronizerId,
+        proto.targetPhysicalSynchronizerId,
+        proto.targetTimestamp,
+        proto.unassignmentTs,
+        ContractReassignment.fromProtoV30,
+        rpv,
+      )
+    } yield parsed
 
   private def fromProtoV31(
       pvv: ProtocolVersionValidation,
       proto: v31.UnassignmentData,
-  ): ParsingResult[UnassignmentData] =
-    fromProto(
+  ): ParsingResult[UnassignmentData] = for {
+    rpv <- UnassignmentData.protocolVersionRepresentativeFor(ProtoVersion(31))
+    parsed <- fromProto(
       pvv,
       proto.submitterMetadata,
       proto.contracts,
@@ -212,7 +241,9 @@ object UnassignmentData
       proto.targetTimestamp,
       proto.unassignmentTs,
       ContractReassignment.fromProtoV31(pvv),
+      rpv,
     )
+  } yield parsed
 
   sealed trait ReassignmentGlobalOffset extends Product with Serializable {
     def merge(other: ReassignmentGlobalOffset): Either[String, ReassignmentGlobalOffset]

@@ -14,6 +14,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  ListAccountsRequest,
+  ListAccountsResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   PruneRequest,
   PruneResponse,
   TrafficServiceGrpc,
@@ -21,12 +25,14 @@ import com.digitalasset.canton.tea.v1.{
   UpdateAccountResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ApiDeprecation
 import io.circe.Codec
 import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
 import sttp.tapir.server.ServerEndpoint
 
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 @SuppressWarnings(Array("com.digitalasset.canton.DirectGrpcServiceInvocation"))
@@ -46,12 +52,20 @@ class JsTrafficService(
         getAccount,
       ),
       withServerLogic(
+        JsTrafficService.listAccountsEndpoint,
+        listAccounts,
+      ),
+      withServerLogic(
         JsTrafficService.updateAccountEndpoint,
         updateAccount,
       ),
       withServerLogic(
         JsTrafficService.pruneEndpoint,
         prune,
+      ),
+      withServerLogic(
+        JsTrafficService.pruneEventsEndpoint,
+        pruneEvents,
       ),
     )
 
@@ -61,6 +75,23 @@ class JsTrafficService(
     implicit val tc: TraceContext = callerContext.traceContext()
     trafficServiceClient(callerContext.token())
       .getAccount(GetAccountRequest(accountId = req.in))
+      .resultToRight
+  }
+
+  private def listAccounts(
+      callerContext: CallerContext
+  ): TracedInput[PagedList[Option[String]]] => Future[
+    Either[JsCantonError, ListAccountsResponse]
+  ] = { req =>
+    implicit val tc: TraceContext = callerContext.traceContext()
+    trafficServiceClient(callerContext.token())
+      .listAccounts(
+        ListAccountsRequest(
+          pageSize = req.in.pageSize,
+          pageToken = req.in.pageToken,
+          accountIdPrefix = req.in.input,
+        )
+      )
       .resultToRight
   }
 
@@ -81,6 +112,17 @@ class JsTrafficService(
     trafficServiceClient(callerContext.token())
       .prune(req.in)
       .resultToRight
+  }
+
+  @nowarn("cat=deprecation")
+  private def pruneEvents(
+      callerContext: CallerContext
+  ): TracedInput[PruneEventsRequest] => Future[Either[JsCantonError, PruneEventsResponse]] = {
+    req =>
+      implicit val tc: TraceContext = callerContext.traceContext()
+      trafficServiceClient(callerContext.token())
+        .pruneEvents(req.in)
+        .resultToRight
   }
 
   private def trafficServiceClient(token: Option[String])(implicit
@@ -111,6 +153,24 @@ object JsTrafficService extends DocumentationEndpoints {
                         |$TrafficEndpointEnablementNote
        """.stripMargin.trim)
 
+  private val listAccountsEndpoint =
+    traffic.get
+      .in("accounts")
+      .in(
+        query[Option[String]]("accountIdPrefix").description(
+          "only list accounts whose ID starts with this prefix, leave out to list all accounts"
+        )
+      )
+      .inPagedListParams()
+      .out(jsonBody[ListAccountsResponse])
+      .description(s"""|
+                       |${createProtoRef(
+          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_LIST_ACCOUNTS
+        )}
+                       |
+                       |$TrafficEndpointEnablementNote
+       """.stripMargin.trim)
+
   private val updateAccountEndpoint =
     traffic.post
       .in("accounts")
@@ -137,10 +197,29 @@ object JsTrafficService extends DocumentationEndpoints {
                        |$TrafficEndpointEnablementNote
        """.stripMargin.trim)
 
+  private val pruneEventsEndpoint =
+    traffic.post
+      .in("events" / "prune")
+      .in(jsonBody[PruneEventsRequest])
+      .out(jsonBody[PruneEventsResponse])
+      .deprecated()
+      .description(s"""|
+                       |Served by POST /v2/traffic/prune, and returns only the number of pruned events.
+                       |Permissioned only to Ledger API admin users.
+                       |
+                       |${ApiDeprecation.Canton37.Endpoints.documentationNotice(
+          "POST /v2/traffic/prune"
+        )}
+                       |
+                       |$TrafficEndpointEnablementNote
+       """.stripMargin.trim)
+
   override def documentation: Seq[AnyEndpoint] = List(
     getAccountEndpoint,
+    listAccountsEndpoint,
     updateAccountEndpoint,
     pruneEndpoint,
+    pruneEventsEndpoint,
   )
 }
 
@@ -148,8 +227,11 @@ object JsTrafficServiceCodecs {
   import JsSchema.config
 
   implicit val getAccountResponseRW: Codec[GetAccountResponse] = deriveRelaxedCodec
+  implicit val listAccountsResponseRW: Codec[ListAccountsResponse] = deriveRelaxedCodec
   implicit val updateAccountRequestRW: Codec[UpdateAccountRequest] = deriveRelaxedCodec
   implicit val updateAccountResponseRW: Codec[UpdateAccountResponse] = deriveRelaxedCodec
   implicit val pruneRequestRW: Codec[PruneRequest] = deriveRelaxedCodec
   implicit val pruneResponseRW: Codec[PruneResponse] = deriveRelaxedCodec
+  implicit val pruneEventsRequestRW: Codec[PruneEventsRequest] = deriveRelaxedCodec
+  implicit val pruneEventsResponseRW: Codec[PruneEventsResponse] = deriveRelaxedCodec
 }

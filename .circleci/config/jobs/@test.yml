@@ -324,6 +324,7 @@ nightly_cn_topology_snapshot_test_only:
         num_test_buckets: "4"
         num_parallel_tasks: "1"
         timeout: "240m" # Very large timeout on purpose, because topology validation can take a long time
+    - slack_red_main_with_volunteer
 
 nightly_integration_test_sequencer_only:
   executor: canton-xlarge-docker-with-postgres-toxiproxy

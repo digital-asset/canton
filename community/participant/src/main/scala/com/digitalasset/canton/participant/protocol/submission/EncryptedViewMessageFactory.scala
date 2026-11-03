@@ -106,7 +106,6 @@ object EncryptedViewMessageFactory {
               cryptoSnapshot.pureCrypto,
               sessionKey,
               viewType,
-              protocolVersion,
             )(
               viewTrees,
               MaxBytesToDecompress(maxRequestSize.value),

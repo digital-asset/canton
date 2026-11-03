@@ -424,92 +424,97 @@ trait AuthenticationTokenIntegrationTest
         implicit env =>
           import env.*
 
-          // Activate synchronizer restrictions (allowlist only) and enable p1 on the synchronizer
-          // setup: Enable restrictions and grant permission
-          sequencer1.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen),
-            mustFullyAuthorize = true,
-          )
-          sequencer1.topology.participant_synchronizer_permissions.propose(
-            daId,
-            participant1,
-            ParticipantPermission.Submission,
-            loginAfter = None, // restore loginAfter to None
-            mustFullyAuthorize = true,
-          )
+          // Avoid participant1 resubscribing while the revoke in this test takes effect - it was flaky.
+          withParticipant1Disconnected {
+            // Activate synchronizer restrictions (allowlist only) and enable p1 on the synchronizer
+            // setup: Enable restrictions and grant permission
+            sequencer1.topology.synchronizer_parameters.propose_update(
+              daId,
+              _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen),
+              mustFullyAuthorize = true,
+            )
+            sequencer1.topology.participant_synchronizer_permissions.propose(
+              daId,
+              participant1,
+              ParticipantPermission.Submission,
+              loginAfter = None, // restore loginAfter to None
+              mustFullyAuthorize = true,
+            )
 
-          // Active member gets a valid token
-          val crypto = SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1)
-          val validToken = requestToken(daId, participant1, crypto).futureValueUS.value
+            // Active member gets a valid token
+            val crypto = SynchronizerCrypto(participant1.crypto, staticSynchronizerParameters1)
+            val validToken = requestToken(daId, participant1, crypto).futureValueUS.value
 
-          // Test that the existing token is accepted by the sequencer
-          assertRefused(
-            sendSubmissionUsingToken(daId, participant1, validToken)
-          )
+            // Test that the existing token is accepted by the sequencer
+            assertRefused(
+              sendSubmissionUsingToken(daId, participant1, validToken)
+            )
 
-          // revoke the participant permission and verify refusal
-          // wrap the whole block after revoke to suppress background "unable to find participantSynchronizerPermissions..." warnings
-          loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            {
-              sequencer1.topology.participant_synchronizer_permissions.revoke(
-                synchronizerId = daId,
-                participantId = participant1.id,
-              )
+            // revoke the participant permission and verify refusal
+            // wrap the whole block after revoke to suppress background "unable to find participantSynchronizerPermissions..." warnings
+            loggerFactory.assertLoggedWarningsAndErrorsSeq(
+              {
+                sequencer1.topology.participant_synchronizer_permissions.revoke(
+                  synchronizerId = daId,
+                  participantId = participant1.id,
+                )
 
-              sequencer1.topology.synchronisation.await_idle()
+                sequencer1.topology.synchronisation.await_idle()
 
-              // check to make sure the state is reached and no permissions exist
-              eventually() {
-                sequencer1.topology.participant_synchronizer_permissions
-                  .find(daId, participant1.id) shouldBe empty
-              }
+                // check to make sure the state is reached and no permissions exist
+                eventually() {
+                  sequencer1.topology.participant_synchronizer_permissions
+                    .find(daId, participant1.id) shouldBe empty
+                }
 
-              // Test the existing token
-              // the Sequencer should now reject it because the member is disabled
-              assertUnauthenticated(
-                sendSubmissionUsingToken(daId, participant1, validToken)
-              )
+                // Test the existing token
+                // the Sequencer should now reject it because the member is disabled
+                assertUnauthenticated(
+                  sendSubmissionUsingToken(daId, participant1, validToken)
+                )
 
-              // Test if the participant can get a new token
-              val newAttempt = requestToken(daId, participant1, crypto).value.futureValueUS
+                // Test if the participant can get a new token
+                val newAttempt = requestToken(daId, participant1, crypto).value.futureValueUS
 
-              inside(newAttempt) { case Left(status) =>
-                status.getCode shouldBe Code.PERMISSION_DENIED
-              }
+                inside(newAttempt) { case Left(status) =>
+                  status.getCode shouldBe Code.PERMISSION_DENIED
+                }
 
-              // restore UnrestrictedOpen permissions in the test environment
-              sequencer1.topology.synchronizer_parameters.propose_update(
-                daId,
-                _.update(onboardingRestriction = UnrestrictedOpen),
-                mustFullyAuthorize = true,
-              )
-              sequencer1.topology.synchronisation.await_idle()
+                // restore UnrestrictedOpen permissions in the test environment
+                sequencer1.topology.synchronizer_parameters.propose_update(
+                  daId,
+                  _.update(onboardingRestriction = UnrestrictedOpen),
+                  mustFullyAuthorize = true,
+                )
+                sequencer1.topology.synchronisation.await_idle()
 
-              // reactivate the participant
-              sequencer1.topology.participant_synchronizer_permissions.propose(
-                daId,
-                participant1,
-                ParticipantPermission.Submission,
-                loginAfter = None,
-                mustFullyAuthorize = true,
-              )
-              sequencer1.topology.synchronisation.await_idle()
-            },
-            LogEntry.assertLogSeq(
-              mustContainWithClue = Seq.empty,
-              mayContain = Seq(
-                _.warningMessage should include("Unable to find ParticipantSynchronizerPermission"),
-                _.warningMessage should include("PERMISSION_DENIED"),
-                _.warningMessage should include("SYNC_SERVICE_SYNCHRONIZER_DISABLED_US"),
-                _.warningMessage should include("Failed to establish subscription for"),
-                _.warningMessage should include("Permanently closing sequencer subscription"),
-                _.warningMessage should include(
-                  "rejected our subscription attempt with permission denied"
+                // reactivate the participant
+                sequencer1.topology.participant_synchronizer_permissions.propose(
+                  daId,
+                  participant1,
+                  ParticipantPermission.Submission,
+                  loginAfter = None,
+                  mustFullyAuthorize = true,
+                )
+                sequencer1.topology.synchronisation.await_idle()
+              },
+              LogEntry.assertLogSeq(
+                mustContainWithClue = Seq.empty,
+                mayContain = Seq(
+                  _.warningMessage should include(
+                    "Unable to find ParticipantSynchronizerPermission"
+                  ),
+                  _.warningMessage should include("PERMISSION_DENIED"),
+                  _.warningMessage should include("SYNC_SERVICE_SYNCHRONIZER_DISABLED_US"),
+                  _.warningMessage should include("Failed to establish subscription for"),
+                  _.warningMessage should include("Permanently closing sequencer subscription"),
+                  _.warningMessage should include(
+                    "rejected our subscription attempt with permission denied"
+                  ),
                 ),
               ),
-            ),
-          )
+            )
+          }
       }
     }
 
@@ -718,6 +723,16 @@ trait AuthenticationTokenIntegrationTest
     inside(outcome.failed.futureValue) { case sre: StatusRuntimeException =>
       sre.getStatus.getCode shouldBe SubmissionRequestRefused.category.grpcCode.value
     }
+
+  private def withParticipant1Disconnected(test: => Unit)(implicit env: FixtureParam): Unit = {
+    import env.*
+
+    participant1.synchronizers.disconnect_all()
+    test
+    participant1.synchronizers.reconnect_all()
+
+    assertPingSucceeds(participant1, participant1)
+  }
 
   // helper for removal of individual sequencers and mediators from their groups
   // do not use for participants

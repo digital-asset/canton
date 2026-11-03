@@ -10,8 +10,9 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveDouble}
 import com.digitalasset.canton.ledger.participant.state.ChangeId
+import com.digitalasset.canton.ledger.participant.state.SyncService.CostEstimateWithReassignments
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.*
@@ -32,9 +33,9 @@ import scala.concurrent.ExecutionContext
 
 trait TrafficEnforcementBackend {
 
-  /** Stores the account to charge and checks if its balance covers `trafficCost` when enforced.
-    * Called just before sending the confirmation request. TEA errors return as `Left`, not failed
-    * futures.
+  /** Stores the account to charge and checks if its balance covers `trafficCost` when enforced and
+    * `checkBalance` is set. Called just before sending the confirmation request. TEA errors return
+    * as `Left`, not failed futures.
     */
   def registerSubmission(
       info: SubmissionAccountingInfo,
@@ -43,15 +44,30 @@ trait TrafficEnforcementBackend {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit]
 
-  /** Checks if the selected account's balance covers the estimated cost, without storing anything.
-    * Used when preparing an interactive submission.
+  /** Checks if the selected account's balance covers the total estimated cost, scaled using
+    * [[scaleEstimate]], without storing anything. Used during interactive preparation and before
+    * routing transactions that need reassignments. TEA errors return as `Left`, not failed futures.
     */
   def checkEstimatedCost(
       accounting: SubmissionAccounting,
-      estimatedCost: Long,
+      estimate: CostEstimateWithReassignments,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit]
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit]
+
+  /** Whether we need to check the balance in [[checkEstimatedCost]]. If not, callers can skip
+    * estimation.
+    */
+  def checksBalance(accounting: SubmissionAccounting): Boolean =
+    enforceCostOnSubmissions && (accounting.selection match {
+      case _: TrafficAccountSelection.Explicit | _: TrafficAccountSelection.FallbackParty => true
+      case _: TrafficAccountSelection.AdminFallback | TrafficAccountSelection.NoAccount => false
+    })
+
+  /** Multiplies an estimated cost by the configured estimate multiplier, rounded up. */
+  def scaleEstimate(cost: Long): Long
+
+  def enforceCostOnSubmissions: Boolean
 
   def adminParty: LfPartyId
 
@@ -62,8 +78,9 @@ trait TrafficEnforcementBackend {
   * submission requests in the Phase 1 of the Canton protocol.
   *
   * @param enforceCostOnSubmissions
-  *   Whether to check the account balance when registering a submission. When disabled, the
-  *   submission is still registered, just without a balance check.
+  *   Whether to check the account balance when registering a submission. When disabled, or when the
+  *   submission's `checkBalance` is false, the submission is still registered, just without a
+  *   balance check.
   * @param rejectMultiPartySubmissions
   *   Whether to reject submissions without an account whose actAs has more than one party (or
   *   none), instead of registering them with a no-account marker.
@@ -71,13 +88,16 @@ trait TrafficEnforcementBackend {
   *   Whether to let submissions proceed if account lookup or registration fails without a response
   *   from the traffic service. Correlation conflicts and refusals still fail the submission.
   *   No-account marker writes are always best effort.
+  * @param estimateMultiplier
+  *   Scales estimated costs before they're checked or returned to clients.
   * @param trafficServiceClient
   *   The traffic service client used to communicate with the traffic enforcement server.
   */
 class TrafficEnforcementBackendImpl(
-    enforceCostOnSubmissions: Boolean,
+    override val enforceCostOnSubmissions: Boolean,
     rejectMultiPartySubmissions: Boolean,
     allowSubmissionsOnDegradation: Boolean,
+    estimateMultiplier: PositiveDouble,
     override val trafficServiceClient: RichTrafficServiceClient,
     override val adminParty: LfPartyId,
     metrics: TrafficEnforcementMetrics,
@@ -120,7 +140,7 @@ class TrafficEnforcementBackendImpl(
       errorLoggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
     logger.debug(
-      s"Registering submission ${info.submissionId} with ${info.accounting.selection}, trafficCost: $trafficCost"
+      s"Registering submission ${info.submissionId} with ${info.accounting.selection}, checkBalance: ${info.accounting.checkBalance}, trafficCost: $trafficCost"
     )
     def send(
         accountId: Option[String],
@@ -141,7 +161,12 @@ class TrafficEnforcementBackendImpl(
 
     def forAccount(accountId: String): EitherT[FutureUnlessShutdown, RpcError, Unit] =
       if (enforceCostOnSubmissions)
-        send(Some(accountId), Some(trafficCost), TrafficEnforcementOutcome.Accepted, None)
+        send(
+          Some(accountId),
+          Option.when(info.accounting.checkBalance)(trafficCost),
+          TrafficEnforcementOutcome.Accepted,
+          None,
+        )
       else
         send(
           Some(accountId),
@@ -261,23 +286,34 @@ class TrafficEnforcementBackendImpl(
 
   override def checkEstimatedCost(
       accounting: SubmissionAccounting,
-      estimatedCost: Long,
+      estimate: CostEstimateWithReassignments,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
       withSpan(TrafficEnforcementBackend.CheckEstimatedCostSpanName) { spanTraceContext => span =>
-        decide(accounting, estimatedCost, span)(spanTraceContext, errorLoggingContext)
+        decide(accounting, scaleEstimate(estimate.total.value), span)(
+          spanTraceContext,
+          errorLoggingContext,
+        )
       },
       labelMapping = {
+        case Left(e) if e.code.category.redactDetails => TrafficEnforcementOutcome.Failed
         case Left(e) => e.code.id
         case Right(_) => "success"
       },
       failedStatus = TrafficEnforcementOutcome.Failed,
     )
   }
+
+  // Compute in decimal, because in Double 100 * 1.1 rounds up to 111.
+  override def scaleEstimate(cost: Long): Long =
+    (BigDecimal(cost) * BigDecimal(estimateMultiplier.value))
+      .setScale(0, BigDecimal.RoundingMode.CEILING)
+      .min(BigDecimal(Long.MaxValue))
+      .toLong
 
   private def decide(
       accounting: SubmissionAccounting,
@@ -286,7 +322,7 @@ class TrafficEnforcementBackendImpl(
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
     logger.debug(
       s"Validating traffic enforcement for ${accounting.selection}, trafficCost: $trafficCost"
     )
@@ -310,7 +346,7 @@ class TrafficEnforcementBackendImpl(
           rejectNoAccount(
             span,
             "Traffic enforcement rejected submission with non-singleton actAs parties",
-          ): TrafficEnforcementErrors.TrafficEnforcementError
+          ): RpcError
         )
       case TrafficAccountSelection.NoAccount =>
         logger.info(
@@ -343,7 +379,7 @@ class TrafficEnforcementBackendImpl(
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] =
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     if (!enforceCostOnSubmissions) {
       recordOutcome(
         span,
@@ -356,23 +392,21 @@ class TrafficEnforcementBackendImpl(
         trafficServiceClient
           .getAccount(GetAccountRequest(accountId))
           .value
-          .flatMap[Either[TrafficEnforcementErrors.TrafficEnforcementError, Unit]] {
+          .map[Either[RpcError, Unit]] {
             case Right(account) if account.balance >= trafficCost =>
               recordOutcome(span, TrafficEnforcementOutcome.Accepted)
-              FutureUnlessShutdown.pure(Right(()))
+              Right(())
             case Right(account) =>
               recordOutcome(
                 span,
                 TrafficEnforcementOutcome.Rejected,
                 Some(TrafficEnforcementOutcome.InsufficientBalance),
               )
-              FutureUnlessShutdown.pure(
-                Left(
-                  TrafficEnforcementErrors.InsufficientBalance.Reject(
-                    accountId = accountId,
-                    balance = account.balance,
-                    trafficCost = trafficCost,
-                  )
+              Left(
+                TrafficEnforcementErrors.InsufficientBalance.EstimateReject(
+                  accountId = accountId,
+                  balance = account.balance,
+                  estimatedCost = trafficCost,
                 )
               )
             case Left(grpcError)
@@ -387,15 +421,15 @@ class TrafficEnforcementBackendImpl(
                 s"Traffic enforcement account lookup failed for account $accountId; degrading" +
                   " and allowing the submission to proceed without a balance check.",
               )
-              FutureUnlessShutdown.pure(Right(()))
+              Right(())
             case Left(grpcError) =>
+              span.recordException(grpcError.asRuntimeException)
               recordOutcome(
                 span,
                 TrafficEnforcementOutcome.Failed,
                 Some(TrafficEnforcementOutcome.LookupFailed),
               )
-              // The span picks up the exception and the ERROR status from closeSpan as it propagates.
-              FutureUnlessShutdown.failed(RichTrafficServiceClient.normalizeTeaError(grpcError))
+              Left(RichTrafficServiceClient.normalizeTeaErrorToRpcError(grpcError))
           }
       )
 
@@ -460,6 +494,7 @@ object TrafficEnforcementBackend {
       enforceCostOnSubmissions: Boolean,
       rejectMultiPartySubmissions: Boolean,
       allowSubmissionsOnDegradation: Boolean,
+      estimateMultiplier: PositiveDouble,
       trafficEnforcementServerConfig: TrafficEnforcementServerConfig,
       instanceName: InstanceName,
       ledgerApiPort: Port,
@@ -485,6 +520,7 @@ object TrafficEnforcementBackend {
       enforceCostOnSubmissions,
       rejectMultiPartySubmissions,
       allowSubmissionsOnDegradation,
+      estimateMultiplier,
       trafficServiceClient,
       adminParty,
       metrics,

@@ -10,12 +10,10 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v32}
-import com.digitalasset.canton.sequencing.protocol.CompressionAlgorithm.ZSTD
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{MediatorId, Member}
 import com.digitalasset.canton.util.ByteStringUtil
-import com.digitalasset.canton.util.CompressionAlgo.Zstd as AlgoZstd
 import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
@@ -81,9 +79,7 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
       compressedRecipients = ByteStringUtil.compressZstd(
         checkedToByteString(decompressedRecipients)
       ),
-      compressedEnvelopes = envelopes.map(
-        _.toClosedCompressedEnvelope(AlgoZstd).bytes
-      ),
+      compressedEnvelopes = envelopes.map(_.toClosedCompressedEnvelope.bytes),
     )
   }
 
@@ -179,7 +175,6 @@ object Batch
 
       // The recipients blob is always bounded on its own.
       decompressedRecipientsBytes <- decompress(
-        ZSTD,
         compressedRecipientsP,
         DecompressionBudget(decompressionPolicy.limit),
       )
@@ -215,7 +210,6 @@ object Batch
           ClosedCompressedEnvelope.create(
             envelopes,
             recipients,
-            ZSTD,
           )(
             allocator.nextEnvelopeBudget(),
             pvv,
@@ -232,15 +226,10 @@ object Batch
   }
 
   private[protocol] def decompress(
-      algorithm: CompressionAlgorithm,
       compressed: ByteString,
       decompressionBudget: DecompressionBudget,
   ): ParsingResult[ByteString] =
-    algorithm match {
-      case CompressionAlgorithm.Unspecified => Right(compressed)
-      case CompressionAlgorithm.GZIP => decompressionBudget.decompressGzip(compressed)
-      case CompressionAlgorithm.ZSTD => decompressionBudget.decompressZstd(compressed)
-    }
+    decompressionBudget.decompressZstd(compressed)
 
   /** Rebinds the deferred decompression of the batch's envelopes to the given policy. */
   def withDecompressionPolicy(

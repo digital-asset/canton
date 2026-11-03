@@ -12,7 +12,7 @@ object TestSubmissionTrackingData {
   import BaseTest.*
 
   lazy val default: SubmissionTrackingData =
-    TransactionSubmissionTrackingData(
+    TransactionSubmissionTrackingData.create(
       DefaultParticipantStateValues
         .completionInfo(List.empty, paidTrafficCost = NonNegativeLong.tryCreate(12356)),
       TransactionSubmissionTrackingData.TimeoutCause,

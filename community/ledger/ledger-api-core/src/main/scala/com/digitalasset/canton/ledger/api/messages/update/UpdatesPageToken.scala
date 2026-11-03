@@ -10,7 +10,11 @@ import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidator.Result
-import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ParticipantOffsetValidator}
+import com.digitalasset.canton.ledger.api.validation.{
+  FieldValidator,
+  LedgerApiSizeLimitsConfig,
+  ParticipantOffsetValidator,
+}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
@@ -120,9 +124,17 @@ object UpdatesPageToken {
   def validateToken(
       request: update_service.GetUpdatesPageRequest,
       participantId: Ref.ParticipantId,
-  )(implicit errorLoggingContext: ErrorLoggingContext): Result[Option[UpdatesPageToken]] =
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Result[Option[UpdatesPageToken]] =
     request.pageToken.traverse { token =>
       for {
+        _ <- FieldValidator.validateByteSizeLimit(
+          bytes = token,
+          fieldName = "page_token",
+          limit = sizeLimitsConfig.publicLapiSizeConfig.getUpdatesPageRequest.pageTokenSizeLimit,
+        )
         parsedToken <- FieldValidator.validateProtobufEncodedField(
           token,
           page_tokens.UpdatesPageToken,

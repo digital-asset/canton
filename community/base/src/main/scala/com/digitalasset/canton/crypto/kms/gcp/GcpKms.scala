@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsError.*
-import com.digitalasset.canton.crypto.kms.gcp.GcpKms.defaultDestroyScheduledDurationInSecs
 import com.digitalasset.canton.crypto.kms.gcp.audit.GcpRequestResponseLogger
 import com.digitalasset.canton.crypto.kms.{
   Kms,
@@ -218,7 +217,12 @@ class GcpKms(
               .newBuilder()
               .setPurpose(keyPurpose)
               .setDestroyScheduledDuration(
-                Duration.newBuilder().setSeconds(defaultDestroyScheduledDurationInSecs).build()
+                Duration
+                  .newBuilder()
+                  .setSeconds(
+                    config.destroyScheduledDuration.duration.toSeconds
+                  )
+                  .build()
               )
               .setVersionTemplate(
                 gcp.CryptoKeyVersionTemplate
@@ -750,8 +754,6 @@ class GcpKms(
 }
 
 object GcpKms extends Kms.SupportedSchemes {
-
-  val defaultDestroyScheduledDurationInSecs: Long = 24L * 60L * 60L // 24h
 
   val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
     NonEmpty.mk(

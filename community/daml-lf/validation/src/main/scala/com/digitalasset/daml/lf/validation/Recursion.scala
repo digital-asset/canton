@@ -8,13 +8,15 @@ import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.iterable.TypeIterable
 import com.digitalasset.daml.lf.language.{Graphs, Util as AstUtil}
 
+import scala.annotation.tailrec
+
 private[validation] object Recursion {
 
   /* Check there are no cycles in the module references */
 
   @throws[ValidationError]
   def checkPackage(pkgId: PackageId, pkg: Package): Unit = {
-    val g = pkg.modules.map { case (modName0, mod) =>
+    val g: Graphs.Graph[ModuleName] = pkg.modules.map { case (modName0, mod) =>
       modName0 ->
         AstUtil
           .collectIdentifiers(mod)
@@ -35,16 +37,23 @@ private[validation] object Recursion {
     val g =
       mod.definitions.collect { case (dottedName, DTypeSyn(_, replacementTyp)) =>
         val name = Identifier(pkgId, QualifiedName(modName, dottedName))
-        (name, synRefsOfType(Set.empty, replacementTyp))
+        (name, synRefsOfType(replacementTyp))
       }
     Graphs.topoSort(g).left.foreach(cycle => throw ETypeSynCycle(Context.None, cycle.vertices))
   }
 
-  private def synRefsOfType(acc: Set[TypeSynId], typ: Type): Set[TypeSynId] = typ match {
-    case TSynApp(typeSynName, _) =>
-      (TypeIterable(typ) foldLeft (acc + typeSynName))(synRefsOfType)
-    case otherwise =>
-      (TypeIterable(otherwise) foldLeft acc)(synRefsOfType)
+  private def synRefsOfType(typ: Type): Set[TypeSynId] = {
+    @tailrec
+    def loop(todo: List[Type], acc: Set[TypeSynId]): Set[TypeSynId] =
+      todo match {
+        case Nil => acc
+        case typ :: rest =>
+          val acc1 = typ match {
+            case TSynApp(typeSynName, _) => acc + typeSynName
+            case _ => acc
+          }
+          loop(TypeIterable(typ).toList ::: rest, acc1)
+      }
+    loop(List(typ), Set.empty)
   }
-
 }

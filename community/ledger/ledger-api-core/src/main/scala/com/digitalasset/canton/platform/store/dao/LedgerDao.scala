@@ -13,7 +13,10 @@ import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
-import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
+import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerKnownPartiesPage,
+  IndexerPartyDetails,
+}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
@@ -128,14 +131,15 @@ private[platform] trait LedgerReadDao extends ReportsHealth {
       loggingContext: LoggingContextWithTrace
   ): Future[List[IndexerPartyDetails]]
 
-  /** Returns a list of all known parties. */
+  /** Returns a page of known parties. */
   def listKnownParties(
       fromExcl: Option[Party],
       filterParty: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]]
+  ): Future[IndexerKnownPartiesPage]
 
   /** Prunes participant events and completions in archived history and remembers largest pruning
     * offset processed thus far.

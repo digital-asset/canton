@@ -7,10 +7,7 @@ import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate
 
 object ParticipantProtocolFeatureFlags {
 
-  /** Feature flags required by participant node for each PV */
-  val requiredFeatureFlagsByPV: Map[ProtocolVersion, Set[ParticipantTopologyFeatureFlag]] = Map(
-    ProtocolVersion.v34 -> Set.empty,
-    ProtocolVersion.v35 -> Set.empty,
-  )
+  /** Feature flags required by participant node for a given protocol version */
+  val requiredFeatureFlagsByPV: Map[ProtocolVersion, Set[ParticipantTopologyFeatureFlag]] = Map()
 
 }
