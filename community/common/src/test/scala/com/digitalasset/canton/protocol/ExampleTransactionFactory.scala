@@ -938,7 +938,7 @@ class ExampleTransactionFactory(
   }
 
   def mkMetadata(seeds: Map[LfNodeId, LfHash] = Map.empty): TransactionMetadata =
-    TransactionMetadata(ledgerTime, preparationTime, seeds)
+    TransactionMetadata(ledgerTime, preparationTime, seeds, Map.empty)
 
   def versionedTransactionWithSeeds(
       rootIndices: Seq[Int],

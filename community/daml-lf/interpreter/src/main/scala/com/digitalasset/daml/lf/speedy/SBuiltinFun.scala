@@ -1752,7 +1752,8 @@ private[lf] object SBuiltinFun {
           dstSArg,
           mbTypedNormalFormAuthenticator,
         )
-        (dstTmplId, dstArg, _) = result
+        (dstTmplId, dstArg, recomputedMetaData) = result
+        _ <- validateDeclaredKey(machine, coid, srcMetadata, recomputedMetaData)
       } yield SAny(Ast.TTyCon(dstTmplId), dstArg)
 
     machine.getIfLocalContract(coid) match {
@@ -2233,26 +2234,24 @@ private[lf] object SBuiltinFun {
                 mbToken,
               )
               (result, newMbtoken) = entry
-              // sanity check: check that any returned contracts have the key asked.
-              result <- result.collectFirst {
-                case (contract, _, _)
-                    if contract.contractKeyWithMaintainers.forall(_.globalKey != gkey) =>
-                  contract
-              } match {
-                case None =>
-                  loop(resume(result.view.map(_._1.contractId), newMbtoken))
-                case Some(contract) =>
-                  crash(
-                    s"""Contract key mismatch: the ledger returned a contract whose key does not match the requested key.
-                       | Requested key: $gkey
-                       | Returned contract id: ${contract.contractId}
-                       | Returned contract template: ${contract.templateId}
-                       | Returned contract key: ${contract.contractKeyWithMaintainers
-                        .map(_.globalKey)
-                        .getOrElse("<no key>")}
-                       |""".stripMargin
-                  )
-              }
+              // This check is superseded by `validateDeclaredKey`. We keep it here only when
+              // `errorOnContractKeyMismatch` is off (PV36) to be 100% sure we do not break
+              // backward compatibility.
+              _ = if (!machine.interpretationConfig.errorOnContractKeyMismatch)
+                result.foreach { case (contract, _, _) =>
+                  if (contract.contractKeyWithMaintainers.forall(_.globalKey != gkey))
+                    crash(
+                      s"""Contract key mismatch: the ledger returned a contract whose key does not match the requested key.
+                         | Requested key: $gkey
+                         | Returned contract id: ${contract.contractId}
+                         | Returned contract template: ${contract.templateId}
+                         | Returned contract key: ${contract.contractKeyWithMaintainers
+                          .map(_.globalKey)
+                          .getOrElse("<no key>")}
+                         |""".stripMargin
+                    )
+                }
+              result <- loop(resume(result.view.map(_._1.contractId), newMbtoken))
             } yield result
           case Right(Right((mapping, next))) =>
             for {
@@ -2851,6 +2850,37 @@ private[lf] object SBuiltinFun {
       case v =>
         throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"Invalid contract info struct: $v")
     }
+
+  private def validateDeclaredKey(
+      machine: UpdateMachine,
+      coid: V.ContractId,
+      declaredMetaData: ContractMetadata,
+      recomputedMetaData: ContractInfo,
+  ): Cont[Question.Update, Unit] =
+    if (
+      recomputedMetaData.keyOpt
+        .map(_.globalKey.hash) == declaredMetaData.keyOpt.map(_.globalKey.hash)
+    ) {
+      ContU.Unit
+    } else if (machine.interpretationConfig.errorOnContractKeyMismatch) {
+      ContU.throwError(
+        IE.Dev(
+          "fetchTemplate",
+          IE.Dev.ContractKeyMismatchError(
+            coid,
+            declaredMetaData.keyOpt,
+            recomputedMetaData.keyOpt,
+          ),
+        )
+      )
+    } else
+      ContU.pure(
+        machine.recordContractKeyMismatch(
+          coid,
+          declaredMetaData.keyOpt,
+          recomputedMetaData.keyOpt,
+        )
+      )
 
   /** Fetches the requested contract ID and:
     *   - authenticates the contract against its contract ID if the contract ID uses a legacy

@@ -308,8 +308,7 @@ class ExampleTransactionConformanceTest
                 check(sut, viewsWithNoInputKeys(example.rootTransactionViewTrees))
               )(s"model conformance check for root views")
             } yield {
-              val Result(updateId, absoluteTransaction, _) = result
-              updateId should equal(example.updateId)
+              val Result(absoluteTransaction, _, _) = result
 
               absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
               absoluteTransaction.unwrap.version should equal(
@@ -354,8 +353,7 @@ class ExampleTransactionConformanceTest
                 )
               )(s"model conformance check for root views")
             } yield {
-              val Result(updateId, absoluteTransaction, _) = result
-              updateId should equal(example.updateId)
+              val Result(absoluteTransaction, _, _) = result
               absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
               absoluteTransaction.unwrap.version should equal(
                 example.versionedSuffixedTransaction.version
@@ -378,8 +376,7 @@ class ExampleTransactionConformanceTest
                     s"model conformance check for view at ${viewTree.viewPosition}"
                   )
                 } yield {
-                  val Result(updateId, absoluteTransaction, _) = result
-                  updateId should equal(example.updateId)
+                  val Result(absoluteTransaction, _, _) = result
                   absoluteTransaction.metadata.ledgerTime should equal(factory.ledgerTime)
                 }
               }

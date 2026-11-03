@@ -811,6 +811,8 @@ object BuildCommon {
           opentelemetry_exporter_prometheus,
           opentelemetry_sdk,
           scalatest % Test,
+          // bump transitive deps introduced by opentelemetry to address vulnerabilities
+          kotlin_stdlib,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,

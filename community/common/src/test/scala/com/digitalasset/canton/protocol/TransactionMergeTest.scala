@@ -664,6 +664,7 @@ class TransactionMergeTest
             lfTx.nodes.collect {
               case (nid, node) if LfTransactionUtil.nodeHasSeed(node) => nid -> hasher()
             },
+            Map.empty,
           ),
           WithAbsoluteSuffixes,
           rollbackContextFactory,

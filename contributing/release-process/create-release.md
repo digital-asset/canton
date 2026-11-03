@@ -95,6 +95,29 @@ Before starting the release, check the following:
 
 - No blocker is mentioned in release tracker.
 
+#### Polish the release notes with Claude Code
+
+The Claude Code skill [`polish-release-notes`](../../.claude/skills/polish-release-notes/SKILL.md) prepares
+`UNRELEASED.md` of a release line for a minor (`3.x.0`) or patch (`3.x.y`) release. Run it from the repository root:
+
+```
+claude
+> /polish-release-notes 3.7.1
+```
+
+The skill:
+
+- creates the local branch `polish-release-notes-<version>` from the latest release line,
+- restructures the notes along the previous release notes of the same kind and removes the template placeholders,
+- drops entries that already shipped or have no user-facing effect, adds missing user-facing changes from the commit
+  history, and verifies every entry against the code of the release line,
+- commits the result as a single commit "Polish the <version> release notes" without pushing it.
+
+It asks for input it cannot derive from the code, e.g. the baseline commit if the previous tag does not exist yet,
+the advisory id and severity of fixes, the MainNet status of security fixes (Critical or High security fixes are only
+included once the fix is deployed on MainNet), and the timings of expensive database migrations. Review the commit and
+its open questions, then push the branch and open a PR against the release line.
+
 #### Update the release line Daml version
 
 - The Daml version can be read in `project/project/DamlVersions.scala`.

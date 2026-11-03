@@ -129,7 +129,11 @@ private[execution] class TapsCommandExecutionFactory(
         (packagePreferenceSet, protocolVersion) = packagePreferenceSetPV
 
         // TODO(#32356): Engine contract state mode selection for TAPS
-        interpretationConfig = InterpretationConfig.forProtocolVersion(protocolVersion)
+        interpretationConfig = InterpretationConfig
+          .forProtocolVersion(protocolVersion)
+          // During interpretation in Phase 1, we want to fail on all contract key hash mismatches,
+          // independent of the protocol version.
+          .copy(errorOnContractKeyMismatch = true)
 
         _ = logDebug(
           show"Using package preference set: $packagePreferenceSet, protocol version: $protocolVersion"

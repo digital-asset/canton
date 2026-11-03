@@ -786,11 +786,12 @@ class RequiredTopologyMappingChecksTest
             partyId: PartyId = participant1.adminParty,
             participants: Seq[HostingParticipant] =
               Seq(HostingParticipant(participant1, Submission)),
+            threshold: PositiveInt = PositiveInt.one,
         ) = factory.mkAdd(
           PartyToParticipant
             .create(
               partyId = partyId,
-              threshold = PositiveInt.one,
+              threshold = threshold,
               participants = participants,
               partySigningKeysWithThreshold = None,
             )
@@ -819,11 +820,14 @@ class RequiredTopologyMappingChecksTest
         val foreignParticipant =
           mkPTP(participants = Seq(HostingParticipant(participant2, Submission)))
 
-        // we don't need to explicitly check threshold > 1, because we already reject the PTP if participants.size > 1
-        // and the threshold can never be higher than the number of participants
+        // PartyToParticipant.create accepts a threshold above the number of participants, so the
+        // admin party check has to reject this itself
+        val thresholdAboveOne = mkPTP(threshold = PositiveInt.two)
+
         val unhappyCases = invalidParticipantPermission ++ Seq(
           foreignParticipant,
           invalidNumberOfHostingParticipants,
+          thresholdAboveOne,
         )
 
         forAll(unhappyCases)(ptp =>

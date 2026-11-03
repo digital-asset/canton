@@ -9,7 +9,11 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.topology.DefaultTestIdentities.{participant1, participant2, party1}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Confirmation, Submission}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
+  Confirmation,
+  Observation,
+  Submission,
+}
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersionValidation}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -123,6 +127,27 @@ class PartyToParticipantHostingStateTest extends AnyWordSpec with BaseTest {
         mapping.toProtoPartyToParticipantV30.left.value should include(
           "unsupported hosting states"
         )
+      }
+    }
+  }
+
+  "HostingParticipant" should {
+    "be able to confirm only if Active with Submission or Confirmation permission" in {
+      val canConfirm = Set[(ParticipantPermission, HostingState)](
+        Submission -> HostingState.Active,
+        Confirmation -> HostingState.Active,
+      )
+      for {
+        permission <- Seq(Submission, Confirmation, Observation)
+        state <- Seq(
+          HostingState.Nominated,
+          HostingState.Freezing,
+          HostingState.Onboarding,
+          HostingState.Active,
+        )
+      } clue(s"$permission, $state") {
+        HostingParticipant(participant1, permission, state).canConfirm shouldBe
+          canConfirm.contains(permission -> state)
       }
     }
   }

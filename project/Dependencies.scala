@@ -67,6 +67,7 @@ object Dependencies {
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.10"
   lazy val jakarta_annotation_api_version = "3.0.0"
+  lazy val kotlin_version = "2.4.20"
   lazy val magnolia_version = "1.1.14"
   lazy val magnolifyScalacheck_version = "0.9.8"
   lazy val magnolifyShared_version = "0.6.2"
@@ -219,6 +220,9 @@ object Dependencies {
     "io.opentelemetry" % "opentelemetry-sdk-testing" % opentelemetry_version
   lazy val opentelemetry_sdk_trace =
     "io.opentelemetry" % "opentelemetry-sdk-trace" % opentelemetry_version
+
+  // bump transitive dep introduced by opentelementy to address vulnerabilities
+  lazy val kotlin_stdlib = "org.jetbrains.kotlin" % "kotlin-stdlib" % kotlin_version
 
   lazy val pekko_projection_core =
     "org.apache.pekko" %% "pekko-projection-core" % pekko_projection_version

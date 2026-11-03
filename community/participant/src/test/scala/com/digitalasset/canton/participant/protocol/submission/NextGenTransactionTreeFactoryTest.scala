@@ -615,6 +615,7 @@ final class NextGenTransactionTreeFactoryTest
               ledgerTime = factory.ledgerTime,
               preparationTime = factory.ledgerTime,
               seeds = tx.nodes.view.mapValues(_ => ExampleContractFactory.lfHash(2)).toMap,
+              contractKeyHashMismatches = Map.empty,
             )
             val wft = WellFormedTransaction.createUnsafe(tx, meta)
 

@@ -91,7 +91,13 @@ private[execution] class DefaultCommandExecutor(
       .fold(candidateSynchronizers)(logical => candidateSynchronizers.filter(_.logical == logical))
       .map(_.protocolVersion)
       .maxOption
-      .map(pv => InterpretationConfig.forProtocolVersion(pv))
+      .map(pv =>
+        InterpretationConfig
+          .forProtocolVersion(pv)
+          // During interpretation in Phase 1, we want to fail on all contract key hash mismatches,
+          // independent of the protocol version.
+          .copy(errorOnContractKeyMismatch = true)
+      )
       .getOrElse(LfInterpretationConfig.Default)
 
   override def execute(
