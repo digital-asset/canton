@@ -25,7 +25,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.Party
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import monocle.macros.syntax.lens.*
@@ -73,13 +72,8 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
       participant2.dars.upload(UpgradingBaseTest.UpgradeV1)
       participant2.dars.upload(UpgradingBaseTest.UpgradeV2)
 
-      // The keyed UpgradeCK templates require Daml-LF >= 2.3 / protocol version >= 3.5, so only
-      // upload them when the tested protocol version supports them. Uploading here (rather than in
-      // the by-key test) ensures their vetting is effective before that test submits.
-      if (testedProtocolVersion >= ProtocolVersion.v35) {
-        participant1.dars.upload(UpgradingBaseTest.UpgradeCKV1)
-        participant1.dars.upload(UpgradingBaseTest.UpgradeCKV2)
-      }
+      participant1.dars.upload(UpgradingBaseTest.UpgradeCKV1)
+      participant1.dars.upload(UpgradingBaseTest.UpgradeCKV2)
 
       // Participant 3 initially has just V1
 
@@ -140,45 +134,40 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
     }
 
     "commands are submitted by key with a package-name-scoped template id" should {
-      // Contract keys require Daml-LF >= 2.3 and protocol version >= 3.5, so this uses the keyed
-      // UpgradingCK template, which lives in its own LF 2.3 UpgradeCK package (the shared Upgrade
-      // package stays on LF 2.1). The UpgradeCK DARs are uploaded in the shared setup so their
-      // package vetting is effective well before this test submits.
-      "resolve ExerciseByKey to the newest uploaded package" onlyRunWithOrGreaterThan
-        ProtocolVersion.v35 in { implicit env =>
-          import env.*
+      "resolve ExerciseByKey to the newest uploaded package" in { implicit env =>
+        import env.*
 
-          val alice = alice1
-          val bob = bob1
+        val alice = alice1
+        val bob = bob1
 
-          val ckPackageName = byPackageNameIdentifierCK.packageId
+        val ckPackageName = byPackageNameIdentifierCK.packageId
 
-          // Create by specifying the package name; resolves to the newest uploaded package (V2).
-          new v1ck.upgradeck.UpgradingCK(
-            alice.toProtoPrimitive,
-            alice.toProtoPrimitive,
-            0,
-          ).create.commands.asScala.toSeq
-            .map(_.withPackageName(ckPackageName))
-            .pipe(
-              participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
-            )
-            .discard
+        // Create by specifying the package name; resolves to the newest uploaded package (V2).
+        new v1ck.upgradeck.UpgradingCK(
+          alice.toProtoPrimitive,
+          alice.toProtoPrimitive,
+          0,
+        ).create.commands.asScala.toSeq
+          .map(_.withPackageName(ckPackageName))
+          .pipe(
+            participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
+          )
+          .discard
 
-          // ExerciseByKey on the previously created contract, again by package name: the key is
-          // (issuer, field) == (alice, 0).
-          v1ck.upgradeck.UpgradingCK
-            .byKey(new v1ck.da.types.Tuple2(alice.toProtoPrimitive, java.lang.Long.valueOf(0L)))
-            .exerciseChangeOwnerCK(bob.toProtoPrimitive)
-            .commands
-            .asScala
-            .toSeq
-            .map(_.withPackageName(ckPackageName))
-            .pipe(
-              participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
-            )
-            .discard
-        }
+        // ExerciseByKey on the previously created contract, again by package name: the key is
+        // (issuer, field) == (alice, 0).
+        v1ck.upgradeck.UpgradingCK
+          .byKey(new v1ck.da.types.Tuple2(alice.toProtoPrimitive, java.lang.Long.valueOf(0L)))
+          .exerciseChangeOwnerCK(bob.toProtoPrimitive)
+          .commands
+          .asScala
+          .toSeq
+          .map(_.withPackageName(ckPackageName))
+          .pipe(
+            participant1.ledger_api.javaapi.commands.submit(Seq(alice), _)
+          )
+          .discard
+      }
     }
 
     "upgrading a disclosed contract" should {

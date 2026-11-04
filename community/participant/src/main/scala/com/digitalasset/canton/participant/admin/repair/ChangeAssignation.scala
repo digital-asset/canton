@@ -325,7 +325,7 @@ private final class ChangeAssignation(
         val contractsById = contracts.view.map(contract => contract.contractId -> contract).toMap
         val contractWithCounter = contractIdsWithCounter
           .flatMap { cidWithCounter =>
-            // TODO(#26468): Use representative package
+            // TODO(#37350): Ensure validation packages are available
             contractsById.get(cidWithCounter.contractId).map { contract =>
               val sourcePkg = Source(contract.templateId.packageId)
               val targetPkg = Target(contract.templateId.packageId)

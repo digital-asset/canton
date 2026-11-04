@@ -28,7 +28,7 @@ import com.digitalasset.canton.data.ViewType.UnassignmentViewType
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
@@ -82,12 +82,14 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.Active
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
   AcsCounterParticipantConfigStore,
+  DamlPackageStore,
   SyncPersistentState,
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.topology.FailingOfflineTopologyLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
@@ -96,6 +98,11 @@ import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
+import com.digitalasset.canton.store.packagemeta.PackageMetadata.{
+  LocalPackagePreference,
+  PackageResolution,
+}
 import com.digitalasset.canton.store.{
   ConfirmationRequestSessionKeyStore,
   IndexedPhysicalSynchronizer,
@@ -114,6 +121,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.LfTransactionBuilder.{defaultPackageId, defaultPackageName}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag, ResourceUtil}
 import com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion
@@ -126,12 +134,14 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LedgerUserId,
   LfPackageId,
+  LfPackageVersion,
   LfPartyId,
   ProtocolVersionChecksAsyncWordSpec,
   ReassignmentCounter,
   RequestCounter,
   SequencerCounter,
 }
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 import org.scalatest
@@ -341,6 +351,23 @@ final class UnassignmentProcessingStepsTest
   private lazy val coordination: ReassignmentCoordination =
     createReassignmentCoordination()
 
+  private val packageVersion = LfPackageVersion.assertFromString("1.0")
+  private val packageMetadataView = new PackageMetadataView {
+    override def packageStore: DamlPackageStore = mock[DamlPackageStore]
+    override def getSnapshot(implicit errorLoggingContext: ErrorLoggingContext): PackageMetadata =
+      PackageMetadata(
+        packageNameMap = Map(
+          defaultPackageName -> PackageResolution(
+            LocalPackagePreference(packageVersion, defaultPackageId),
+            NonEmpty.mk(Set, defaultPackageId),
+          )
+        ),
+        packageIdVersionMap = Map(defaultPackageId -> (defaultPackageName, packageVersion)),
+      )
+    override val packageUpgradeValidator: PackageUpgradeValidator = mock[PackageUpgradeValidator]
+    override def close(): Unit = ()
+  }
+
   private def createUnassignmentProcessingSteps(
       reassignmentCoordination: ReassignmentCoordination = coordination,
       cryptoClient: SynchronizerCryptoClient = cryptoClient,
@@ -348,6 +375,7 @@ final class UnassignmentProcessingStepsTest
       participantId: ParticipantId = submittingParticipant,
       reassignmentMetrics: ReassignmentMetrics = TestReassignmentMetrics(),
       crashAfterFailedValidation: Boolean = true,
+      packageMetadataView: PackageMetadataView = packageMetadataView,
   ) =
     new UnassignmentProcessingSteps(
       sourceSynchronizer,
@@ -363,6 +391,7 @@ final class UnassignmentProcessingStepsTest
       ParticipantNodeParameters
         .forTestingOnly(testedProtocolVersion)
         .copy(crashAfterFailedValidation = crashAfterFailedValidation),
+      packageMetadataView,
       loggerFactory,
     )(executorService)
 
@@ -793,8 +822,8 @@ final class UnassignmentProcessingStepsTest
           submitterMetadata = submitterMetadata(party1),
           Seq(contractId),
           targetSynchronizer,
-          overrideSourceValidationPkgIds = Map.empty,
-          overrideTargetValidationPkgIds = Map.empty,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
           accounting = SubmissionAccounting.NoAccount,
         )
 
@@ -826,8 +855,8 @@ final class UnassignmentProcessingStepsTest
         submitterMetadata = submitterMetadata(party1),
         Seq(contract.contractId),
         Target(sourceSynchronizer.unwrap),
-        overrideSourceValidationPkgIds = Map.empty,
-        overrideTargetValidationPkgIds = Map.empty,
+        overrideSourceValidationPkgIds = Source(Map.empty),
+        overrideTargetValidationPkgIds = Target(Map.empty),
         accounting = SubmissionAccounting.NoAccount,
       )
 
@@ -857,12 +886,12 @@ final class UnassignmentProcessingStepsTest
           Seq(contractId),
           targetSynchronizer,
           overrideSourceValidationPkgIds = invalidPackageId match {
-            case Source(rpId) => Map(contractId -> rpId)
-            case Target(_) => Map.empty
+            case Source(rpId) => Source(Map(contractId -> rpId))
+            case Target(_) => Source(Map.empty)
           },
           overrideTargetValidationPkgIds = invalidPackageId match {
-            case Source(_) => Map.empty
-            case Target(rpId) => Map(contractId -> rpId)
+            case Source(_) => Target(Map.empty)
+            case Target(rpId) => Target(Map(contractId -> rpId))
           },
           accounting = SubmissionAccounting.NoAccount,
         )
@@ -898,16 +927,60 @@ final class UnassignmentProcessingStepsTest
       }
     }
 
-    "check that the contracts validate against the source validation package" in {
+    "check that the contracts validate against the source validation package" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       checkContractsValidateAgainstValidationPackage(
         sourceValidationPackageId
       )
     }
 
-    "check that the contracts validate against the target validation package" in {
+    "check that the contracts validate against the target validation package" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
       checkContractsValidateAgainstValidationPackage(
         targetValidationPackageId
       )
+    }
+
+    "check that a common validation package is required" onlyRunWithOrGreaterThan ProtocolVersion.v37 in {
+
+      val noPackageContract = ExampleContractFactory.build(
+        signatories = Set(submitter),
+        stakeholders = Set(submitter, party1),
+        packageName = Ref.PackageName.assertFromString("no_common_package"),
+      )
+
+      val state = mkState
+      val submissionParam =
+        UnassignmentProcessingSteps.SubmissionParam(
+          submitterMetadata = submitterMetadata(party1),
+          Seq(noPackageContract.contractId),
+          targetSynchronizer,
+          overrideSourceValidationPkgIds = Source(Map.empty),
+          overrideTargetValidationPkgIds = Target(Map.empty),
+          accounting = SubmissionAccounting.NoAccount,
+        )
+
+      for {
+        _ <- state.contractStore.storeContract(noPackageContract)
+        _ <- persistentState.activeContractStore
+          .markContractsCreated(
+            Seq(noPackageContract.contractId -> initialReassignmentCounter),
+            TimeOfChange(targetTs.unwrap),
+          )
+          .value
+        submissionResult <- leftOrFail(
+          unassignmentProcessingSteps
+            .createSubmission(
+              submissionParam,
+              sourceMediator,
+              state,
+              cryptoSnapshot,
+              _ => CantonTimestamp.MaxValue,
+            )
+        )("prepare submission succeeded unexpectedly")
+      } yield {
+        inside(submissionResult) { case NoCommonPackage(_, _, _) =>
+          succeed
+        }
+      }
     }
 
   }
@@ -1148,7 +1221,8 @@ final class UnassignmentProcessingStepsTest
         UnassignmentViewType,
         RequestId(CantonTimestamp.Epoch),
         rootHash,
-        Verdict.Approve(testedProtocolVersion),
+        Verdict.Approve.create(testedProtocolVersion),
+        testedProtocolVersion,
       )
 
     val synchronizerParameters = DynamicSynchronizerParametersWithValidity(
@@ -1161,6 +1235,7 @@ final class UnassignmentProcessingStepsTest
         reassignmentResult,
         cryptoSnapshot,
         None,
+        testedProtocolVersion,
       )
       .futureValueUS
 
@@ -1174,6 +1249,7 @@ final class UnassignmentProcessingStepsTest
         Some(MessageId.tryCreate("msg-0")),
         batch,
         Option.empty[TrafficReceipt],
+        testedProtocolVersion,
       )
     }
     val signedContent = SignedContent(
@@ -1484,5 +1560,6 @@ final class UnassignmentProcessingStepsTest
       UnassignmentViewType,
       testTopologyTimestamp,
       SerializedRootHashMessagePayload.empty,
+      testedProtocolVersion,
     )
 }

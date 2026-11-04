@@ -108,7 +108,7 @@ class MediatorStateTest
       )
     }
     val informeeMessage =
-      InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
+      InformeeMessage(fullInformeeTree, Signature.noSignature, testedProtocolVersion)
     val mockTopologySnapshot = mock[TopologySnapshot]
     when(
       mockTopologySnapshot.activeParticipantsOfPartiesWithInfo(any[Seq[LfPartyId]])(

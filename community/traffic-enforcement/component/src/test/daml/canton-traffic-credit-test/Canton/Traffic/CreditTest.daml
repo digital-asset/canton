@@ -1,0 +1,38 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Minimal `TrafficCreditIssuer` implementation to evaluate `mkAccountId` and exercise
+-- `PublishCredit` in tests.
+module Canton.Traffic.CreditTest where
+
+import Canton.Traffic.Credit
+  ( AccountId
+  , mkAccountId
+  , PublishCredit(..)
+  , TrafficCreditIssuer
+  , TrafficCreditIssuerView(..)
+  )
+
+template TestCreditIssuer
+  with
+    paymaster : Party
+  where
+    signatory paymaster
+
+    interface instance TrafficCreditIssuer for TestCreditIssuer where
+      view = TrafficCreditIssuerView with paymaster
+
+    -- | Exercises `PublishCredit` with `accountId` as given, bypassing `mkAccountId`
+    -- like a Ledger API exercise does.
+    nonconsuming choice TestCreditIssuer_PublishCredit : ()
+      with
+        accountId : AccountId
+        trafficAmount : Int
+      controller paymaster
+      do exercise (toInterfaceContractId @TrafficCreditIssuer self) PublishCredit with ..
+
+    nonconsuming choice TestCreditIssuer_MkAccountId : Either Text AccountId
+      with
+        value : Text
+      controller paymaster
+      do pure (mkAccountId value)

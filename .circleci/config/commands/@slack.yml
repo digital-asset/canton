@@ -29,9 +29,11 @@ slack_red_main_with_volunteer:
           # selection path as best-effort, degrading to the usual suspects below.
           if [ -n "$FIXED" ]; then
             SELECTED_VOLUNTEER="$FIXED"
-          elif printf '%s' "$CIRCLE_BRANCH" | grep -q '^release-line-2\.'; then
+          elif printf '%s' "$CIRCLE_BRANCH" | grep -q '^release-line-2\.' \
+            || printf '%s' "${CIRCLE_TAG:-}" | grep -q '^v2\.'; then
             # The 2.x lines are in maintenance and have no rota column, so ping the
             # usual suspects who own them directly instead of a rota volunteer.
+            # Tag builds have no branch, so v2.x release tags are matched by tag.
             SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
             PING_REASON="This is a 2.x maintenance line, so pinging the usual suspects."
           elif [ -x .ci/nix-exec ] && command -v nix-shell >/dev/null 2>&1; then
@@ -59,14 +61,35 @@ slack_red_main_with_volunteer:
             SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
           fi
 
+          # select_rota.py prints a multi-person rota (Flaky Canton) space-separated, the
+          # slack orb expects a comma-separated list, so one invalid mention is not rendered.
+          SELECTED_VOLUNTEER=$(printf '%s' "$SELECTED_VOLUNTEER" | tr -s ' ' ',')
+
+          # Release tag builds have no branch, so the branch-filtered alert below never
+          # matches. The tag alert filter is empty (the orb then always sends) on a v* tag
+          # build, and a value no branch can match otherwise, so exactly one alert is sent.
+          if printf '%s' "${CIRCLE_TAG:-}" | grep -q '^v[0-9]'
+          then
+            TAG_ALERT_FILTER=""
+          else
+            TAG_ALERT_FILTER="-"
+          fi
+
           echo "$SELECTED_VOLUNTEER"
           echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
           echo "export PING_REASON=\"${PING_REASON}\"" >> $BASH_ENV
+          echo "export TAG_ALERT_FILTER=\"${TAG_ALERT_FILTER}\"" >> $BASH_ENV
     - slack/status:
         mentions: "${SELECTED_VOLUNTEER}"
         fail_only: true
         only_for_branches: main,release-line-2.0,release-line-2.1,release-line-2.2,release-line-2.3,release-line-2.3.10,release-line-2.4,release-line-2.5,release-line-2.6,release-line-2.7,release-line-2.8,release-line-2.9,release-line-2.10,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
         failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. $PING_REASON'
+        webhook: << parameters.webhook_url >>
+    - slack/status:
+        mentions: "${SELECTED_VOLUNTEER}"
+        fail_only: true
+        only_for_branches: "${TAG_ALERT_FILTER}"
+        failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on release tag \`$CIRCLE_TAG\`. $PING_REASON'
         webhook: << parameters.webhook_url >>
 
 # This command will send a notification to team-sdk-updates

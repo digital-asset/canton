@@ -6,14 +6,12 @@ package com.digitalasset.canton.integration.tests.benchmarks
 import better.files.File
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.TempDirectory
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.integration.performance.NightlyPerformanceBase
 import com.digitalasset.canton.integration.plugins.{
   PostgresDumpRestore,
   UseBftSequencer,
   UsePostgres,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.manual.ReplayTestCommon.*
 import com.digitalasset.canton.integration.tests.manual.{
@@ -156,9 +154,6 @@ trait SequencerReplayBenchmark
       StartingParticipantIndex,
       NumberOfParticipantsPerGroup,
   ) => PerformanceRunnerRecorder
-
-  protected val referenceBlockSequencerPlugin: Option[UseReferenceBlockSequencer[?]] =
-    None
 
   // Use local tools as the dump files are not copied into the container.
   // Otherwise, the tests would fail with "No such file or directory".
@@ -418,13 +413,6 @@ trait SequencerReplayBenchmark
 
   "Initialize the DB" in { implicit env =>
     import env.*
-
-    // The reference block sequencer uses a separate database.
-    referenceBlockSequencerPlugin.foreach { plugin =>
-      plugin
-        .restoreDatabases(TempDirectory(dumpDirectory(SourceDumpDirectory)), forceLocal = true)
-        .futureValue
-    }
 
     (mediators.local.map(_.name) ++ participantNames ++ sequencers.local.map(_.name))
       .foreach { nodeName =>

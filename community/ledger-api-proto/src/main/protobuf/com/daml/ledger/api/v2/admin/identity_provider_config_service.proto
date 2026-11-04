@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.daml.ledger.api.v2.admin;
 
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "google/protobuf/field_mask.proto";
 
 option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
@@ -144,7 +145,7 @@ message UpdateIdentityProviderConfigRequest {
   // For additional information see the documentation for standard protobuf3's ``google.protobuf.FieldMask``.
   //
   // Required
-  google.protobuf.FieldMask update_mask = 2;
+  google.protobuf.FieldMask update_mask = 2 [(size_limit) = true];
 }
 
 message UpdateIdentityProviderConfigResponse {

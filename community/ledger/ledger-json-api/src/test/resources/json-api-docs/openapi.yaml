@@ -2380,6 +2380,62 @@ paths:
       - httpAuth: []
       - apiKeyAuth: []
   /v2/traffic/accounts:
+    get:
+      description: |-
+        List accounts and their details.
+        Accounts that were never credited or debited are not listed.
+
+        Permissioned to users holding CanActAsAnyParty, CanExecuteAsAnyParty or CanDebitTrafficFromAnyAccount rights.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: getV2TrafficAccounts
+      parameters:
+      - name: accountIdPrefix
+        in: query
+        description: only list accounts whose ID starts with this prefix, leave out
+          to list all accounts
+        required: false
+        schema:
+          type: string
+      - name: pageSize
+        in: query
+        description: maximum number of elements in a returned page
+        required: false
+        schema:
+          type: integer
+          format: int32
+      - name: pageToken
+        in: query
+        description: token - to continue results from a given page, leave empty to
+          start from the beginning of the list, obtain token from the result of previous
+          page
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAccountsResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: query parameter accountIdPrefix,
+            Invalid value for: query parameter pageSize, Invalid value for: query
+            parameter pageToken'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
     post:
       description: |-
         Update account state for a given account ID.
@@ -2454,6 +2510,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/traffic/events/prune:
+    post:
+      description: |-
+        Served by POST /v2/traffic/prune, and returns only the number of pruned events.
+        Permissioned only to Ledger API admin users.
+
+        Deprecated since Canton 3.7, disabled by default since Canton 3.8 and removed in Canton 3.9 (re-enable it until then with `canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37 = true`). Use POST /v2/traffic/prune instead.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: postV2TrafficEventsPrune
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PruneEventsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PruneEventsResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -6594,6 +6689,26 @@ components:
         properties:
           ParticipantAdmin:
             $ref: '#/components/schemas/ParticipantAdmin'
+    ListAccountsResponse:
+      title: ListAccountsResponse
+      type: object
+      properties:
+        accounts:
+          description: |-
+            List of accounts and their details, ordered lexicographically by account ID,
+            up to the requested page size.
+
+            Optional: may be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/GetAccountResponse'
+        nextPageToken:
+          description: |-
+            Token to fetch the next page.
+            Not set, if there are no further results.
+
+            Optional
+          type: string
     ListIdentityProviderConfigsResponse:
       title: ListIdentityProviderConfigsResponse
       type: object
@@ -7282,6 +7397,32 @@ components:
           $ref: '#/components/schemas/UnknownFieldSet'
         valueDecoded:
           type: string
+    PruneEventsRequest:
+      title: PruneEventsRequest
+      type: object
+      required:
+      - beforeOrAt
+      properties:
+        beforeOrAt:
+          description: |-
+            The timestamp before which events should be pruned.
+            Events with a timestamp less than or equal to this value will be pruned.
+
+            Required
+          type: string
+    PruneEventsResponse:
+      title: PruneEventsResponse
+      type: object
+      required:
+      - prunedEventCount
+      properties:
+        prunedEventCount:
+          description: |-
+            The number of events that were pruned.
+
+            Required
+          type: integer
+          format: int32
     PruneRequest:
       title: PruneRequest
       type: object

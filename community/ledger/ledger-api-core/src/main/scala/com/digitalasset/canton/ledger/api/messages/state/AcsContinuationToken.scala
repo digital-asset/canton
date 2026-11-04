@@ -10,6 +10,7 @@ import com.daml.platform.v1.acs_continuation.{
   AcsContinuationTokenPayload,
 }
 import com.digitalasset.canton.LedgerParticipantId
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
 import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValidationErrors}
@@ -86,15 +87,28 @@ object AcsContinuationToken {
       .pipe(PageTokenUtils.toChecksum)
       .pipe(Checksum(_))
 
-  def decodeAndValidate(expectedChecksum: Checksum, token: ByteString)(implicit
+  def decodeAndValidate(
+      expectedChecksum: Checksum,
+      token: ByteString,
+      fieldName: String,
+      limit: PositiveInt,
+  )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, AcsContinuationPointer] =
     FieldValidator
-      .validateProtobufEncodedField(
-        token,
-        AcsContinuationTokenPayload,
-        fieldName = "stream_continuation_token",
-        errorMessage = "Invalid continuation token for GetActiveContractsRequest",
+      .validateByteSizeLimit(
+        bytes = token,
+        fieldName = fieldName,
+        limit = limit,
+      )
+      .flatMap(_ =>
+        FieldValidator
+          .validateProtobufEncodedField(
+            token,
+            AcsContinuationTokenPayload,
+            fieldName = fieldName,
+            errorMessage = "Invalid continuation token for GetActiveContractsRequest",
+          )
       )
       .ensure(ValidationErrors.invalidContinuationToken)(proto =>
         proto.checksum == expectedChecksum.bytes

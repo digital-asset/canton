@@ -10,7 +10,11 @@ import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{PageTokenUtils, UpdateFormatHashUtils}
-import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValidationErrors}
+import com.digitalasset.canton.ledger.api.validation.{
+  FieldValidator,
+  LedgerApiSizeLimitsConfig,
+  ValidationErrors,
+}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.protobuf.ByteString
 import io.grpc.StatusRuntimeException
@@ -53,8 +57,14 @@ object AcsPageToken {
       participantIdChecksum: ByteString,
       token: ByteString,
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Either[StatusRuntimeException, (Offset, AcsContinuationPointer)] = for {
+    _ <- FieldValidator.validateByteSizeLimit(
+      bytes = token,
+      fieldName = "page_token",
+      limit = sizeLimitsConfig.publicLapiSizeConfig.getActiveContractsPageRequest.pageTokenSizeLimit,
+    )
     proto <- FieldValidator
       .validateProtobufEncodedField(
         token,
@@ -82,6 +92,14 @@ object AcsPageToken {
       .left
       .map(_ => ValidationErrors.invalidAcsPageToken("Invalid token contents."))
     pointerToTheFirstElem <- AcsContinuationToken
-      .decodeAndValidate(AcsContinuationToken.emptyChecksum, proto.continuationToken)
+      .decodeAndValidate(
+        expectedChecksum = AcsContinuationToken.emptyChecksum,
+        token = proto.continuationToken,
+        fieldName = "page_token",
+        limit =
+          sizeLimitsConfig.publicLapiSizeConfig.getActiveContractsPageRequest.pageTokenSizeLimit,
+      )
+      .left
+      .map(_ => ValidationErrors.invalidAcsPageToken("Invalid token contents."))
   } yield (offset, pointerToTheFirstElem.decrease)
 }

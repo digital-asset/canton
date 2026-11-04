@@ -40,14 +40,17 @@ pairs : [AssetWithCid] -> [(AssetWithCid, AssetWithCid)]
 pairs (x :: y :: rest) = (x, y) :: pairs rest
 pairs _              = []
 
+fetchSettlementApp registry user = script do
+  (st,_) <- head . filter (\(_, st) -> st.registry == registry) <$> query @SettlementApp user
+  return st
+
 substitute : Party -> Party -> [Substitution] -> Script ()
 substitute sub user substitutions = script do
   let accId = "acc.u0.r0.i0.a0"
   (tp,_) <- fetchTripartyByAccount user accId
   assets <- fetchAssetsByAccount user accId  
-  (st,_) <- head <$> query @SettlementApp sub
-  stD <- fromSome <$> queryDisclosure sub st
-  submitWithDisclosures user [stD] do 
+  st <- fetchSettlementApp sub user  
+  submit user do 
     exerciseCmd tp Substitute with substitutions = substitutions, assetCids = (map fst assets), settleCid = st
   return ()
 
@@ -59,7 +62,10 @@ submitWithDisclosure registry party dcid cmds = script do
   mstC <- fromSome <$> queryDisclosure registry dcid
   submitWithDisclosures party [mstC] cmds
 
-
+fetchForceForDisclosure : Party -> Script [Disclosure]
+fetchForceForDisclosure party = script do
+  fas <- query @ForceAccept party
+  forA (map fst fas) (fmap fromSome. queryDisclosure party)  
 
 main : Script ()
 main = script do
@@ -90,7 +96,7 @@ main = script do
     exerciseCmd mst2 AddAgent with agent = a1
 
   mst4 <- submitWithDisclosure registry ci mst3 do
-    exerciseCmd mst3 AddCashIssuer with cashIssuer = ci
+    exerciseCmd mst3 AddCashIssuer with cashIssuerParty = ci
 
   mst5 <- submitWithDisclosure registry i1 mst4 do
     exerciseCmd mst4 AddIssuer with issuer = i1
@@ -102,12 +108,9 @@ main = script do
     exerciseCmd mst6 ReadyForBootstrap
 
   bsd <- fromSome <$> queryDisclosure registry bs
-  submitWithDisclosures g1 [bsd] do
+  force <- fetchForceForDisclosure registry
+  submitWithDisclosures g1 (bsd :: force) do
      exerciseCmd bs AddCustodian with custodian = g1
-
-  bcs <- query @BootstrapCustodianAccount registry
-  submit registry do
-    forA_ bcs \(bc, _) -> exerciseCmd bc ProcessBootstrap
 
   approveMints registry    
 
@@ -120,10 +123,9 @@ main = script do
   let to = map (\((_, a), (_, b)) -> Substitution with oldAssetId = a.id, oldQty = a.qty, newAssetId = b.id, newQty = b.qty) (pairs (reverse assetsWithoutCash))
 
   let pledges = map (\(_, a) -> (a.id, a.qty)) (takeEverySecond assetsWithoutCash)  
-  (st,_) <- head <$> query @SettlementApp s1
-  stD <- fromSome <$> queryDisclosure s1 st
+  (st,_) <- head <$> query @SettlementApp g1  
   (tp,_) <- fetchTripartyByAccount g1 accId
-  _ <- submitWithDisclosures g1 [stD] do
+  _ <- submit g1  do
       exerciseCmd tp Open with pledges = pledges, assetCids = (map fst assets), settleCid = st
 
   substitute s1 g1 from

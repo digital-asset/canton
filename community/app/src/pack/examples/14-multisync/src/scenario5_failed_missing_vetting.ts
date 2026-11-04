@@ -77,7 +77,7 @@ export async function scenario5FailedMissingVetting(
         } catch (error: unknown) {
             const fullMsg = error instanceof Error ? error.message : String(error);
             const msg = fullMsg.substring(0, 200);
-            if (!fullMsg.includes("has not vetted")) {
+            if (!(fullMsg.includes("requires package model-tests") || fullMsg.includes("has not vetted"))) {
                 throw new Error(`Unassign failed for an unexpected reason: ${msg}`);
             }
             logOk(`Unassign correctly rejected: ${msg}`);

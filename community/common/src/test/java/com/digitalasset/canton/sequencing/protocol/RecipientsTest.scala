@@ -84,7 +84,7 @@ class RecipientsTest
       ) shouldBe Left(
         InvariantViolation(
           "recipients_tree",
-          "repeated field has 2 elements, exceeding the maximum of 1",
+          "repeated or map field has 2 elements, exceeding the maximum of 1",
         )
       )
 
@@ -97,7 +97,7 @@ class RecipientsTest
       ) shouldBe Left(
         InvariantViolation(
           "RecipientsTreeProto.recipients",
-          "repeated field has 3 elements, exceeding the maximum of 2",
+          "repeated or map field has 3 elements, exceeding the maximum of 2",
         )
       )
 
@@ -110,7 +110,7 @@ class RecipientsTest
       ) shouldBe Left(
         InvariantViolation(
           "children",
-          "repeated field has 2 elements, exceeding the maximum of 1",
+          "repeated or map field has 2 elements, exceeding the maximum of 1",
         )
       )
 

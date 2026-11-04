@@ -211,6 +211,10 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  ListAccountsRequest,
+  ListAccountsResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -243,6 +247,7 @@ import io.scalaland.chimney.dsl.*
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ScheduledExecutorService
+import scala.annotation.nowarn
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -2849,6 +2854,24 @@ object LedgerApiCommands {
         service.getAccount(request)
     }
 
+    final case class ListAccounts(
+        pageSize: Option[Int],
+        pageToken: Option[String],
+        accountIdPrefix: Option[String],
+    ) extends BaseCommand[
+          ListAccountsRequest,
+          ListAccountsResponse,
+        ] {
+      override protected def createRequest(): Either[String, ListAccountsRequest] =
+        Right(ListAccountsRequest(pageSize, pageToken, accountIdPrefix))
+
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: ListAccountsRequest,
+      ): Future[ListAccountsResponse] =
+        service.listAccounts(request)
+    }
+
     final case class UpdateAccount(
         accountId: String,
         balanceDelta: Option[Long],
@@ -2881,6 +2904,23 @@ object LedgerApiCommands {
           request: TeaPruneRequest,
       ): Future[TeaPruneResponse] =
         service.prune(request)
+    }
+
+    final case class PruneEvents(
+        beforeInclusive: CantonTimestamp
+    ) extends BaseCommand[
+          PruneEventsRequest,
+          PruneEventsResponse,
+        ] {
+      override protected def createRequest(): Either[String, PruneEventsRequest] =
+        Right(PruneEventsRequest(beforeInclusive.toProtoTimestamp.some))
+
+      @nowarn("cat=deprecation")
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: PruneEventsRequest,
+      ): Future[PruneEventsResponse] =
+        service.pruneEvents(request)
     }
   }
 }

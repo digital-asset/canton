@@ -4,7 +4,10 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
+import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.PruningOffsetService
 import com.digitalasset.canton.platform.store.backend.h2.H2StorageBackendFactory
 import com.digitalasset.canton.platform.store.backend.localstore.{
@@ -77,6 +80,22 @@ trait StorageBackendProvider {
     backend.ledgerEndCache.set(
       backend.parameter.ledgerEnd(connection)
     )
+
+  protected final def knownPartiesAtLedgerEnd(
+      fromExcl: Option[Party],
+      filterString: Option[String185],
+      maxResults: Int,
+  )(connection: Connection): List[IndexerPartyDetails] =
+    backend
+      .ledgerEndCache()
+      .fold(List.empty[IndexerPartyDetails])(ledgerEnd =>
+        backend.party.knownParties(
+          fromExcl,
+          filterString,
+          maxResults,
+          ledgerEnd.lastEventSeqId,
+        )(connection)
+      )
 }
 
 trait StorageBackendProviderPostgres

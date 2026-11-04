@@ -47,6 +47,7 @@ final case class TransactionConfirmationRequest(
     viewType = ViewType.TransactionViewType,
     submissionTopologyTimestamp = submissionTopologyTime,
     payload = EmptyRootHashMessagePayload,
+    protocolVersion = protocolVersion,
   )
 
   def asBatch(ipsSnapshot: TopologySnapshot)(implicit

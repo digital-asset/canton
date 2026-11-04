@@ -26,13 +26,15 @@ import com.digitalasset.canton.store.db.{
   PostgresDbStorageSetup,
   PostgresTestDatabase,
 }
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause, Success as RetrySuccess}
+import com.digitalasset.canton.{TempDirectory, TempFile}
 import com.typesafe.config.{Config, ConfigFactory}
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.DurationInt
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.Random
 import scala.util.control.NonFatal
 
@@ -270,4 +272,47 @@ class UsePostgres(
       .map(_.unwrap)
 
   override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+
+  private def forAllDatabaseDumps(
+      config: CantonConfig
+  )(op: Seq[String] => Future[Unit]): Future[Unit] = {
+    val nodeDatabases = config.nodeNamesInStartupOrder.map(name => name.unwrap)
+    op(nodeDatabases)
+  }
+  def dumpAllDatabases(
+      config: CantonConfig,
+      tempDirectory: TempDirectory,
+      forceLocal: Boolean = false,
+  ): Future[Unit] =
+    forAllDatabaseDumps(config)(dumpDatabases(_, tempDirectory, forceLocal))
+
+  private def dumpDatabases(
+      names: Seq[String],
+      tempDirectory: TempDirectory,
+      forceLocal: Boolean,
+  ): Future[Unit] = {
+    implicit val ec: ExecutionContext = dbSetupExecutionContext
+    val pgDumpRestore = PostgresDumpRestore(this, forceLocal)
+    names.parTraverse_(db => pgDumpRestore.saveDump(db, dumpTempFile(tempDirectory, db)))
+  }
+
+  private def dumpTempFile(tempDirectory: TempDirectory, dbName: String): TempFile =
+    tempDirectory.toTempFile(s"pg-dump-$dbName.tar")
+
+  def restoreAllDatabases(
+      config: CantonConfig,
+      tempDirectory: TempDirectory,
+      forceLocal: Boolean = false,
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    forAllDatabaseDumps(config)(restoreDatabases(_, tempDirectory, forceLocal))
+
+  private def restoreDatabases(
+      names: Seq[String],
+      tempDirectory: TempDirectory,
+      forceLocal: Boolean,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    implicit val ec: ExecutionContext = dbSetupExecutionContext
+    val pgDumpRestore = PostgresDumpRestore(this, forceLocal)
+    names.parTraverse_(db => pgDumpRestore.restoreDump(db, dumpTempFile(tempDirectory, db).path))
+  }
 }

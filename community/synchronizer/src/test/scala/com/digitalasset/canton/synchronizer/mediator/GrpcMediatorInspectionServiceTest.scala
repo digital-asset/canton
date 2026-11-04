@@ -56,7 +56,8 @@ class GrpcMediatorInspectionServiceTest
     InformeeMessage(
       fullInformeeTree,
       Signature.noSignature,
-    )(testedProtocolVersion)
+      testedProtocolVersion,
+    )
 
   private def mkResponse(
       ts: CantonTimestamp,

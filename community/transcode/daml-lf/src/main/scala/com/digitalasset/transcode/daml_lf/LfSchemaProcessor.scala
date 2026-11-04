@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory
 import scala.PartialFunction.condOpt
 import scala.collection.mutable
 import scala.util.Try
+import scala.util.control.TailCalls.{TailRec, done, tailcall}
 
 /** [[LfSchemaProcessor]] traverses Daml Schema and produces results by calling into handler methods
   * of [[com.digitalasset.transcode.schema.SchemaVisitor]].
@@ -55,7 +56,7 @@ private class LfSchemaProcessor[R](
     val entities = for
       pkgId <- rootPackages.iterator.toSeq
       pkg = getPackage(pkgId) if validatePackage(pkg)
-      (moduleName, module) <- pkg.modules
+      (moduleName, module) <- pkg.modules.toSeq
 
       entities =
         module.templates.map((name, t) =>
@@ -100,21 +101,27 @@ private class LfSchemaProcessor[R](
     )
 
   private val tpeCache = mutable.Map.empty[Identifier, visitor.Type]
-  private def fromType(tpe: Ast.Type | Ast.DataCons): visitor.Type =
+  private def fromType(tpe: Ast.Type | Ast.DataCons): visitor.Type = fromTypeRec(tpe).result
+
+  // Trampolined so that deeply nested types do not overflow the stack
+  private def fromTypeRec(tpe: Ast.Type | Ast.DataCons): TailRec[visitor.Type] =
     tpe match
       case TInterface(id, tpe) =>
-        tpeCache.getOrElseUpdate(
-          id, {
-            val lazyBody = Lazy(fromType(tpe))
-            visitor.constructor(id, Seq.empty, lazyBody())
-          },
+        done(
+          tpeCache.getOrElseUpdate(
+            id, {
+              val lazyBody = Lazy(fromType(tpe))
+              visitor.constructor(id, Seq.empty, lazyBody())
+            },
+          )
         )
       case TUnknown(id, args) =>
         val typeParams = 1.to(args.size).map(i => TypeVarName(s"X$i")) // synthetic type params
         val ctor =
           tpeCache.getOrElseUpdate(id, visitor.constructor(id, typeParams, visitor.unknown))
-        if args.nonEmpty then visitor.application(ctor, typeParams, args.map(fromType))
-        else ctor
+        if args.nonEmpty then
+          fromTypes(args).flatMap(ts => done(visitor.application(ctor, typeParams, ts)))
+        else done(ctor)
       case TTyConApp(id, cons, params, args) =>
         val ctor = tpeCache.getOrElseUpdate(
           id, {
@@ -123,40 +130,54 @@ private class LfSchemaProcessor[R](
           },
         )
         if args.nonEmpty
-        then visitor.application(ctor, params.map(TypeVarName), args.map(fromType))
-        else ctor
+        then
+          fromTypes(args).flatMap(ts =>
+            done(visitor.application(ctor, params.map(TypeVarName), ts))
+          )
+        else done(ctor)
       case TSynApp(tpe, params, args) =>
-        visitor.application(fromType(tpe), params.map(TypeVarName), args.map(fromType))
+        tailcall(fromTypeRec(tpe)).flatMap(body =>
+          fromTypes(args).flatMap(ts =>
+            done(visitor.application(body, params.map(TypeVarName), ts))
+          )
+        )
 
       case Ast.DataRecord(fields) =>
-        lazy val fieldProcessors = fields.toSeq.map { (name, typ) =>
-          FieldName(name) -> fromType(typ)
-        }
-        visitor.record(fieldProcessors)
+        val (names, types) = fields.toSeq.unzip
+        fromTypes(types).flatMap(ts => done(visitor.record(names.map(FieldName).zip(ts))))
       case Ast.DataVariant(variants) =>
-        lazy val cases = variants.toSeq.map((name, typ) => VariantConName(name) -> fromType(typ))
-        visitor.variant(cases)
+        val (names, types) = variants.toSeq.unzip
+        fromTypes(types).flatMap(ts => done(visitor.variant(names.map(VariantConName).zip(ts))))
       case Ast.DataEnum(constructors) =>
-        visitor.enumeration(constructors.map(EnumConName).toSeq)
+        done(visitor.enumeration(constructors.map(EnumConName).toSeq))
 
-      case Ast.TVar(name) => visitor.variable(TypeVarName(name))
+      case Ast.TVar(name) => done(visitor.variable(TypeVarName(name)))
 
-      case Util.TList(typ) => visitor.list(fromType(typ))
-      case Util.TOptional(typ) => visitor.optional(fromType(typ))
-      case Util.TTextMap(typ) => visitor.textMap(fromType(typ))
-      case Util.TGenMap(kTyp, vTyp) => visitor.genMap(fromType(kTyp), fromType(vTyp))
+      case Util.TList(typ) => tailcall(fromTypeRec(typ)).flatMap(t => done(visitor.list(t)))
+      case Util.TOptional(typ) => tailcall(fromTypeRec(typ)).flatMap(t => done(visitor.optional(t)))
+      case Util.TTextMap(typ) => tailcall(fromTypeRec(typ)).flatMap(t => done(visitor.textMap(t)))
+      case Util.TGenMap(kTyp, vTyp) =>
+        tailcall(fromTypeRec(kTyp)).flatMap(k =>
+          tailcall(fromTypeRec(vTyp)).flatMap(v => done(visitor.genMap(k, v)))
+        )
 
-      case Util.TUnit => visitor.unit
-      case Util.TBool => visitor.bool
-      case Util.TText => visitor.text
-      case Util.TInt64 => visitor.int64
-      case Util.TNumeric(Ast.TNat(scale)) => visitor.numeric(scale)
-      case Util.TTimestamp => visitor.timestamp
-      case Util.TDate => visitor.date
-      case Util.TParty => visitor.party
-      case Util.TContractId(typ) => visitor.contractId(fromType(typ))
+      case Util.TUnit => done(visitor.unit)
+      case Util.TBool => done(visitor.bool)
+      case Util.TText => done(visitor.text)
+      case Util.TInt64 => done(visitor.int64)
+      case Util.TNumeric(Ast.TNat(scale)) => done(visitor.numeric(scale))
+      case Util.TTimestamp => done(visitor.timestamp)
+      case Util.TDate => done(visitor.date)
+      case Util.TParty => done(visitor.party)
+      case Util.TContractId(typ) =>
+        tailcall(fromTypeRec(typ)).flatMap(t => done(visitor.contractId(t)))
 
       case other => err(s"Type $other not supported")
+
+  private def fromTypes(tpes: Seq[Ast.Type]): TailRec[Seq[visitor.Type]] =
+    tpes.foldLeft(done(Vector.empty[visitor.Type])) { (acc, tpe) =>
+      acc.flatMap(ts => tailcall(fromTypeRec(tpe)).flatMap(t => done(ts :+ t)))
+    }
 
   private val Lazy = LazinessManager()
 

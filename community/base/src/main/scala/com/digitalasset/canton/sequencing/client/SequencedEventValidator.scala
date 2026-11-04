@@ -39,6 +39,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.UpstreamSubscriptionError
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.decompressEvent
+import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy.Cumulative
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
@@ -62,7 +63,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress}
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
@@ -670,28 +671,18 @@ class SequencedEventValidatorImpl(
   }
 
   /** Derives the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] to use when
-    * decompressing the event's batch. The dynamic `maxRequestSize` bound from the topology snapshot
-    * is only used from protocol version 36 on; earlier protocol versions keep the historical fixed
-    * [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy.HardcodedDefault]] policy.
+    * decompressing the event's batch.
     */
   private def decompressionPolicy(
       snapshot: SyncCryptoApi
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[DecompressionPolicy] =
-    if (psid.protocolVersion == ProtocolVersion.v35)
-      FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
-    else
-      // Guard with the validator's close context: an in-flight lookup is drained before close, and a
-      // later one short-circuits to AbortedDueToShutdown instead of racing the closing storage layer.
-      synchronizeWithClosing("decompression-bound")(
-        snapshot.ipsSnapshot
-          .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
-          .map(parameters =>
-            DecompressionPolicy.forProtocolVersion(
-              psid.protocolVersion,
-              MaxBytesToDecompress(parameters.maxRequestSize.value),
-            )
-          )
-      )
+    // Guard with the validator's close context: an in-flight lookup is drained before close, and a
+    // later one short-circuits to AbortedDueToShutdown instead of racing the closing storage layer.
+    synchronizeWithClosing("decompression-bound")(
+      snapshot.ipsSnapshot
+        .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
+        .map(parameters => Cumulative(MaxBytesToDecompress(parameters.maxRequestSize.value)))
+    )
 
   /** Verifies the event's signature against the resolved topology snapshot and decompresses its
     * batch within the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] derived

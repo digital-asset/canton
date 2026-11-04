@@ -15,7 +15,13 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
+import com.digitalasset.canton.integration.{
+  ConfigTransforms,
+  EnvironmentDefinition,
+  EnvironmentSetupPlugin,
+  TestConsoleEnvironment,
+}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.performance.PartyRole.{
   DvpIssuer,
   Master,
@@ -29,6 +35,8 @@ import com.digitalasset.canton.performance.{
   PerformanceRunnerConfig,
   RateSettings,
 }
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*
@@ -37,80 +45,15 @@ class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
   import BasePerformanceIntegrationTest.*
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition
-      .buildBaseEnvironmentDefinition(
-        numParticipants = 2,
-        numSequencers = 2,
-        numMediators = 2,
-      )
-      .addConfigTransforms(
-        _.focus(_.parameters.timeouts.processing.shutdownProcessing)
-          .replace(NonNegativeDuration.tryFromDuration(1.minute))
-          .focus(_.parameters.enableAdditionalConsistencyChecks)
-          .replace(false),
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
-      )
+    TransferPerformanceIntegrationTest.environmentDefinition
 
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      sequencerGroups = MultiSynchronizer(
-        Seq(Set("sequencer1"), Set("sequencer2"))
-          .map(_.map(InstanceName.tryCreate))
-      ),
-    )
-  )
+  TransferPerformanceIntegrationTest.plugins(loggerFactory).foreach(registerPlugin)
 
   "setup synchronizers" in { implicit env =>
-    import env.*
-
-    // bootstrap synchronizeres
-    val connections =
-      sequencers.all.zip(mediators.all).zipWithIndex.map { case ((sequencer, mediator), idx) =>
-        val alias = s"sync$idx"
-        logger.info(s"Bootstrapping $alias with ${sequencer.name} and ${mediator.name}")
-        bootstrap.synchronizer(
-          synchronizerName = alias,
-          sequencers = Seq(sequencer),
-          mediators = Seq(mediator),
-          synchronizerOwners = Seq(sequencer),
-          synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaults(testedProtocolVersion),
-        )
-        (alias, sequencer.sequencerConnection.withAlias(alias))
-      }
-
-    // connect the participants to all sequencers
-    participants.all.foreach { participant =>
-      connections.foreach { case (alias, connection) =>
-        logger.info(s"Connecting ${participant.name} to $alias")
-        participant.synchronizers.connect_by_config(
-          SynchronizerConnectionConfig(
-            alias,
-            SequencerConnections.single(connection),
-          )
-        )
-      }
-
-      // upload dar first
-      logger.info(s"Uploading dar to ${participant.name}")
-      val darId = participant.dars.upload(
-        BaseTest.PerformanceTestPath,
-        vetAllPackages = false,
-        synchronizeVetting = false,
-      )
-      // vet the dar on all synchronizers
-      participant.synchronizers.list_connected().map(_.synchronizerId).foreach { synchronizerId =>
-        participant.dars.vetting
-          .enable(darId, synchronizerId = Some(synchronizerId), synchronize = false)
-      }
-
-      logger.info(s"Completed connecting nodes")
-
-    }
-
+    TransferPerformanceIntegrationTest.setupSynchronizers(testedProtocolVersion)(
+      env,
+      TransferPerformanceIntegrationTest.this.traceContext,
+    )
   }
 
   "run a normal transfer perf test" in { implicit env =>
@@ -184,6 +127,86 @@ class TransferPerformanceIntegrationTest extends BasePerformanceIntegrationTestC
         },
         forEvery(_)(acceptableLogMessage),
       )
+  }
+
+}
+object TransferPerformanceIntegrationTest {
+  private[performance] lazy val environmentDefinition = EnvironmentDefinition
+    .buildBaseEnvironmentDefinition(
+      numParticipants = 2,
+      numSequencers = 2,
+      numMediators = 2,
+    )
+    .addConfigTransforms(
+      _.focus(_.parameters.timeouts.processing.shutdownProcessing)
+        .replace(NonNegativeDuration.tryFromDuration(1.minute))
+        .focus(_.parameters.enableAdditionalConsistencyChecks)
+        .replace(false),
+      ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+    )
+
+  private[performance] def plugins(loggerFactory: NamedLoggerFactory): Seq[EnvironmentSetupPlugin] =
+    Seq(
+      new UsePostgres(loggerFactory),
+      new UseBftSequencer(
+        loggerFactory,
+        sequencerGroups = MultiSynchronizer(
+          Seq(Set("sequencer1"), Set("sequencer2"))
+            .map(_.map(InstanceName.tryCreate))
+        ),
+      ),
+    )
+
+  private[performance] def setupSynchronizers(
+      testedProtocolVersion: ProtocolVersion
+  )(implicit env: TestConsoleEnvironment, traceContext: TraceContext) = {
+    import env.*
+    val logger = env.loggerFactoryInternal.getTracedLogger(getClass)
+    // bootstrap synchronizers
+    val connections =
+      sequencers.all.zip(mediators.all).zipWithIndex.map { case ((sequencer, mediator), idx) =>
+        val alias = s"sync$idx"
+        logger.info(s"Bootstrapping $alias with ${sequencer.name} and ${mediator.name}")
+        bootstrap.synchronizer(
+          synchronizerName = alias,
+          sequencers = Seq(sequencer),
+          mediators = Seq(mediator),
+          synchronizerOwners = Seq(sequencer),
+          synchronizerThreshold = PositiveInt.one,
+          staticSynchronizerParameters =
+            StaticSynchronizerParameters.defaults(testedProtocolVersion),
+        )
+        (alias, sequencer.sequencerConnection.withAlias(alias))
+      }
+
+    // connect the participants to all sequencers
+    participants.all.foreach { participant =>
+      connections.foreach { case (alias, connection) =>
+        logger.info(s"Connecting ${participant.name} to $alias")
+        participant.synchronizers.connect_by_config(
+          SynchronizerConnectionConfig(
+            alias,
+            SequencerConnections.single(connection),
+          )
+        )
+      }
+
+      // upload dar first
+      logger.info(s"Uploading dar to ${participant.name}")
+      val darId = participant.dars.upload(
+        BaseTest.PerformanceTestPath,
+        vetAllPackages = false,
+        synchronizeVetting = false,
+      )
+      // vet the dar on all synchronizers
+      participant.synchronizers.list_connected().map(_.synchronizerId).foreach { synchronizerId =>
+        participant.dars.vetting
+          .enable(darId, synchronizerId = Some(synchronizerId), synchronize = false)
+      }
+
+      logger.info(s"Completed connecting nodes")
+
+    }
   }
 
 }

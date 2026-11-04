@@ -32,6 +32,9 @@ import com.digitalasset.canton.tea.projection.{
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  ListAccountsPageTokenPayload,
+  ListAccountsRequest,
+  ListAccountsResponse,
   PruneRequest,
   PruneResponse,
   RegisterSubmissionRequest,
@@ -42,7 +45,10 @@ import com.digitalasset.canton.tea.v1.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 import scala.concurrent.ExecutionContext
+import scala.util.Try
 
 /** Transport-agnostic Traffic Enforcement App (TEA) operations.
   */
@@ -61,12 +67,7 @@ class TrafficEnforcementService(
   ): FutureUnlessShutdown[Either[RpcError, GetAccountResponse]] = {
 
     val result = for {
-      accountId <- EitherT
-        .fromEither[FutureUnlessShutdown](
-          AccountId
-            .fromProtoPrimitive(request.accountId, "account_id")
-            .leftMap[RpcError](ProtoDeserializationFailure.Wrap(_))
-        )
+      accountId <- parsed(AccountId.fromProtoPrimitive(request.accountId, "account_id"))
       balance <- store.getBalance(accountId).leftWiden[RpcError]
     } yield {
       balance match {
@@ -86,11 +87,6 @@ class TrafficEnforcementService(
   def registerSubmission(request: RegisterSubmissionRequest)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[RpcError, RegisterSubmissionResponse]] = {
-    def parsed[A](result: ParsingResult[A]): EitherT[FutureUnlessShutdown, RpcError, A] =
-      EitherT.fromEither[FutureUnlessShutdown](
-        result.leftMap[RpcError](ProtoDeserializationFailure.Wrap(_))
-      )
-
     val result = for {
       changeIdHash <- parsed(
         LfHash
@@ -145,11 +141,7 @@ class TrafficEnforcementService(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[RpcError, UpdateAccountResponse]] = {
     def processBalanceDelta(accountId: AccountId, balanceDelta: Long) = for {
-      eventId <- EitherT.fromEither[FutureUnlessShutdown](
-        EventId
-          .fromProtoPrimitive(request.deduplicationId)
-          .leftMap[RpcError](ProtoDeserializationFailure.Wrap(_))
-      )
+      eventId <- parsed(EventId.fromProtoPrimitive(request.deduplicationId))
       newBalance <- store
         .persistTrafficDelta(
           accountId,
@@ -192,19 +184,46 @@ class TrafficEnforcementService(
     result.value
   }
 
+  /** List accounts with a stored balance, ordered by account ID. */
+  def listAccounts(request: ListAccountsRequest)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[RpcError, ListAccountsResponse]] = {
+    val result = for {
+      pageSize <- parsed(TrafficEnforcementService.parsePageSize(request.pageSize))
+      prefix <- parsed(
+        request.accountIdPrefix
+          .filter(_.nonEmpty)
+          .traverse(AccountId.prefixFromProtoPrimitive(_, "account_id_prefix/accountIdPrefix"))
+      )
+      after <- parsed(TrafficEnforcementService.decodePageToken(request.pageToken))
+      // Fetch one more for lookahead and decision on the nextPageToken
+      fetched <- store.listBalances(prefix, after, pageSize + 1).leftWiden[RpcError]
+      page = fetched.take(pageSize)
+      nextPageToken = TrafficEnforcementService.encodePageToken(
+        page.lastOption
+          .filter(_ => fetched.sizeIs > pageSize)
+          .map(_.account)
+      )
+    } yield ListAccountsResponse(
+      accounts = page.map(state => GetAccountResponse(state.account.unwrap, state.balance)),
+      nextPageToken = nextPageToken,
+    )
+
+    result.value
+  }
+
   def prune(request: PruneRequest)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[RpcError, PruneResponse]] = {
 
     val result: EitherT[FutureUnlessShutdown, RpcError, PruneResponse] = for {
-      ts <- EitherT.fromEither[FutureUnlessShutdown](
+      ts <- parsed(
         ProtoConverter
           .parseRequired(
             CantonTimestamp.fromProtoTimestamp,
             "before_or_at",
             request.beforeOrAt,
           )
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       safeBeforeOrAt = clock.now.minus(minimumPruningRetention.asJava)
       _ <- EitherT.cond[FutureUnlessShutdown](
@@ -226,4 +245,55 @@ class TrafficEnforcementService(
 
     result.value
   }
+
+  private def parsed[A](result: ParsingResult[A])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, A] =
+    EitherT.fromEither[FutureUnlessShutdown](
+      result.leftMap[RpcError](ProtoDeserializationFailure.Wrap(_))
+    )
+}
+
+object TrafficEnforcementService {
+  val MaxListAccountsPageSize: Int = 1000
+  private val DefaultListAccountsPageSize: Int = 100
+  private val PageTokenField: String = "page_token/pageToken"
+  private val PageSizeField: String = "page_size/pageSize"
+
+  private[tea] def decodePageToken(pageTokenO: Option[String]): ParsingResult[Option[AccountId]] =
+    pageTokenO.filter(_.nonEmpty).traverse { pageToken =>
+      def invalid(details: String) =
+        ProtoDeserializationError
+          .ValueConversionError(PageTokenField, s"Invalid page token: $details")
+      for {
+        decodedBytes <- Try(
+          Base64.getUrlDecoder.decode(pageToken.getBytes(StandardCharsets.UTF_8))
+        ).toEither.leftMap(err => invalid(s"failed base64 decoding: ${err.getMessage}"))
+        payload <- Try(ListAccountsPageTokenPayload.parseFrom(decodedBytes)).toEither
+          .leftMap(err => invalid(s"failed proto decoding: ${err.getMessage}"))
+        accountId <- AccountId
+          .fromLegacyFormat(payload.accountIdLowerBoundExcl)
+          .leftMap(err => invalid(err.message))
+      } yield accountId
+    }
+
+  private[tea] def encodePageToken(lastAccountO: Option[AccountId]): Option[String] =
+    lastAccountO.map { lastAccount =>
+      Base64.getUrlEncoder.encodeToString(
+        ListAccountsPageTokenPayload(accountIdLowerBoundExcl = lastAccount.unwrap).toByteArray
+      )
+    }
+
+  private def parsePageSize(pageSizeO: Option[Int]): ParsingResult[Int] =
+    pageSizeO
+      .fold[ParsingResult[Int]](Right(DefaultListAccountsPageSize)) { pageSize =>
+        Either.cond(
+          pageSize > 0 && pageSize <= MaxListAccountsPageSize,
+          pageSize,
+          ProtoDeserializationError.ValueConversionError(
+            PageSizeField,
+            s"must be between 1 and the maximum allowed page size ($MaxListAccountsPageSize), but was $pageSize",
+          ),
+        )
+      }
 }

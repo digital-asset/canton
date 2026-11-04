@@ -6,16 +6,20 @@ package com.digitalasset.canton.participant.admin.party.acsreplication
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow
-import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationTopologyWorkflow.TopologyTransactionInfo
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationTopologyWorkflow.{
+  TopologyTransactionInfo,
+  partyToParticipantTopologyHeadO,
+}
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   PartyToParticipant,
@@ -23,6 +27,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -122,32 +127,6 @@ class AcsReplicationTopologyWorkflow(
         s"Source participant ${params.sourceParticipantId} authorization to host party ${params.partyId} has been removed, but is necessary for ACS replication request ${params.requestId}.",
       )
     } yield ()
-
-  private def partyToParticipantTopologyHeadO(
-      partyId: PartyId,
-      topologyStore: TopologyStore[SynchronizerStore],
-      proposal: Boolean = false,
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
-    // TODO(#25766): add topology client endpoint
-    topologyStore
-      .inspect(
-        proposals = proposal,
-        timeQuery = TimeQuery.HeadState,
-        asOfExclusiveO = None,
-        op = Some(TopologyChangeOp.Replace),
-        types = Seq(TopologyMapping.Code.PartyToParticipant),
-        idFilter = Some(partyId.uid.identifier.str),
-        namespaceFilter = Some(partyId.uid.namespace.filterString),
-      )
-      .map(
-        _.collectOfMapping[PartyToParticipant]
-          .collectOfType[TopologyChangeOp.Replace]
-          .result
-          .headOption
-      )
-
 }
 
 object AcsReplicationTopologyWorkflow {
@@ -156,4 +135,28 @@ object AcsReplicationTopologyWorkflow {
       isOnboarding: Boolean,
       serial: PositiveInt,
   )
+
+  /** The party's current mapping, or its current proposal if `proposal` is set. Filters by the uid
+    * only: with a namespace filter, the store also returns the mappings of other parties of that
+    * namespace.
+    */
+  private[party] def partyToParticipantTopologyHeadO(
+      partyId: PartyId,
+      topologyStore: TopologyStore[SynchronizerStore],
+      proposal: Boolean = false,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
+    // TODO(#25766): add topology client endpoint
+    topologyStore
+      .findPositiveTransactions(
+        asOf = CantonTimestamp.MaxValue,
+        asOfInclusive = false,
+        isProposal = proposal,
+        types = Seq(TopologyMapping.Code.PartyToParticipant),
+        filterUid = Some(NonEmpty(Seq, partyId.uid)),
+        filterNamespace = None,
+      )
+      .map(_.collectOfMapping[PartyToParticipant].result.headOption)
 }

@@ -91,6 +91,20 @@ class RichTrafficServiceClient(
       retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
     )
 
+  def listAccounts(
+      request: ListAccountsRequest
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, GrpcError, ListAccountsResponse] =
+    CantonGrpcUtil.sendGrpcRequest(client, serverName)(
+      _.listAccounts(request),
+      requestDescription = "list-accounts",
+      timeout = timeouts.network.duration,
+      logger = logger,
+      logPolicy = RichTrafficServiceClient.doNotLogRefusedRequests,
+      retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
+    )
+
   def prune(
       request: PruneRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, GrpcError, PruneResponse] =

@@ -979,7 +979,7 @@ final class AssignmentProcessingStepsTest
               NoOpeningErrors(
                 SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
               ),
-              Verdict.Approve(testedProtocolVersion),
+              Verdict.Approve.create(testedProtocolVersion),
               pendingRequestData,
               state.pendingAssignmentSubmissions,
               crypto.pureCrypto,
@@ -1001,7 +1001,7 @@ final class AssignmentProcessingStepsTest
                   NoOpeningErrors(
                     SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                   ),
-                  Verdict.Approve(testedProtocolVersion),
+                  Verdict.Approve.create(testedProtocolVersion),
                   // request used MediatorGroupIndex.zero
                   pendingRequestData
                     .copy(mediator = MediatorGroupRecipient(MediatorGroupIndex.one)),
@@ -1039,7 +1039,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 failingAssignmentValidation,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,
@@ -1063,7 +1063,7 @@ final class AssignmentProcessingStepsTest
             NoOpeningErrors(
               SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
             ),
-            Verdict.Approve(testedProtocolVersion),
+            Verdict.Approve.create(testedProtocolVersion),
             pendingAssignment,
             state.pendingAssignmentSubmissions,
             crypto.pureCrypto,
@@ -1184,7 +1184,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 reassigningParticipantData,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,
@@ -1206,7 +1206,7 @@ final class AssignmentProcessingStepsTest
                 NoOpeningErrors(
                   SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
                 ),
-                Verdict.Approve(testedProtocolVersion),
+                Verdict.Approve.create(testedProtocolVersion),
                 pendingRequestData,
                 state.pendingAssignmentSubmissions,
                 crypto.pureCrypto,

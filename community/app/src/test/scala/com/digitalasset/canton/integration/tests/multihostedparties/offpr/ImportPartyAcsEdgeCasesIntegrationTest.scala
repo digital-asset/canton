@@ -3,19 +3,23 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
+import com.digitalasset.canton.admin.api.client.data.FlagNotSet
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.AcsImportMissingOnboardingMapping
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.PendingOperationStore
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.{Party, SynchronizerId}
 import com.digitalasset.canton.{ReassignmentCounter, RepairCounter}
+
+import java.time.Duration
+import scala.concurrent.duration.DurationInt
 
 /** General idea is to simulate an operator who is not following the offline party replication steps
   * properly.
@@ -528,5 +532,100 @@ final class OfflinePartyReplicationIncrementalAcsImportIntegrationTest
       reconnectAndEnsureOnboardingClearance(clock, alice, daName)
 
       assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 3)
+  }
+}
+
+/** Setup:
+  *   - Alice and Carol are hosted on participant1 (source), in its namespace
+  *   - Bob is hosted on participant2
+  *   - 1 active IOU contract between Alice and Bob
+  *   - Participant3 (target) is the target for replicating Alice
+  *
+  * Test: The onboarding flag clearance of Alice waits for the decision deadline of Alice's
+  * onboarding, although the target is still onboarding Carol, whose decision deadline has passed.
+  * The import must not take Carol's onboarding transaction for Alice's, as both parties share a
+  * namespace.
+  */
+final class ImportPartyAcsWhileTargetOnboardsAnotherPartyIntegrationTest
+    extends OfflinePartyReplicationIntegrationTestBase {
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .withSetup { implicit env =>
+        import env.*
+        source = participant1
+        target = participant3
+
+        IouSyntax.createIou(source)(alice, bob, 1.95).discard
+      }
+
+  private def targetIsOnboarding(party: Party)(implicit env: TestConsoleEnvironment): Boolean =
+    source.topology.party_to_participant_mappings
+      .list(env.daId, filterParty = party.filterString, filterParticipant = target.id.filterString)
+      .loneElement
+      .item
+      .participants
+      .exists(p => p.participantId == target.id && p.onboarding)
+
+  "The onboarding flag clearance waits for the decision deadline of the imported party's onboarding" in {
+    implicit env =>
+      import env.*
+      val clock = env.environment.simClock.value
+
+      // The target stays onboarding Carol, as it never imports her ACS
+      val carol = source.parties.testing.enable("Carol", synchronizeParticipants = Seq(target))
+      targetAuthorizesHosting(carol, daId, disconnectTarget = false).discard
+      eventually()(targetIsOnboarding(carol) shouldBe true)
+      // Pass the decision deadline of Carol's onboarding
+      advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
+
+      val beforeActivationOffset = targetAuthorizesHosting(alice, daId, disconnectTarget = true)
+      source.parties.export_party_acs(
+        party = alice,
+        synchronizerId = daId,
+        targetParticipantId = target.id,
+        beginOffsetExclusive = beforeActivationOffset,
+        exportFilePath = acsSnapshotPath,
+      )
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
+
+      clue("Alice's onboarding is not yet effective on the disconnected target") {
+        PendingOperationStore(
+          target.underlying.value.storage,
+          timeouts,
+          loggerFactory,
+          OnboardingClearanceOperation,
+          SynchronizerId.fromString,
+        )(executionContext)
+          .get(
+            daId.logical,
+            OnboardingClearanceOperation.operationKey(alice.partyId),
+            OnboardingClearanceOperation.operationName,
+          )
+          .value
+          .futureValueUS
+          .value
+          .operation
+          .onboardingEffectiveAt shouldBe None
+      }
+
+      val targetLedgerEnd = target.ledger_api.state.end()
+      clock.advance(Duration.ofSeconds(30))
+      target.synchronizers.reconnect(daName)
+      source.health.ping(target)
+      target.health.ping(source)
+
+      clue("The flag stays set before the decision deadline of Alice's onboarding") {
+        always(durationOfSuccess = 5.seconds)(targetIsOnboarding(alice) shouldBe true)
+      }
+
+      advanceTimeAndPing(clock, Duration.ofMinutes(2).plusSeconds(10), source, target)
+      eventually() {
+        target.parties.clear_party_onboarding_flag(
+          alice,
+          daId.logical,
+          targetLedgerEnd,
+        ) shouldBe FlagNotSet
+      }
   }
 }

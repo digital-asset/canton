@@ -25,7 +25,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroug
   SubmissionRequestEntry,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerThroughputCapTest.*
-import com.digitalasset.canton.synchronizer.sequencer.block.SchedulerTestUtil.mockScheduler
+import com.digitalasset.canton.synchronizer.sequencer.block.SchedulerTestUtil.{
+  ManualScheduler,
+  mockScheduler,
+}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.nonempty.NonEmpty
@@ -173,6 +176,41 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       // after advancing, the scheduler takes care of updating the cap (so now submissions are all accepted again)
       clock.advance(Duration.ofSeconds(observationPeriodSeconds.toLong).plusMillis(1L))
       assertAllAreAccepted
+    }
+
+    "keep at most one clock tick scheduled when a fired tick races with a block update" in {
+      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+      val scheduler = new ManualScheduler()
+      val cap = new BlockSequencerThroughputCap(
+        createConfig(observationPeriodSeconds = 1),
+        clock,
+        scheduler,
+        sequencerMetrics,
+        timeouts,
+        loggerFactory,
+      )
+      def blockUpdate(): Unit =
+        cap.addBlockUpdateInternal(
+          Seq(SubmissionRequestEntry(m1, ConfirmationRequest, clock.now, 1L))
+        )
+
+      blockUpdate()
+      scheduler.pending should have size 1
+
+      // CNI-7843: Reproduce the interleaving: the most recently scheduled tick (the one tracked by the cap)
+      // is fired by the scheduler and can no longer be cancelled, a block update is processed before
+      // the fired tick acquires the lock, then the fired tick runs.
+      (1 to 10).foreach { _ =>
+        val firedTick = scheduler.fire(scheduler.pending.lastOption.value)
+        blockUpdate()
+        firedTick.run()
+      }
+
+      // Without proper cancellation, every race leaks one self-perpetuating tick chain
+      scheduler.pending should have size 1
+
+      cap.close()
+      succeed
     }
   }
 

@@ -135,8 +135,7 @@ final case class ParticipantNodeConfig(
 /** Participant features configuration
   *
   * @param deprecated
-  *   Feature flags to temporarily re-enable endpoints and request fields that were deprecated in an
-  *   earlier release and are disabled by default in this one.
+  *   Feature flags to re-enable deprecated endpoints until their removal.
   */
 final case class ParticipantFeaturesConfig(
     deprecated: DeprecatedApiConfig = DeprecatedApiConfig()
@@ -153,13 +152,17 @@ final case class ParticipantFeaturesConfig(
   *   defined when the remote participant exposes a JSON API endpoint that the console should
   *   access, and left as None otherwise
   * @param token
-  *   optional bearer token to use on the ledger-api if jwt authorization is enabled
+  *   optional bearer token to use on the ledger-api and the admin-api if jwt authorization is
+  *   enabled
+  * @param adminApiToken
+  *   if defined replaces `token` in admin-api calls
   */
 final case class RemoteParticipantConfig(
     adminApi: FullClientConfig,
     ledgerApi: FullClientConfig,
     ledgerJsonApi: Option[JsonClientConfig] = None,
     token: Option[String] = None,
+    adminApiToken: Option[String] = None,
     httpHealth: Option[HttpHealthServerConfig] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi

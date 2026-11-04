@@ -22,7 +22,6 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.BftOrderingSigningKeyUsage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
@@ -44,7 +43,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmptyUtil
 import org.scalatest.wordspec.AsyncWordSpec
 
-class CantonOrderingTopologyProviderTest
+final class CantonOrderingTopologyProviderTest
     extends AsyncWordSpec
     with CryptoTestHelper
     with BaseTest
@@ -108,34 +107,26 @@ class CantonOrderingTopologyProviderTest
             (
               None,
               Some(nonDefaultSegmentLength.length.value),
-              if (testedProtocolVersion == ProtocolVersion.v34) DefaultSegmentLength
-              else nonDefaultSegmentLength,
+              nonDefaultSegmentLength,
               None,
               Some(NoBlacklistingLeaderSelectionPolicyConfig),
-              if (testedProtocolVersion == ProtocolVersion.v34) DefaultLeaderSelectionPolicyConfig
-              else NoBlacklistingLeaderSelectionPolicyConfig,
+              NoBlacklistingLeaderSelectionPolicyConfig,
             ),
             (
               Some(123L),
               Some(100L),
-              if (testedProtocolVersion == ProtocolVersion.v34) mkSegmentLength(123)
-              else mkSegmentLength(100),
+              mkSegmentLength(100),
               Some(NoBlacklistingLeaderSelectionPolicyConfig),
               Some(nonDefaultLeaderSelectionPolicy),
-              if (testedProtocolVersion == ProtocolVersion.v34)
-                NoBlacklistingLeaderSelectionPolicyConfig
-              else nonDefaultLeaderSelectionPolicy,
+              nonDefaultLeaderSelectionPolicy,
             ),
             (
               Some(123L),
               None,
-              if (testedProtocolVersion == ProtocolVersion.v34) mkSegmentLength(123)
-              else DefaultSegmentLength,
+              DefaultSegmentLength,
               Some(NoBlacklistingLeaderSelectionPolicyConfig),
               None,
-              if (testedProtocolVersion == ProtocolVersion.v34)
-                NoBlacklistingLeaderSelectionPolicyConfig
-              else DefaultLeaderSelectionPolicyConfig,
+              DefaultLeaderSelectionPolicyConfig,
             ),
           ).forEvery {
             case (
@@ -229,10 +220,6 @@ class CantonOrderingTopologyProviderTest
               }
               new CantonOrderingTopologyProvider(
                 cryptoApiMock,
-                BftBlockOrdererConfig(
-                  segmentLengthForPv34 = configSegmentLength,
-                  leaderSelectionPolicyConfigForPv34 = configLeaderSelectionPolicy,
-                ),
                 PublicServerConfig(),
                 loggerFactory,
                 SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
@@ -310,7 +297,6 @@ class CantonOrderingTopologyProviderTest
         .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
       new CantonOrderingTopologyProvider(
         cryptoApiMock,
-        BftBlockOrdererConfig(),
         PublicServerConfig(),
         loggerFactory,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,

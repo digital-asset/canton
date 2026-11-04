@@ -13,8 +13,8 @@ import com.google.protobuf.ByteString
 import java.util.concurrent.atomic.AtomicLong
 
 /** A budget bounding the total number of bytes produced by decompressing one or more blobs. Each
-  * blob is decompressed via [[decompressGzip]] or [[decompressZstd]], which draws the decompressed
-  * size from the budget; once the cumulative size would exceed the initial
+  * blob is decompressed via [[decompressZstd]], which draws the decompressed size from the budget;
+  * once the cumulative size would exceed the initial
   * [[com.digitalasset.canton.util.MaxBytesToDecompress]] limit, further decompressions fail with
   * [[com.digitalasset.canton.serialization.MaxByteToDecompressExceeded]].
   *
@@ -26,14 +26,6 @@ final class DecompressionBudget(limit: MaxBytesToDecompress) {
     * dip below `Int.MinValue` before any of them lands.
     */
   private val remaining = new AtomicLong(limit.limit.value.toLong)
-
-  def decompressGzip(compressed: ByteString): ParsingResult[ByteString] =
-    for {
-      decompressed <- ByteStringUtil
-        .decompressGzip(compressed, maxBytesLimit = remainingLimit)
-        .leftMap(_.toProtoDeserializationError)
-      _ <- take(decompressed.size).leftMap(_.toProtoDeserializationError)
-    } yield decompressed
 
   def decompressZstd(compressed: ByteString): ParsingResult[ByteString] =
     for {

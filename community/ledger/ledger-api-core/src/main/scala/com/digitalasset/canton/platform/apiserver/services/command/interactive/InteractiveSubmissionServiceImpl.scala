@@ -35,7 +35,11 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
-import com.digitalasset.canton.ledger.participant.state.SyncService.ReassignmentCostEstimation
+import com.digitalasset.canton.ledger.participant.state.SyncService.{
+  CostEstimateWithReassignments,
+  ReassignmentCostEstimation,
+  SubmissionCostEstimation,
+}
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -258,7 +262,17 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         case HashTracer.NoOp => None
         case stringTracer: HashTracer.StringHashTracer => Some(stringTracer.result)
       }
-      costEstimation <- costEstimationHints.traverse(doCostEstimations(commandExecutionResult, _))
+      // With enforcement on, we estimate for the balance check even when the client disabled estimation.
+      estimationHints = costEstimationHints.orElse(
+        Option.when(trafficEnforcementBackendO.exists(_.enforceCostOnSubmissions))(
+          CostEstimationHints()
+        )
+      )
+      estimations <- estimationHints.traverse(doCostEstimations(commandExecutionResult, _))
+      estimate = estimations.fold(CostEstimateWithReassignments.empty) {
+        case (transaction, reassignments) =>
+          CostEstimateWithReassignments(transaction.totalCost, reassignments)
+      }
       _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
         trafficEnforcementBackend
           .checkEstimatedCost(
@@ -267,11 +281,24 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
               actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs.toSet,
               adminParty = trafficEnforcementBackend.adminParty,
             ),
-            estimatedCost =
-              costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
+            estimate = estimate,
           )
-          .leftWiden[RpcError]
       )
+      scale = trafficEnforcementBackendO.fold[Long => Long](x => x)(_.scaleEstimate)
+      costEstimation =
+        if (costEstimationHints.isEmpty) None
+        else
+          estimations.map { case (transaction, reassignments) =>
+            CostEstimation(
+              estimationTimestamp = Some(transaction.estimationTimestamp.toProtoTimestamp),
+              confirmationRequestTrafficCostEstimation =
+                scale(transaction.confirmationRequestCost.value),
+              confirmationResponseTrafficCostEstimation =
+                scale(transaction.confirmationResponseCost.value),
+              totalTrafficCostEstimation = scale(estimate.total.value),
+              reassignmentCosts = toProto(reassignments, scale),
+            )
+          }
     } yield proto.PrepareSubmissionResponse(
       preparedTransaction = Some(prepareResult.transaction),
       preparedTransactionHash = prepareResult.hash.unwrap,
@@ -288,7 +315,11 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       costEstimationHints: CostEstimationHints,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, CostEstimation] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    RpcError,
+    (SubmissionCostEstimation, Seq[ReassignmentCostEstimation]),
+  ] = {
     val submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo
     val synchronizerId = commandExecutionResult.synchronizerRank.synchronizerId
 
@@ -310,31 +341,26 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         submitterInfo = submitterInfo,
         targetSynchronizer = synchronizerId,
       )
-    } yield CostEstimation(
-      estimationTimestamp = Some(estimation.estimationTimestamp.toProtoTimestamp),
-      confirmationRequestTrafficCostEstimation = estimation.confirmationRequestCost.value,
-      confirmationResponseTrafficCostEstimation = estimation.confirmationResponseCost.value,
-      totalTrafficCostEstimation =
-        estimation.totalCost.value + reassignEstimations.map(_.totalCost.value).sum,
-      reassignmentCosts = toProto(reassignEstimations),
-    ))
+    } yield (estimation, reassignEstimations))
       .leftMap(InteractiveSubmissionPreparationError.Reject(_))
       .leftWiden[RpcError]
   }
 
   private def toProto(
-      reassignEstimations: Seq[ReassignmentCostEstimation]
+      reassignEstimations: Seq[ReassignmentCostEstimation],
+      scale: Long => Long,
   ): Seq[ReassignmentCost] =
     reassignEstimations.map { estimation =>
       ReassignmentCost(
         sourceSynchronizerId = estimation.sourceSynchronizerId.toProtoPrimitive,
         targetSynchronizerId = estimation.targetSynchronizerId.toProtoPrimitive,
         contractIds = estimation.contractIds.map(_.toProtoPrimitive),
-        unassignmentRequestTrafficCostEstimation = estimation.unassignmentRequestCost.value,
-        unassignmentResponseTrafficCostEstimation = estimation.unassignmentResponseCost.value,
-        assignmentRequestTrafficCostEstimation = estimation.assignmentRequestCost.value,
-        assignmentResponseTrafficCostEstimation = estimation.assignmentResponseCost.value,
-        totalReassignmentCostEstimation = estimation.totalCost.value,
+        unassignmentRequestTrafficCostEstimation = scale(estimation.unassignmentRequestCost.value),
+        unassignmentResponseTrafficCostEstimation =
+          scale(estimation.unassignmentResponseCost.value),
+        assignmentRequestTrafficCostEstimation = scale(estimation.assignmentRequestCost.value),
+        assignmentResponseTrafficCostEstimation = scale(estimation.assignmentResponseCost.value),
+        totalReassignmentCostEstimation = scale(estimation.totalCost.value),
       )
     }
 

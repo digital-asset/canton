@@ -7,6 +7,7 @@ import cats.implicits.toBifunctorOps
 import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfTimestamp
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.validation.ResourceAnnotationValidator.{
@@ -27,7 +28,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.validation.ProtoValidation.{validateLength, validateSeqLength}
+import com.digitalasset.canton.validation.ProtoValidation.{validateCondition, validateLength}
 import com.digitalasset.canton.validation.ValidationParam
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
@@ -135,14 +136,14 @@ object FieldValidator {
     }
 
   def validateCardinality(
-      values: Seq[Any],
+      values: Iterable[?],
       fieldName: String,
       limit: PositiveInt,
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Unit] =
-    validateSeqLength(
-      seq = values,
+    validateLength(
+      iterable = values,
       field = fieldName,
       pvv = ProtocolVersionValidation.AlwaysValidation,
       maxLength = ValidationParam(ProtocolVersion.minimum -> limit),
@@ -172,6 +173,25 @@ object FieldValidator {
         protoDeserializationError => sizeLimitExceeded(protoDeserializationError.message),
         _ => (),
       )
+
+  def validateSerializedSizeLimit(
+      message: GeneratedMessage,
+      fieldName: String,
+      limit: PositiveInt,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Unit] =
+    validateCondition(
+      pvv = ProtocolVersionValidation.AlwaysValidation,
+      param = ValidationParam(ProtocolVersion.minimum -> limit),
+    )(
+      condition = max => message.serializedSize <= max.value,
+      mkError = max =>
+        InvariantViolation(
+          fieldName,
+          s"Serialized message size for $fieldName (${message.serializedSize} bytes) exceeds maximum limit of ${max.value} bytes",
+        ),
+    ).leftMap(protoDeserializationError => sizeLimitExceeded(protoDeserializationError.message))
 
   def requireUserId(
       s: String,

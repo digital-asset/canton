@@ -50,6 +50,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Print shard distribution debug output.",
     )
+    parser.add_argument(
+        "--all-buckets-file",
+        default=None,
+        help="Also write every bucket to this file, one '<shard>=<tests>' line per shard.",
+    )
     return parser.parse_args(argv)
 
 
@@ -148,6 +153,17 @@ def write_output(output_file: str, selected: Sequence[str], total_tests: int) ->
         f.write("selected_tests=" + " ".join(selected) + "\n")
 
 
+def write_all_buckets(all_buckets_file: str, buckets: Sequence[Sequence[str]]) -> None:
+    """Write every bucket as a '<shard>=<space-separated tests>' line.
+
+    Reruns restore their test list from this file so that every shard keeps the split
+    of the attempt whose results are reused, even when only some shards are rerun.
+    """
+    with open(all_buckets_file, "w", encoding="utf-8") as f:
+        for shard_index, bucket in enumerate(buckets):
+            f.write(f"{shard_index}=" + " ".join(bucket) + "\n")
+
+
 def test_validate_inputs_rejects_invalid_total() -> None:
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as test_file:
         test_file.write("com.example.TestSuite\n")
@@ -236,6 +252,18 @@ def test_write_output_format() -> None:
         os.remove(output_path)
 
 
+def test_write_all_buckets_format() -> None:
+    with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as out_file:
+        output_path = out_file.name
+    try:
+        write_all_buckets(output_path, [["A", "B"], [], ["C"]])
+        with open(output_path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        assert lines == ["0=A B", "1=", "2=C"]
+    finally:
+        os.remove(output_path)
+
+
 def test_full_flow_helpers() -> None:
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as test_file:
         test_file.write("suite.A\n")
@@ -268,6 +296,7 @@ def self_test() -> None:
     test_load_timings_returns_empty_for_missing_file()
     test_assign_to_shards_balances_largest_first()
     test_write_output_format()
+    test_write_all_buckets_format()
     test_full_flow_helpers()
     print("All self-checks passed")
 
@@ -304,6 +333,8 @@ def main():
         print_debug_distribution(args.total, args.shard, buckets, bucket_times)
 
     write_output(args.output_file, selected, len(filtered))
+    if args.all_buckets_file:
+        write_all_buckets(args.all_buckets_file, buckets)
 
 
 if __name__ == "__main__":

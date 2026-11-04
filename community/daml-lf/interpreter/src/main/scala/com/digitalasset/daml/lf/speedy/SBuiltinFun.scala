@@ -2474,26 +2474,7 @@ private[lf] object SBuiltinFun {
                 mbToken,
               )
               (result, newMbtoken) = entry
-              // sanity check: check that any returned contracts have the key asked.
-              result <- result.collectFirst {
-                case (contract, _, _)
-                    if contract.contractKeyWithMaintainers.forall(_.globalKey != gkey) =>
-                  contract
-              } match {
-                case None =>
-                  loop(resume(result.view.map(_._1.contractId), newMbtoken))
-                case Some(contract) =>
-                  crash(
-                    s"""Contract key mismatch: the ledger returned a contract whose key does not match the requested key.
-                       | Requested key: $gkey
-                       | Returned contract id: ${contract.contractId}
-                       | Returned contract template: ${contract.templateId}
-                       | Returned contract key: ${contract.contractKeyWithMaintainers
-                        .map(_.globalKey)
-                        .getOrElse("<no key>")}
-                       |""".stripMargin
-                  )
-              }
+              result <- loop(resume(result.view.map(_._1.contractId), newMbtoken))
             } yield result
           case Right(Right((mapping, next))) =>
             for {
@@ -3339,6 +3320,10 @@ private[lf] object SBuiltinFun {
       check(_.nonSignatoryStakeholders, "nonSignatoryStakeholders"),
       check(_.keyOpt.map(_.maintainers), "key maintainers"),
       check(_.keyOpt.map(_.globalKey.key), "key value"),
+      // TODO(#37616): PV36 backward-compatibility logic was omitted here assuming PV36 is deprecated.
+      // If support is retained, port the fixes implemented on 3.7 in #37442, #37448, #37450, and #37482.
+      // Once #37616 is resolved, simply remove this comment.
+      check(_.keyOpt.map(_.globalKey.hash), "key hash"),
       Option.when(srcPkgName != dstPkgName)(
         s"package name mismatch: $srcPkgName vs $dstPkgName"
       ),

@@ -95,12 +95,6 @@ import scala.util.Random
 
 /** Configuration class for the BFT Block Orderer.
   *
-  * @param segmentLengthForPv34
-  *   Optionally, the number of blocks per segment (only taken into account in Protocol Version 34).
-  *   If set to [[scala.None]], the default epoch length is used.
-  * @param leaderSelectionPolicyConfigForPv34
-  *   The leader selection policy to enforce in the presence of View Changes of segments (only taken
-  *   into account in Protocol Version 34).
   * @param viewChangeTimeoutOverride
   *   Optionally, the base duration to use for view change timeouts for ISS segments. If specified,
   *   this value will be used instead of the pbftViewChangeTimeout set in the network-wide
@@ -273,8 +267,6 @@ import scala.util.Random
   *   becomes cold.
   */
 final case class BftBlockOrdererConfig(
-    segmentLengthForPv34: Option[Long] = None,
-    leaderSelectionPolicyConfigForPv34: Option[BlacklistLeaderSelectionPolicyConfig] = None,
     viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,

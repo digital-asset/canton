@@ -338,6 +338,10 @@ trait SequencerPruningIntegrationTest extends CommunityIntegrationTest with Shar
     //  Allow 60s for ordering to complete, matching the patience in waitForAllEnabledMembersToAck,
     //  instead of eventually's 20s default.
     eventually(timeUntilSuccess = 60.seconds) {
+      // Acks are only sent on sim clock ticks. A member (e.g. the sequencer) may observe its post-jump
+      // event only after the previous tick, so tick again on every retry.
+      environment.simClock.value.advance(sequencerClientAcknowledgementInterval.asJava)
+
       earliestAckExcludingParticipant(
         sequencer1.pruning.status(),
         participant3Id,

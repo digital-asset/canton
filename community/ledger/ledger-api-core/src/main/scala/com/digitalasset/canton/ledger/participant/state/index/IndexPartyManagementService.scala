@@ -24,7 +24,8 @@ trait IndexPartyManagementService {
       fromExcl: Option[Party],
       filterString: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]]
+  ): Future[IndexerKnownPartiesPage]
 }

@@ -59,6 +59,9 @@ echo "***** Running Sequencer Replay Test..."
 		sbt -J-Dlogback.configurationFile=logback.xml \
 			-J-Dreplay-tests.enable-recording=true \
 			-J-Dreplay-tests.total-cycles="${SEQUENCER_REPLAY_TOTAL_CYCLES:-1000}" \
+			-J-Dreplay-tests.enable-resubscription=false \
+			-J-Dreplay-tests.replay-timeout-minutes=20 \
+			-J-Dreplay-tests.recording-timeout-minutes=20 \
 			-J-Dcanton.metrics.reporters.csv.directory="$METRICS_DIR" \
 			-J-Dio.opentelemetry.exporter.metrics.csv.directory="$METRICS_DIR" \
 			"community-app/testOnly com.digitalasset.canton.integration.tests.benchmarks.BftSequencerReplayBenchmark"
@@ -79,4 +82,4 @@ export COMMON_LOG_FILE="$SYNCHRONIZERS_LOG_FILE"
 export UPDATES_LOAD_METRICS_FILE="sequencer1.daml.sequencer.block.events.csv"
 export UPDATES_LOAD_METRICS_FILTER_PATTERN="participant.*send-confirmation-response"
 
-compute-and-publish-metrics.sh 10 95
+compute-and-publish-metrics.sh 0 100

@@ -6,6 +6,8 @@ package iterable
 
 import com.digitalasset.daml.lf.language.Ast.*
 
+// The topmost expressions under a node: the direct sub-expressions of an expression, or the
+// expressions held by a definition, template or module. Callers descend into them themselves.
 private[lf] object ExprIterable {
   that =>
 
@@ -70,19 +72,19 @@ private[lf] object ExprIterable {
       case ECallInterface(iface @ _, method @ _, value) =>
         Iterator(value)
       case EToRequiredInterface(requiredIface @ _, requiringIface @ _, body) =>
-        iterator(body)
+        Iterator(body)
       case EFromRequiredInterface(requiredIface @ _, requiringIface @ _, body) =>
-        iterator(body)
+        Iterator(body)
       case EUnsafeFromRequiredInterface(requiredIface @ _, requiringIface @ _, cid, body) =>
         Iterator(cid, body)
       case EInterfaceTemplateTypeRep(iface @ _, body) =>
-        iterator(body)
+        Iterator(body)
       case ESignatoryInterface(iface @ _, body) =>
-        iterator(body)
+        Iterator(body)
       case EViewInterface(ifaceId @ _, expr) =>
-        iterator(expr)
+        Iterator(expr)
       case EObserverInterface(iface @ _, body) =>
-        iterator(body)
+        Iterator(body)
       case EChoiceController(tpl @ _, choiceName @ _, contract, choiceArg) =>
         Iterator(contract, choiceArg)
       case EChoiceObserver(tpl @ _, choiceName @ _, contract, choiceArg) =>

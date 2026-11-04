@@ -118,7 +118,11 @@ final class LsuSequencingTestMessageHandlerTest
     for {
       snapshot <- cryptoClient.currentSnapshotApproximation
 
-      content = LsuSequencingTestMessageContent.create(psid = psid, sender = sender)
+      content = LsuSequencingTestMessageContent.create(
+        psid = psid,
+        sender = sender,
+        testedProtocolVersion,
+      )
       signedContent <- sign(
         cryptoClient,
         snapshot,
@@ -129,6 +133,7 @@ final class LsuSequencingTestMessageHandlerTest
       message = LsuSequencingTestMessage(
         signedContent.content,
         signatureOverride.getOrElse(signedContent.signature),
+        testedProtocolVersion,
       )
 
       openEnvelope: OpenEnvelope[LsuSequencingTestMessage] = OpenEnvelope(
@@ -143,6 +148,7 @@ final class LsuSequencingTestMessageHandlerTest
         MessageId.tryCreate("test").some,
         Batch(List(openEnvelope), testedProtocolVersion),
         trafficReceipt = None,
+        testedProtocolVersion,
       )
 
       tracedBatch = Traced(Seq(WithCounter(SequencerCounter(42), Traced(deliver))))

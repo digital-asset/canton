@@ -150,7 +150,7 @@ class GrpcSequencerConnectServiceTest
         result.left.value.getDescription should include("Too many topology transactions")
       } else {
         result.left.value.getDescription should include(
-          s"repeated field has $tooMany elements, exceeding the maximum of ${GrpcSequencerConnectService.maxOnboardingTransactions.value}"
+          s"repeated or map field has $tooMany elements, exceeding the maximum of ${GrpcSequencerConnectService.maxOnboardingTransactions.value}"
         )
       }
     }

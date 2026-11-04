@@ -6,6 +6,10 @@ package iterable
 
 import com.digitalasset.daml.lf.language.Ast.*
 
+import scala.annotation.tailrec
+
+// The topmost types under a node: the direct subtypes of a type, or the types attached to any
+// sub-expression of an expression or definition. Callers descend into the returned types themselves.
 private[lf] object TypeIterable {
   that =>
 
@@ -26,146 +30,121 @@ private[lf] object TypeIterable {
         fields.values
     }
 
-  private def iterator(expr0: Expr): Iterator[Type] =
+  // stack-safe: descends into sub-expressions with an explicit worklist
+  private def typesIn(expr0: Expr): List[Type] = {
+    @tailrec
+    def loop(todo: List[Expr], acc: List[Type]): List[Type] =
+      todo match {
+        case Nil => acc
+        case expr :: rest =>
+          loop(ExprIterable.iterator(expr).toList ::: rest, localTypes(expr) ::: acc)
+      }
+    loop(List(expr0), Nil)
+  }
+
+  // types attached to this node only, sub-expressions are visited by the caller
+  private def localTypes(expr0: Expr): List[Type] =
     expr0 match {
       case ERecCon(tycon, fields @ _) =>
-        Iterator(toType(tycon)) ++
-          fields.iterator.flatMap { case (_, typ) => iterator(typ) }
-      case ERecProj(tycon, field @ _, record) =>
-        Iterator(toType(tycon)) ++
-          iterator(record)
-      case ERecUpd(tycon, field @ _, record, update) =>
-        Iterator(toType(tycon)) ++
-          iterator(record) ++ iterator(update)
-      case EVariantCon(tycon, variant @ _, arg) =>
-        Iterator(toType(tycon)) ++
-          iterator(arg)
-      case ETyApp(expr, typ) =>
-        iterator(expr) ++ Iterator(typ)
-      case EAbs((boundVarName @ _, boundVarType), body) =>
-        Iterator(boundVarType) ++ iterator(body)
-      case ELet(binding, body) =>
-        iterator(binding) ++ iterator(body)
+        List(toType(tycon))
+      case ERecProj(tycon, field @ _, record @ _) =>
+        List(toType(tycon))
+      case ERecUpd(tycon, field @ _, record @ _, update @ _) =>
+        List(toType(tycon))
+      case EVariantCon(tycon, variant @ _, arg @ _) =>
+        List(toType(tycon))
+      case ETyApp(expr @ _, typ) =>
+        List(typ)
+      case EAbs((boundVarName @ _, boundVarType), body @ _) =>
+        List(boundVarType)
+      case ELet(binding, body @ _) =>
+        List(binding.typ)
       case EEnumCon(tyConName, _) =>
-        Iterator(TTyCon(tyConName))
-      case EToAny(typ, expr) =>
-        Iterator(typ) ++ iterator(expr)
-      case EFromAny(typ, expr) =>
-        Iterator(typ) ++ iterator(expr)
+        List(TTyCon(tyConName))
+      case EToAny(typ, expr @ _) =>
+        List(typ)
+      case EFromAny(typ, expr @ _) =>
+        List(typ)
       case ETypeRep(tyCon) =>
-        Iterator(tyCon)
+        List(tyCon)
       case ENil(typ) =>
-        Iterator(typ)
-      case ECons(typ, front, tail) =>
-        Iterator(typ) ++
-          front.iterator.flatMap(iterator(_)) ++
-          iterator(tail)
+        List(typ)
+      case ECons(typ, front @ _, tail @ _) =>
+        List(typ)
       case ENone(typ) =>
-        Iterator(typ)
-      case ESome(typ, body) =>
-        Iterator(typ) ++ iterator(body)
+        List(typ)
+      case ESome(typ, body @ _) =>
+        List(typ)
       case EUpdate(u) =>
-        iterator(u)
-      case EThrow(returnType, exceptionType, exception) =>
-        Iterator(returnType, exceptionType) ++
-          iterator(exception)
-      case EToAnyException(typ, value) =>
-        Iterator(typ) ++
-          iterator(value)
-      case EFromAnyException(typ, value) =>
-        Iterator(typ) ++
-          iterator(value)
-      case EToInterface(iface, tpl, value) =>
-        Iterator(TTyCon(iface), TTyCon(tpl)) ++ iterator(value)
-      case EFromInterface(iface, tpl, value) =>
-        Iterator(TTyCon(iface), TTyCon(tpl)) ++ iterator(value)
-      case EUnsafeFromInterface(iface, tpl, cid, value) =>
-        Iterator(TTyCon(iface), TTyCon(tpl)) ++ iterator(cid) ++ iterator(value)
-      case ECallInterface(iface, _, value) =>
-        Iterator(TTyCon(iface)) ++ iterator(value)
-      case EToRequiredInterface(requiredIfaceId, requiringIfaceId, body) =>
-        Iterator(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId)) ++ iterator(body)
-      case EFromRequiredInterface(requiredIfaceId, requiringIfaceId, body) =>
-        Iterator(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId)) ++ iterator(body)
-      case EUnsafeFromRequiredInterface(requiredIfaceId, requiringIfaceId, cid, body) =>
-        Iterator(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId)) ++
-          iterator(cid) ++ iterator(body)
-      case EInterfaceTemplateTypeRep(ifaceId @ _, body) =>
-        Iterator(TTyCon(ifaceId)) ++ iterator(body)
-      case ESignatoryInterface(ifaceId, body) =>
-        Iterator(TTyCon(ifaceId)) ++ iterator(body)
-      case EObserverInterface(ifaceId, body) =>
-        Iterator(TTyCon(ifaceId)) ++ iterator(body)
-      case EViewInterface(ifaceId, expr) =>
-        Iterator(TTyCon(ifaceId)) ++
-          iterator(expr)
-      case EChoiceController(tpl, choiceName @ _, contract, choiceArg) =>
-        Iterator(TTyCon(tpl)) ++
-          iterator(contract) ++
-          iterator(choiceArg)
-      case EChoiceObserver(tpl, choiceName @ _, contract, choiceArg) =>
-        Iterator(TTyCon(tpl)) ++
-          iterator(contract) ++
-          iterator(choiceArg)
+        localTypes(u)
+      case EThrow(returnType, exceptionType, exception @ _) =>
+        List(returnType, exceptionType)
+      case EToAnyException(typ, value @ _) =>
+        List(typ)
+      case EFromAnyException(typ, value @ _) =>
+        List(typ)
+      case EToInterface(iface, tpl, value @ _) =>
+        List(TTyCon(iface), TTyCon(tpl))
+      case EFromInterface(iface, tpl, value @ _) =>
+        List(TTyCon(iface), TTyCon(tpl))
+      case EUnsafeFromInterface(iface, tpl, cid @ _, value @ _) =>
+        List(TTyCon(iface), TTyCon(tpl))
+      case ECallInterface(iface, _, value @ _) =>
+        List(TTyCon(iface))
+      case EToRequiredInterface(requiredIfaceId, requiringIfaceId, body @ _) =>
+        List(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId))
+      case EFromRequiredInterface(requiredIfaceId, requiringIfaceId, body @ _) =>
+        List(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId))
+      case EUnsafeFromRequiredInterface(requiredIfaceId, requiringIfaceId, cid @ _, body @ _) =>
+        List(TTyCon(requiredIfaceId), TTyCon(requiringIfaceId))
+      case EInterfaceTemplateTypeRep(ifaceId, body @ _) =>
+        List(TTyCon(ifaceId))
+      case ESignatoryInterface(ifaceId, body @ _) =>
+        List(TTyCon(ifaceId))
+      case EObserverInterface(ifaceId, body @ _) =>
+        List(TTyCon(ifaceId))
+      case EViewInterface(ifaceId, expr @ _) =>
+        List(TTyCon(ifaceId))
+      case EChoiceController(tpl, choiceName @ _, contract @ _, choiceArg @ _) =>
+        List(TTyCon(tpl))
+      case EChoiceObserver(tpl, choiceName @ _, contract @ _, choiceArg @ _) =>
+        List(TTyCon(tpl))
       case EVar(_) | EVal(_) | EBuiltinFun(_) | EBuiltinCon(_) | EBuiltinLit(_) | EApp(_, _) |
           ECase(_, _) | ELocation(_, _) | EStructCon(_) | EStructProj(_, _) | EStructUpd(_, _, _) |
           ETyAbs(_, _) | EExperimental(_, _) =>
-        ExprIterable.iterator(expr0).flatMap(iterator(_))
+        Nil
     }
 
-  private def iterator(update: Update): Iterator[Type] =
+  private def localTypes(update: Update): List[Type] =
     update match {
-      case UpdatePure(typ, expr) =>
-        Iterator(typ) ++ iterator(expr)
-      case UpdateBlock(bindings, body) =>
-        bindings.iterator.flatMap(iterator(_)) ++
-          iterator(body)
-      case UpdateCreate(templateId, arg) =>
-        Iterator(TTyCon(templateId)) ++
-          iterator(arg)
-      case UpdateCreateInterface(interface, arg) =>
-        Iterator(TTyCon(interface)) ++
-          iterator(arg)
-      case UpdateFetchTemplate(templateId, contractId) =>
-        Iterator(TTyCon(templateId)) ++
-          iterator(contractId)
-      case UpdateFetchInterface(interface, contractId) =>
-        Iterator(TTyCon(interface)) ++
-          iterator(contractId)
-      case UpdateUnpackTemplate(templateId, contractId) =>
-        Iterator(TTyCon(templateId)) ++
-          iterator(contractId)
-      case UpdateUnpackInterface(interface, contractId) =>
-        Iterator(TTyCon(interface)) ++
-          iterator(contractId)
-      case UpdateExercise(templateId, choice @ _, cid, arg) =>
-        Iterator(TTyCon(templateId)) ++
-          iterator(cid) ++
-          iterator(arg)
-      case UpdateExerciseInterface(interface, choice @ _, cid, arg, guard) =>
-        Iterator(TTyCon(interface)) ++
-          iterator(cid) ++
-          iterator(arg) ++
-          guard.iterator.flatMap(iterator(_))
-      case UpdateExerciseByKey(templateId, choice @ _, key, arg) =>
-        Iterator(TTyCon(templateId)) ++
-          iterator(key) ++
-          iterator(arg)
-      case UpdateEmbedExpr(typ, body) =>
-        Iterator(typ) ++
-          iterator(body)
+      case UpdatePure(typ, expr @ _) =>
+        List(typ)
+      case UpdateBlock(bindings, body @ _) =>
+        bindings.toList.map(_.typ)
+      case UpdateCreate(templateId, arg @ _) =>
+        List(TTyCon(templateId))
+      case UpdateCreateInterface(interface, arg @ _) =>
+        List(TTyCon(interface))
+      case UpdateFetchTemplate(templateId, contractId @ _) =>
+        List(TTyCon(templateId))
+      case UpdateFetchInterface(interface, contractId @ _) =>
+        List(TTyCon(interface))
+      case UpdateUnpackTemplate(templateId, contractId @ _) =>
+        List(TTyCon(templateId))
+      case UpdateUnpackInterface(interface, contractId @ _) =>
+        List(TTyCon(interface))
+      case UpdateExercise(templateId, choice @ _, cid @ _, arg @ _) =>
+        List(TTyCon(templateId))
+      case UpdateExerciseInterface(interface, choice @ _, cid @ _, arg @ _, guard @ _) =>
+        List(TTyCon(interface))
+      case UpdateExerciseByKey(templateId, choice @ _, key @ _, arg @ _) =>
+        List(TTyCon(templateId))
+      case UpdateEmbedExpr(typ, body @ _) =>
+        List(typ)
       case UpdateGetTime | UpdateLedgerTimeLT(_) | UpdateFetchByKey(_) | UpdateQueryNByKey(_) =>
-        ExprIterable.iterator(update).flatMap(iterator(_))
-      case UpdateTryCatchV1(typ, body, binder @ _, handler) =>
-        Iterator(typ) ++
-          iterator(body) ++
-          iterator(handler)
-    }
-
-  private def iterator(binding: Binding): Iterator[Type] =
-    binding match {
-      case Binding(binder @ _, typ, bound) =>
-        Iterator(typ) ++ iterator(bound)
+        Nil
+      case UpdateTryCatchV1(typ, body @ _, binder @ _, handler @ _) =>
+        List(typ)
     }
 
   private def iterator(defn: Definition): Iterator[Type] =
@@ -181,7 +160,7 @@ private[lf] object TypeIterable {
       case DDataType(serializable @ _, params @ _, DataInterface) =>
         Iterator.empty
       case DValue(typ, body) =>
-        Iterator(typ) ++ iterator(body)
+        Iterator(typ) ++ typesIn(body)
 
     }
 
@@ -196,10 +175,10 @@ private[lf] object TypeIterable {
             key,
             implements,
           ) =>
-        iterator(precond) ++
-          iterator(signatories) ++
+        typesIn(precond).iterator ++
+          typesIn(signatories) ++
           choices.values.flatMap(iterator(_)) ++
-          iterator(observers) ++
+          typesIn(observers) ++
           key.iterator.flatMap(iterator(_)) ++
           implements.values.flatMap(iterator(_))
     }
@@ -217,10 +196,10 @@ private[lf] object TypeIterable {
             retType,
             update,
           ) =>
-        iterator(controllers) ++
-          observers.iterator.flatMap(iterator(_)) ++
-          authorizers.iterator.flatMap(iterator(_)) ++
-          iterator(update) ++
+        typesIn(controllers).iterator ++
+          observers.iterator.flatMap(typesIn) ++
+          authorizers.iterator.flatMap(typesIn) ++
+          typesIn(update) ++
           Iterator(boundedVarType) ++
           Iterator(retType)
     }
@@ -229,8 +208,8 @@ private[lf] object TypeIterable {
     key match {
       case TemplateKey(typ, body, maintainers) =>
         Iterator(typ) ++
-          iterator(body) ++
-          iterator(maintainers)
+          typesIn(body) ++
+          typesIn(maintainers)
     }
 
   private def iterator(impl: TemplateImplements): Iterator[Type] =
@@ -242,13 +221,13 @@ private[lf] object TypeIterable {
   private def iterator(iiBody: InterfaceInstanceBody): Iterator[Type] =
     iiBody match {
       case InterfaceInstanceBody(methods, view) =>
-        methods.values.iterator.flatMap(iterator) ++ iterator(view)
+        methods.values.iterator.flatMap(iterator) ++ typesIn(view)
     }
 
   private def iterator(method: InterfaceInstanceMethod): Iterator[Type] =
     method match {
       case InterfaceInstanceMethod(name @ _, value) =>
-        iterator(value)
+        typesIn(value).iterator
     }
 
   private def iterator(coImpl: InterfaceCoImplements): Iterator[Type] =
@@ -280,7 +259,7 @@ private[lf] object TypeIterable {
 
   def apply(expr: Expr): Iterable[Type] =
     new Iterable[Type] {
-      override def iterator = that.iterator(expr)
+      override def iterator = that.typesIn(expr).iterator
     }
 
   def apply(module: Module): Iterable[Type] =

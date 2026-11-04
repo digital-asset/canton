@@ -194,7 +194,11 @@ class BlockSequencerThroughputCap(
     }
   }
 
-  private def scheduleClockTick(): Unit =
+  private def scheduleClockTick(): Unit = {
+    // Cancel the previously scheduled tick before replacing it. Otherwise, a tick that has already
+    // been fired (and thus cannot be cancelled by `addBlockUpdateInternal`) would overwrite the
+    // reference to the tick scheduled in the meantime, leaking a self-perpetuating tick scheduling chain.
+    cancellable.foreach(_.cancel().discard)
     cancellable = Some(
       scheduler.scheduleOnce(
         config.clockTickInterval.asJava,
@@ -203,6 +207,7 @@ class BlockSequencerThroughputCap(
         },
       )
     )
+  }
 
   override def close(): Unit = lock.exclusive {
     if (!closed.getAndSet(true)) {

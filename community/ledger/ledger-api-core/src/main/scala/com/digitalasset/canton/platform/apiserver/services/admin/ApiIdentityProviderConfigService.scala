@@ -5,6 +5,8 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin.identity_provider_config_service as proto
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
+import com.digitalasset.canton.ledger.api.validation.IdentityProviderConfigServiceRequestValidator.validateUpdateIdentityProviderConfigRequest
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.error.groups.IdentityProviderConfigServiceErrors
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -26,7 +28,8 @@ class ApiIdentityProviderConfigService(
     identityProviderConfigStore: IdentityProviderConfigStore,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends proto.IdentityProviderConfigServiceGrpc.IdentityProviderConfigService
     with GrpcApiService
     with NamedLogging {
@@ -92,48 +95,25 @@ class ApiIdentityProviderConfigService(
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
 
-    withValidation {
-      for {
-        config <- requirePresence(request.identityProviderConfig, "identity_provider_config")
-        identityProviderId <- requireIdentityProviderId(
-          config.identityProviderId,
-          "identity_provider_id",
+    withValidation(validateUpdateIdentityProviderConfigRequest(request)) {
+      case (identityProviderConfig, updateMask) =>
+        for {
+          identityProviderConfigUpdate: IdentityProviderConfigUpdate <- handleUpdatePathResult(
+            identityProviderId = identityProviderConfig.identityProviderId,
+            IdentityProviderConfigUpdateMapper.toUpdate(
+              apiObject = identityProviderConfig,
+              updateMask = updateMask,
+            ),
+          )
+          updateResult <- identityProviderConfigStore.updateIdentityProviderConfig(
+            identityProviderConfigUpdate
+          )
+          updatedIdentityProviderConfig <- handleResult("updating identity provider config")(
+            updateResult
+          )
+        } yield proto.UpdateIdentityProviderConfigResponse(
+          Some(toProto(updatedIdentityProviderConfig))
         )
-        jwksUrl <- optionalString(config.jwksUrl)(requireJwksUrl(_, "jwks_url"))
-        issuer <- optionalString(config.issuer)(requireNonEmptyString(_, "issuer"))
-        updateMask <- requirePresence(
-          request.updateMask,
-          "update_mask",
-        )
-        audience <- optionalString(config.audience)(Right(_))
-      } yield (
-        IdentityProviderConfigUpdate(
-          identityProviderId,
-          Some(config.isDeactivated),
-          jwksUrl,
-          issuer,
-          Some(audience),
-        ),
-        updateMask,
-      )
-    } { case (identityProviderConfig, updateMask) =>
-      for {
-        identityProviderConfigUpdate: IdentityProviderConfigUpdate <- handleUpdatePathResult(
-          identityProviderId = identityProviderConfig.identityProviderId,
-          IdentityProviderConfigUpdateMapper.toUpdate(
-            apiObject = identityProviderConfig,
-            updateMask = updateMask,
-          ),
-        )
-        updateResult <- identityProviderConfigStore.updateIdentityProviderConfig(
-          identityProviderConfigUpdate
-        )
-        updatedIdentityProviderConfig <- handleResult("updating identity provider config")(
-          updateResult
-        )
-      } yield proto.UpdateIdentityProviderConfigResponse(
-        Some(toProto(updatedIdentityProviderConfig))
-      )
     }
   }
 

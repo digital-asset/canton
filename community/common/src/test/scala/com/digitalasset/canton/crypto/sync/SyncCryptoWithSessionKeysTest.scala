@@ -19,19 +19,17 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.*
 
-class SyncCryptoWithSessionKeysTest
+final class SyncCryptoWithSessionKeysTest
     extends AnyWordSpec
     with SyncCryptoTest
     with ProtocolVersionChecksAnyWordSpec {
 
   override protected lazy val sessionSigningKeysConfig: SessionSigningKeysConfig =
-    if (testedProtocolVersion >= ProtocolVersion.v35) SessionSigningKeysConfig.enabled
-    else SessionSigningKeysConfig.disabled
+    SessionSigningKeysConfig.enabled
 
   private lazy val validityDuration = sessionSigningKeysConfig.keyValidityDuration
 

@@ -18,6 +18,7 @@ import com.digitalasset.canton.ledger.api.messages.state.{
   AcsRangeInfo,
 }
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.ledger.api.{
   CumulativeFilter,
   EventFormat,
@@ -366,6 +367,9 @@ trait IndexComponentLoadTestBase
             AcsContinuationToken.decodeAndValidate(
               expectedChecksum = AcsContinuationToken.emptyChecksum,
               token = last.streamContinuationToken,
+              fieldName = "stream_continuation_token",
+              limit =
+                LedgerApiSizeLimitsConfig().publicLapiSizeConfig.getActiveContractsRequest.streamContinuationTokenSizeLimit,
             ) match {
               case Right(continuationPointer) =>
                 logger.warn(s"fetched page with ${page.size} active contracts")

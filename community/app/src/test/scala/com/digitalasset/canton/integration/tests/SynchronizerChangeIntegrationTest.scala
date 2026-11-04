@@ -533,98 +533,97 @@ abstract class SynchronizerChangeSimClockIntegrationTest
         }
       }
 
-      "take parameters changes into account" onlyRunWithOrLessThan ProtocolVersion.v36 in {
-        implicit env =>
-          import env.*
+      "take parameters changes into account" onlyRunWith ProtocolVersion.v36 in { implicit env =>
+        import env.*
 
-          withUniqueParties { case (alice, bank, painter) =>
-            val participants = Seq(P4, P5)
+        withUniqueParties { case (alice, bank, painter) =>
+          val participants = Seq(P4, P5)
 
-            val clock = env.environment.simClock.value
-            clock.advance(NonNegativeFiniteDuration.tryOfSeconds(1).unwrap)
-            participants.foreach(_.testing.fetch_synchronizer_times())
+          val clock = env.environment.simClock.value
+          clock.advance(NonNegativeFiniteDuration.tryOfSeconds(1).unwrap)
+          participants.foreach(_.testing.fetch_synchronizer_times())
 
-            val exclusivityTimeoutIncrease = NonNegativeFiniteDuration.tryOfSeconds(2)
-            val updatedExclusivityTimeout = exclusivityTimeout + exclusivityTimeoutIncrease
+          val exclusivityTimeoutIncrease = NonNegativeFiniteDuration.tryOfSeconds(2)
+          val updatedExclusivityTimeout = exclusivityTimeout + exclusivityTimeoutIncrease
 
-            // Ensure initial assignmentExclusivityTimeout is the expected one
-            sequencer1.topology.synchronizer_parameters
-              .get_dynamic_synchronizer_parameters(
-                daId
-              )
-              .assignmentExclusivityTimeout shouldBe exclusivityTimeout.toConfig
-
-            // Increase assignmentExclusivityTimeout by exclusivityTimeoutIncrease
-            sequencer1.topology.synchronizer_parameters.propose_update(
-              iouSynchronizerId,
-              _.update(assignmentExclusivityTimeout = updatedExclusivityTimeout.toConfig),
+          // Ensure initial assignmentExclusivityTimeout is the expected one
+          sequencer1.topology.synchronizer_parameters
+            .get_dynamic_synchronizer_parameters(
+              daId
             )
+            .assignmentExclusivityTimeout shouldBe exclusivityTimeout.toConfig
 
-            sequencer1.topology.synchronizer_parameters
-              .get_dynamic_synchronizer_parameters(daId)
+          // Increase assignmentExclusivityTimeout by exclusivityTimeoutIncrease
+          sequencer1.topology.synchronizer_parameters.propose_update(
+            iouSynchronizerId,
+            _.update(assignmentExclusivityTimeout = updatedExclusivityTimeout.toConfig),
+          )
+
+          sequencer1.topology.synchronizer_parameters
+            .get_dynamic_synchronizer_parameters(daId)
+            .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
+
+          eventually() {
+            P4.topology.synchronizer_parameters
+              .get_dynamic_synchronizer_parameters(synchronizerId = iouSynchronizerId)
               .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
+          }
 
-            eventually() {
-              P4.topology.synchronizer_parameters
-                .get_dynamic_synchronizer_parameters(synchronizerId = iouSynchronizerId)
-                .assignmentExclusivityTimeout shouldBe updatedExclusivityTimeout.toConfig
-            }
-
-            /*
+          /*
             Advance time a bit
 
             We need that otherwise, the timestamp that determines the synchronizer parameters
             (via a time proof) is before the change of assignmentExclusivityTimeout.
-             */
-            val baseTime = clock.now
-            val newTime = baseTime + NonNegativeFiniteDuration.tryOfMillis(1)
-            clock.advanceTo(newTime)
-            // any event still pending from the sequencer on P4 that gets consumed between
-            // the clock.advance above and the fetch time below will make the
-            // test hang (as we'll schedule a fetch synchronizer time in the future, but
-            // that future will never appear)
-            participants.foreach(_.testing.fetch_synchronizer_times())
-            P4.testing.await_synchronizer_time(iouSynchronizerAlias, newTime, 5.seconds)
+           */
+          val baseTime = clock.now
+          val newTime = baseTime + NonNegativeFiniteDuration.tryOfMillis(1)
+          clock.advanceTo(newTime)
+          // any event still pending from the sequencer on P4 that gets consumed between
+          // the clock.advance above and the fetch time below will make the
+          // test hang (as we'll schedule a fetch synchronizer time in the future, but
+          // that future will never appear)
+          participants.foreach(_.testing.fetch_synchronizer_times())
+          P4.testing.await_synchronizer_time(iouSynchronizerAlias, newTime, 5.seconds)
 
-            // Trigger flow
-            val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
-            logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
+          // Trigger flow
+          val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
+          logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
 
-            val reassignmentId =
-              P4.ledger_api.commands.submit_unassign(
-                painter,
-                Seq(paintOfferId),
-                paintSynchronizerId,
-                iouSynchronizerId,
-              )
-
-            // Advance clock at the initial exclusivity timeout
-            clock.advance(exclusivityTimeout.unwrap)
-            participants.foreach(_.testing.fetch_synchronizer_times())
-            checkIncompleteUnassignedContracts(
-              participants,
+          val reassignmentId =
+            P4.ledger_api.commands.submit_unassign(
               painter,
-            ) // assignment did not happen yet
-
-            // Get reassignment from the store
-            val unassignedEvent = getIncompleteUnassignedContracts(participants, painter)
-            val targetTimestamp = CantonTimestamp
-              .fromProtoTimestamp(
-                unassignedEvent.assignmentExclusivity.value
-              )
-              .value + updatedExclusivityTimeout
-            // Advance clock at the updated exclusivity timeout
-            clock.advanceTo(targetTimestamp)
-            logger.info(
-              s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
-            )
-            participants.foreach(_.testing.fetch_synchronizer_times())
-            checkReassignmentStoreIsEmpty(
+              Seq(paintOfferId),
+              paintSynchronizerId,
               iouSynchronizerId,
-              participants,
-              painter,
-            ) // assignment should be done
-          }
+            )
+
+          // Advance clock at the initial exclusivity timeout
+          clock.advance(exclusivityTimeout.unwrap)
+          participants.foreach(_.testing.fetch_synchronizer_times())
+          checkIncompleteUnassignedContracts(
+            participants,
+            painter,
+          ) // assignment did not happen yet
+
+          // Get reassignment from the store
+          val unassignedEvent = getIncompleteUnassignedContracts(participants, painter)
+          val targetTimestamp = CantonTimestamp
+            .fromProtoTimestamp(
+              unassignedEvent.assignmentExclusivity.value
+            )
+            .value + updatedExclusivityTimeout
+          // Advance clock at the updated exclusivity timeout
+          clock.advanceTo(targetTimestamp)
+          logger.info(
+            s"An assignment for $reassignmentId is triggered automatically after the exclusivity timeout"
+          )
+          participants.foreach(_.testing.fetch_synchronizer_times())
+          checkReassignmentStoreIsEmpty(
+            iouSynchronizerId,
+            participants,
+            painter,
+          ) // assignment should be done
+        }
 
       }
 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.tea
 
 import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapper,
@@ -50,13 +51,21 @@ object AccountId extends LengthLimitedStringWrapperCompanion[String255, AccountI
       .fromProtoPrimitive(str, field)
       .flatMap(checkFormat(_).leftMap(ValueConversionError(field, _)))
 
-  // Some rows were stored before we added the new format, so we only check the length here.
-  // All stored ids were already String255, and most are party ids that match the format anyway.
-  private def fromDb(str: String): AccountId =
+  def prefixFromProtoPrimitive(str: String, field: String): ParsingResult[String] =
+    // An account ID followed by a "/" is a valid prefix but not a valid accountID
+    fromProtoPrimitive(str.stripSuffix("/"), field).map(_ => str)
+
+  // Allows reading unrestricted AccountID format.
+  // Should not be used for creating new AccountIDs
+  def fromLegacyFormat(str: String): Either[ProtoDeserializationError, AccountId] =
     String255
       .fromProtoPrimitive(str, instanceName)
       .map(AccountId(_))
-      .valueOr(err => throw new DbDeserializationException(err.toString))
+
+  // Some rows were stored before we added the new format, so we only check the length here.
+  // All stored ids were already String255, and most are party ids that match the format anyway.
+  private def fromDb(str: String): AccountId =
+    fromLegacyFormat(str).valueOr(err => throw new DbDeserializationException(err.toString))
 
   override implicit val getResultWrapper: GetResult[AccountId] =
     GetResult(r => fromDb(r.nextString()))

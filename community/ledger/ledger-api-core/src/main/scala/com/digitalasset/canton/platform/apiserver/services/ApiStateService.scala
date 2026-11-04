@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePrese
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator,
   FormatValidator,
+  LedgerApiSizeLimitsConfig,
   ParticipantOffsetValidator,
   StateServiceRequestValidator,
 }
@@ -67,6 +68,7 @@ final class ApiStateService(
     mat: Materializer,
     esf: ExecutionSequencerFactory,
     executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends StateServiceGrpc.StateService
     with StreamingServiceLifecycleManagement
     with GrpcApiService
@@ -84,8 +86,14 @@ final class ApiStateService(
         eventFormatProto <- requirePresence(request.eventFormat, "event_format")
         eventFormat <- FormatValidator.validate(eventFormatProto)
         checksum = AcsContinuationToken.calcChecksum(request, participantId)
-        continuationPointer <- request.streamContinuationToken.traverse(
-          AcsContinuationToken.decodeAndValidate(checksum, _)
+        continuationPointer <- request.streamContinuationToken.traverse(token =>
+          AcsContinuationToken.decodeAndValidate(
+            expectedChecksum = checksum,
+            token = token,
+            fieldName = "stream_continuation_token",
+            limit =
+              sizeLimitsConfig.publicLapiSizeConfig.getActiveContractsRequest.streamContinuationTokenSizeLimit,
+          )
         )
 
         activeAt <- ParticipantOffsetValidator.validateNonNegative(
@@ -267,8 +275,15 @@ final class ApiStateService(
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] = {
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
-    val result = request.synchronizerId
-      .traverse(FieldValidator.requireSynchronizerId(_, "synchronizer_id"))
+    val result = FieldValidator
+      .validateCardinality(
+        values = request.synchronizerId,
+        fieldName = "synchronizer_id",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.getLedgerEndRequest.synchronizerIdSizeLimit,
+      )
+      .flatMap(_ =>
+        request.synchronizerId.traverse(FieldValidator.requireSynchronizerId(_, "synchronizer_id"))
+      )
       .fold(
         t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
         synchronizerIds => {

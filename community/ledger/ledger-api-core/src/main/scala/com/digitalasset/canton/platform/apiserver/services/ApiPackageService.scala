@@ -20,7 +20,11 @@ import com.daml.ledger.api.v2.package_service.{
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.ValidationErrors
+import com.digitalasset.canton.ledger.api.validation.{
+  LedgerApiSizeLimitsConfig,
+  PackageServiceRequestValidator,
+  ValidationErrors,
+}
 import com.digitalasset.canton.ledger.api.{ListVettedPackagesOpts, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
@@ -50,7 +54,7 @@ private[apiserver] final class ApiPackageService(
     packageSyncService: PackageSyncService,
     packageServiceConfig: PackageServiceConfig,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, sizeLimitsConfig: LedgerApiSizeLimitsConfig)
     extends PackageService
     with GrpcApiService
     with NamedLogging {
@@ -86,7 +90,7 @@ private[apiserver] final class ApiPackageService(
               Future.failed[GetPackageResponse](
                 RequestValidationErrors.NotFound.Package
                   .Reject(packageId = packageId)(
-                    createerrorLoggingContext
+                    createErrorLoggingContext
                   )
                   .asGrpcError
               )
@@ -127,6 +131,9 @@ private[apiserver] final class ApiPackageService(
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
     for {
+      _ <- PackageServiceRequestValidator
+        .validateListVettedPackagesRequest(request)(createErrorLoggingContext, sizeLimitsConfig)
+        .toFuture(ValidationLogger.logFailureWithTrace(logger, request, _))
       opts <- ListVettedPackagesOpts
         .fromProto(request, packageServiceConfig.maxVettedPackagesPageSize)
         .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
@@ -150,7 +157,7 @@ private[apiserver] final class ApiPackageService(
               request,
               ValidationErrors
                 .invalidArgument(s"Invalid package id: $errorMessage")(
-                  createerrorLoggingContext
+                  createErrorLoggingContext
                 ),
             )
           ),
@@ -169,7 +176,7 @@ private[apiserver] final class ApiPackageService(
     )
   }
 
-  private def createerrorLoggingContext(implicit
+  private def createErrorLoggingContext(implicit
       loggingContext: LoggingContextWithTrace
   ): ErrorLoggingContext =
     ErrorLoggingContext(logger, loggingContext)

@@ -705,6 +705,7 @@ class ParticipantSimulator(
               syncCrypto,
               payload,
               AcsCommitmentLimits.default.maxCommitmentSizeBytes,
+              pv,
             )
             .leftMap(_.toString)
         } yield Some(
@@ -745,6 +746,7 @@ class ParticipantSimulator(
                       timestampOverride = period.toInclusive.forgetRefinement,
                     ),
                     None,
+                    pv,
                   )
               )
             } yield Some(msg -> (counterParticipant, sender))

@@ -118,6 +118,7 @@ object HashPurpose {
   val AcsCommitmentSummary = HashPurpose(67, "AcsCommitmentSummary")
   val AcsReplicationDigest = HashPurpose(68, "AcsReplicationDigest")
   val Transparency = HashPurpose(69, "ViewEncryptionTransparency")
+  val ListPartiesPageToken = HashPurpose(70, "ListPartiesPageToken")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

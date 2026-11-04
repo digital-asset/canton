@@ -172,8 +172,6 @@ final case class TransactionView private (
 
   /** The key maintainers associated with each queried global key.
     *
-    * Use to support protocol behaviour from [[com.digitalasset.canton.version.ProtocolVersion.v35]]
-    *
     * For more information on the population see [[ViewParticipantData.keyResolution]].
     *
     * @throws java.lang.IllegalStateException

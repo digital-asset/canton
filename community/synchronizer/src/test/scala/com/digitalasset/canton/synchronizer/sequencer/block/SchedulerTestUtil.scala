@@ -6,9 +6,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 import com.digitalasset.canton.time.Clock
 import org.apache.pekko.actor.{Cancellable, Scheduler}
 
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters.*
 import scala.jdk.DurationConverters.*
 
 object SchedulerTestUtil {
@@ -38,4 +40,47 @@ object SchedulerTestUtil {
       )(implicit executor: ExecutionContext): Cancellable = ???
       override def maxFrequency: Double = 42
     }
+
+  /** Scheduler under full control of the test: tasks only run when the test explicitly fires and
+    * runs them. Mimics Pekko's scheduler semantics in that a task that has already been fired
+    * (i.e., handed to the execution context) can no longer be cancelled.
+    */
+  final class ManualScheduler extends Scheduler {
+
+    final class Task(val runnable: Runnable) extends Cancellable {
+      private val cancelled = new AtomicBoolean(false)
+      private[SchedulerTestUtil] val fired = new AtomicBoolean(false)
+
+      override def cancel(): Boolean = !fired.get() && cancelled.compareAndSet(false, true)
+      override def isCancelled: Boolean = cancelled.get()
+    }
+
+    private val tasks = new ConcurrentLinkedQueue[Task]()
+
+    /** Tasks that have neither been fired nor cancelled */
+    def pending: Seq[Task] = tasks.asScala.filter(t => !t.fired.get() && !t.isCancelled).toSeq
+
+    /** Fire the task, i.e., the scheduler hands it over to the execution context. From this point
+      * on, the task cannot be cancelled anymore. Returns the runnable to be run by the test.
+      */
+    def fire(task: Task): Runnable = {
+      task.fired.set(true)
+      task.runnable
+    }
+
+    override def scheduleOnce(delay: FiniteDuration, runnable: Runnable)(implicit
+        executor: ExecutionContext
+    ): Cancellable = {
+      val task = new Task(runnable)
+      tasks.add(task)
+      task
+    }
+
+    override def schedule(
+        initialDelay: FiniteDuration,
+        interval: FiniteDuration,
+        runnable: Runnable,
+    )(implicit executor: ExecutionContext): Cancellable = ???
+    override def maxFrequency: Double = 42
+  }
 }

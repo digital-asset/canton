@@ -54,7 +54,7 @@ private[lf] object Speedy {
 
   /** A constructor/deconstructor of value arithmetic errors. */
   val ValueArithmeticError: V.ValueArithmeticError =
-    new value.Value.ValueArithmeticError(StablePackages.stablePackages)
+    new V.ValueArithmeticError(StablePackages.stablePackages)
 
   /** A constructor/deconstructor of svalue arithmetic errors. */
   val SArithmeticError: SValue.SArithmeticError =

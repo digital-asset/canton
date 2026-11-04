@@ -173,7 +173,7 @@ class PartyReplicationIndexingWorkflow(
 
                 val reassignment = ContractReassignment(
                   contractInst,
-                  // TODO(#26468): Use validation packages
+                  // TODO(#37238): Figure out representative package
                   ReassignmentTag.Source(packageId),
                   ReassignmentTag.Target(packageId),
                   reassignmentCounter,
@@ -315,7 +315,7 @@ class PartyReplicationIndexingWorkflow(
     )
 
     val contractIdCounters = activationChanges.map(_.contract match {
-      // TODO(#26468): Use validation packages
+      // TODO(#37238): Figure out representative package
       case ContractReassignment(contract, _, _, reassignmentCounter) =>
         (contract.contractId, reassignmentCounter)
     })
@@ -364,7 +364,7 @@ class PartyReplicationIndexingWorkflow(
         reassignmentInfo = artificialReassignmentInfo,
         reassignment = Reassignment.Batch(
           activationChanges.zipWithIndex.map[Reassignment] {
-            // TODO(#26468): Use validation packages
+            // TODO(#37238): Figure out representative package
             case (ContractActivation(contractReassignment, internalContractId), idx) =>
               Reassignment.Assign(
                 reassignmentCounter = contractReassignment.counter.v,

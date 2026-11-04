@@ -164,15 +164,13 @@ final case class AssignmentCommonData private (
 )(
     hashOps: HashOps,
     override val deserializedFrom: Option[ByteString],
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      AssignmentCommonData.type
+    ]
 ) extends MerkleTreeLeaf[AssignmentCommonData](hashOps)
     with HasProtocolVersionedWrapper[AssignmentCommonData]
     with ReassignmentCommonData {
-
-  override val representativeProtocolVersion: RepresentativeProtocolVersion[
-    AssignmentCommonData.type
-  ] = AssignmentCommonData.protocolVersionRepresentativeFor(
-    targetSynchronizerId.unwrap.protocolVersion
-  )
 
   @transient override protected lazy val companionObj: AssignmentCommonData.type =
     AssignmentCommonData
@@ -242,7 +240,9 @@ object AssignmentCommonData
     submitterMetadata = submitterMetadata,
     reassigningParticipants = reassigningParticipants,
     unassignmentTs = unassignmentTs,
-  )(hashOps, None)
+  )(hashOps, None)(
+    AssignmentCommonData.protocolVersionRepresentativeFor(targetPsid.unwrap.protocolVersion)
+  )
 
   private[this] def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -309,6 +309,7 @@ object AssignmentCommonData
         "unassignment_ts",
         unassignmentTsP,
       )
+      rpv <- AssignmentCommonData.protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield AssignmentCommonData(
       salt,
       sourceSynchronizerId,
@@ -319,7 +320,7 @@ object AssignmentCommonData
       submitterMetadata,
       reassigningParticipants = reassigningParticipants.toSet,
       unassignmentTs,
-    )(hashOps, Some(bytes))
+    )(hashOps, Some(bytes))(rpv)
   }
 }
 

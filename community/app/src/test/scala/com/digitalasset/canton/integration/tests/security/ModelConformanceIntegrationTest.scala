@@ -148,7 +148,7 @@ trait ModelConformanceIntegrationTest
           daId,
           sequencer1,
           mediator1,
-          withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+          withMediatorVerdict(Verdict.Approve.create(testedProtocolVersion)),
         ) {
           trackingLedgerEvents(Seq(participant1), Seq.empty) {
             maliciousP1

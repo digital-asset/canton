@@ -22,6 +22,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionSynchronizerTracker,
   SeedGenerator,
 }
+import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -58,6 +59,7 @@ class UnassignmentProcessor(
     override val testingConfig: TestingConfigInternal,
     promiseFactory: PromiseUnlessShutdownFactory,
     trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
+    packageMetadataView: PackageMetadataView,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
       UnassignmentProcessingSteps.SubmissionParam,
@@ -77,6 +79,7 @@ class UnassignmentProcessor(
         sourceProtocolVersion,
         reassignmentMetrics,
         participantNodeParameters,
+        packageMetadataView,
         loggerFactory,
       ),
       inFlightSubmissionSynchronizerTracker,

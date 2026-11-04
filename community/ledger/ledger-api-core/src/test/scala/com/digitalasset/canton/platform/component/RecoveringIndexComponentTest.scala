@@ -120,7 +120,8 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
     }
   }
 
-  it should "not throw a warning for uncommited queue size growth when indexer pipeline is at full momentum and the commit is slow" in {
+  // TODO(#36878): Reactivate in cheaper form, or remove
+  it should "not throw a warning for uncommited queue size growth when indexer pipeline is at full momentum and the commit is slow" ignore {
     ingest(numberOfUpdates = 200000)
     val minExpectedCommitedSize: Int = 12000
 
@@ -131,7 +132,8 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
     peak should be < IndexerConfig.DefaultQueueUncommittedWarnThreshold
   }
 
-  it should "emit the uncommitted-queue warning when commit lags behind ingestion" in {
+  // TODO(#36878): Reactivate in cheaper form, or remove
+  it should "emit the uncommitted-queue warning when commit lags behind ingestion" ignore {
     restartServices(
       serviceParams.copy(indexerConfig =
         serviceParams.indexerConfig.copy(queueUncommittedWarnThreshold = 1000)

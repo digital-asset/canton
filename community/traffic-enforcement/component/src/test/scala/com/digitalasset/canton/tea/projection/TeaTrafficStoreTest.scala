@@ -112,6 +112,16 @@ trait TeaTrafficStoreTest
         case Left(err) => fail(s"expected the lookup to succeed, but it failed: $err")
       }
 
+    def listAccounts(
+        prefix: Option[String],
+        after: Option[AccountId],
+        limit: Int,
+    ): FutureUnlessShutdown[Seq[AccountId]] =
+      store.listBalances(prefix, after, limit).value.map {
+        case Right(states) => states.map(_.account)
+        case Left(err) => fail(s"expected the listing to succeed, but it failed: $err")
+      }
+
     def pruneOk(beforeInclusive: CantonTimestamp): FutureUnlessShutdown[PruneCounts] =
       store.prune(beforeInclusive).value.map {
         case Right(counts) => counts
@@ -154,6 +164,37 @@ trait TeaTrafficStoreTest
       "return empty for unknown account" in {
         val store = mk()
         store.balance(unknown).map(_ shouldBe empty)
+      }
+
+      "list balances ordered by account ID, filtered by prefix and paged" in {
+        val store = mk()
+        val ids = Seq("acme/b", "acme/a", "acme_c", "acmeXd", "bob").map(AccountId.tryCreate)
+        for {
+          _ <- ids.foldLeft(FutureUnlessShutdown.pure(())) { (previous, id) =>
+            previous.flatMap(_ =>
+              store.persistOk(id, creditBalanceDelta(1), clock.now).map(_ => ())
+            )
+          }
+          all <- store.listAccounts(None, None, 10)
+          acmeSlash <- store.listAccounts(Some("acme/"), None, 10)
+          // `_` is not a wildcard, so "acmeXd" must not match
+          acmeUnderscore <- store.listAccounts(Some("acme_"), None, 10)
+          page1 <- store.listAccounts(None, None, 2)
+          page2 <- store.listAccounts(None, page1.lastOption, 2)
+          page3 <- store.listAccounts(None, page2.lastOption, 2)
+          prefixedPage2 <- store.listAccounts(Some("acme"), Some(AccountId.tryCreate("acme/b")), 10)
+          noMatch <- store.listAccounts(Some("zzz"), None, 10)
+        } yield {
+          val (a, b, x, u, bob) = ("acme/a", "acme/b", "acmeXd", "acme_c", "bob")
+          all.map(_.unwrap) shouldBe Seq(a, b, x, u, bob)
+          acmeSlash.map(_.unwrap) shouldBe Seq(a, b)
+          acmeUnderscore.map(_.unwrap) shouldBe Seq(u)
+          page1.map(_.unwrap) shouldBe Seq(a, b)
+          page2.map(_.unwrap) shouldBe Seq(x, u)
+          page3.map(_.unwrap) shouldBe Seq(bob)
+          prefixedPage2.map(_.unwrap) shouldBe Seq(x, u)
+          noMatch shouldBe empty
+        }
       }
 
       "return empty events for unknown account" in {

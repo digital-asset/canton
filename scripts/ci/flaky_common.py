@@ -171,7 +171,13 @@ def is_dry_run() -> bool:
 
 
 def should_report_issues():
-    return branch in branches_to_report
+    return branch in branches_to_report and is_issue_repo()
+
+
+def is_issue_repo() -> bool:
+    """Whether this run can reach the flaky issues in DACH-NY/canton. An env check, not a
+    workflow `if`, so the shared step still reports to Datadog from the public repo."""
+    return not is_github_actions_ci() or os.environ.get("GITHUB_REPOSITORY") == "DACH-NY/canton"
 
 
 def is_nightly_job(job: str) -> bool:
@@ -560,6 +566,7 @@ def self_test():
     test_get_ci_commit_url()
     test_format_test_name_sanitizes()
     test_format_issue_title_and_should_report_issues()
+    test_is_issue_repo()
     test_with_evidence_link()
     test_is_transient_gh_error()
     test_run_gh_with_retries()
@@ -877,15 +884,38 @@ def test_format_test_name_sanitizes():
 
 
 def test_format_issue_title_and_should_report_issues():
-    with patch(f'{__name__}.branch', 'main'):
+    private = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'DACH-NY/canton'}
+    with patch(f'{__name__}.branch', 'main'), patch.dict(os.environ, private, clear=True):
         assert format_issue_title("FooShard1Test/x=1") == "[main] Flaky FooTest"
         assert should_report_issues()
-    with patch(f'{__name__}.branch', 'main-2.x'):
+    with patch(f'{__name__}.branch', 'main-2.x'), patch.dict(os.environ, private, clear=True):
         assert should_report_issues()
-    with patch(f'{__name__}.branch', 'feature-x'):
+    with patch(f'{__name__}.branch', 'feature-x'), patch.dict(os.environ, private, clear=True):
         assert not should_report_issues()
-    with patch(f'{__name__}.branch', ''):
+    with patch(f'{__name__}.branch', ''), patch.dict(os.environ, private, clear=True):
         assert not should_report_issues()
+    # public main can't reach the issues
+    public = {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'digital-asset/canton'}
+    with patch(f'{__name__}.branch', 'main'), patch.dict(os.environ, public, clear=True):
+        assert not should_report_issues()
+
+
+def test_is_issue_repo():
+    with patch.dict(
+        os.environ, {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'DACH-NY/canton'}, clear=True
+    ):
+        assert is_issue_repo()
+    with patch.dict(
+        os.environ,
+        {'GITHUB_ACTIONS': 'true', 'GITHUB_REPOSITORY': 'digital-asset/canton'},
+        clear=True,
+    ):
+        assert not is_issue_repo()
+    # no default to DACH-NY/canton
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}, clear=True):
+        assert not is_issue_repo()
+    with patch.dict(os.environ, {'GITHUB_ACTIONS': 'false', 'CIRCLECI': 'true'}, clear=True):
+        assert is_issue_repo()
 
 
 def test_with_evidence_link():

@@ -428,6 +428,36 @@ class PartyReplicationTopologyWorkflowTest
           isOnboardedAfterSecondSafeCall shouldBe true
         }
       }.failOnShutdown
+
+      "not take the mapping of another party whose identifier starts with the party's" in {
+        val tw = topologyWorkflow()
+        val topologyStore = newTopologyStore()
+        val topologyContext = mockTopologyContext(
+          topologyStore,
+          mockTopologyManager(),
+          tTracker = mockSynchronizerTimeTracker(None),
+        )
+        // Same namespace as the party, and the party's identifier is a prefix of its identifier
+        val otherParty = PartyId.tryFromProtoPrimitive("onboarding-2::namespace")
+        val otherPartyOnboarding = PartyToParticipant.tryCreate(
+          partyId = otherParty,
+          threshold = PositiveInt.one,
+          participants = ptpProposal.participants,
+        )
+
+        for {
+          _ <- add(topologyStore)(tsSerialMinusOne, serialBefore, otherPartyOnboarding)
+          err <- tw
+            .authorizeClearingOnboardingFlag(
+              params,
+              EffectiveTime(tsSerialMinusOne),
+              topologyContext,
+            )
+            .leftOrFail("expect the party not to be hosted")
+        } yield {
+          err should include regex "Party .* is not hosted by target participant"
+        }
+      }.failOnShutdown
     }
   }
 }

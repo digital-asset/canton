@@ -12,6 +12,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
+import com.google.protobuf.field_mask.FieldMask
 import com.google.rpc.error_details
 import com.google.rpc.error_details.RetryInfo
 import io.grpc.Status.Code
@@ -96,6 +97,15 @@ trait ValidatorTestUtils extends Matchers with Inside with OptionValues with Eit
       retryDelay: Seq[Duration] = Seq.empty,
   ): Assertion =
     inside(request)(isError(code, description, metadata, retryDelay))
+
+  protected def mustFailWithoutFilters(request: Either[StatusRuntimeException, ?]): Assertion =
+    requestMustFailWith(
+      request = request,
+      code = Code.INVALID_ARGUMENT,
+      description =
+        "INVALID_ARGUMENT(8,0): The submitted request has invalid arguments: filtersByParty and filtersForAnyParty cannot be empty simultaneously",
+    )
+
   protected def isError(
       expectedCode: Code,
       expectedDescription: String,
@@ -147,6 +157,28 @@ trait SizeLimitTestUtils extends AnyWordSpecLike with ValidatorTestUtils {
 
   protected def byteSizeLimit(field: String, limit: Int, limitName: String = "limit")(
       validate: Int => Either[StatusRuntimeException, ?]
+  ): Unit =
+    sizeLimit(
+      field = field,
+      limit = limit,
+      limitName = limitName,
+      exceededDescription = sizeLimitExceeded(field, actual = limit + 1, limit = limit),
+    )(
+      validate
+    )
+
+  protected def serializedSizeLimit(field: String, limit: Int, limitName: String = "limit")(
+      validate: Int => Either[StatusRuntimeException, ?]
+  ): Unit =
+    sizeLimit(
+      field = field,
+      limit = limit,
+      limitName = limitName,
+      exceededDescription = serializedSizeLimitExceeded(field, actual = limit + 1, limit = limit),
+    )(validate)
+
+  private def sizeLimit(field: String, limit: Int, limitName: String, exceededDescription: String)(
+      validate: Int => Either[StatusRuntimeException, ?]
   ): Unit = {
     s"accept $field with number of bytes exactly equal to the $limitName" in {
       validate(limit) shouldBe a[Right[?, ?]]
@@ -155,22 +187,36 @@ trait SizeLimitTestUtils extends AnyWordSpecLike with ValidatorTestUtils {
       requestMustFailWith(
         request = validate(limit + 1),
         code = Code.INVALID_ARGUMENT,
-        description = sizeLimitExceeded(field, actual = limit + 1, limit = limit),
+        description = exceededDescription,
       )
     }
   }
 
   protected def cardinalityLimitExceeded(field: String, actual: Int, limit: Int): String =
     s"FIELD_CARDINALITY_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
-      s"repeated field has $actual elements, exceeding the maximum of $limit"
+      s"repeated or map field has $actual elements, exceeding the maximum of $limit"
+
+  protected def totalFiltersLimitExceeded(actual: Int, limit: Int): String =
+    s"EVENT_FORMAT_FILTERS_LIMIT_EXCEEDED(8,0): The total number of decomposed filters in the event format(s) ($actual) exceeds the maximum allowed number of $limit " +
+      s"(a template or wildcard filter counts as 1, an interface filter as ${FormatValidator.decomposedInterfaceFilterSize})"
 
   protected def sizeLimitExceeded(field: String, actual: Int, limit: Int): String =
     s"FIELD_SIZE_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
       s"Byte length for $field ($actual bytes) exceeds maximum limit of $limit bytes"
+
+  protected def serializedSizeLimitExceeded(field: String, actual: Int, limit: Int): String =
+    s"FIELD_SIZE_LIMIT_EXCEEDED(8,0): Invariant violation in field `$field`: " +
+      s"Serialized message size for $field ($actual bytes) exceeds maximum limit of $limit bytes"
 
   protected def parties(numberOfParties: Int): Seq[String] =
     (1 to numberOfParties).map(i => s"party$i")
 
   protected def bytes(numberOfBytes: Int): ByteString =
     ByteString.copyFrom(Array.fill(numberOfBytes)(1.toByte))
+
+  protected def fieldMask(numberOfBytes: Int): FieldMask = {
+    val fieldMask = FieldMask(paths = Seq("a" * (numberOfBytes - 2)))
+    assert(fieldMask.serializedSize == numberOfBytes)
+    fieldMask
+  }
 }

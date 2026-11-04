@@ -189,8 +189,7 @@ private[mediator] class DefaultVerdictSender(
         val reason = error.reason
         reason match {
           // The V2 error may appear with PV36
-          case SequencerErrors.AggregateSubmissionAlreadySent(_) |
-              SequencerErrors.AggregateSubmissionAlreadySentV2(_) =>
+          case SequencerErrors.AggregateSubmissionAlreadySent(_) =>
             logger.info(
               s"Result message was already sent for $requestId: $reason"
             )
@@ -307,6 +306,7 @@ private[mediator] class DefaultVerdictSender(
           requestId,
           request.rootHash,
           verdict,
+          protocolVersion,
         )
         val recipientSeq = informeesMap.keys.toSeq.map(MemberRecipient.apply)
         val recipients =
@@ -329,6 +329,7 @@ private[mediator] class DefaultVerdictSender(
                 validityPeriodEnd = Some(decisionTime),
               )
             ),
+            protocolVersion,
           )
           .map(signedResult => List(OpenEnvelope(signedResult, recipients)(protocolVersion)))
       }
@@ -451,6 +452,7 @@ private[mediator] class DefaultVerdictSender(
             requestId,
             rootHash,
             rejectionReason,
+            protocolVersion,
           )
 
           val recipients = Recipients.recipientGroups(flatRecipients.map(r => NonEmpty(Set, r)))
@@ -465,6 +467,7 @@ private[mediator] class DefaultVerdictSender(
                   validityPeriodEnd = Some(decisionTime),
                 )
               ),
+              protocolVersion,
             )
             .map(_ -> recipients)
         }

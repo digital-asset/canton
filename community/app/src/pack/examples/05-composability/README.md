@@ -17,7 +17,7 @@ https://docs.canton.network/overview/learn/multi-synchronizer#multi-synchronizer
 The composability examples can be invoked from the root directory of the Canton release using
 
 ```
-./bin/canton -c examples/05-composability/composability.conf \
+./bin/canton -c examples/05-composability/composability1.conf \
 --bootstrap examples/05-composability/composability1.canton
 ./bin/canton -c examples/05-composability/composability.conf \
 --bootstrap examples/05-composability/composability2.canton
@@ -27,6 +27,6 @@ It can be run from other directories if the path to the CantonExamples.dar file 
 is set as the system property canton-examples.dar-path:
 
 ```
-./bin/canton -Dcanton-examples.dar-path=<path-to-dar-file> -c examples/05-composability/composability.conf \
+./bin/canton -Dcanton-examples.dar-path=<path-to-dar-file> -c examples/05-composability/composability1.conf \
 --bootstrap examples/05-composability/composability1.canton
 ```

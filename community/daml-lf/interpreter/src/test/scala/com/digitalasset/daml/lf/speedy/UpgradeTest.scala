@@ -541,7 +541,11 @@ class UpgradeTest
     )
 
   val commonKeyValue = ValueParty(alice)
-  val commonKeyHash = crypto.Hash.hashPrivateKey(alice)
+  val commonKeyHash = crypto.SValueHash.assertHashContractKey(
+    pkgName,
+    Ref.QualifiedName.assertFromString("M:T"),
+    SValue.SParty(alice),
+  )
 
   val v1_key =
     GlobalKeyWithMaintainers(
@@ -574,7 +578,7 @@ class UpgradeTest
       val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg2-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -634,7 +638,7 @@ class UpgradeTest
       val v_missingFieldKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -693,7 +697,7 @@ class UpgradeTest
       def key(templateId: Ref.TypeConId) = GlobalKeyWithMaintainers(
         templateId,
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -908,7 +912,7 @@ class UpgradeTest
       val v1_extraTextKey = GlobalKeyWithMaintainers(
         i"'-pkg1-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -970,7 +974,7 @@ class UpgradeTest
       val v1_extraSomeKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -1044,7 +1048,7 @@ class UpgradeTest
       val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )
@@ -1098,7 +1102,7 @@ class UpgradeTest
       val v1_extraNoneKey = GlobalKeyWithMaintainers(
         i"'-pkg3-':M:T",
         ValueParty(alice),
-        crypto.Hash.hashPrivateKey(alice),
+        commonKeyHash,
         Set(alice),
         pkgName,
       )

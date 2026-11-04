@@ -3,6 +3,8 @@
 
 package com.digitalasset.daml.lf.validation
 
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.matchers.should.Matchers
@@ -112,6 +114,35 @@ class RecursionSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matc
     an[ETypeSynCycle] should be thrownBy Recursion.checkPackage(defaultPackageId, positiveCase1)
     an[ETypeSynCycle] should be thrownBy Recursion.checkPackage(defaultPackageId, positiveCase2)
 
+  }
+
+  "Recursion validation should be stack safe on deeply nested types" in {
+    val deepType =
+      (1 to deepDepth).foldLeft[Type](TBuiltin(BTInt64))((t, _) => TApp(TBuiltin(BTList), t))
+    checkPackageWith(
+      Ref.DottedName.assertFromString("Syn") -> DTypeSyn(ImmArray.empty, deepType)
+    )
+  }
+
+  "Recursion validation should be stack safe on deeply nested expressions" in {
+    val deepExpr =
+      (1 to deepDepth).foldLeft[Expr](EBuiltinLit(BLInt64(0)))((e, _) =>
+        ESome(TBuiltin(BTInt64), e)
+      )
+    checkPackageWith(Ref.DottedName.assertFromString("v") -> DValue(TBuiltin(BTInt64), deepExpr))
+  }
+
+  private val deepDepth = 100000
+
+  private def checkPackageWith(definitions: (Ref.DottedName, Definition)*): Unit = {
+    val p = p"""
+         metadata ( 'pkg' : '1.0.0' )
+         module Mod {
+         }
+       """
+    val modName = Ref.DottedName.assertFromString("Mod")
+    val mod = p.modules(modName).copy(definitions = definitions.toMap)
+    Recursion.checkPackage(defaultPackageId, p.copy(modules = Map(modName -> mod)))
   }
 
 }

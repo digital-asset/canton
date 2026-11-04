@@ -125,8 +125,8 @@ runs:
     # Failure evidence for the flaky-test issues (scripts/ci/collect_flake_evidence.py):
     # evidence.json and an investigation package per failing suite. Runs before the flaky
     # pipeline below so the packages can be uploaded first and the artifact URL linked
-    # from the evidence comments. A no-op on branches that do not report issues (see
-    # flaky_common.should_report_issues).
+    # from the evidence comments. A no-op on branches or repos that do not report issues
+    # (see flaky_common.should_report_issues).
     - name: Collect flake evidence
       if: |
         !cancelled() &&

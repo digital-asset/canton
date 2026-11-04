@@ -1613,7 +1613,7 @@ object OutputModule {
       // TODO(#21615) we should avoid a further deserialization downstream
       deserializeSignedSubmissionRequest(
         synchronizerProtocolVersion,
-        DecompressionPolicy.forProtocolVersion(synchronizerProtocolVersion, maxBytesToDecompress),
+        DecompressionPolicy.Cumulative(maxBytesToDecompress),
         synchronizerLimits,
       )(
         request.payload

@@ -21,6 +21,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors.{
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.RequestValidationErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.version.ApiDeprecation
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.language.{LookupError, Reference}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -448,6 +449,36 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   }
 
   @Explanation(
+    """This error is emitted when a request uses a deprecated Ledger API or JSON Ledger API endpoint
+      |that is disabled on the participant before its removal.
+      |The error message names the releases that deprecated the API and remove it."""
+  )
+  @Resolution(
+    """Migrate your application to the replacement named in the API documentation. Alternatively,
+      |set the feature flag named in the error message to `true` (for example
+      |`canton.participants.<participant>.features.deprecated.enable-deprecated-endpoints-37` for the
+      |endpoints deprecated in Canton 3.7) in the participant configuration."""
+  )
+  object DeprecatedApiDisabled
+      extends ErrorCode(
+        id = "DEPRECATED_API_DISABLED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+
+    /** @param api
+      *   the deprecated endpoint or gRPC method that was used
+      * @param deprecation
+      *   the deprecation wave the `api` belongs to
+      */
+    final case class Reject(api: String, deprecation: ApiDeprecation)(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = deprecation.disabledMessage(api),
+          extraContext = Map("api" -> api, "deprecated_in" -> deprecation.deprecatedIn.toString),
+        )
+  }
+
+  @Explanation(
     """This error is emitted when a submitted ledger API command contains an invalid argument."""
   )
   @Resolution("Inspect the reason given and correct your application.")
@@ -515,11 +546,13 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
     final case class Reject(
         actualSize: Long,
         maxLimit: Long,
+        interfaceFilterSize: Int,
     )(implicit
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(
           cause =
-            s"The total number of decomposed filters in the event format(s) ($actualSize) exceeds the maximum allowed number of $maxLimit"
+            s"The total number of decomposed filters in the event format(s) ($actualSize) exceeds the maximum allowed number of $maxLimit " +
+              s"(a template or wildcard filter counts as 1, an interface filter as $interfaceFilterSize)"
         )
   }
 

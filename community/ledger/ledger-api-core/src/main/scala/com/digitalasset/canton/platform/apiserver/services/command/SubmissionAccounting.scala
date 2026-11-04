@@ -39,7 +39,14 @@ object TrafficAccountSelection {
     }
 }
 
-final case class SubmissionAccounting(selection: TrafficAccountSelection)
+/** @param checkBalance
+  *   set to false once the balance check before routing passes, so we don't check again for each
+  *   send
+  */
+final case class SubmissionAccounting(
+    selection: TrafficAccountSelection,
+    checkBalance: Boolean = true,
+)
 
 object SubmissionAccounting {
   val NoAccount: SubmissionAccounting = SubmissionAccounting(TrafficAccountSelection.NoAccount)

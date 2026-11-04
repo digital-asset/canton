@@ -253,9 +253,10 @@ class CommandServiceImplSpec
       service: CommandServiceImpl,
       deadlineTicker: Deadline.Ticker = Deadline.getSystemTicker,
   ): ResourceOwner[CommandServiceGrpc.CommandServiceStub] = {
+    implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
     val commandsValidator = new CommandsValidator(
       validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-    )(sizeLimitsConfig = LedgerApiSizeLimitsConfig())
+    )
     val apiService = new ApiCommandService(
       service = service,
       commandsValidator = commandsValidator,

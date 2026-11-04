@@ -17,9 +17,10 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.performance.PartyRole.MasterDynamicConfig
 import com.digitalasset.canton.performance.acs.{ContractObserver, ContractStore}
+import com.digitalasset.canton.performance.elements.CmdStatus.CmdSubmitted
 import com.digitalasset.canton.performance.elements.DriverStatus.MasterStatus
 import com.digitalasset.canton.performance.model.java as M
-import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
+import com.digitalasset.canton.performance.model.java.orchestration.runtype.{DvpRun, TriParty}
 import com.digitalasset.canton.performance.model.java.orchestration.{
   ParticipantFlag,
   ProbeType,
@@ -28,10 +29,12 @@ import com.digitalasset.canton.performance.model.java.orchestration.{
   TestRun,
 }
 import com.digitalasset.canton.performance.{Connectivity, PartyRole}
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import org.apache.pekko.actor.ActorSystem
 
 import java.time.Instant
+import java.util.Optional
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters.*
@@ -85,6 +88,7 @@ class MasterDriver(
     metricsFactory: LabeledMetricsFactory,
     loggerFactory: NamedLoggerFactory,
     control: DriverControl,
+    baseSynchronizerId: SynchronizerId,
 )(implicit
     ec: ExecutionContextExecutor,
     actorSystem: ActorSystem,
@@ -113,6 +117,13 @@ class MasterDriver(
     )(
       MetricsContext.Empty
     )
+
+  private val isTriParty = config.runConfig.runType match {
+    case _: TriParty => true
+    case _ => false
+  }
+  // track if we already created the bootstrap contract
+  private val createdBootstrap = new AtomicReference[CmdStatus](CmdStatus.CmdNotSubmitted)
 
   private val requests = new ContractStore[
     M.orchestration.ParticipationRequest.Contract,
@@ -189,6 +200,61 @@ class MasterDriver(
         actors.inc()(contextFromContract(create))
     }
 
+  private val preBootstrap =
+    new ContractStore[
+      M.triparty.bootstrap.PreBootstrap.Contract,
+      M.triparty.bootstrap.PreBootstrap.ContractId,
+      M.triparty.bootstrap.PreBootstrap,
+      Unit,
+    ](
+      "issuer-bootstrap",
+      M.triparty.bootstrap.PreBootstrap.COMPANION,
+      index = _ => (),
+      filter = _ => true,
+      loggerFactory,
+    )
+  private val bootstrap =
+    new ContractStore[
+      M.triparty.bootstrap.Bootstrap.Contract,
+      M.triparty.bootstrap.Bootstrap.ContractId,
+      M.triparty.bootstrap.Bootstrap,
+      Unit,
+    ](
+      "bootstrap",
+      M.triparty.bootstrap.Bootstrap.COMPANION,
+      index = _ => (),
+      filter = _ => true,
+      loggerFactory,
+    )
+
+  private val register =
+    new ContractStore[
+      M.triparty.asset.Registry.Contract,
+      M.triparty.asset.Registry.ContractId,
+      M.triparty.asset.Registry,
+      (String, String),
+    ](
+      "registry",
+      M.triparty.asset.Registry.COMPANION,
+      index = x => (x.data.issuer, x.data.id),
+      filter = _ => true,
+      loggerFactory,
+    )
+
+  private val bootstrapAssets =
+    new ContractStore[
+      M.triparty.bootstrap.BootstrapAsset.Contract,
+      M.triparty.bootstrap.BootstrapAsset.ContractId,
+      M.triparty.bootstrap.BootstrapAsset,
+      (String, String),
+    ](
+      "bootstrapAssets",
+      M.triparty.bootstrap.BootstrapAsset.COMPANION,
+      index = x => (x.data.request.issuer, x.data.request.id),
+      filter = _ => true,
+      loggerFactory,
+    )
+
   private def templateMatches(expected: javaapi.data.Identifier)(actual: Identifier): Boolean =
     Identifier.fromJavaProto(expected.toProto) == actual
 
@@ -197,6 +263,10 @@ class MasterDriver(
       requests,
       testParticipants,
       testProbes,
+      preBootstrap,
+      bootstrap,
+      register,
+      bootstrapAssets,
       new ContractObserver() {
         override def processCreate(create: CreatedEvent, synchronizerId: String): Boolean = {
           if (
@@ -216,13 +286,20 @@ class MasterDriver(
             synchronizerId: String,
             reassignmentCounter: Long,
         ): Boolean = false
+
         override def processArchive(archive: ArchivedEvent): Boolean = false
+
         override def reset(): Unit = {}
       },
     )
   )
 
-  protected def subscribeToTemplates: Seq[javaapi.data.Identifier] = Seq()
+  protected def subscribeToTemplates: Seq[javaapi.data.Identifier] = Seq(
+    M.triparty.bootstrap.BootstrapAsset.TEMPLATE_ID,
+    M.triparty.bootstrap.Bootstrap.TEMPLATE_ID,
+    M.triparty.bootstrap.PreBootstrap.TEMPLATE_ID,
+    M.triparty.asset.Registry.TEMPLATE_ID,
+  )
 
   override def start(): Future[Either[String, Unit]] =
     (for {
@@ -239,8 +316,8 @@ class MasterDriver(
 
   private def setupTestRun(): Future[Boolean] =
     submitCommand(
-      "setup-test-run",
-      new M.orchestration.TestRun(
+      baseDescription = "setup-test-run",
+      commandJava = new M.orchestration.TestRun(
         M.orchestration.Mode.PREPAREISSUER,
         List().asJava,
         List().asJava,
@@ -249,7 +326,8 @@ class MasterDriver(
         config.runConfig.reportFrequency.toLong,
         config.runConfig.runType,
       ).create.commands.asScala.toSeq,
-      "Test Run Orchestration",
+      reference = "Test Run Orchestration",
+      synchronizerId = Some(baseSynchronizerId),
     ).flatMap { success =>
       if (!success && !isClosing) {
         logger.warn("Test run orchestration initialisation failed. Retrying")
@@ -282,6 +360,7 @@ class MasterDriver(
           "amend-master",
           amendMaster,
           s"Amending master run-type",
+          synchronizerId = Some(baseSynchronizerId),
         )
         setPending(masterContract, master.id, submissionF)
       } else {
@@ -294,22 +373,14 @@ class MasterDriver(
     }).discard
 
   override def flush(): Boolean = {
-    if (requests.allAvailable.nonEmpty) {
+    if (!prepareBootstrap()) ()
+    else {
       // process participation requests
       masterContract.one(()).foreach { case (_, master) =>
-        val allRequests = requests.allAvailable.take(100).toList
-        val acceptRegistration =
-          master.id.exerciseBulkAddParticipant(allRequests.map(_.id).asJava).commands.asScala.toSeq
-        logger.info(
-          s"Accepting participation requests of\n  ${allRequests.map(_.data.party).mkString("\n  ")}"
-        )
-        val submissionF = submitCommand(
-          "accept-participation",
-          acceptRegistration,
-          s"registering participants",
-        )
-        setPending(masterContract, master.id, submissionF)
-        allRequests.foreach(request => setPending(requests, request.id, submissionF))
+        if (isTriParty)
+          flushTriPartyParticipantRequests(master)
+        else if (requests.allAvailable.nonEmpty)
+          flushNormalParticipantRequests(master)
       }
     }
 
@@ -320,6 +391,138 @@ class MasterDriver(
     // adapt state based on progress
     adaptTestRunState()
     false
+  }
+
+  private def flushTriPartyParticipantRequests(master: M.orchestration.TestRun.Contract): Unit = {
+    def toKey(request: M.triparty.asset.MintRequest): (String, String) =
+      (request.issuer, request.id)
+    val nextRequest = bootstrapAssets.allAvailable
+      .flatMap(request =>
+        register.one(toKey(request.data.request)).map { case (_, reg) => (request, reg) }
+      )
+      .headOption
+    (numPending.get() < config.maxPending, nextRequest) match {
+      case (true, Some((request, reg))) =>
+        val rest =
+          bootstrapAssets.find(toKey(request.data.request)).map(_._2).filter(_.id != request.id)
+        logger.info(
+          s"Processing ${rest.size + 1} asset bootstrap requests for ${request.data.request.id}"
+        )
+        val cmds = request.id
+          .exerciseBatchApprove(
+            reg.id,
+            rest.map(_.id).asJava,
+          )
+          .commands
+          .asScala
+          .toSeq
+        val submissionF = submitCommand(
+          "bootstrap-assets",
+          cmds,
+          s"bootstrap assets for ${request.data.request.id}",
+          synchronizerId = Some(baseSynchronizerId),
+        )
+        setPending(bootstrapAssets, request.id, submissionF)
+        rest.foreach(rr => setPending(bootstrapAssets, rr.id, submissionF))
+        setPending(register, reg.id, submissionF)
+
+      case (false, Some(_)) =>
+        logger.debug("Not accepting more asset requests as we are at max pending")
+      case _ =>
+
+    }
+    (preBootstrap.one(()), bootstrap.one(())) match {
+      case (Some((_, pre)), None) =>
+        logger.debug(
+          s"In prepare issuer mode ${master.data.mode}, have ${master.data.issuers.size()} passive roles:\n"
+            + s"  agents=${pre.data.agents.size()}\n"
+            + s"  subregisters=${pre.data.subregisters.size()}\n"
+            + s"  takers=${pre.data.takers.size()}\n"
+            + s"  required=${pre.data.numAgents}\n"
+            + s"  cash-issuer=${pre.data.cashIssuer}\n"
+            + s"  issuers=${pre.data.issuers.size()}\n"
+        )
+        if (master.data.issuers.size() == config.quorumIssuers) {
+          logger.info("We reached the quorum, moving to custodian bootstrapping")
+          val cmd = pre.id.exerciseReadyForBootstrap().commands().asScala.toSeq
+          val submissionF = submitCommand(
+            "move-to-custodian-bootstrap",
+            cmd,
+            s"moving to custodian bootstrap",
+            synchronizerId = Some(baseSynchronizerId),
+          )
+          setPending(preBootstrap, pre.id, submissionF)
+        } else {
+          requests.allAvailable.find(_.data.role == Role.ISSUER).foreach { request =>
+            logger.info(
+              s"Accepting issuer participation request of ${request.data.party}"
+            )
+            val acceptRegistration = request.id
+              .exerciseAcceptTriPartyIssuer(
+                master.id,
+                pre.id,
+              )
+              .commands
+              .asScala
+              .toSeq
+            val submissionF = submitCommand(
+              "accept-issuer-participation",
+              acceptRegistration,
+              s"registering participants",
+              synchronizerId = Some(baseSynchronizerId),
+            )
+            setPending(masterContract, master.id, submissionF)
+            setPending(requests, request.id, submissionF)
+            setPending(preBootstrap, pre.id, submissionF)
+          }
+        }
+      case (None, Some((_, traders))) =>
+        requests.allAvailable.find(_.data.role == Role.TRADER).foreach { request =>
+          logger.info(
+            s"Accepting trader participation request of ${request.data.party}"
+          )
+          val acceptRegistration = request.id
+            .exerciseAcceptTriPartyUser(
+              master.id,
+              traders.id,
+            )
+            .commands
+            .asScala
+            .toSeq
+          val submissionF = submitCommand(
+            "accept-trader-participation",
+            acceptRegistration,
+            s"registering participants",
+            synchronizerId = Some(baseSynchronizerId),
+          )
+          setPending(masterContract, master.id, submissionF)
+          setPending(requests, request.id, submissionF)
+          setPending(bootstrap, traders.id, submissionF)
+        }
+      case (None, None) => // fine
+      case (Some(_), Some(_)) =>
+        logger.error(
+          "Both pre-bootstrap and bootstrap contracts exist simultaneously. This should not happen."
+        )
+    }
+  }
+
+  private def flushNormalParticipantRequests(master: M.orchestration.TestRun.Contract): Unit = {
+    val allRequests = requests.allAvailable.take(config.batchSize).toList
+    val acceptRegistration =
+      master.id.exerciseBulkAddParticipant(allRequests.map(_.id).asJava).commands.asScala.toSeq
+    logger.info(
+      s"Accepting participation requests of\n  ${allRequests.map(_.data.party).mkString("\n  ")}"
+    )
+    val submissionF = submitCommand(
+      "accept-participation",
+      acceptRegistration,
+      s"registering participants",
+      synchronizerId = Some(baseSynchronizerId),
+    )
+    setPending(masterContract, master.id, submissionF)
+    allRequests.foreach(request => setPending(requests, request.id, submissionF))
+
   }
 
   private def cleanupTestProbes(cleanup: List[M.orchestration.TestProbe.Contract]): Unit =
@@ -456,12 +659,52 @@ class MasterDriver(
           .asScala
           .toSeq
         val submissionF =
-          submitCommand("toggle-mode", command, s"Changing mode ${master.data.mode} => $mode")
+          submitCommand(
+            "toggle-mode",
+            command,
+            s"Changing mode ${master.data.mode} => $mode",
+            synchronizerId = Some(baseSynchronizerId),
+          )
         setPending(masterContract, master.id, submissionF)
       }
       if (master.data.mode == M.orchestration.Mode.DONE) {
         finished()
       }
     }
+
+  private def prepareBootstrap(): Boolean = config.runConfig.runType match {
+    case cfg: TriParty
+        if createdBootstrap.compareAndSet(CmdStatus.CmdNotSubmitted, CmdStatus.CmdSubmitted) =>
+      FutureUtil.doNotAwait(
+        submitCommand(
+          baseDescription = "setup-bootstrap",
+          new M.triparty.bootstrap.PreBootstrap(
+            masterPartyLf,
+            Optional.empty(),
+            List().asJava,
+            List().asJava,
+            List().asJava,
+            List().asJava,
+            cfg.numAgents,
+            cfg.numAssetsPerIssuer,
+            cfg.numAccountsPerIssuer,
+          ).create.commands.asScala.toSeq,
+          reference = "Create prebootstrap",
+          synchronizerId = Some(baseSynchronizerId),
+          fixedCommandId = Some("setup-bootstrap"),
+        ).map { success =>
+          if (success) {
+            createdBootstrap.set(CmdStatus.CmdSucceeded)
+          } else if (!isClosing) {
+            logger.warn("Bootstrap creation failed. Retrying")
+            createdBootstrap.set(CmdStatus.CmdNotSubmitted)
+          }
+        },
+        "creating preboostrap failed",
+      )
+      false
+    case _: TriParty if createdBootstrap.get() == CmdSubmitted => false
+    case _ => true
+  }
 
 }

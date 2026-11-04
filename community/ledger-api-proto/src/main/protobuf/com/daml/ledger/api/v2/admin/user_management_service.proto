@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.daml.ledger.api.v2.admin;
 
 import "com/daml/ledger/api/v2/admin/object_meta.proto";
+import "com/daml/ledger/api/v2/size_config_options.proto";
 import "google/protobuf/field_mask.proto";
 
 option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
@@ -282,7 +283,7 @@ message UpdateUserRequest {
   // For similar Ledger API see ``com.daml.ledger.api.v2.admin.UpdatePartyDetailsRequest``.
   //
   // Required
-  google.protobuf.FieldMask update_mask = 2;
+  google.protobuf.FieldMask update_mask = 2 [(size_limit) = true];
 }
 
 message UpdateUserResponse {

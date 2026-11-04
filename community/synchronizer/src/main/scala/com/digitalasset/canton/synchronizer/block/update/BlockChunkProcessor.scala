@@ -41,7 +41,6 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import io.opentelemetry.api.trace.Tracer
 
@@ -605,19 +604,14 @@ final class BlockChunkProcessor(
                 )
                 // Now that the sequencing timestamp is assigned, we can resolve the topology
                 // snapshot and re-bind the envelope contents' decompression to the dynamic
-                // `maxRequestSize`. Earlier protocol versions keep the hardcoded value.
-                decompressionPolicy <-
-                  if (protocolVersion == ProtocolVersion.v35)
-                    FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
-                  else
-                    snapshotAtSequencingTime.ipsSnapshot
-                      .findDynamicSynchronizerParametersOrDefault(protocolVersion)
-                      .map(parameters =>
-                        DecompressionPolicy.forProtocolVersion(
-                          protocolVersion,
-                          MaxBytesToDecompress(parameters.maxRequestSize.value),
-                        )
-                      )
+                // `maxRequestSize`.
+                decompressionPolicy <- snapshotAtSequencingTime.ipsSnapshot
+                  .findDynamicSynchronizerParametersOrDefault(protocolVersion)
+                  .map(parameters =>
+                    DecompressionPolicy.Cumulative(
+                      MaxBytesToDecompress(parameters.maxRequestSize.value)
+                    )
+                  )
                 boundedSignedSubmissionRequest = signedSubmissionRequest.copy(
                   content = submissionRequest.withDecompressionPolicy(decompressionPolicy)
                 )

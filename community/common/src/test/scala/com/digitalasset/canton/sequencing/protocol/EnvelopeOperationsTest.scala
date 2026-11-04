@@ -7,7 +7,7 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.protocol.{SynchronizerLimits, v31}
-import com.digitalasset.canton.util.{CompressionAlgo, MaxBytesToDecompress}
+import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   CommonGenerators,
@@ -23,14 +23,13 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 final class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChecks {
   private val generators = new CommonGenerators(testedProtocolVersion)
-  private val algo = CompressionAlgo(testedProtocolVersion)
 
-  s"ClosedUncompressedEnvelope (algo=$algo)" should {
+  s"ClosedUncompressedEnvelope" should {
     "compress and then decompress to the same value" in {
       import generators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
 
       forAll { (uncompressed: ClosedUncompressedEnvelope) =>
-        val compressed = uncompressed.toClosedCompressedEnvelope(algo)
+        val compressed = uncompressed.toClosedCompressedEnvelope
         val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
 
         uncompressed shouldBe decompressed
@@ -41,26 +40,23 @@ final class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPrope
       import generators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
 
       forAll { (uncompressed: ClosedUncompressedEnvelope) =>
-        val compressed = uncompressed.toClosedCompressedEnvelope(algo)
+        val compressed = uncompressed.toClosedCompressedEnvelope
         val budget = DecompressionBudget(MaxBytesToDecompress.MaxValueUnsafe)
-        val decompressed = (algo match {
-          case CompressionAlgo.Gzip => budget.decompressGzip(compressed.bytes)
-          case CompressionAlgo.Zstd => budget.decompressZstd(compressed.bytes)
-        }).value
+        val decompressed = budget.decompressZstd(compressed.bytes).value
 
         decompressed.size shouldBe uncompressed.uncompressedByteSize
       }
     }
   }
 
-  s"CloseCompressedEnvelope (algo=$algo)" should {
+  "CloseCompressedEnvelope" should {
     "decompress and compress to the same value" in {
       implicit val arb: Arbitrary[ClosedCompressedEnvelope] =
         generators.generatorsProtocolSeq.closedCompressedEnvelopeArb
 
       forAll { (compressed: ClosedCompressedEnvelope) =>
         val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
-        val recompressed = decompressed.toClosedCompressedEnvelope(algo)
+        val recompressed = decompressed.toClosedCompressedEnvelope
 
         compressed shouldBe recompressed
       }
@@ -113,7 +109,7 @@ final class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPrope
         .flatMap(_.toClosedUncompressedBatchResult) shouldBe Left(
         InvariantViolation(
           Some("signatures"),
-          "repeated field has 3 elements, exceeding the maximum of 2",
+          "repeated or map field has 3 elements, exceeding the maximum of 2",
         )
       )
     }
@@ -233,17 +229,6 @@ final class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPrope
           .toClosedUncompressedEnvelopeResult
           .value
       }
-    }
-
-    "select the policy mandated by the protocol version" in {
-      val limit = MaxBytesToDecompress(NonNegativeInt.tryCreate(42))
-
-      DecompressionPolicy.forProtocolVersion(ProtocolVersion.v35, limit) shouldBe
-        DecompressionPolicy.PerEnvelope(limit)
-      DecompressionPolicy.forProtocolVersion(ProtocolVersion.v36, limit) shouldBe
-        DecompressionPolicy.Cumulative(limit)
-      DecompressionPolicy.forProtocolVersion(ProtocolVersion.dev, limit) shouldBe
-        DecompressionPolicy.Cumulative(limit)
     }
   }
 

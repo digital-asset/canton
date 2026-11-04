@@ -39,6 +39,10 @@ class ParticipantReplayBenchmark extends CommunityIntegrationTest with SharedEnv
     */
   private lazy val FinishIfIdleDuring: FiniteDuration = 5.seconds
 
+  // The nightly configs run with the default canton.features.enable-repair-commands = false,
+  // which disables the repair service providing the consistency check commands
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override lazy val environmentDefinition: EnvironmentDefinition = {
     val envDefFromFiles = EnvironmentDefinition
       .fromFiles(

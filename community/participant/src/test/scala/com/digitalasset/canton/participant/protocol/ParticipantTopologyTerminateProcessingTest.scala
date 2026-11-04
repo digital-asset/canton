@@ -91,6 +91,8 @@ final class ParticipantTopologyTerminateProcessingTest
       store: TopologyStore[TopologyStoreId.SynchronizerStore] = mkStore,
       initialRecordTime: CantonTimestamp = CantonTimestamp.MinValue,
       synchronizerPredecessor: Option[SynchronizerPredecessor] = None,
+      onboardingClearanceScheduler: OnboardingClearanceScheduler =
+        mock[OnboardingClearanceScheduler],
   ): (
       ParticipantTopologyTerminateProcessing,
       TopologyStore[TopologyStoreId.SynchronizerStore],
@@ -135,7 +137,7 @@ final class ParticipantTopologyTerminateProcessingTest
       pendingLsuOperationsStore = mock[PendingLsuOperation.Store],
       synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
-      onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
+      onboardingClearanceScheduler = onboardingClearanceScheduler,
       partyReplicationTriggersO = None,
       metrics,
       loggerFactory,
@@ -745,6 +747,27 @@ final class ParticipantTopologyTerminateProcessingTest
           any[NonEmptyString],
         )(any[TraceContext])
 
+        succeed
+      }
+    }
+
+    "request the onboarding flag clearance at the effective time of the onboarding" in {
+      val scheduler = mock[OnboardingClearanceScheduler]
+      val (proc, store, _, _, pendingOnboardingStore) = mk(onboardingClearanceScheduler = scheduler)
+      val (cts0, _) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+      // A pending clearance with another effective time than the onboarding's
+      val pendingClearance = OnboardingClearanceOperation(Some(EffectiveTime(cts0)))(
+        OnboardingClearanceOperation.protocolVersionRepresentativeFor(testedProtocolVersion)
+      ).toPendingOperation(store.storeId.psid.logical, party1)
+
+      for {
+        _ <- valueOrFail(pendingOnboardingStore.insert(pendingClearance))("insert")
+        _ <- add(store, cts1, List(party1participant1_ob))
+        _ <- proc.terminate(sc1, SequencedTime(cts1), EffectiveTime(cts1))
+      } yield {
+        verify(scheduler, times(1))
+          .requestClearanceInBackground(eqTo(party1), eqTo(EffectiveTime(cts1)))(any[TraceContext])
         succeed
       }
     }

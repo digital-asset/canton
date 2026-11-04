@@ -29,7 +29,8 @@ fi
 #
 # - ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed,
 #   ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed,
-#   CommandDeduplicationPeriodValidationIT:OffsetPruned:
+#   CommandDeduplicationPeriodValidationIT:OffsetPruned,
+#   PartyManagementServiceIT:PMPagedListKnownPartiesAfterPruning:
 #   These individual tests also prune the shared ledger, causing the same cross-iteration
 #   PARTICIPANT_PRUNED_DATA_ACCESSED contamination as ParticipantPruningIT.
 #
@@ -41,9 +42,9 @@ fi
 #   against the observability setup.
 #
 # - ContractIdIT:AcceptSuffixedV1CidExerciseTarget: Exercises a fabricated suffixed v1 contract ID
-excluded_tests="ParticipantPruningIT,ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed,ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed,CommandDeduplicationPeriodValidationIT:OffsetPruned,CheckpointInTailingStreamsIT,VettingIT,ContractIdIT:AcceptSuffixedV1CidExerciseTarget"
+excluded_tests="ParticipantPruningIT,ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed,ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed,CommandDeduplicationPeriodValidationIT:OffsetPruned,PartyManagementServiceIT:PMPagedListKnownPartiesAfterPruning,CheckpointInTailingStreamsIT,VettingIT,ContractIdIT:AcceptSuffixedV1CidExerciseTarget"
 #   INTERNAL instead of CONTRACT_NOT_FOUND for this case in the observability environment.
-excluded_tests="ParticipantPruningIT,ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed,ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed,CommandDeduplicationPeriodValidationIT:OffsetPruned,CheckpointInTailingStreamsIT,VettingIT,CommandDeduplicationIT,ContractIdIT:AcceptSuffixedV1CidExerciseTarget"
+excluded_tests="ParticipantPruningIT,ActiveContractsServiceIT:AcsAtPruningOffsetIsAllowed,ActiveContractsServiceIT:AcsBeforePruningOffsetIsDisallowed,CommandDeduplicationPeriodValidationIT:OffsetPruned,PartyManagementServiceIT:PMPagedListKnownPartiesAfterPruning,CheckpointInTailingStreamsIT,VettingIT,CommandDeduplicationIT,ContractIdIT:AcceptSuffixedV1CidExerciseTarget"
 
 echo "### Running Ledger API conformance tests 🛠️"
 java -jar "${jar_file}" "${@:1}" \

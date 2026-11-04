@@ -236,7 +236,6 @@ object EnvironmentDefinition extends LazyLogging {
       else Map.empty
 
     EnvironmentDefinition(configWithDefaults)
-      .addConfigTransforms(ConfigTransforms.defaultsForNodes*)
       .addConfigTransform(c =>
         c.focus(_.remoteParticipants)
           .replace(toRemote(c.participants)(_.toRemoteConfig))

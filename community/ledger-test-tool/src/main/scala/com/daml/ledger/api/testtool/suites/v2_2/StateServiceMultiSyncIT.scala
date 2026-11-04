@@ -192,6 +192,7 @@ final class StateServiceMultiSyncIT extends LedgerTestSuite {
     }
   })
 
+  // TODO(#35522) add a test for the cardinality limit of synchronizer_id in GetLedgerEndRequest, once the default limits are set
   test(
     "StateServiceLedgerEndMalformedSynchronizerId",
     "Get ledger end should return an error when filtering with malformed synchronizer id",

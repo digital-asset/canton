@@ -17,7 +17,8 @@ object EventQueryServiceRequestValidator {
   def validateEventsByContractId(
       req: GetEventsByContractIdRequest
   )(implicit
-      errorLoggingContext: ErrorLoggingContext
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): Result[event.GetEventsByContractIdRequest] =
     for {
       contractId <- requireContractId(req.contractId, "contract_id")

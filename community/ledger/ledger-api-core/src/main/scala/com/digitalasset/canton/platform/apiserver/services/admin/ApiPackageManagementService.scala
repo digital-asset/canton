@@ -12,6 +12,12 @@ import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
+import com.digitalasset.canton.ledger.api.validation.PackageManagementServiceRequestValidator.{
+  validateUpdateVettedPackagesRequest,
+  validateUploadDarFileRequest,
+  validateValidateDarFileRequest,
+}
 import com.digitalasset.canton.ledger.api.{
   UpdateVettedPackagesOpts,
   UploadDarVettingChange as UploadDarOpts,
@@ -38,7 +44,7 @@ private[apiserver] final class ApiPackageManagementService private (
     packageSyncService: PackageSyncService,
     submissionIdGenerator: String => Ref.SubmissionId,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
+)(implicit executionContext: ExecutionContext, sizeLimitsConfig: LedgerApiSizeLimitsConfig)
     extends PackageManagementService
     with GrpcApiService
     with NamedLogging {
@@ -83,6 +89,7 @@ private[apiserver] final class ApiPackageManagementService private (
     ) { implicit loggingContext: LoggingContextWithTrace =>
       logger.info(s"Validating DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
       for {
+        _ <- validateValidateDarFileRequest(request).toFuture(identity)
         synchronizerIdO <-
           EitherTUtil.toFuture(
             CantonGrpcUtil.mapErrNew(
@@ -113,6 +120,7 @@ private[apiserver] final class ApiPackageManagementService private (
       logger.info(s"Uploading DAR file, ${loggingContext.serializeFiltered("submissionId")}.")
 
       val resultET = for {
+        _ <- EitherT.fromEither[Future](validateUploadDarFileRequest(request))
         synchronizerIdO <-
           CantonGrpcUtil.mapErrNew(
             OptionUtil
@@ -149,6 +157,7 @@ private[apiserver] final class ApiPackageManagementService private (
       logging.submissionId(submissionId)
     ) { implicit loggingContext: LoggingContextWithTrace =>
       for {
+        _ <- validateUpdateVettedPackagesRequest(request).toFuture(identity)
         updateVettedPackagesOpts <- UpdateVettedPackagesOpts
           .fromProto(request)
           .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
@@ -170,7 +179,8 @@ private[apiserver] object ApiPackageManagementService {
       packageSyncService: PackageSyncService,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): PackageManagementServiceGrpc.PackageManagementService & GrpcApiService =
     new ApiPackageManagementService(
       packageSyncService,

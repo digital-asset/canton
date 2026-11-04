@@ -21,7 +21,7 @@ abstract class CreateBasicDataContinuityDumpsPostgres(override val shard: Int)
     with CreateContinuityDumpsShard
     with DataContinuityTestFixturePostgres {
   override def numShards: Int = 3
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 }
 
 class CreateBasicDataContinuityDumpsPostgres_0
@@ -38,7 +38,7 @@ abstract class CreateSynchronizerChangeDataContinuityDumpsPostgres(override val 
     with CreateContinuityDumpsShard
     with DataContinuityTestFixturePostgres {
   override def numShards: Int = 3
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
 }
 class CreateSynchronizerChangeDataContinuityDumpsPostgres_0
     extends CreateSynchronizerChangeDataContinuityDumpsPostgres(shard = 0)
@@ -71,13 +71,13 @@ object SplitCreateDataContinuityDumps {
 class CreateBasicDataContinuityDumpsPostgres_all
     extends CreateBasicDataContinuityDumps
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def supportedPVS = SplitCreateDataContinuityDumps.allSupportedStablePv
 }
 
 class CreateSynchronizerChangeDataContinuityDumpsPostgres_all
     extends CreateSynchronizerChangeDataContinuityDumps
     with DataContinuityTestFixturePostgres {
-  registerPlugin(plugin)
+  registerPlugin(pgPlugin)
   override def supportedPVS = SplitCreateDataContinuityDumps.allSupportedStablePv
 }

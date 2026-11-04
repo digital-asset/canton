@@ -42,7 +42,7 @@ inputs:
     default: ""
     required: false
   artifact_name_suffix:
-    description: Optional suffix appended to selected-tests artifact names
+    description: Optional suffix appended to test-split artifact names
     required: false
     default: ''
   job_name:

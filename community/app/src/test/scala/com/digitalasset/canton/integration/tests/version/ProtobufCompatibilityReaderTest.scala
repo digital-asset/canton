@@ -154,6 +154,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
+      // Fields added to the opaque, participant-internal ListKnownParties page token; older nodes simply ignore the new fields
+      """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Added ML-DSA support to 3.6, crypto handshake handles missing schemes with 3.5
@@ -232,6 +236,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
+      // Fields added to the opaque, participant-internal ListKnownParties page token; older nodes simply ignore the new fields
+      """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
     ),
     (3, 6) -> Seq(
       // Daml-LF archive backward compatibility is checked separately
@@ -271,6 +279,10 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/sequencer/api/v30/sequencer_connect_service.proto:Previously present field "5" with name "v33" on message "GetSynchronizerParametersResponse" was deleted.""",
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
       """com/digitalasset/canton/admin/sequencer/v30/sequencer_connection.proto:Previously present field "7" with name "sequencer_connection_penalty_config" on message "SequencerConnections" was deleted.""",
+      // Fields added to the opaque, participant-internal ListKnownParties page token; older nodes simply ignore the new fields
+      """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
     ),
     (3, 7) -> Seq(
       // Added `sequencer_connection_penalty_config` to `SequencerConnections` for sequencer connections penalty mechanism configuration
@@ -284,6 +296,10 @@ final class ProtobufCompatibilityReaderTest
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf.proto" was deleted.""",
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf1.proto" was deleted.""",
       """<input>:1:1:Previously present file "com/digitalasset/daml/lf/archive/daml_lf2.proto" was deleted.""",
+      // Fields added to the opaque, participant-internal ListKnownParties page token; older nodes simply ignore the new fields
+      """daml/platform/v1/page_tokens.proto:Previously present field "2" with name "valid_at_event_seq_id" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "3" with name "version" on message "ListPartiesPageTokenPayload" was deleted.""",
+      """daml/platform/v1/page_tokens.proto:Previously present field "4" with name "participant_id_checksum" on message "ListPartiesPageTokenPayload" was deleted.""",
     ),
   )
 
@@ -354,8 +370,6 @@ final class ProtobufCompatibilityReaderTest
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "5" with name "resolved_keys" on message "ViewParticipantData" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "6" with name "action_description" on message "ViewParticipantData" was deleted.""",
     """com/digitalasset/canton/protocol/v30/participant_transaction.proto:Previously present field "7" with name "rollback_context" on message "ViewParticipantData" was deleted.""",
-    """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "1" with name "algorithm" on message "CompressedBatch" was deleted.""",
-    """com/digitalasset/canton/protocol/v30/sequencing.proto:Previously present field "2" with name "compressed_batch" on message "CompressedBatch" was deleted.""",
   )
 
   // 3.7 and later releases no longer contain the pv=34 messages

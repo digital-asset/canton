@@ -78,13 +78,13 @@ class TransferDriver(
     metricsFactory.gauge[Long](
       MetricInfo(
         prefix :+ "transfers",
-        "How many open transfer we have outstanding",
+        "How many asset contracts have been archived (as part of a transfer)",
         MetricQualification.Debug,
       ),
       0,
     )(
       MetricsContext.Empty
-    ) // sum accepts and proposals together
+    )
 
   protected val preapprovals = new ContractStore[
     M.dvp.asset.TransferPreapproval.Contract,
@@ -449,7 +449,6 @@ class TransferDriver(
       .map { case (master, params) =>
         updateTransferStats(
           master.data.mode,
-          transferStats,
           assets.totalNum,
         )
         master.data.mode match {
@@ -503,7 +502,6 @@ class TransferDriver(
 
   private def updateTransferStats(
       mode: M.orchestration.Mode,
-      transferStats: TraderStats,
       numAssets: Int,
   ): Unit = {
 

@@ -152,7 +152,7 @@ trait InteractiveSubmissionIntegrationTestSetup
       .loneElement
 }
 
-class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrationTestSetup {
+final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrationTestSetup {
   "Interactive submission" should {
     var danE: ExternalParty = null
 
@@ -502,7 +502,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         prepareTransactionsWithIncorrectSynchronizerIdFormat(cycle, aliceE)
 
       val expectedErrorMessage =
-        "Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
+        "Please use a Physical Synchronizer ID in the prepared transaction metadata"
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         cpn.ledger_api.interactive_submission

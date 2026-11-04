@@ -112,7 +112,6 @@ object EncryptedView {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       aViewType: VT,
-      protocolVersion: ProtocolVersion,
   )(
       aViewTree: aViewType.View,
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -125,7 +124,7 @@ object EncryptedView {
         EncryptionError.MaxViewSizeExceeded(viewSize, maxBytesToDecompress.limit),
       )
       encryptedView <- encryptionOps
-        .encryptSymmetricWith(CompressedView(aViewTree)(protocolVersion), viewKey)
+        .encryptSymmetricWith(CompressedView(aViewTree), viewKey)
         .map(apply(aViewType))
     } yield encryptedView
   }
@@ -134,15 +133,13 @@ object EncryptedView {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       encryptedViewTree: Encrypted[CompressedView[View]],
-      protocolVersion: ProtocolVersion,
   )(
       deserialize: ByteString => Either[DeserializationError, View],
       maxBytesToDecompress: MaxBytesToDecompress,
   ): Either[DecryptionError, View] =
     encryptionOps
       .decryptWith(encryptedViewTree, viewKey)(
-        CompressedView
-          .fromByteString[View](deserialize)(_, maxBytesToDecompress)(protocolVersion)
+        CompressedView.fromByteString[View](deserialize)(_, maxBytesToDecompress)
       )
       .map(_.value)
 }
@@ -172,7 +169,6 @@ object EncryptedMultipleViews {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       viewType: VT,
-      protocolVersion: ProtocolVersion,
   )(
       viewTrees: NonEmpty[Seq[viewType.View]],
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -187,7 +183,7 @@ object EncryptedMultipleViews {
         EncryptionError.MaxViewSizeExceeded(size, maxBytesToDecompress.limit),
       )
       encryptedViews <- encryptionOps.encryptSymmetricWith(
-        CompressedView(multiView)(protocolVersion),
+        CompressedView(multiView),
         viewKey,
       )
     } yield EncryptedMultipleViews(viewType, encryptedViews)
@@ -232,9 +228,7 @@ object EncryptedMultipleViews {
     encryptionOps
       .decryptWith(encryptedViewTrees, viewKey)(
         CompressedView
-          .fromByteString[MultipleViewTrees[View]](deserializeMultiView)(_, maxBytesToDecompress)(
-            protocolVersion
-          )
+          .fromByteString[MultipleViewTrees[View]](deserializeMultiView)(_, maxBytesToDecompress)
       )
       .map(_.value)
   }
@@ -247,28 +241,25 @@ object EncryptedMultipleViews {
   * is ignored by decryption) and we want to avoid that this is applied to
   * [[com.digitalasset.canton.serialization.HasCryptographicEvidence]] instances.
   */
-final case class CompressedView[+V <: HasToByteString] private (value: V)(pv: ProtocolVersion)
-    extends HasToByteString {
+final case class CompressedView[+V <: HasToByteString] private (value: V) extends HasToByteString {
   override def toByteString: ByteString =
-    ByteStringUtil.compress(value.toByteString, CompressionAlgo(pv))
+    ByteStringUtil.compressZstd(value.toByteString)
 }
 
 object CompressedView {
-  private[messages] def apply[V <: HasToByteString](value: V)(
-      pv: ProtocolVersion
-  ): CompressedView[V] =
-    new CompressedView(value)(pv)
+  private[messages] def apply[V <: HasToByteString](value: V): CompressedView[V] =
+    new CompressedView(value)
 
   private[messages] def fromByteString[V <: HasToByteString](
       deserialize: ByteString => Either[DeserializationError, V]
   )(
       bytes: ByteString,
       maxBytesToDecompress: MaxBytesToDecompress,
-  )(pv: ProtocolVersion): Either[DeserializationError, CompressedView[V]] =
+  ): Either[DeserializationError, CompressedView[V]] =
     ByteStringUtil
-      .decompress(bytes, CompressionAlgo(pv), maxBytesLimit = maxBytesToDecompress)
+      .decompressZstd(bytes, maxBytesLimit = maxBytesToDecompress)
       .flatMap(deserialize)
-      .map(CompressedView(_)(pv))
+      .map(CompressedView(_))
 }
 
 /** An encrypted view message. The view message is encrypted with a symmetric key derived from the

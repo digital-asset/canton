@@ -263,6 +263,11 @@ class FixedSyncCryptoApiForSigning(
     override def vettedPackages(participantId: ParticipantId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Set[VettedPackage]] = notImplementedUS
+
+    override def vettedPackages(participantIds: Set[ParticipantId])(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[ParticipantId, Set[VettedPackage]]] = notImplementedUS
+
   }
 
   override def verifySignature(

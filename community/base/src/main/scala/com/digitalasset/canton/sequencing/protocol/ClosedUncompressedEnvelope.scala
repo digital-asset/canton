@@ -64,7 +64,7 @@ final case class ClosedUncompressedEnvelope private[protocol] (
           .fromByteString(ProtocolVersionValidation.PV(protocolVersion), bytes)
           .map { typedMessage =>
             OpenEnvelope(
-              SignedProtocolMessage(typedMessage, signaturesNE),
+              SignedProtocolMessage(typedMessage, signaturesNE, protocolVersion),
               recipients,
             )(protocolVersion)
           }
@@ -80,8 +80,9 @@ final case class ClosedUncompressedEnvelope private[protocol] (
                 Right(
                   OpenEnvelope(
                     SignedProtocolMessage(
-                      TypedSignedProtocolMessageContent(acsCommitment),
+                      TypedSignedProtocolMessageContent(acsCommitment, protocolVersion),
                       signatures,
+                      protocolVersion,
                     ),
                     recipients,
                   )(protocolVersion)
@@ -123,14 +124,11 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     */
   def uncompressedByteSize: Int = toEnvelopeWithoutRecipientsProto.serializedSize
 
-  override def toClosedCompressedEnvelope(
-      algo: com.digitalasset.canton.util.CompressionAlgo
-  ): ClosedCompressedEnvelope = {
+  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = {
     val uncompressed = checkedToByteString(toEnvelopeWithoutRecipientsProto)
     ClosedCompressedEnvelope.create(
-      bytes = ByteStringUtil.compress(uncompressed, algo),
+      bytes = ByteStringUtil.compressZstd(uncompressed),
       recipients = recipients,
-      algorithm = CompressionAlgorithm(algo),
     )(
       DecompressionBudget(
         MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size))
@@ -214,7 +212,7 @@ object ClosedUncompressedEnvelope {
           case acsCommitment: LegacyAcsCommitment =>
             ClosedUncompressedEnvelope.create(
               EnvelopeContent(
-                LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures),
+                LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures, protocolVersion),
                 protocolVersion,
               ).toByteString,
               recipients,

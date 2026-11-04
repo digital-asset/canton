@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.admin.data.{
   PartyOnboardingFlagStatus,
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTopologyWorkflow.AuthorizeClearanceError
+import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationTopologyWorkflow.partyToParticipantTopologyHeadO
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersHistory
 import com.digitalasset.canton.time.SynchronizerTimeTracker
@@ -25,14 +26,13 @@ import com.digitalasset.canton.topology.TopologyManagerError.NoAppropriateSignin
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant.HostingState
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   PartyToParticipant,
   TopologyChangeOp,
-  TopologyMapping,
 }
 import com.digitalasset.canton.topology.{
   ForceFlags,
@@ -618,31 +618,6 @@ class PartyReplicationTopologyWorkflow(
       }
     } yield partyOnboardingStatus
   }
-
-  private def partyToParticipantTopologyHeadO(
-      partyId: PartyId,
-      topologyStore: TopologyStore[SynchronizerStore],
-      proposal: Boolean = false,
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[StoredTopologyTransaction[Replace, PartyToParticipant]]] =
-    // TODO(#25766): add topology client endpoint
-    topologyStore
-      .inspect(
-        proposals = proposal,
-        timeQuery = TimeQuery.HeadState,
-        asOfExclusiveO = None,
-        op = Some(TopologyChangeOp.Replace),
-        types = Seq(TopologyMapping.Code.PartyToParticipant),
-        idFilter = Some(partyId.uid.identifier.str),
-        namespaceFilter = Some(partyId.uid.namespace.filterString),
-      )
-      .map(
-        _.collectOfMapping[PartyToParticipant]
-          .collectOfType[TopologyChangeOp.Replace]
-          .result
-          .headOption
-      )
 
   private[party] def partyToParticipantTopologyHead(
       partyId: PartyId,

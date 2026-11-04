@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.config
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveDouble
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.*
@@ -42,6 +43,24 @@ class TrafficEnforcementServerConfigTest extends AnyWordSpec with BaseTest {
           accountLookupTimeout = PositiveFiniteDuration.ofSeconds(5),
         )
       )
+    }
+  }
+
+  "TrafficAccountingConfig" should {
+
+    "accept a finite positive estimateMultiplier" in {
+      noException should be thrownBy TrafficAccountingConfig()
+      noException should be thrownBy TrafficAccountingConfig(
+        estimateMultiplier = PositiveDouble.tryCreate(1.1)
+      )
+    }
+
+    "reject a non-finite estimateMultiplier" in {
+      Seq(Double.PositiveInfinity, Double.NaN).foreach { multiplier =>
+        intercept[IllegalArgumentException](
+          TrafficAccountingConfig(estimateMultiplier = PositiveDouble.tryCreate(multiplier))
+        )
+      }
     }
   }
 }

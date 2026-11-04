@@ -227,7 +227,7 @@ sealed trait SyncStateInspectionTest
         testedProtocolVersion,
       )
     val signed =
-      SignedProtocolMessage.from(dummyCommitmentMsg, dummySignature)
+      SignedProtocolMessage.from(dummyCommitmentMsg, testedProtocolVersion, dummySignature)
     val received = ReceivedAcsCommitment(
       synchronizerId,
       commitmentPeriod,

@@ -12,7 +12,9 @@ Usage:
 """
 
 import argparse
+import contextlib
 import datetime
+import io
 import json
 import os
 import re
@@ -25,7 +27,7 @@ from unittest.mock import patch
 
 from flaky_common import (
     branch,
-    should_report_issues,
+    is_issue_repo,
     is_nightly_job,
     is_unstable_job,
     format_issue_title,
@@ -891,6 +893,7 @@ def self_test():
     test_update_issue_links_evidence_in_new_row()
     test_run_dry_run_writes_comments_without_github()
     test_run_reports_issues_even_if_evidence_is_broken()
+    test_run_skips_issues_outside_the_issue_repo()
     test_truncate_history()
     test_update_issue_truncates_history()
     print("manage_flaky_issues self-checks passed")
@@ -912,7 +915,7 @@ def test_run_reports_issues_even_if_evidence_is_broken():
         }
         with (
             patch.dict(os.environ, env),
-            patch(f"{__name__}.should_report_issues", return_value=True),
+            patch(f"{__name__}.branch", "main"),
             patch(
                 f"{__name__}.report_issue",
                 side_effect=lambda name, cause, comment: reported.append((name, comment)),
@@ -920,6 +923,47 @@ def test_run_reports_issues_even_if_evidence_is_broken():
         ):
             run(failing, streaks, evidence)
     assert reported == [("FooTest", None), ("NoEvidenceTest", None)], reported
+
+
+def test_run_skips_issues_outside_the_issue_repo():
+    """Public main can't reach the issues: skip them, write empty streaks, and annotate
+    only when there are failures."""
+    reported: list = []
+    out = io.StringIO()
+    with tempfile.TemporaryDirectory() as tmp:
+        failing, evidence, streaks = _write_pipeline_inputs(tmp)
+        env = {
+            "GITHUB_ACTIONS": "true",
+            "CIRCLECI": "false",
+            "GITHUB_REPOSITORY": "digital-asset/canton",
+            "GITHUB_SHA": "a" * 40,
+            "GITHUB_JOB": "test",
+            "GITHUB_RUN_ID": "7",
+            "MATRIX_SHARD": "0",
+            # a dry run would bypass the gate
+            "FLAKY_DRY_RUN": "",
+        }
+        with (
+            patch.dict(os.environ, env),
+            patch(f"{__name__}.branch", "main"),
+            contextlib.redirect_stdout(out),
+            patch(
+                f"{__name__}.report_issue",
+                side_effect=lambda name, cause, comment: reported.append(name),
+            ),
+        ):
+            run(failing, streaks, evidence)
+            with open(streaks) as f:
+                assert json.load(f)["streaks"] == [], streaks
+            assert "::notice::" in out.getvalue(), out.getvalue()
+            assert "digital-asset/canton" in out.getvalue(), out.getvalue()
+
+            # green shard: no annotation
+            out.seek(0)
+            out.truncate()
+            run(os.path.join(tmp, "missing.json"), streaks, evidence)
+            assert "::notice::" not in out.getvalue(), out.getvalue()
+    assert reported == [], reported
 
 
 def test_package_artifact_only_for_issues_with_a_package():
@@ -1961,7 +2005,7 @@ def most_specific_cause_by_title(failing_tests, causes) -> dict[str, str]:
 def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
     out_path = streaks_json or streaks_path()
 
-    if not (should_report_issues() or is_dry_run()):
+    if not (branch in branches_to_report or is_dry_run()):
         print(f"Skipping GitHub issue updates: branch '{branch}' is not a tracked branch.")
         write_streaks(out_path, [])
         return
@@ -1971,6 +2015,15 @@ def run(failing_tests_json=None, streaks_json=None, evidence_json=None):
     causes = read_failing_test_causes(in_path)
     if not failing_tests:
         print("No failing tests to report to GitHub.")
+        write_streaks(out_path, [])
+        return
+
+    if not (is_issue_repo() or is_dry_run()):
+        repo = os.environ.get("GITHUB_REPOSITORY", "<unknown>")
+        print(
+            "::notice::Skipping GitHub issue updates: the flaky issues live in "
+            f"DACH-NY/canton, which '{repo}' can't reach."
+        )
         write_streaks(out_path, [])
         return
 

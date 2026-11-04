@@ -25,7 +25,6 @@ import com.digitalasset.canton.integration.plugins.{
   UseExternalConsole,
   UseExternalProcess,
   UsePostgres,
-  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
@@ -132,28 +131,14 @@ final class LsuAcrossReleasesIntegrationTest
   override protected def testName: String = "lsu-across-releases"
 
   registerPlugin(new UsePostgres(loggerFactory))
-  // One synchronizer per version. The synchronizers created before 3.6 use the reference sequencer,
-  // as the BFT orderer of 3.5 cannot read the database of a 3.4 BFT sequencer; the later ones use the
-  // BFT sequencer.
-  private lazy val (referenceSequencers, bftSequencers) = sequencers.partition { sequencer =>
-    steps.find(_.sequencer == sequencer).flatMap(_.release).exists { release =>
-      val (major, minor) = release.majorMinor
-      major == 3 && minor < 6
-    }
-  }
 
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
-      loggerFactory,
-      MultiSynchronizer.tryCreate(referenceSequencers.map(Set(_))*),
-    )
-  )
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      MultiSynchronizer.tryCreate(bftSequencers.map(Set(_))*),
+      MultiSynchronizer.tryCreate(sequencers.map(Set(_))*),
     )
   )
+
   registerPlugin(external)
 
   private lazy val external =

@@ -11,7 +11,10 @@ import com.digitalasset.canton.health.{HealthStatus, ReportsHealth}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
-import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
+import com.digitalasset.canton.ledger.participant.state.index.{
+  IndexerKnownPartiesPage,
+  IndexerPartyDetails,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -103,13 +106,34 @@ private[platform] class JdbcLedgerDao(
       fromExcl: Option[Party],
       filterParty: Option[String185],
       maxResults: Int,
+      validAtEventSeqId: Option[Long],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Future[List[IndexerPartyDetails]] =
-    dbDispatcher
-      .executeSql(metrics.index.db.loadAllParties)(
-        readStorageBackend.partyStorageBackend.knownParties(fromExcl, filterParty, maxResults)
-      )
+  ): Future[IndexerKnownPartiesPage] =
+    // The first page pins the ledger end, so subsequent pages see the same topology state.
+    validAtEventSeqId.orElse(ledgerEndCache().map(_.lastEventSeqId)) match {
+      case None =>
+        // Empty ledger: no topology events exist yet.
+        Future.successful(IndexerKnownPartiesPage(parties = Nil, validAtEventSeqId = 0L))
+      case Some(snapshotEventSeqId) =>
+        queryValidRange.withEventSeqIdNotAfterLedgerEnd(
+          eventSeqId = snapshotEventSeqId,
+          errorLedgerEnd = latestEventSeqId =>
+            s"Listing known parties at event sequential ID $snapshotEventSeqId is not possible, as it is beyond the ledger end event sequential ID $latestEventSeqId.",
+        )(
+          dbDispatcher.executeSql(metrics.index.db.loadAllParties) { connection =>
+            IndexerKnownPartiesPage(
+              parties = readStorageBackend.partyStorageBackend.knownParties(
+                fromExcl = fromExcl,
+                filterString = filterParty,
+                maxResults = maxResults,
+                validAtEventSeqId = snapshotEventSeqId,
+              )(connection),
+              validAtEventSeqId = snapshotEventSeqId,
+            )
+          }
+        )
+    }
 
   private def ensurePruningIsNotInProgress[T](
       f: => Future[T]

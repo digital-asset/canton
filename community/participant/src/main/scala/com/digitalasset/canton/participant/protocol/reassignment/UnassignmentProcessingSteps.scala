@@ -48,6 +48,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Purged,
   ReassignedAway,
 }
+import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.platform.apiserver.services.command.SubmissionAccounting
@@ -66,7 +67,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{ContractValidator, MonadUtil}
+import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{LfPackageId, LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
@@ -86,6 +87,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     val protocolVersion: Source[ProtocolVersion],
     reassignmentMetrics: ReassignmentMetrics,
     participantNodeParameters: ParticipantNodeParameters,
+    packageMetadataView: PackageMetadataView,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -139,16 +141,37 @@ private[reassignment] class UnassignmentProcessingSteps(
       submitterMetadata,
       contractIds,
       targetSynchronizer,
-      sourceValidationPackageIds,
-      targetValidationPackageIds,
+      overrideSourceValidationPackageIds,
+      overrideTargetValidationPackageIds,
       _,
     ) = submissionParam
     val pureCrypto = sourceRecentSnapshot.pureCrypto
-
     def withDetails(message: String) = s"unassign $contractIds to $targetSynchronizer: $message"
 
     val unassignmentUuid = seedGenerator.generateUuid()
     val seed = seedGenerator.generateSaltSeed()
+
+    val packageMetadata = packageMetadataView.getSnapshot
+    val validateUsingCreatingPackage = Seq(
+      protocolVersion.unwrap,
+      submissionParam.targetSynchronizer.unwrap.protocolVersion,
+    ).exists(_ <= ProtocolVersion.v36)
+
+    def chooseValidationPackage[T[X] <: ReassignmentTag[X]](
+        contract: ContractInstance,
+        overrideValidationPackageIds: T[Map[LfContractId, LfPackageId]],
+        snapshot: T[TopologySnapshot],
+    ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, LfPackageId] =
+      if (validateUsingCreatingPackage) {
+        EitherT.pure(contract.templateId.packageId)
+      } else {
+        ValidationPackage.choose(
+          contract,
+          overrideValidationPackageIds,
+          snapshot,
+          packageMetadata,
+        )
+      }
 
     for {
       _ <- condUnitET[FutureUnlessShutdown](
@@ -156,6 +179,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         TargetSynchronizerIsSourceSynchronizer(psid.unwrap, contractIds),
       )
 
+      sourceTopology = Source(sourceRecentSnapshot.ipsSnapshot)
       targetTopology <- reassignmentCoordination
         .getTargetApproximateSnapshot(targetSynchronizer)
       targetTimestamp = targetTopology.map(_.timestamp)
@@ -195,10 +219,19 @@ private[reassignment] class UnassignmentProcessingSteps(
                 UnassignmentProcessorError.ReassignmentCounterOverflow: ReassignmentProcessorError
               )
           )
-          sourceValidationPackageId = sourceValidationPackageIds
-            .getOrElse(contractId, contract.templateId.packageId)
-          targetValidationPackageId = targetValidationPackageIds
-            .getOrElse(contractId, contract.templateId.packageId)
+
+          sourceValidationPackageId <- chooseValidationPackage(
+            contract,
+            overrideSourceValidationPackageIds,
+            sourceTopology,
+          )
+
+          targetValidationPackageId <- chooseValidationPackage(
+            contract,
+            overrideTargetValidationPackageIds,
+            targetTopology,
+          )
+
         } yield ContractReassignment(
           contract,
           Source(sourceValidationPackageId),
@@ -221,7 +254,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           psid,
           mediator,
           targetSynchronizer,
-          Source(sourceRecentSnapshot.ipsSnapshot),
+          sourceTopology,
           targetTopology,
         )
         .leftMap(_.toSubmissionValidationError)
@@ -298,6 +331,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           ViewType.UnassignmentViewType,
           sourceRecentSnapshot.ipsSnapshot.timestamp,
           EmptyRootHashMessagePayload,
+          protocolVersion.unwrap,
         )
       rootHashRecipients =
         Recipients.recipientGroups(
@@ -824,8 +858,8 @@ object UnassignmentProcessingSteps {
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
-      overrideSourceValidationPkgIds: Map[LfContractId, LfPackageId],
-      overrideTargetValidationPkgIds: Map[LfContractId, LfPackageId],
+      overrideSourceValidationPkgIds: Source[Map[LfContractId, LfPackageId]],
+      overrideTargetValidationPkgIds: Target[Map[LfContractId, LfPackageId]],
       accounting: SubmissionAccounting,
   ) {
     val submittingParty: LfPartyId = submitterMetadata.submitter

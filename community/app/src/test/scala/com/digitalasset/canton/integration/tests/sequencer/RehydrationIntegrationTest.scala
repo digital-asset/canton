@@ -16,28 +16,38 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
+  SequencingParameters as ConsoleSequencingParameters,
 }
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{InstanceReference, ParticipantReference}
 import com.digitalasset.canton.examples.java.{iou, cycle as C}
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
-  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
+  TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.config.{ParticipantInitConfig, ParticipantNodeConfig}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.{
+  HowLongToBlacklist,
+  HowManyCanWeBlacklist,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  BlacklistLeaderSelectionPolicyConfig,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
@@ -47,6 +57,7 @@ import org.scalatest.Assertion
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 /** The operations performed in this test are the following:
   *
@@ -86,6 +97,9 @@ abstract class RehydrationIntegrationTest
               generateTopologyTransactionsAndKeys = false,
             )
           ),
+          InstanceName.tryCreate(s"sequencer3") -> SequencerNodeConfig(),
+          InstanceName.tryCreate(s"sequencer4") -> SequencerNodeConfig(),
+          InstanceName.tryCreate(s"sequencer5") -> SequencerNodeConfig(),
         ),
         mediators = Map(
           InstanceName.tryCreate(s"mediator1") -> MediatorNodeConfig(),
@@ -111,17 +125,19 @@ abstract class RehydrationIntegrationTest
         ),
         features = CantonFeatures(enableRepairCommands = true),
       )
-    ).addConfigTransforms(ConfigTransforms.defaultsForNodes*)
-      .withManualStart
+    ).withManualStart
       .withSetup { implicit env =>
         import env.*
 
         participant1.start()
         mediator1.start()
         sequencer1.start()
+        sequencer3.start()
+        sequencer4.start()
+        sequencer5.start()
         synchronizerId = env.bootstrap.synchronizer(
           daName.unwrap,
-          sequencers = Seq(sequencer1),
+          sequencers = Seq(sequencer1, sequencer3, sequencer4, sequencer5),
           mediators = Seq(mediator1),
           synchronizerOwners = Seq[InstanceReference](sequencer1, mediator1),
           synchronizerThreshold = PositiveInt.two,
@@ -129,9 +145,37 @@ abstract class RehydrationIntegrationTest
         )
 
         sequencer1.health.wait_for_initialized()
+        sequencer3.health.wait_for_initialized()
+        sequencer4.health.wait_for_initialized()
+        sequencer5.health.wait_for_initialized()
         mediator1.health.wait_for_initialized()
         sequencer1.health.initialized() shouldBe true
         mediator1.health.initialized() shouldBe true
+
+        val newSequencingParameters = SequencingParameters
+          .Default(testedProtocolVersion)
+          .update(
+            // lower view-change timeout so that while sequencer1 is being moved to sequencer2,
+            // the view-change will happen quickly and then when sequencer2 is up, it starts in a fresh segment
+            pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+            // define no blacklisting to avoid sequencer1/sequencer2 being blacklisted while moving sequencer1 to sequencer2, which would cause failures in the test
+            blacklistLeaderSelectionPolicyConfig = BlacklistLeaderSelectionPolicyConfig(
+              howLongToBlacklist = HowLongToBlacklist.NoBlacklisting,
+              howManyCanWeBlacklist = HowManyCanWeBlacklist.NoBlacklisting,
+            ),
+          )
+        // The synchronizer owners' threshold is two, so the proposal must be signed by both owners to become effective.
+        Seq[InstanceReference](sequencer1, mediator1).foreach(
+          _.topology.sequencing_parameters.propose(
+            synchronizerId.logical,
+            ConsoleSequencingParameters(Some(newSequencingParameters.toByteString)),
+          )
+        )
+        eventually() {
+          sequencer1.bft
+            .get_ordering_topology()
+            .sequencingParameters shouldBe newSequencingParameters
+        }
 
         participant1.synchronizers.connect_local(
           sequencer1,
@@ -231,6 +275,7 @@ abstract class RehydrationIntegrationTest
               sequencerConnections,
             )
             // architecture-handbook-entry-end: RehydrationSequencer
+            connectSequencer2ToPeers()
             logger.debug("Moved sequencer1 to sequencer2")
           }
         }
@@ -278,6 +323,12 @@ abstract class RehydrationIntegrationTest
       }
     }
   }
+
+  /** Hook to give sequencer2 the P2P endpoints of its peers, and its peers the endpoint of
+    * sequencer2. Called right after sequencer2 has been initialized from sequencer1's identity.
+    * No-op by default, e.g., if the sequencers already know each other statically.
+    */
+  protected def connectSequencer2ToPeers()(implicit env: TestConsoleEnvironment): Unit = ()
 
   protected val expectedLogs: Seq[(LogEntryOptionality, LogEntry => Assertion)] = Seq(
     (
@@ -423,15 +474,37 @@ abstract class RehydrationIntegrationTest
   }
 }
 
-class ReferenceRehydrationIntegrationTestPostgres extends RehydrationIntegrationTest {
+class RehydrationIntegrationTestPostgres extends RehydrationIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[Postgres](loggerFactory))
-}
+  private val sequencer2Name = InstanceName.tryCreate("sequencer2")
+  // sequencer2 is kept out of the static P2P network, in both directions: it is neither given the other sequencers'
+  //  endpoints, nor do they get its endpoint. They are connected explicitly in `connectSequencer2ToPeers` instead.
+  private val bftPlugin =
+    new UseBftSequencer(loggerFactory, dynamicallyOnboardedSequencerNames = Seq(sequencer2Name))
+  registerPlugin(bftPlugin)
 
-// TODO(#16823): Re-enable test. This test requires that the second sequencer reads old blocks from genesis,
-//  which requires state transfer and catchup functionality that is not yet available.
-class BftOrderingRehydrationIntegrationTestPostgres
-//  extends RehydrationIntegrationTest {
-//  registerPlugin(new UsePostgres(loggerFactory))
-//  registerPlugin(new UseBftOrderingBlockSequencer(loggerFactory))
-//}
+  override protected def connectSequencer2ToPeers()(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+    val endpoints =
+      bftPlugin.p2pEndpoints.get.valueOrFail("BFT P2P endpoints have not been generated")
+    val sequencer1Endpoint = endpoints(InstanceName.tryCreate("sequencer1"))
+    val sequencer2Endpoint = endpoints(sequencer2Name)
+    val peers = Seq(sequencer3, sequencer4, sequencer5)
+
+    // sequencer2 took over sequencer1's identity, so for the peers it replaces sequencer1: they drop sequencer1's (dead) endpoint and learn sequencer2's.
+    peers.foreach { peer =>
+      peer.bft.remove_peer_endpoint(
+        BftBlockOrdererConfig.EndpointId(
+          sequencer1Endpoint.address,
+          sequencer1Endpoint.port,
+          sequencer1Endpoint.tlsConfig.exists(_.enabled),
+        )
+      )
+      peer.bft.add_peer_endpoint(sequencer2Endpoint)
+    }
+    // sequencer2 learns the endpoints of the remaining peers to be able to state-transfer the blocks from them.
+    peers.foreach(peer =>
+      sequencer2.bft.add_peer_endpoint(endpoints(InstanceName.tryCreate(peer.name)))
+    )
+  }
+}

@@ -4,9 +4,10 @@
 
 - **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
   - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
-    - a **flaky streak** pings the **Flaky Canton** rotation (three people),
-    - a **broken nightly** pings the **CI rota**.
-  - **Red-main alert** (`slack_red_main_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
+    - a **flaky streak** and a **broken nightly** both ping the **Flaky Canton** rotation (three people), since fixing a broken test is theirs.
+  - **Red-main alert** (`slack_red_main_with_volunteer`), when a job fails on `main`: it pings the rota mapped to the failed job by `rotation_for_job` in `select_rota.py`. A red **blackduck** job pings the **Release & Blackduck** rota, test jobs (matched by `TEST_JOB_PREFIXES`) ping **Flaky Canton**, and everything else pings the **CI rota**.
+    - **GitHub Actions** alerts only on **build or infrastructure** jobs. Test-job failures are excluded, since the flaky/nightly alert above covers them. The one exception is `crash_recovery_test_36*`, an infra job that never reaches the flaky pipeline, which pings Flaky Canton as a test. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
+    - **CircleCI** has no test/infra split, so every failed job alerts and the prefixes decide who is pinged.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
 - **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
 - **Upcoming-shift reminders.** Another scheduled workflow, `remind_upcoming_rota.yml`, runs every Monday and privately DMs the people who start a rota shift about a month (28 days) out, so they get a heads-up in time to arrange a swap.
@@ -64,7 +65,7 @@ flowchart TD
 
     K --> L["alert_slack.py<br/>post to #team-canton-notifications"]
     L --> M{"nightly job?"}
-    M -->|yes| M1["Broken nightly test alert<br/>@ CI rota"]
+    M -->|yes| M1["Broken nightly test alert<br/>@ Flaky Canton rota"]
     M -->|no| M2["Flaky test alert<br/>@ Flaky Canton rota"]
 ```
 
@@ -112,7 +113,7 @@ To still catch a genuinely broken nightly test, `manage_flaky_issues.py` uses a 
 - `recent_nightly_commits()` reconstructs the commits of the last `NIGHTLY_CONSECUTIVE_FAILURES` (3) nightly cron slots by walking the schedule back from now and resolving `git rev-list -1 --before=<slot> origin/main` for each. The current run always counts as the most recent slot.
 - `nightly_streak()` returns true when the test has a failure row for each of those 3 nightly commits, read from the issue body (restricted to nightly jobs) plus the current commit.
 
-When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.py` posts a distinct **broken nightly test alert** to `#team-canton-notifications`, worded "failed on the last 3 nightly runs ... likely genuinely broken, not flaky", @-mentioning the **CI rota** rather than the Flaky Canton rota.
+When the streak fires, the issue is labelled `broken-nightly` and `alert_slack.py` posts a distinct **broken nightly test alert** to `#team-canton-notifications`, worded "failed on the last 3 nightly runs ... likely genuinely broken, not flaky", @-mentioning the **Flaky Canton** rota, like a flaky streak.
 `unstable_test` runs nightly but is intentionally allowed to fail, so it is excluded and never produces this alert.
 
 Two caveats:

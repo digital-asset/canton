@@ -8,10 +8,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.Interpreter.{
-  AuthorizationError,
-  UnhandledException,
-}
+import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.Interpreter.AuthorizationError
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.config.{TopUpConfig, TrafficEnforcementServerConfig}
 import com.digitalasset.canton.tea.tests.java.canton.traffic.credit.{AccountId, TrafficCreditIssuer}
@@ -29,6 +26,9 @@ import scala.jdk.CollectionConverters.CollectionHasAsScala
 /** Top-up ingestion from `PublishCredit` exercises. The paymaster must be hosted on the
   * participant, but the config is built before any party exists, so participant1 starts with top-up
   * disabled and is restarted with Daml top-up enabled once the paymaster is allocated.
+  *
+  * The account id and amount validation of `PublishCredit` is covered by
+  * `PublishCreditValidationTest` in traffic-enforcement-component.
   */
 final class ParticipantTrafficEnforcementDamlTopUpTest extends ParticipantTrafficEnforcementTest {
   registerPlugin(new UsePostgres(loggerFactory))
@@ -106,44 +106,6 @@ final class ParticipantTrafficEnforcementDamlTopUpTest extends ParticipantTraffi
           participant1.topology.vetted_packages
             .list(store = daId, filterParticipant = participant1.filterString)
             .flatMap(_.item.packages.map(_.packageId)) should contain(trafficCreditPackageId)
-        }
-      }
-
-      "enforce PublishCredit account ID and amount constraints" in { implicit env =>
-        import env.*
-
-        // Submitted by the untrusted paymaster, so that the extreme amounts are not ingested
-        def submit(account: String, amount: Long) =
-          participant1.ledger_api.javaapi.commands
-            .submit(Seq(untrustedPaymaster), credit(untrustedPaymaster, account, amount))
-
-        val validAccounts =
-          Seq(
-            "a",
-            "a" * 255,
-            "a/b",
-            "alice::1220ab/Bob-x_y z",
-            "user@example.com",
-            "@^$.!`-#+'~_|:() ",
-          )
-        val validCredits = validAccounts.map(_ -> 1L) :+ ("a" -> Long.MaxValue)
-        forAll(validCredits) { case (account, amount) => submit(account, amount).discard }
-        val invalidCredits =
-          Seq("", "/a", "a/", "a//b").map((_, 1L, "Account id segments must not be empty")) ++
-            Seq("é", "a,b", "a\\b", "a/b,c", "a\tb", "a\nb", "𐀀" * 127 + "a").map(
-              (_, 1L, "Account id segments must only contain")
-            ) ++
-            Seq("a" * 256, ("a" * 127 + "/") * 2 + "a")
-              .map((_, 1L, "Account id must be at most 255 characters")) ++
-            Seq(0L, -1L, Long.MinValue).map(("a", _, "trafficAmount must be positive"))
-        forAll(invalidCredits) { case (account, amount, error) =>
-          assertThrowsAndLogsCommandFailures(
-            submit(account, amount),
-            entry => {
-              entry.shouldBeCantonErrorCode(UnhandledException)
-              entry.errorMessage should include(error)
-            },
-          )
         }
       }
 

@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.{
   IsolatedEnvironments,
 }
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.version.ProtocolVersion
 import org.slf4j.event.Level
 
 import scala.sys.process.Process
@@ -82,10 +83,16 @@ class MultisyncExampleIntegrationTest
         MultiSynchronizerFeatureFlag.enable(Seq(participant1, participant2, participant3), s2Id)
       }
 
+  private val notVettedErrorMessage =
+    if (testedProtocolVersion <= ProtocolVersion.v36)
+      "has not vetted"
+    else
+      "requires package model-tests, which is not available on participants"
+
   // Expected error message patterns from scenario 4 (missing party) and scenario 5 (missing vetting)
   private val expectedErrorPatterns: Seq[String] = Seq(
     "not active on the target synchronizer", // Scenario 4: party not hosted on target
-    "has not vetted", // Scenario 5: package not vetted on target
+    notVettedErrorMessage, // Scenario 5: package not vetted on target
   )
 
   "run the multisync TypeScript scenarios" in { implicit env =>
@@ -164,7 +171,7 @@ class MultisyncExampleIntegrationTest
         // Scenario 5: Failed reassignment — missing vetting (unvets then re-vets package on S2)
         output should include("Scenario 5 complete!")
         output should include("Unvetted on V1/S2")
-        output should include("has not vetted")
+        output should include(notVettedErrorMessage)
         output should include("Re-vetted on V1/S2")
 
         output should include("All scenarios complete!")
