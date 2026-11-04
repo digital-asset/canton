@@ -10,11 +10,12 @@ import org.apache.pekko.http.scaladsl.server.Route
 import scala.concurrent.duration.*
 import scala.util.Try
 
-/** Honours an optional, client-supplied per-request timeout carried in the `Request-Timeout` header.
+/** Honours an optional, client-supplied per-request timeout carried in the `Request-Timeout`
+  * header.
   *
-  * The value is either a bare integer, interpreted as milliseconds (e.g. `5000`), or a duration with
-  * a unit as accepted by `scala.concurrent.duration.Duration(String)` (e.g. `5s`, `1500ms`, `1.5s`,
-  * `2 minutes`).
+  * The value is either a bare integer, interpreted as milliseconds (e.g. `5000`), or a duration
+  * with a unit as accepted by `scala.concurrent.duration.Duration(String)` (e.g. `5s`, `1500ms`,
+  * `1.5s`, `2 minutes`).
   *
   * The header value is validated against a `[lowerBound; upperBound]` window, configurable via
   * [[ClientRequestTimeoutConfig.lowerBound]] and [[ClientRequestTimeoutConfig.upperBound]]
