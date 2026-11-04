@@ -424,6 +424,7 @@ class TransactionViewDecompositionTest
           tx.nodes.collect {
             case (nid, node) if LfTransactionUtil.nodeHasSeed(node) => nid -> hasher()
           },
+          Map.empty,
         ),
         WithoutSuffixes,
         rollbackContextFactory,

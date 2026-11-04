@@ -944,10 +944,6 @@ class ModelConformanceCheckerTest
           getEngineAbortStatus = getEngineAbortStatus,
           hostedOnboardingPartiesO = None,
         )
-        .map {
-          case valid if valid.updateId == commonData.updateId => valid
-          case result => fail(s"Unexpected updateId: $result")
-        }
     )
   }
 

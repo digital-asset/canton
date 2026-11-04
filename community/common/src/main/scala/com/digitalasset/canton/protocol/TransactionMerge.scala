@@ -113,6 +113,8 @@ sealed abstract class TransactionMerge {
     val ledgerTimes = transactions.map(_.metadata.ledgerTime).distinct
     val preparationTimes = transactions.map(_.metadata.preparationTime).distinct
     val versions = transactions.map(_.tx.version).distinct
+    val contractKeyHashMismatches =
+      transactions.map(_.metadata.contractKeyHashMismatches).fold(Map.empty)(_ ++ _)
 
     // Should not happen, as all views have the same root hash.
     ErrorUtil.requireArgument(
@@ -138,7 +140,12 @@ sealed abstract class TransactionMerge {
         nodesRootsSeeds.nodes,
         nodesRootsSeeds.roots.toList.to(ImmArray),
       ),
-      TransactionMetadata(ledgerTime, preparationTime, nodesRootsSeeds.seeds),
+      TransactionMetadata(
+        ledgerTime,
+        preparationTime,
+        nodesRootsSeeds.seeds,
+        contractKeyHashMismatches,
+      ),
     )
 
     // Finally, we repeat some of the checks from `check` to assert that the result is really well-formed.

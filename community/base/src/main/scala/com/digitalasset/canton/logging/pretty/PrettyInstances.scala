@@ -240,6 +240,11 @@ trait PrettyInstances {
     param("hash", _.hash.toHexString.readableHash),
   )
 
+  implicit def prettyLfGlobalKeyWithMaintainers: Pretty[LfGlobalKeyWithMaintainers] = prettyOfClass(
+    param("global key", _.globalKey),
+    param("maintainers", _.maintainers),
+  )
+
   implicit def prettyV2DeduplicationPeriod: Pretty[DeduplicationPeriod] =
     prettyOfString {
       case deduplicationDuration: DeduplicationPeriod.DeduplicationDuration =>

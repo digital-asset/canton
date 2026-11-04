@@ -22,7 +22,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError.*
-import com.digitalasset.canton.topology.transaction.HostingParticipant
+import com.digitalasset.canton.topology.transaction.{HostingParticipant, ParticipantPermission}
 import com.digitalasset.canton.topology.{
   ForceFlag,
   ForceFlags,
@@ -37,6 +37,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
+import scala.math.Ordered.orderingToOrdered
 
 import PackageMetadata.Implicits.packageMetadataSemigroup
 
@@ -180,8 +181,19 @@ trait ParticipantTopologyValidation extends NamedLogging {
               reassignmentId -> reassigningParticipants
           }.toMap
 
+          // The participants that this check expects to confirm assignments under the next
+          // mapping. The rule is the check's released behaviour, kept so that the check still
+          // accepts the changes it accepted before:
+          // - Onboarding entries are left out: they do not confirm until their onboarding
+          //   completes.
+          // - Nominated and Freezing entries are included, as they have been since 3.7.0. They do
+          //   not confirm yet either, but cannot move backward: they can only move on towards
+          //   Active, where they confirm, or be removed.
+          // HostingParticipant.canConfirm answers a different question, whether an entry confirms
+          // now, and accepts Active entries only. Using it here would make the check reject
+          // changes that it accepts currently.
           nextConfirmingParticipants = nextHostingParticipants
-            .filter(_.canConfirm)
+            .filter(p => p.permission >= ParticipantPermission.Confirmation && !p.onboarding)
             .map(_.participantId)
 
           // find the first reassignment that has less reassigning participants than the threshold
@@ -233,7 +245,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
             }
           case Some((reassignmentId, _)) =>
             logger.debug(
-              s"Allow to change party to participant mapping for $party with incomplete reassignments, such as $reassignmentId, on $synchronizerId because force flag ${ForceFlag.DisablePartyWithActiveContracts} is set."
+              s"Allow to change party to participant mapping for $party with incomplete reassignments, such as $reassignmentId, on $synchronizerId because force flag ${ForceFlag.AllowInsufficientSignatoryAssigningParticipantsForParty} is set."
             )
             Either.unit
           case None =>

@@ -83,21 +83,79 @@ to add specific health checks for the Indexer. This is the case in the Sandbox a
 
 ### Checking the server health in production
 
-We encourage you to use the [grpc-health-probe][] tool to periodically check the health of your Ledger API Server in
-production. On the command line, you can run it as follows (changing the address to match your ledger):
+Every node runs an HTTP health server, by default on port `5071`. To check the health of a node in production, query
+it with any HTTP client. It needs no gRPC tooling, and works with plain HTTP probes in Docker, Kubernetes and load
+balancers.
+
+You can change the bind address and port with `monitoring.http-health-server.address` and
+`monitoring.http-health-server.port` in the node's configuration.
+
+The server exposes two endpoints:
+
+| Endpoint | Aliases | Meaning |
+|---|---|---|
+| `/health/live` | `/health/liveness` | The process is alive. If this fails, restart the node. |
+| `/health/ready` | `/health/readiness`, `/health` | The node can serve requests. If this fails, stop sending it traffic. |
+
+Both return `200 OK` when serving, `503 Service Unavailable` when not serving, and `500 Internal Server Error` if the
+check itself fails. The response body lists the status of each component the check depends on, which is useful when
+debugging an unhealthy node.
+
+On the command line, you can check the health as follows (changing the address to match your node):
 
 ```shell
-$ grpc-health-probe -addr=localhost:6865
-status: SERVING
+$ curl -fsS http://localhost:5071/health/ready
 ```
 
-An example of how to naively configure Kubernetes to run the Sandbox, with accompanying health checks, can be found in
-[sandbox/kubernetes.yaml]().
+If your environment doesn't have `curl`, `wget` works as well:
 
-More details can be found on the Kubernetes blog, in the post titled _[Health checking gRPC servers on Kubernetes][]_.
+```shell
+$ wget -Y off -q -T 5 -O /dev/null http://localhost:5071/health/ready
+```
 
-[grpc-health-probe]: https://github.com/grpc-ecosystem/grpc-health-probe
-[Health checking gRPC servers on Kubernetes]: https://kubernetes.io/blog/2018/10/01/health-checking-grpc-servers-on-kubernetes/
+Note that readiness reflects the state of the node's storage. During startup, the readiness endpoint returns `503`
+until the database is reachable and all schema migrations have been applied, which can take a long time after an
+upgrade. The liveness endpoint reports alive throughout startup, so a long migration does not cause liveness-based
+restarts.
+
+#### Kubernetes
+
+Use `httpGet` probes against the HTTP health server:
+
+```yaml
+containers:
+  - name: participant
+    ports:
+      - name: health
+        containerPort: 5071
+    livenessProbe:
+      httpGet:
+        path: /health/live
+        port: health
+      initialDelaySeconds: 60
+      periodSeconds: 60
+      failureThreshold: 5
+      timeoutSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health/ready
+        port: health
+      periodSeconds: 5
+      failureThreshold: 3
+      timeoutSeconds: 10
+```
+
+When choosing timeouts, keep in mind that a pod stays unready for the whole duration of database migrations on startup.
+Anything that waits for the pod to become ready, such as `helm install --wait`, `kubectl rollout status`, or the
+deployment's `progressDeadlineSeconds`, needs a timeout that covers the longest migration you expect.
+
+Do not point the liveness probe at the readiness endpoint. A node that is temporarily unready, for example because its
+database is unavailable, would then be restarted instead of being taken out of the load balancer.
+
+If you prefer gRPC, Kubernetes 1.27 and later can probe the node's gRPC health server (`monitoring.grpc-health-server`)
+directly, without any additional binary, using `grpc` probes. Use the `liveness` service for the liveness probe and
+the default service for the readiness probe. Be aware that the gRPC health server reports the node as serving before
+schema migrations have completed, so it is a weaker readiness signal than the HTTP endpoint.
 
 ## gRPC and back-pressure
 

@@ -47,6 +47,7 @@ import com.digitalasset.canton.protocol.ContractIdAbsolutizer.{
   ContractIdAbsolutizationDataV1,
   ContractIdAbsolutizationDataV2,
 }
+import com.digitalasset.canton.protocol.TransactionMetadata.ContractKeyHashMismatches
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
   WithSuffixesAndMerged,
@@ -147,6 +148,7 @@ class ModelConformanceChecker(
                 TransactionView,
                 RoseTree[ViewEffect],
                 WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes]],
+                ContractKeyHashMismatches,
             )
           ],
       )
@@ -154,7 +156,7 @@ class ModelConformanceChecker(
       .parTraverseWithLimit(parallelism)(views) {
         case (view, effects, viewPos, submittingParticipantO) =>
           for {
-            wfTxE <- checkView(
+            wfTxAndContractKeyHashMismatchesE <- checkView(
               updateId,
               view,
               viewPos,
@@ -169,8 +171,11 @@ class ModelConformanceChecker(
               protocolVersion,
             ).value
 
-            errorsViewsTxs <- wfTxE match {
-              case Right(wfTx) => FutureUnlessShutdown.pure((Seq.empty, Seq((view, effects, wfTx))))
+            errorsViewsTxs <- wfTxAndContractKeyHashMismatchesE match {
+              case Right((wfTx, contractKeyHashMismatches)) =>
+                FutureUnlessShutdown.pure(
+                  (Seq.empty, Seq((view, effects, wfTx, contractKeyHashMismatches)))
+                )
 
               // There is no point in checking subviews if we have aborted
               case Left(error @ DAMLeError(DAMLe.EngineAborted(_), _)) =>
@@ -192,7 +197,6 @@ class ModelConformanceChecker(
                   // If a view is not model conformant, all its ancestors are not either.
                   // To avoid redundant errors, return this view's error only if the subviews are valid.
                   val errors = if (subErrors.isEmpty) Seq(error) else subErrors
-
                   (errors, subViewsTxs)
                 }
             }
@@ -217,7 +221,8 @@ class ModelConformanceChecker(
 
     } yield {
       val (errors, viewsTxs) = errorsAndViewTxs
-      val (_, effects, unmergedTransactions) = viewsTxs.unzip3
+      import com.digitalasset.canton.util.collection.IterableUtil.IterableOpsOps
+      val (_, effects, unmergedTransactions, contractKeyHashMismatches) = viewsTxs.unzip4
 
       // Filter out transaction nodes only relevant to onboarding parties on this participant
       val txs = hostedOnboardingPartiesO.fold(unmergedTransactions)(hostedOnboardingParties =>
@@ -233,24 +238,31 @@ class ModelConformanceChecker(
         errors ++ mergeErrorO ++ conflictingStoredContractErrors
       ) match {
         case None =>
-          wftxO match {
-            case Some(wftx) =>
-              Right(
-                Result(
-                  updateId,
-                  wftx,
-                  // drop top-level rollback nodes as the internal consistency checker's
-                  // NUCK validation ignores rollback nodes
-                  txs.map(_.unwrap.unwrap),
-                )
+          val wftx = wftxO.getOrElse(
+            ErrorUtil.internalError(
+              new IllegalStateException(
+                s"Model conformance check for transaction $updateId completed successfully but without a valid transaction"
               )
-            case _ =>
-              ErrorUtil.internalError(
-                new IllegalStateException(
-                  s"Model conformance check for transaction $updateId completed successfully but without a valid transaction"
-                )
-              )
-          }
+            )
+          )
+          // drop top-level rollback nodes as the internal consistency checker's
+          // NUCK validation ignores rollback nodes
+          val unmergedTransactionsWithoutTopLevelRollbackNodes = txs.map(_.unwrap.unwrap)
+
+          // We report contract key hash mismatch errors only if there are no other model conformance errors
+          // because they take precedence over contract key hash mismatches anyway.
+          val contractKeyHashMismatchError =
+            contractKeyHashMismatches.collectFirstSome(NonEmpty.from).map { mismatches =>
+              val (contractId, (declared, recomputed)) = mismatches.head1
+              ContractKeyHashMismatch(contractId, declared, recomputed)
+            }
+
+          val result = Result(
+            wftx,
+            unmergedTransactionsWithoutTopLevelRollbackNodes,
+            contractKeyHashMismatchError,
+          )
+          Right(result)
         case Some(errorsNE) =>
           val flatEffects = effects.flatMap(_.preorder)
           Left(ErrorWithSubTransaction(errorsNE, wftxO, flatEffects))
@@ -359,9 +371,14 @@ class ModelConformanceChecker(
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, WithRollbackScope[
-    WellFormedTransaction[WithAbsoluteSuffixes]
-  ]] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    Error,
+    (
+        WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes]],
+        ContractKeyHashMismatches,
+    ),
+  ] = {
     val submittingParticipantO = submitterMetadataO.map(_.submittingParticipant)
     val viewParticipantData = view.viewParticipantData.tryUnwrap
     val rbContext = viewParticipantData.rollbackContext
@@ -445,9 +462,9 @@ class ModelConformanceChecker(
         ViewReconstructionError(view, reconstructedView): Error,
       )
 
-    } yield WithRollbackScope(
-      rbContext.rollbackScope,
-      suffixedTx,
+    } yield (
+      WithRollbackScope(rbContext.rollbackScope, suffixedTx),
+      metadata.contractKeyHashMismatches,
     )
   }
 
@@ -839,6 +856,22 @@ object ModelConformanceChecker {
     override protected val pretty: Pretty[MergeError] = prettyOfParam(_.cause.unquoted)
   }
 
+  final case class ContractKeyHashMismatch(
+      contractId: LfContractId,
+      declared: Option[LfGlobalKeyWithMaintainers],
+      recomputed: Option[LfGlobalKeyWithMaintainers],
+  ) extends Error {
+    override def prettyCompanion: PrettyPrintingCompanion[ContractKeyHashMismatch] =
+      ContractKeyHashMismatch
+  }
+  object ContractKeyHashMismatch extends PrettyPrintingCompanion[ContractKeyHashMismatch] {
+    override protected val pretty: Pretty[ContractKeyHashMismatch] = prettyOfClass(
+      param("contractId", _.contractId),
+      param("declared", _.declared),
+      param("recomputed", _.recomputed),
+    )
+  }
+
   final case class ConflictingStoredContract(cause: String) extends Error {
     override def prettyCompanion: PrettyPrintingCompanion[ConflictingStoredContract] =
       ConflictingStoredContract
@@ -851,17 +884,18 @@ object ModelConformanceChecker {
 
   /** Model conformance successful result as input for indexing and further consistency checks.
     *
-    * @param updateId
-    *   update id to be used for indexing if the transaction commits
     * @param suffixedTransaction
     *   the merged transaction with suffixed contract ids to use for indexing
     * @param unmergedTransactionsWithoutTopLevelRollbackNodes
     *   the unmerged root transactions to use for internal lf transaction consistency checks
+    * @param contractKeyHashMismatch
+    *   A mismatch between the declared contract key and its hash in used contracts of the
+    *   transaction. Only needed for protocol versions <=
+    *   [[com.digitalasset.canton.version.ProtocolVersion.v36]].
     */
   final case class Result(
-      updateId: UpdateId,
       suffixedTransaction: WellFormedTransaction[WithSuffixesAndMerged],
       unmergedTransactionsWithoutTopLevelRollbackNodes: Seq[LfVersionedTransaction],
+      contractKeyHashMismatch: Option[ContractKeyHashMismatch],
   )
-
 }

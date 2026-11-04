@@ -647,7 +647,6 @@ final class ExternalCallProtocolIntegrationTest
       rightViewPosition -> validationResult(withConfirmers(example.rootViews(5), confirmers)),
     )
     val defaultModelConformance = ModelConformanceChecker.Result(
-      example.updateId,
       WellFormedTransaction.checkOrThrow(
         example.versionedSuffixedTransaction,
         example.metadata,
@@ -655,10 +654,11 @@ final class ExternalCallProtocolIntegrationTest
         PathRollbackContextFactory,
       ),
       unmergedTransactionsWithoutTopLevelRollbackNodes = Seq.empty,
+      contractKeyHashMismatch = None,
     )
 
     val transactionValidationResult = TransactionValidationResult(
-      updateId = defaultModelConformance.updateId,
+      updateId = example.updateId,
       submitterMetadataO = None,
       workflowIdO = None,
       contractConsistencyResultE = Right(()),

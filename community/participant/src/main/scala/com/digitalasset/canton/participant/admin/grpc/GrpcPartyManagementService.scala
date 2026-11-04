@@ -638,7 +638,9 @@ class GrpcPartyManagementService(
               packageMetadataSnapshot = sync.getPackageMetadataSnapshot,
               representativePackageIdOverride = representativePackageIdOverride,
               workflowIdPrefix = workflowIdPrefix,
-              forceRepairWhenTopologyTransactionAtLedgerEnd = false,
+              // in case of party replication, the topology transaction at the ledger end won't cause any
+              // issues, because it does not affect the replicated party
+              forceRepairWhenTopologyTransactionAtLedgerEnd = true,
             )
             .leftMap(err => PartyManagementServiceError.IOStream.Error(err))
 

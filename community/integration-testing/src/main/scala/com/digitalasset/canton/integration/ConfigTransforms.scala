@@ -394,6 +394,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     val updatedSequencers = updateAllSequencerConfigs_(
@@ -403,6 +405,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     val updatedMediators = updateAllMediatorConfigs_(
@@ -410,6 +414,8 @@ object ConfigTransforms {
         .replace(nextPort.some)
         .focus(_.monitoring.grpcHealthServer)
         .modify(_.map(_.copy(internalPort = nextPort.some)))
+        .focus(_.monitoring.httpHealthServer)
+        .modify(_.map(_.copy(port = nextPort)))
     )
 
     updatedSequencers compose updatedMediators compose updatedParticipants

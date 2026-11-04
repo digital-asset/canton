@@ -15,12 +15,18 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- GCP KMS key deletion notice periods can now be configured via `destroyScheduledDuration`, and values must be within 24h and 120 days. The default remains 30 days, matching the previous default value.
+- The `canton-participant`, `canton-mediator`, and `canton-sequencer` Docker images now enable the HTTP readiness endpoint (`/health/ready` on port 5071) by default.
+- The `HEALTHCHECK` of the `canton-participant` Docker image now uses the HTTP readiness endpoint (`/health/ready` on port 5071) instead of the gRPC health service.
+  Readiness is now only reported once database migrations and storage initialization have completed, so after an upgrade with long-running migrations the container stays unhealthy for longer.
+  Tooling that waits for the container to become healthy (e.g., `docker compose up --wait` or `condition: service_healthy`) may need longer timeouts.
+- Bump base docker image to [1.0.19](https://github.com/canton-network/canton-base-images/releases/tag/v1.0.19) to address security vulnerabilities.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
+- Sequencer node: fixed a resource leak, causing a spike of # of threads, CPU and memory consumption affecting the node's
+  ability to keep up with the rest of synchronizer, requiring an imminent restart of the node every few days.
 
 ### (YY-nnn, Risk): Title
 
