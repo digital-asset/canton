@@ -71,36 +71,6 @@ A shorthand field `includeTransactionsAndReassignments` of type `TransactionForm
     }
   }
 ```
-- Added the request type to the sequencer cap rejection message.
-- The participant status report now tracks the health components of all connected synchronizers instead of only the
-  last connected one. Each per-synchronizer component status carries the physical synchronizer id in a new `labels`
-  field (`synchronizer` key) of `ComponentStatus` in the health admin API, and the `Components:` section of
-  `participant.health.status` renders node-level components as before, followed by a `Synchronizers:` section with the
-  component states per connected synchronizer. The status can also be restricted to a single synchronizer via
-  `participant.health.status(synchronizerId)` (accepting a logical or physical synchronizer id), backed by a new
-  optional `synchronizer_id` field on `ParticipantStatusRequest`.
-- Removed the default `non-standard-config = true` from the docker images configuration as they are not required for the default configuration.
-- Increased the log level of Ledger API Indexer initialization and termination errors to WARN, except known transient failures that stay on INFO
-- Improved the performance of the Ledger API database queries that fetch event sequential ids for updates and ACS streams. The
-  `(event_sequential_id, first_per_sequential_id)` index on the Ledger API filter tables is also replaced by a plain index on `event_sequential_id`
-  and a partial index on `event_sequential_id` restricted to `first_per_sequential_id`.
-- Starting with protocol version 37, the `EnableMultiSynchronizer` feature flag is not needed to enable
-  multi-synchronizer.
-- Added documentation generation for some missing metrics on
-  `https://docs.canton.network/global-synchronizer/reference/canton-metrics`:
-    - daml.sequencer-client.sequencer-connection-pool.connection-health
-    - daml.sequencer-client.sequencer-connection-pool.subscription-health
-    - daml.sequencer-client.handler.delay-per-connection
-    - daml.sequencer-client.handler.last-sequencing-time-micros-per-connection
-    - daml.sequencer-client.traffic-control.last-traffic-update
-    - daml.sequencer-client.traffic-control.extra-traffic-purchased
-    - daml.sequencer-client.traffic-control.extra-traffic-consumed
-    - daml.sequencer-client.traffic-control.base-traffic-remainder
-    - daml.participant.sync.commitments.counter-participant-latency
-    - daml.participant.sync.commitments.latest-matching-status
-    - daml.participant.sync.commitments.latest-matching-status-period-end
-    - daml.participant.sync.conflict-detection.task-queue
-    - daml.participant.sync.request-tracker.task-queue
 - Request-Timeout header of JSON Ledger API requests now also supports a time unit, for example 15s. Values without a time unit are still interpreted as milliseconds.
 
 #### JSON Ledger API: cookie authentication for websocket endpoints
