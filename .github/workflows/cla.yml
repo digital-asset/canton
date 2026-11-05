@@ -4,6 +4,9 @@ on:
     types: [created]
   pull_request_target:
     types: [opened, closed, synchronize]
+  # Required check: it must also report on merge queue commits or the queue stalls.
+  # The job is skipped there, which counts as success, as the PR run already checked the CLA.
+  merge_group:
 
 # explicitly configure permissions, in case your GITHUB_TOKEN workflow permissions are set to read-only in repository settings
 permissions:
@@ -14,6 +17,7 @@ permissions:
 
 jobs:
   CLAAssistant:
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - name: "CLA Assistant"
