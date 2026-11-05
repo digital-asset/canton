@@ -71,6 +71,7 @@ A shorthand field `includeTransactionsAndReassignments` of type `TransactionForm
     }
   }
 ```
+- Request-Timeout header of JSON Ledger API requests now also supports a time unit, for example 15s. Values without a time unit are still interpreted as milliseconds.
 
 #### JSON Ledger API: cookie authentication for websocket endpoints
 
