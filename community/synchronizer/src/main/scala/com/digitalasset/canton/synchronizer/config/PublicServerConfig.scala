@@ -40,8 +40,8 @@ import scala.concurrent.duration.Duration
   * @param limits
   *   optional stream limit config
   */
-// TODO(i4056): Client authentication over TLS is currently unsupported,
-//  because there is a token based protocol to authenticate clients. This may change in the future.
+// Client authentication over TLS is not supported, because clients authenticate with a token
+// based protocol.
 final case class PublicServerConfig(
     override val address: String = "127.0.0.1",
     override val internalPort: Option[Port] = None,

@@ -135,5 +135,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: sequential_test
+      shard_job_result: ${{ needs.sequential_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

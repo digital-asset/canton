@@ -683,12 +683,12 @@ final class SequencerRateLimitManagerImplTest
             expectedSerial = Some(PositiveInt.one),
             timestamp = sequencingTs.plusMillis(3),
           )
-          _ = {
-            // This method will be called during the crash recovery
-            f.rlm.resetStateTo(
+          // This method will be called during the crash recovery
+          _ <- f.rlm
+            .resetStateTo(
               sequencingTs.plusMillis(3).immediatePredecessor
             )
-          }
+            .failOnShutdown
           // Consume again with insufficient traffic (simulate a crash recovery replay)
           insufficientTrafficResAgain <- consume(
             correctCost = NonNegativeLong.tryCreate(20),

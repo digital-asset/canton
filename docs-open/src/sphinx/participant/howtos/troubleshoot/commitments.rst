@@ -68,9 +68,6 @@ which counter-participant is ahead of its own participant and how far ahead it i
 ahead, then the operator can try to correlate the periods of the counter-participants' commitments when the slowdown
 started with any changes in the participant's load, connectivity, etc.
 
-.. todo::
-   Refine when addressing `#27011 <https://github.com/DACH-NY/canton/issues/27011>`_
-
 The following examples show how the operator of ``participant1`` inspects the received commitments from all counter-participants,
 for specific time periods on synchronizer ``synchronizerId``, filtered by buffered commitments, which means
 that the participant received but has not computed the commitments for that period yet:
@@ -84,11 +81,6 @@ The output indicates that counter-participant ``participant2`` has sent commitme
 ``1970-01-01T00:00:20Z to 1970-01-01T00:00:25Z`` and ``1970-01-01T00:00:25Z to 1970-01-01T00:00:30Z``, shows the received
 commitment hashes but not the send commitments because the participant has not computed them yet, and the state that these
 commitments are buffered.
-
-.. todo::
-   It would be better to have the output of the commands generated from an actual integration test. Our docs tooling
-   supports that (see SphinxDocumentationGenerator and its implementations). It might be worth to convert the tooling
-   integration test accordingly. `#27011 <https://github.com/DACH-NY/canton/issues/27011>`_
 
 .. code-block:: none
 
@@ -106,9 +98,6 @@ As another example, assume that the operator observes an ``ACS_COMMITMENT_MISMAT
 step to inspect the mismatch. Concretely, the operator can use this command to understand with which counter-participants
 the participant has mismatches, and for what periods. The operator could then  correlate the periods of the mismatches
 with, e.g., potential repair commands on the participant, or even uncover misbehaving counter-participants.
-
-.. todo::
-   Refine when addressing `#27011 <https://github.com/DACH-NY/canton/issues/27011>`_
 
 The following examples show how the operator of ``participant1`` inspects the commitments sent to all counter-participants,
 for specific time periods on synchronizer ``synchronizerId``, filtered by mismatches commitments:

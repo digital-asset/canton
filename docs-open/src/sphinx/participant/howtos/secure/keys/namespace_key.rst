@@ -29,11 +29,6 @@ Only the root key can be isolated. All the other keys are essential for Canton t
 the intermediate key can also be isolated but will have to be turned on and off as needed during administrative
 operations such as uploading DARs or adding parties.
 
-.. todo:: `#25262: Improve how to identify and disable root keys <https://github.com/DACH-NY/canton/issues/25262>`_
-
-    * Explain how to identify the root key (look up what the root key is and how to find it in the KMS)
-    * Explain how to disable access to the root key in Cloud KMS.
-
 .. _namespace-root-key-offline:
 
 Offline Root Namespace Key

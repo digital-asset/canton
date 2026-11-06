@@ -94,12 +94,7 @@ jobs:
           shard-index: ${{ matrix.shard }}
 
       - name: Allow automatic protocol version selection
-        env:
-          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
-        run: |
-          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will select the protocol version automatically"
-        shell: bash
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings
@@ -152,5 +147,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: build_docs_snippets
+      shard_job_result: ${{ needs.build_docs_snippets.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ""

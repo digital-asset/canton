@@ -16,6 +16,7 @@ import com.digitalasset.canton.damltestslf23.java.universal.UniversalContract
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError.{DuplicateConfirmationRequest, InvalidMessage}
 import com.digitalasset.canton.integration.*
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseH2,
@@ -1716,19 +1717,34 @@ abstract sealed class LedgerConsistencyIntegrationTest
 // Need to test all storage backends to cover all relevant code paths.
 final class LedgerConsistencyIntegrationTestPostgres extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
 // Need to test all storage backends to cover all relevant code paths.
 final class LedgerConsistencyIntegrationTestH2 extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
 // Need to test all storage backends to cover all relevant code paths.
 final class LedgerConsistencyIntegrationTestInMemory extends LedgerConsistencyIntegrationTest {
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

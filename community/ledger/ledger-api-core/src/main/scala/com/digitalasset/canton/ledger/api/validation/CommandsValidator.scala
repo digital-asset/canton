@@ -63,8 +63,8 @@ final class CommandsValidator(
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
-    // TODO(#35522) validate the size limits of the PrepareSubmissionRequest
     for {
+      _ <- CommandsValidator.validatePrepareSubmissionRequestSizeLimits(prepareRequest)
       userId <- requireUserId(prepareRequest.userId, "user_id")
       commandId <- requireLedgerString(prepareRequest.commandId, "command_id").map(
         CommandId(_)
@@ -541,6 +541,62 @@ object CommandsValidator {
   }
 
   val noSubmitters: Submitters[String] = Submitters(Set.empty, Set.empty)
+
+  def validatePrepareSubmissionRequestSizeLimits(prepareRequest: PrepareSubmissionRequest)(implicit
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+      errorLoggingContext: ErrorLoggingContext,
+  ): Either[StatusRuntimeException, Unit] = {
+    import FieldValidator.*
+    val prepareSubmissionRequestSizeConfig =
+      sizeLimitsConfig.interactiveLapiSizeConfig.prepareSubmissionRequest
+    for {
+      _ <- validateCardinality(
+        values = prepareRequest.commands,
+        fieldName = "commands",
+        limit = prepareSubmissionRequestSizeConfig.commandsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = prepareRequest.actAs,
+        fieldName = "act_as",
+        limit = prepareSubmissionRequestSizeConfig.actAsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = prepareRequest.readAs,
+        fieldName = "read_as",
+        limit = prepareSubmissionRequestSizeConfig.readAsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = prepareRequest.disclosedContracts,
+        fieldName = "disclosed_contracts",
+        limit = prepareSubmissionRequestSizeConfig.disclosedContractsSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = prepareRequest.packageIdSelectionPreference,
+        fieldName = "package_id_selection_preference",
+        limit = prepareSubmissionRequestSizeConfig.packageIdSelectionPreferenceSizeLimit,
+      )
+      _ <- validateCardinality(
+        values = prepareRequest.prefetchContractKeys,
+        fieldName = "prefetch_contract_keys",
+        limit = prepareSubmissionRequestSizeConfig.prefetchContractKeysSizeLimit,
+      )
+      _ <- prepareRequest.disclosedContracts.traverse(disclosedContract =>
+        validateByteSizeLimit(
+          bytes = disclosedContract.createdEventBlob,
+          fieldName = "created_event_blob",
+          limit = sizeLimitsConfig.publicLapiSizeConfig.disclosedContract.createdEventBlobSizeLimit,
+        )
+      )
+      _ <- prepareRequest.estimateTrafficCost.traverse(costEstimationHints =>
+        validateCardinality(
+          values = costEstimationHints.expectedSignatures,
+          fieldName = "expected_signatures",
+          limit =
+            sizeLimitsConfig.interactiveLapiSizeConfig.costEstimationHints.expectedSignaturesSizeLimit,
+        )
+      )
+    } yield ()
+  }
 
   def validateCommandsSizeLimits(commands: ProtoCommands)(implicit
       sizeLimitsConfig: LedgerApiSizeLimitsConfig,

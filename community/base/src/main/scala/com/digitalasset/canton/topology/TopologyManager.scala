@@ -72,7 +72,13 @@ import com.digitalasset.canton.topology.transaction.checks.{
 import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  EitherUtil,
+  FutureUnlessShutdownUtil,
+  MonadUtil,
+  SimpleExecutionQueue,
+}
 import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
@@ -570,7 +576,8 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         existingTransaction,
         forceChanges,
       )
-      _ <- add(Seq(signedTx), forceChanges, expectFullAuthorization)
+      // Don't wait for the transaction to become effective.
+      _ <- add(Seq(signedTx), forceChanges, expectFullAuthorization).map(_.discard)
     } yield signedTx
 
   /** Authorizes an existing topology transaction by signing it and adding it to the topology state.
@@ -625,11 +632,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         namespacesToSignFor = Seq.empty,
         forceChanges,
       )
+      // Don't wait for the transaction to become effective.
       _ <- add(
         Seq(extendedTransaction),
         expectFullAuthorization = expectFullAuthorization,
         forceChanges = forceChanges,
-      )
+      ).map(_.discard)
     } yield extendedTransaction
   }
 
@@ -985,7 +993,13 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
               _ <- failOrNotifyObservers(transactionsAndTimestamp)
             } yield asyncResult
           }
-      } yield asyncResult,
+      } yield AsyncResult(
+        // Callers may discard the asynchronous result, so its failure is logged here
+        FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
+          asyncResult.unwrap,
+          "Asynchronous processing of added topology transactions failed",
+        )
+      ),
       "add-topology-transaction",
     )
 
@@ -1232,11 +1246,19 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       _ <- signingKeysWithThresholdO.traverse_ { case SigningKeysWithThreshold(keys, threshold) =>
         checkSigningThresholdCanBeReached(threshold, keys)
       }
-      _ <- checkConfirmingThresholdIsNotAboveNumberOfHostingNodes(
-        threshold,
-        nextParticipants.length,
-        forceChanges: ForceFlags,
-      )
+      _ <- operation match {
+        case TopologyChangeOp.Replace =>
+          checkConfirmingThresholdIsNotAboveNumberOfHostingNodes(
+            threshold,
+            // Observation entries never confirm. Entries in any hosting state count: the ones
+            // that are not Active yet confirm once they are.
+            nextParticipants.count(_.permission != Observation),
+            forceChanges: ForceFlags,
+          )
+        // A removal leaves no hosts, so the threshold does not matter
+        case TopologyChangeOp.Remove =>
+          EitherTUtil.unitUS[TopologyManagerError]
+      }
 
       currentMappingO <- EitherT.right(currentMappingF)
       currentThresholdO = currentMappingO.map(_.threshold)

@@ -39,13 +39,6 @@ If TLS is used on the server side with a self-signed certificate, we need to pas
 certificate chain during the connect call of the participant. Otherwise, the default root
 certificates of the Java runtime will be used. An example would be:
 
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/MultiSynchronizerIntegrationTests.scala
-    start-after: architecture-handbook-entry-begin: TlsConnect
-    end-before: architecture-handbook-entry-end: TlsConnect
-    dedent:
-
 Server Authentication
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -108,10 +101,6 @@ that member and close the sequencer connections. The legitimate member automatic
 new tokens through the challenge-response protocol described above.
 
 The command is slightly different depending on whether the member is a participant or a mediator, for example:
-
-.. todo::
-   Replace with references to the commands.
-   `#22919 <https://github.com/DACH-NY/canton/issues/22919>`_
 
 .. code-block:: text
 

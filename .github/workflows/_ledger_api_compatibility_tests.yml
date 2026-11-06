@@ -137,5 +137,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: ledger_api_compatibility_tests
+      shard_job_result: ${{ needs.ledger_api_compatibility_tests.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

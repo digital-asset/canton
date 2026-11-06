@@ -23,8 +23,8 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -70,8 +70,8 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
   // Use the test interceptor to block OnPR until a concurrent exercise is processed by the SP
   // in such a way that the exercised contract is replicated between exercise phases 3 and 7
   // to produce a race in the TP ConflictDetector in-memory state.
-  private def createSourceParticipantTestInterceptor(): PartyReplicationTestInterceptor =
-    PartyReplicationTestInterceptorImpl.sourceParticipantProceedsIf { state =>
+  private def createSourceParticipantTestInterceptor(): AcsReplicationTestInterceptor =
+    AcsReplicationTestInterceptorImpl.sourceParticipantProceedsIf { state =>
       // Allow replicating the first batch that contains the contract that this test exercises,
       // but stop before the second batch, so that we can ensure that the exercised contracts is
       // replicated while the exercise is inflight.
@@ -96,7 +96,6 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
       .addConfigTransforms(
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant1" -> (() => createSourceParticipantTestInterceptor())),
-          enableUnsafeSequencerChannelSupport = true,
           pauseIndexer = false,
         )*
       )

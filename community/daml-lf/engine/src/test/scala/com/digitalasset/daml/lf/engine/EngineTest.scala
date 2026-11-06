@@ -29,7 +29,7 @@ import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.Util.*
 import com.digitalasset.daml.lf.language.{LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SValue.*
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugins
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue, svalue}
 import com.digitalasset.daml.lf.stablepackages.{StablePackages, StablePackagesV2}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -422,10 +422,8 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
     }
 
     "be validated with no change in metrics" in {
-      def newMetricPlugins() = Seq(
-        new StepCount(suffixLenientEngine.config.iterationsBetweenInterruptions),
-        new TxNodeCount,
-      )
+      def newMetricPlugins() =
+        Some(new MetricPlugins(suffixLenientEngine.config.iterationsBetweenInterruptions))
 
       val sharedEngine = suffixLenientEngine
       val freshEngine1 = newEngine(executionMode)
@@ -496,14 +494,24 @@ abstract class EngineTest(contractIdVersion: ContractIdVersion, executionMode: E
 
       inside((validatedWithCaching, validatedNoCaching)) {
         case (Right(actualWithCaching), Right(actualNoCaching)) =>
-          actualWithCaching.totalCount[TxNodeCount] shouldBe expectedWithCaching
-            .totalCount[TxNodeCount]
-          actualNoCaching.totalCount[TxNodeCount] shouldBe expectedNoCaching.totalCount[TxNodeCount]
-          actualWithCaching.totalCount[TxNodeCount] shouldBe actualNoCaching.totalCount[TxNodeCount]
+          actualWithCaching.totalCount(_.txNodeCount) shouldBe expectedWithCaching
+            .totalCount(_.txNodeCount)
+          actualNoCaching.totalCount(_.txNodeCount) shouldBe expectedNoCaching.totalCount(
+            _.txNodeCount
+          )
+          actualWithCaching.totalCount(_.txNodeCount) shouldBe actualNoCaching.totalCount(
+            _.txNodeCount
+          )
           // SEVal and SDefinition caching effects impact Speedy machine step counts
-          actualWithCaching.totalCount[StepCount] shouldBe expectedWithCaching.totalCount[StepCount]
-          actualWithCaching.totalCount[StepCount] should be <= actualNoCaching.totalCount[StepCount]
-          actualNoCaching.totalCount[StepCount] should be <= expectedNoCaching.totalCount[StepCount]
+          actualWithCaching.totalCount(_.stepCount) shouldBe expectedWithCaching.totalCount(
+            _.stepCount
+          )
+          actualWithCaching.totalCount(_.stepCount) should be <= actualNoCaching.totalCount(
+            _.stepCount
+          )
+          actualNoCaching.totalCount(_.stepCount) should be <= expectedNoCaching.totalCount(
+            _.stepCount
+          )
       }
     }
   }

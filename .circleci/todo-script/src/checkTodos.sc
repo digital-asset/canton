@@ -369,7 +369,8 @@ val grepLines = grepCommands.flatMap({ command =>
 
 def checkGreppingRstFilesWorks(awkGrep: String): Unit = {
   println("Grepping for todos in RST files ...")
-  require(awkGrep.! == 0, s"Grepping for todos in RST files failed; executed command: $awkGrep")
+  // grep exits with 1 when no RST file has a todo block
+  require(awkGrep.! <= 1, s"Grepping for todos in RST files failed; executed command: $awkGrep")
 }
 
 val awkGrep = s"grep --include='*.rst' -rl '.. todo::' docs-open"

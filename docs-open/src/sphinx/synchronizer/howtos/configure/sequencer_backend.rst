@@ -68,9 +68,6 @@ the :externalref:`standard way<tls-configuration>` with:
     - `external-tls-config` under `server-endpoint` for the external endpoint
     - `tls-config` under `peer-endpoints` for peer endpoints
 
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/26126>
-
 For more details on the `initial-network` configuration, check the reference documentation.
 
 Configure authentication (optional)
@@ -120,9 +117,6 @@ Configure other (local) parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are other (local) configuration parameters under `config` that can be changed.
-
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/26126>
 
 For details, check the reference documentation.
 

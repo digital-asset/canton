@@ -22,8 +22,6 @@ the data/changes that they process:
 Because these nodes operate continuously for an indefinite amount of time, the stored data they accumulate, or put
 differently, the history of the ledger, keeps growing.
 
-.. todo:: Add a link to the data they actually accumulate, probably in one of Raf's section <https://github.com/DACH-NY/canton/issues/26154>
-
 Accumulating and storing history forever on nodes is problematic for several reasons:
 
 * First, nodes have a limited amount of storage that they will eventually exhaust if the stored data keeps growing
@@ -116,8 +114,6 @@ A participant node's snapshot at t consists of the following:
   Otherwise, the participant would not be able to approve or reject reassignments correctly.
   For more details on reassignments, refer to the reassignments section.
   For now, participants do not prune their reassignment data, however, this is planned for the future.
-
-.. todo:: Add link to reassignments section. <https://github.com/DACH-NY/canton/issues/26154>
 
 * The participant's private keys. For now, the participant requires all key material, not just the keys
   valid at time t. The participant uses these keys to authenticate the messages it sends
@@ -409,9 +405,6 @@ of this contract: either creation, archival, or the reassignment instance for a 
 synchronizers. The hash function is homomorphic in the sense that contract deactivations cancel out activations, thus
 the running hash can be updated incrementally.
 
-.. todo::
-    Add a link to contract id in daml when that page exists. <https://github.com/DACH-NY/canton/issues/26154>
-
 The final commitment computation at the end of a period is as follows. For each counter-participant, the participant node
 collects all non-empty running hashes of stakeholder groups it shares with the counter-participant, and adds them into
 a homomorphic hash. The commitment essentially contains a two-level homomorphic hashing: first the hashing of ACS changes into
@@ -452,9 +445,6 @@ We provide tooling for mismatch inspection, which allows participant nodes to id
 However, the tooling does not automatically resolve the mismatch, as the participant node operators need to decide, perhaps
 through out-of-band communication, what the correct end state is, and then apply the changes.
 
-.. todo::
-    Add link to tooling page <https://github.com/DACH-NY/canton/issues/26154>
-
 As long as a mismatch is ongoing then the affected participant nodes would not be able to prune data prior to the
 initial mismatch. Once a period is matched with all counter-participant nodes then all previous periods are implicitly safe
 to prune: Even though initially the states showed a mismatch, a fork no longer exists.
@@ -478,9 +468,6 @@ counter-participant nodes without shared active contracts. Moreover, if a partic
 a counter-participant to be empty, it can prune without establishing that the counter-participant agrees that the state
 is empty.
 
-.. todo::
-    Add a link to the error code doc page (tooling). <https://github.com/DACH-NY/canton/issues/26154>
-
 Second, regarding bandwidth, participant nodes only exchange commitments periodically, which bounds the amount of bandwidth
 consumed regardless of
 the contract activity within a period. Also, periods are aggregated when there is no activity. Instead of constantly
@@ -495,9 +482,6 @@ every 24 hours.
 Additionally, to avoid a spike in network activity at the end of every period,
 each participant node sends commitments with jittered delay. The delay is a random amount uniformly distributed between 0 and
 2/3 of the period length, therefore the sequencer is not getting flooded with commitments.
-
-.. todo::
-    Change the hard-coded amount when we make it configurable in the code. <https://github.com/DACH-NY/canton/issues/26154>
 
 Commitments are sent best-effort, without a guaranteed delivery, which saves network resources. This means that a
 participant node might miss commitments from a counter-participant. However, this is not a problem because each commitment is
@@ -532,9 +516,6 @@ received commitments. A lagging participant node automatically triggers
 a so-called catch-up mode, where it skips computing and sending commitments for some periods. The synchronizer operator
 can control the catch-up behavior through a synchronizer configuration. The catch-up mode brings a participant node up
 to date with transaction throughput, while still detecting forks.
-
-.. todo::
-    Add a link to the how-to guide in the above. <https://github.com/DACH-NY/canton/issues/26154>
 
 Fifth, for multi-hosted parties, a participant node only requires threshold-many counter-participants to send matching
 commitments, instead of all counter-participants. Such an optimization is natural, given that

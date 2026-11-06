@@ -16,11 +16,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.CommandFailure
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -489,7 +485,7 @@ class SynchronizerConnectivityBftOrderingIntegrationTestPostgres
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      sequencerGroups = UseReferenceBlockSequencer.MultiSynchronizer(
+      sequencerGroups = UseBftSequencer.MultiSynchronizer(
         Seq(Set(InstanceName.tryCreate("sequencer1")), Set(InstanceName.tryCreate("sequencer2")))
       ),
     )

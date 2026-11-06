@@ -194,14 +194,14 @@ object SupportedProtoVersions {
         immutable.SortedMap.from(converters)(implicitly[Ordering[ProtoVersion]].reverse)
       )
     )
-    val (_, lowestProtocolVersion) = sortedConverters.last1
+    val (_, lowestCodec) = sortedConverters.last1
 
     // If you are hitting this require failing when your message doesn't exist in PV.minimum,
     // remember to specify that explicitly by adding to the SupportedProtoVersions:
     // ProtoVersion(-1) -> UnsupportedProtoCodec(ProtocolVersion.minimum),
     require(
-      lowestProtocolVersion.fromInclusive.representative == expectedMinimumPv,
-      s"ProtocolVersion corresponding to lowest proto version should be $expectedMinimumPv, found $lowestProtocolVersion",
+      lowestCodec.fromInclusive.representative == expectedMinimumPv,
+      s"ProtocolVersion corresponding to lowest proto version should be $expectedMinimumPv, found ${lowestCodec.fromInclusive}",
     )
 
     SupportedProtoVersions(sortedConverters, name)

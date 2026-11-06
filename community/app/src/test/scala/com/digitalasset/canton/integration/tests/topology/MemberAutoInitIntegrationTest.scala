@@ -18,7 +18,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,

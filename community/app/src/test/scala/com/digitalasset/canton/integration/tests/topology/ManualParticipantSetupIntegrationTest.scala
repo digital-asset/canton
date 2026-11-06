@@ -22,7 +22,10 @@ trait ManualParticipantSetupIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
-      .addConfigTransform(ConfigTransforms.disableAutoInit(Set("participant2", "participant3")))
+      .addConfigTransforms(
+        ConfigTransforms.disableAutoInit(Set("participant2", "participant3")),
+        ConfigTransforms.enableKeyDownload,
+      )
 
   "create a participant based on the identity of another participant" in { implicit env =>
     import env.*

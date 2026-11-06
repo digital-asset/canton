@@ -69,7 +69,7 @@ final class IgnoreSequencedEventsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(ConfigTransforms.useStaticTime, ConfigTransforms.enableKeyDownload)
       .withSetup { implicit env =>
         import env.*
 

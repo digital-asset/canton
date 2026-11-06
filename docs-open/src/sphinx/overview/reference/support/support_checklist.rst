@@ -98,11 +98,6 @@ Logging
 
 * **Command Id / Trace Id in Application Logs**
 
-.. todo:: `#22917: Fix broken ref <https://github.com/DACH-NY/canton/issues/22917>`_
-    Your applications provide a trace-id or at least the command-id in their logs that can be correlated with the Canton logs.
-    Please consult our ref:`guide on how to add end-to-end tracing <open-tracing-ledger-api-client>` to your application.
-    * Verify that you can find the trace-id or command-id in your application logs and correlate it with the Canton logs.
-
 .. _support_metrics:
 
 Metrics

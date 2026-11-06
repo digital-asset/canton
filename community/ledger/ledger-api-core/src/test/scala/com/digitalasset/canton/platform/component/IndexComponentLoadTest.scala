@@ -40,7 +40,7 @@ import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
-import com.digitalasset.canton.platform.{ContractId, WorkflowId}
+import com.digitalasset.canton.platform.{ContractId, UserId, WorkflowId}
 import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.topology.SynchronizerId
@@ -57,6 +57,7 @@ import org.scalatest.{Assertion, Ignore}
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.util.Random
 
 /** Goal of this test is to provide a light-weight approach to ingest synthetic Index DB data for
   * load-testing, benchmarking purposes. This test is not supposed to run in CI (this is why it is
@@ -73,7 +74,7 @@ class IndexComponentLoadTest extends IndexComponentLoadTestBase {
       InMemoryMetricsFactory,
     )
 
-  it should "Index assign/unassign updates" in {
+  it should "Index assign/unassign updates" ignore {
     val nextRecordTime = nextRecordTimeFactory()
     logger.warn(s"start preparing updates...")
     val passes = 1
@@ -94,6 +95,11 @@ class IndexComponentLoadTest extends IndexComponentLoadTestBase {
     logger.warn(s"prepared $allUpdateSize updates")
     indexUpdates(allUpdates)
   }
+
+  it should "Index 10% CN ACS Export NFR fixture updates with completions" ignore cnNFRIngestionFixture(
+    passes = 50,
+    userIdSupplier = Some(() => UserId.assertFromString("user" + Random.nextInt(10_000))),
+  )
 
   // will fail without an explicit flag
   it should "Index CN ACS Export NFR fixture updates" ignore cnNFRIngestionFixture()
@@ -195,6 +201,11 @@ class IndexComponentLoadTest extends IndexComponentLoadTestBase {
 
   it should "Fetch updates pages of size 500 in descending order" ignore {
     fetchUpdatesPaged(500, descendingOrder = true)
+  }
+
+  it should "Fetch completions" ignore TraceContext.withNewTraceContext("Completions") {
+    implicit traceContext =>
+      fetchCompletions()
   }
 
   it should "Measure ACHS rendering time during initialization with small survival region" ignore {
@@ -341,6 +352,36 @@ trait IndexComponentLoadTestBase
       )
   }
 
+  protected def fetchCompletions()(implicit traceContext: TraceContext): Unit = {
+    val ledgerEndOffset = index.currentLedgerEnd().map(_.lastOffset)
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)
+    logger.warn("start fetching completions...")
+    val startTime = System.currentTimeMillis()
+    index
+      .getCompletions(
+        begin = None,
+        userId = None,
+        parties = Set.empty,
+      )
+      .takeWhile(_.getCompletion.offset != ledgerEndOffset.value.positive, inclusive = true)
+      .zipWithIndex
+      .runWith(Sink.last)
+      .map { case (last, lastIndex) =>
+        val totalMillis = System.currentTimeMillis() - startTime
+        logger.warn(
+          s"finished fetching completions in ${seconds(totalMillis)} s, ${lastIndex + 1} completions returned."
+        )
+
+        reportMetric("completion_fetch_time_seconds", totalMillis / 1000.0f)
+
+        logger.warn(s"last completion: $last")
+      }
+      .futureValue(
+        benchmarkedTaskPatience
+      )
+  }
+
   protected def fetchAcsPaginated(pageSize: Int)(implicit traceContext: TraceContext): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
@@ -455,6 +496,7 @@ trait IndexComponentLoadTestBase
       activeTxsPerPass: Int = 23,
       yesIReallyWantToRunIt: Boolean = false,
       actionName: String = "ingesting",
+      userIdSupplier: Option[() => UserId] = None,
   ): Unit = {
     val nextRecordTime: () => CantonTimestamp = nextRecordTimeFactory()
     def ingestionIteration(): Unit = {
@@ -478,6 +520,7 @@ trait IndexComponentLoadTestBase
             createPayloadLength = createPayloadLength,
             archiveArgumentPayloadLengthFromTo = archiveArgumentPayloadLengthFromTo,
             archiveResultPayloadLengthFromTo = archiveResultPayloadLengthFromTo,
+            userIdSupplier = userIdSupplier,
           )
         )
       val allUpdateSize = allUpdates.size

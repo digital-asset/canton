@@ -14,19 +14,29 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.cycle as M
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.sequencer.channel.SequencerChannelProtocolTestExecHelpers
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
+  PartyReplicationAuthorization,
+  PartyReplicationError,
+  ReplicationMode,
+  ReplicationParams,
+  protocolVersionRepresentativeFor,
+}
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.AcsReplicationParameters.AcsReplicationDestination
 import com.digitalasset.canton.participant.admin.party.{
   PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
 }
-import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
-import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
+import com.digitalasset.canton.participant.config.{
+  AlphaAcsReplicationSourceConfig,
+  AlphaAcsReplicationTargetConfig,
+}
+import com.digitalasset.canton.participant.party.AcsReplicationTestInterceptorImpl
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence
 import com.digitalasset.canton.participant.protocol.party.acsreplication.{
   AcsReplicationSourceParticipantProcessor,
@@ -40,6 +50,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RepairCounter, config}
+import io.scalaland.chimney.dsl.*
 
 import scala.annotation.nowarn
 import scala.concurrent.Future
@@ -84,7 +95,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms
-          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
+          .enableAlphaOnlinePartyReplicationSupport()*
       )
       .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
       .withSetup { implicit env =>
@@ -210,7 +221,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         sourceParticipant.id,
         targetParticipant.id,
         timestamp = partyToTargetParticipantEffectiveAt,
-        ParticipantPermission.Observation,
         AcsReplicationDestination.Persistence,
       )
       val initialStatus = AcsReplicationStatus(
@@ -250,6 +260,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           inMemoryAcsReplicationStateManager(sourceParticipant.id),
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
+          AlphaAcsReplicationSourceConfig(),
           sourceParticipant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore,
           futureSupervisor,
           exitOnFatalFailures = false,
@@ -295,12 +306,12 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           noOpProgressAndCompletionCallback,
           noOpProgressAndCompletionCallback2,
           acsTransferContractHandler,
-          OnlinePartyReplicationTargetConfig(),
+          AlphaAcsReplicationTargetConfig(),
           futureSupervisor,
           exitOnFatalFailures = false,
           timeouts,
           targetProcessorLoggerFactory,
-          PartyReplicationTestInterceptorImpl
+          AcsReplicationTestInterceptorImpl
             .targetParticipantProceedsIf(
               // wait for a handful of contracts
               canTargetParticipantProceed || _.processedContractCount.unwrap < handfulOfContractsCountToProcessBeforePausing
@@ -412,7 +423,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
 
       val partyReplicationStatus =
-        replicationProgressState.get(requestId).map(PartyReplicationStatus.fromAcsReplicationStatus)
+        replicationProgressState.get(requestId).map(fromAcsReplicationStatus)
 
       Monad[FutureUnlessShutdown]
         .tailRecM(
@@ -497,6 +508,28 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       excessContracts shouldBe Seq.empty
       targetCantonContracts.size shouldBe sourceContractIds.size
   }
+
+  def fromAcsReplicationStatus(
+      acsReplicationStatus: AcsReplicationStatus
+  ): PartyReplicationStatus = PartyReplicationStatus(
+    acsReplicationStatus.params
+      .into[ReplicationParams]
+      .withFieldConst(
+        _.participantPermission,
+        ParticipantPermission.Confirmation,
+      )
+      .withFieldConst(_.serial, PositiveInt.one)
+      .transform,
+    authorizationO = acsReplicationStatus.partyToParticipantTopologyTransaction.map(
+      PartyReplicationAuthorization.fromAcsPartyToParticipantTopologyTransaction
+    ),
+    replicationO = acsReplicationStatus.replicationO,
+    acsReplicationStatusO = Some(acsReplicationStatus),
+    indexingO = None,
+    hasCompleted = acsReplicationStatus.hasCompleted,
+    replicationMode = ReplicationMode.SequencerChannel,
+    errorO = acsReplicationStatus.errorO.map(PartyReplicationError.fromAcsReplicationError),
+  )(protocolVersionRepresentativeFor(testedProtocolVersion))
 }
 
 // final class OnlinePartyReplicationParticipantProtocolTestH2

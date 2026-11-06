@@ -41,7 +41,7 @@ encode_to_hex() {
 # [start compute_canton_hash fn]
 compute_canton_hash() {
   # The hash purpose integer must be prefixed to the content to be hashed as a 4 bytes big endian
-  (printf "\\x00\\x00\\x00\\x$(printf '%02X' "$1")"; cat - <(cat)) | \
+  (printf "\\x00\\x00\\x00\\x$(printf '%02X' "$1")"; cat) | \
   # Then hash with sha256
   openssl dgst -sha256 -binary | \
   # And finally prefix with 0x12 (The multicodec code for SHA256 https://github.com/multiformats/multicodec/blob/master/table.csv#L9)

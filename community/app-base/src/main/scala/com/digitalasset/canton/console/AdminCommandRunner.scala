@@ -98,6 +98,11 @@ trait BaseInspection[+I <: CantonNode] {
       .flatMap(_.crypto)
       .getOrElse(throw new IllegalArgumentException(s"instance $name is not running."))
 
+  protected[canton] def enableKeyDownload: Boolean =
+    runningNode
+      .map(_.parameters.enableKeyDownload)
+      .getOrElse(throw new IllegalArgumentException(s"instance $name is not running."))
+
 }
 
 trait FeatureFlagFilter extends NamedLogging {

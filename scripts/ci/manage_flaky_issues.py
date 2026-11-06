@@ -47,6 +47,7 @@ from flaky_common import (
     NIGHTLY_CONSECUTIVE_FAILURES,
     NIGHTLY_BROKEN_LABEL,
     NIGHTLY_CRON_HOUR_UTC,
+    NIGHTLY_REPORT_DELAY,
     read_failing_tests,
     read_failing_test_causes,
     DEFAULT_CAUSE,
@@ -89,6 +90,12 @@ def _latest_assignment_time(search_node) -> Optional[datetime.datetime]:
     return max(stamps) if stamps else None
 
 
+def _has_broken_nightly_label(search_node) -> bool:
+    """True if the issue carries NIGHTLY_BROKEN_LABEL. GraphQL may return null labels or nodes."""
+    nodes = (search_node.get("labels") or {}).get("nodes") or []
+    return any(node and node.get("name") == NIGHTLY_BROKEN_LABEL for node in nodes)
+
+
 def _within_assignment_grace(assigned_at: Optional[datetime.datetime]) -> bool:
     """True while a freshly assigned issue is still inside its Slack grace window."""
     if assigned_at is None:
@@ -97,7 +104,7 @@ def _within_assignment_grace(assigned_at: Optional[datetime.datetime]) -> bool:
 
 
 # First column of each history row, e.g. "| 2026-04-20 12:05:05 | ...". Written by
-# create_issue_table_row via a naive datetime.now() on the CI runner, which runs in UTC.
+# create_issue_table_row in UTC.
 _ROW_DATE_RE = re.compile(r'^\| (\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2} \|', re.MULTILINE)
 
 
@@ -122,6 +129,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
     is_archived = False
     has_assignee = False
     assigned_at = None
+    has_broken_nightly_label = False
 
     # search issues by title. also returns partial matches
     result = run_gh_with_retries(
@@ -144,6 +152,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
             body = result["body"]
             has_assignee = result["assignees"]["totalCount"] > 0
             assigned_at = _latest_assignment_time(result)
+            has_broken_nightly_label = _has_broken_nightly_label(result)
             # look at the projects the issue is linked to
             for project_relation in result["projectItems"]["nodes"]:
                 # only extract data for the ticket if the linked project matches the flaky test project
@@ -188,6 +197,7 @@ def report_issue(issue: str, cause: str = DEFAULT_CAUSE, evidence_comment: Optio
             evidence_comment,
             has_assignee=has_assignee,
             assigned_at=assigned_at,
+            has_broken_nightly_label=has_broken_nightly_label,
         )
 
     else:
@@ -265,8 +275,9 @@ def create_issue(
     if idx and evidence_comment:
         # The comment needs the issue to exist, so the first row gets its
         # Evidence link in a second edit.
-        evidence_url = post_evidence_comment(idx, evidence_comment)
-        if evidence_url:
+        posted = post_evidence_comment(idx, evidence_comment)
+        if posted:
+            evidence_url, _ = posted
             linked = (
                 f"{intro}\n\n{create_issue_table_header()}\n"
                 f"{with_evidence_link(row, evidence_url, comment_label(evidence_comment))}"
@@ -292,6 +303,9 @@ def issue_number_from_url(gh_output: str) -> Optional[str]:
 # created or updated issue gets one comment with that evidence (stack traces,
 # log problems, links to the CI log and the artifacts). Comments, not the body: the
 # body table is parsed by the streak logic and close_stale_flake_issues.py.
+# Only the newest EVIDENCE_MAX_COMMENTS are kept, older ones are deleted.
+
+EVIDENCE_MAX_COMMENTS = 10
 
 
 def evidence_artifacts(package_dirs: list[str]) -> list:
@@ -391,8 +405,8 @@ def _evidence_key(meta: dict) -> tuple:
     return (meta.get("sha"), meta.get("job"), str(meta.get("shard", meta.get("node"))))
 
 
-def existing_evidence(idx: str) -> dict:
-    """{(sha, job, shard): comment URL} of the evidence comments already on the issue."""
+def evidence_comments(idx: str) -> list[tuple[tuple, str]]:
+    """[((sha, job, shard), comment URL)] of the evidence comments on the issue, oldest first."""
     result = run_gh_with_retries(
         [
             "api",
@@ -404,24 +418,28 @@ def existing_evidence(idx: str) -> dict:
         ]
     )
     check_result(result)
-    found = {}
+    found = []
     for line in result.stdout.splitlines():
         url, _, marker = line.partition(" ")
         meta = parse_evidence_marker(marker)
         if meta:
-            found[_evidence_key(meta)] = url
+            found.append((_evidence_key(meta), url))
     return found
 
 
-def post_evidence_comment(idx: str, comment: str) -> Optional[str]:
+def post_evidence_comment(idx: str, comment: str) -> Optional[tuple[str, list[str]]]:
     """Posts the evidence once per (commit, job, shard) and returns the comment's URL,
-    also when it was already there. Never fails the pipeline: returns None instead."""
+    also when it was already there, with the URLs of the evidence comments it listed
+    before posting, oldest first (for prune_evidence_comments). Never fails the pipeline:
+    returns None instead."""
     try:
         key = _evidence_key(parse_evidence_marker(comment) or {})
-        existing_url = existing_evidence(idx).get(key)
+        listed = evidence_comments(idx)
+        listed_urls = [url for _, url in listed]
+        existing_url = dict(listed).get(key)
         if existing_url:
             print(f"Issue #{idx} already has evidence for {key}, not posting it again.")
-            return existing_url
+            return existing_url, listed_urls
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
             f.write(comment)
             body_file = f.name
@@ -437,12 +455,56 @@ def post_evidence_comment(idx: str, comment: str) -> Optional[str]:
         print(
             f"Posted failure evidence: {url or f'https://github.com/DACH-NY/canton/issues/{idx}'}"
         )
-        return url
+        return (url, listed_urls) if url else None
     except Exception as e:
         # silent-ok: the evidence comment is a nice-to-have, already surfaced via the
         # ::warning:: annotation, callers already handle a None return gracefully
         print(f"::warning::Could not post failure evidence to #{idx}: {e}")
         return None
+
+
+def _delete_comment(url: str) -> bool:
+    # The anchor of a comment's URL, #issuecomment-<id>, is its REST id.
+    match = re.search(r"#issuecomment-(\d+)$", url)
+    if not match:
+        print(f"::warning::Not deleting old evidence comment {url}: no comment id in the URL")
+        return False
+    result = run_gh_with_retries(
+        ["api", "-X", "DELETE", f"repos/DACH-NY/canton/issues/comments/{match.group(1)}"]
+    )
+    # Another shard's run on the same issue may have deleted it first.
+    already_gone = result.returncode != 0 and "HTTP 404" in result.stderr
+    if result.returncode != 0 and not already_gone:
+        print(f"::warning::Could not delete old evidence comment {url}: {result.stderr.strip()}")
+        return False
+    print(f"Old evidence comment {url} {'was already deleted' if already_gone else 'deleted'}")
+    return True
+
+
+def prune_evidence_comments(idx: str, linked_url: str, listed_urls: list[str]) -> set[str]:
+    """Deletes all but the newest EVIDENCE_MAX_COMMENTS evidence comments of the issue and
+    returns the URLs of the deleted ones (also those another run deleted first). The cap is
+    on the count, not the age: a deleted comment's artifacts may still be there, they
+    expire in their own time (see FLAKE_PKG_RETENTION_DAYS). Only comments with the
+    evidence marker are touched, never human ones. Never fails the pipeline: returns an
+    empty set instead.
+
+    `listed_urls` are the evidence comments post_evidence_comment listed, oldest first:
+    reusing its listing saves a second paginated call per update. The listing may lag
+    behind comments other runs just posted and linked, so it may delete too few, never too
+    many, and only confirmed deletions are returned, not every comment missing from it.
+
+    `linked_url`, the comment the new row links to, counts as the newest and is never
+    deleted: it is either the comment just posted, which the listing may not show yet,
+    or an older one already posted for the same (commit, job, shard)."""
+    try:
+        urls = [url for url in listed_urls if url != linked_url] + [linked_url]
+        return {url for url in urls[:-EVIDENCE_MAX_COMMENTS] if _delete_comment(url)}
+    except Exception as e:
+        # silent-ok: pruning only bounds the comment count, already surfaced via the
+        # ::warning:: annotation, with nothing deleted the caller keeps the body's links
+        print(f"::warning::Could not prune the evidence comments of #{idx}: {e}")
+        return set()
 
 
 def write_dry_run_comments(comments: dict[str, str]) -> None:
@@ -478,6 +540,11 @@ _NIGHTLY_ROW_RE = re.compile(
     re.MULTILINE,
 )
 
+# Matches a failure-history table row, capturing (date, job).
+_NIGHTLY_ROW_DATE_RE = re.compile(
+    r'^\| (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \|\s*([^|]+?)\s*\|', re.MULTILINE
+)
+
 _nightly_commits_cache: Optional[tuple] = None
 
 
@@ -492,6 +559,11 @@ def _git_commit_before(when: datetime.datetime) -> Optional[str]:
     )
     sha = result.stdout.strip()
     return sha if result.returncode == 0 and len(sha) == 40 else None
+
+
+def _utcnow() -> datetime.datetime:
+    """Naive UTC now, comparable with the naive UTC nightly cron datetimes."""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def _previous_nightly_datetimes(count: int, before: datetime.datetime) -> list:
@@ -529,7 +601,7 @@ def recent_nightly_commits() -> tuple:
         print(
             f"recent_nightly_commits: 'git fetch origin main' failed, using local origin/main: {fetch.stderr.strip()}"
         )
-    now = datetime.datetime.utcnow()
+    now = _utcnow()
     # `now` is after the current run's own nightly cron slot, so the most recent
     # cron time enumerated below resolves to `current` again. We therefore request
     # NIGHTLY_CONSECUTIVE_FAILURES slots (not N-1): the newest collapses onto
@@ -571,6 +643,19 @@ def nightly_streak(body: str) -> bool:
     return set(last).issubset(failures)
 
 
+def nightly_runs_clean(body: str) -> bool:
+    """True if the body has no nightly failure row since the oldest of the last
+    NIGHTLY_CONSECUTIVE_FAILURES cron slots older than NIGHTLY_REPORT_DELAY. Rows are matched
+    by Date, not commit, because a nightly dispatched late runs on a newer commit than its slot."""
+    slots = _previous_nightly_datetimes(
+        NIGHTLY_CONSECUTIVE_FAILURES, _utcnow() - NIGHTLY_REPORT_DELAY
+    )
+    since = slots[-1].strftime("%Y-%m-%d %H:%M:%S")
+    return not any(
+        is_nightly_job(job) and date >= since for date, job in _NIGHTLY_ROW_DATE_RE.findall(body)
+    )
+
+
 def add_broken_nightly_label(idx: str) -> None:
     """Best-effort: label the issue. A missing label or transient error is logged, not fatal."""
     result = run_gh_with_retries(
@@ -578,6 +663,25 @@ def add_broken_nightly_label(idx: str) -> None:
     )
     if result.returncode != 0:
         print(f"Could not add '{NIGHTLY_BROKEN_LABEL}' label to #{idx}: {result.stderr.strip()}")
+
+
+def remove_broken_nightly_label(idx: str) -> None:
+    """Best-effort: unlabel the issue. A transient error is logged, not fatal."""
+    result = run_gh_with_retries(
+        [
+            "issue",
+            "edit",
+            str(idx),
+            "--repo",
+            "DACH-NY/canton",
+            "--remove-label",
+            NIGHTLY_BROKEN_LABEL,
+        ]
+    )
+    if result.returncode != 0:
+        print(
+            f"Could not remove '{NIGHTLY_BROKEN_LABEL}' label from #{idx}: {result.stderr.strip()}"
+        )
 
 
 def _parse_iso(value: str) -> datetime.datetime:
@@ -676,9 +780,8 @@ def migrate_table_header(body: str) -> str:
 
 # Caps on the failure-history table, so a test that keeps failing for months does not
 # grow its issue body without bound. Rows are appended at the bottom, so the oldest are
-# cut from the top; their evidence comments stay on the issue. Everything that parses
-# the table (streaks, the daily Slack cap, close_stale_flake_issues.py) only looks at
-# the most recent rows.
+# cut from the top. Everything that parses the table (streaks, the daily Slack cap,
+# close_stale_flake_issues.py) only looks at the most recent rows.
 HISTORY_MAX_ROWS = 500
 # Rows this recent are kept even past HISTORY_MAX_ROWS ...
 HISTORY_KEEP_DAYS = 90
@@ -724,7 +827,7 @@ def truncate_history(body: str, today: Optional[datetime.date] = None) -> str:
         kept = f", oldest kept row is from {oldest_kept}" if oldest_kept else ""
         return [
             f"<!-- flaky-truncated {total} -->",
-            f"_{total} earlier rows truncated{kept}. Any evidence comments for them are still on this issue._",
+            f"_{total} earlier rows truncated{kept}._",
             "",
         ]
 
@@ -750,6 +853,23 @@ def truncate_history(body: str, today: Optional[datetime.date] = None) -> str:
     return out
 
 
+_EVIDENCE_LINK_RE = re.compile(r'\[([^\]]+)\]\((https://github\.com/[^)\s]+#issuecomment-\d+)\)')
+
+
+def unlink_evidence(body: str, deleted_urls: set[str]) -> str:
+    """Replaces the links of table rows to deleted evidence comments by their bare label."""
+    return "\n".join(
+        (
+            _EVIDENCE_LINK_RE.sub(
+                lambda m: m.group(1) if m.group(2) in deleted_urls else m.group(0), line
+            )
+            if line.startswith("|")
+            else line
+        )
+        for line in body.split("\n")
+    )
+
+
 def update_issue(
     idx: str,
     title: str,
@@ -758,6 +878,7 @@ def update_issue(
     evidence_comment: Optional[str] = None,
     has_assignee: bool = False,
     assigned_at: Optional[datetime.datetime] = None,
+    has_broken_nightly_label: bool = False,
 ) -> Optional[tuple[str, str, str]]:
     job = get_ci_job_name()
     threshold = (
@@ -812,11 +933,19 @@ def update_issue(
         else:
             notify = True
 
+    # broken-nightly marks a test that is broken now: drop it once no recent nightly run recorded
+    # a failure. A nightly failure shows the test still fails there, so only a non-nightly
+    # failure can drop the label.
+    if has_broken_nightly_label and not nightly and nightly_runs_clean(body):
+        remove_broken_nightly_label(idx)
+
     # The comment first, so the new row can link to it.
-    evidence_url = post_evidence_comment(idx, evidence_comment) if evidence_comment else None
+    posted = post_evidence_comment(idx, evidence_comment) if evidence_comment else None
+    evidence_url = posted[0] if posted else None
     label = comment_label(evidence_comment) if evidence_comment else ""
-    new_body = truncate_history(f"{body}\n{create_issue_table_row(cause, evidence_url, label)}")
-    gh_issue_edit_cmd(idx, title, new_body)
+    new_body = f"{body}\n{create_issue_table_row(cause, evidence_url, label)}"
+    deleted_urls = prune_evidence_comments(idx, *posted) if posted else set()
+    gh_issue_edit_cmd(idx, title, truncate_history(unlink_evidence(new_body, deleted_urls)))
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if notify:
         return (idx, title, commit_hash)
@@ -872,6 +1001,9 @@ def test_most_specific_cause_by_title():
 
 def self_test():
     test_migrate_table_header()
+    test_unlink_evidence()
+    test_prune_evidence_comments()
+    test_update_issue_caps_comments()
     test_most_specific_cause_by_title()
     test_update_issue_old_format()
     test_update_issue_new_format()
@@ -885,6 +1017,9 @@ def self_test():
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
+    test_update_issue_removes_stale_broken_nightly_label()
+    test_has_broken_nightly_label()
+    test_report_issue_passes_broken_nightly_label()
     test_flake_predates_close()
     test_issue_number_from_url()
     test_package_artifact_only_for_issues_with_a_package()
@@ -1055,13 +1190,16 @@ def test_post_evidence_comment_dedupes_and_never_raises():
 
     # Same (sha, job, shard) already on the issue: no second comment, its URL is reused.
     with patch(f"{__name__}.run_gh_with_retries", side_effect=fake_gh):
-        assert post_evidence_comment("42", comment) == existing_url
+        assert post_evidence_comment("42", comment) == (existing_url, [existing_url])
     assert [c[0] for c in calls] == ["api"], calls
 
     # A different shard is new evidence: posted from a body file, its URL returned.
     calls.clear()
     with patch(f"{__name__}.run_gh_with_retries", side_effect=fake_gh):
-        assert post_evidence_comment("42", _evidence_comment(shard="1")) == new_url
+        assert post_evidence_comment("42", _evidence_comment(shard="1")) == (
+            new_url,
+            [existing_url],
+        )
     assert [c[0] for c in calls] == ["api", "issue"], calls
     assert calls[1][:3] == ["issue", "comment", "42"] and "--body-file" in calls[1], calls
 
@@ -1084,7 +1222,7 @@ def test_create_issue_posts_evidence():
 
     def fake_post(idx, comment):
         posted.append((idx, comment))
-        return url
+        return url, []
 
     with (
         patch(f"{__name__}.gh_issue_create_cmd", return_value=created) as create,
@@ -1116,8 +1254,9 @@ def test_update_issue_links_evidence_in_new_row():
         patch.dict(os.environ, env),
         patch(
             f"{__name__}.post_evidence_comment",
-            side_effect=lambda i, c: order.append("comment") or url,
+            side_effect=lambda i, c: order.append("comment") or (url, []),
         ),
+        patch(f"{__name__}.prune_evidence_comments", return_value=set()),
         patch(
             f"{__name__}.gh_issue_edit_cmd",
             side_effect=lambda i, t, b: order.append(("edit", b)),
@@ -1328,6 +1467,7 @@ def test_update_issue_nightly_streak_labels_and_returns():
     with (
         patch.dict(os.environ, env, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.flake_predates_close', return_value=False),
         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)),
     ):
@@ -1341,12 +1481,122 @@ def test_update_issue_nightly_streak_labels_and_returns():
     with (
         patch.dict(os.environ, env, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd'),
+        patch(f'{__name__}.flake_predates_close', return_value=False),
         patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
         patch(f'{__name__}.add_broken_nightly_label', side_effect=lambda idx: labelled.append(idx)),
     ):
         result = update_issue("77", "Flaky NightlyIntegrationTest", _nightly_body(prior[:-1]))
         assert result is None
         assert labelled == [], "Expected no label when there is no streak"
+
+
+def test_update_issue_removes_stale_broken_nightly_label():
+    commits = [format(i, '040x') for i in range(NIGHTLY_CONSECUTIVE_FAILURES)]
+    per_commit = format(0xC0, '040x')
+    # Friday afternoon: the last 3 reported nightly slots are Tue, Wed and Thu 22:00.
+    friday = datetime.datetime(2026, 1, 9, 15)
+
+    def body(*rows):
+        """Rows of (date, job) or (date, job, commit)."""
+        out = "auto-created\n\n| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+        for i, (date, job, *commit) in enumerate(rows):
+            c = commit[0] if commit else per_commit
+            out += f"\n| {date} | {job} | 0 | [{i}](url) | [{c[:8]}](https://github.com/DACH-NY/canton/commit/{c}) |"
+        return out
+
+    def run(job, current, issue_body, labelled, now=friday):
+        env = {
+            'CIRCLECI': 'true',
+            'GITHUB_ACTIONS': 'false',
+            'CIRCLE_SHA1': current,
+            'CIRCLE_JOB': job,
+            'CIRCLE_NODE_INDEX': '0',
+            'CIRCLE_BUILD_URL': 'https://circleci.com/gh/DACH-NY/canton/0000',
+        }
+        added: list = []
+        removed: list = []
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(f'{__name__}.gh_issue_edit_cmd'),
+            patch(f'{__name__}.flake_predates_close', return_value=False),
+            patch(f'{__name__}.are_consecutive_commits', return_value=False),
+            patch(f'{__name__}.recent_nightly_commits', return_value=tuple(commits)),
+            patch(f'{__name__}._utcnow', return_value=now),
+            patch(f'{__name__}.add_broken_nightly_label', side_effect=added.append),
+            patch(f'{__name__}.remove_broken_nightly_label', side_effect=removed.append),
+        ):
+            update_issue("77", "Flaky T", issue_body, has_broken_nightly_label=labelled)
+        return added, removed
+
+    nightly = 'nightly_integration_test'
+    # moved to per-commit jobs: no nightly failures at all -> removed
+    assert run('sequential_test', per_commit, body(), True) == ([], ["77"])
+    # last nightly failure came from the Monday run, before the Tuesday slot -> removed
+    assert run('sequential_test', per_commit, body(("2026-01-06 02:00:00", nightly)), True) == (
+        [],
+        ["77"],
+    )
+    # the Tuesday nightly run still failed -> kept
+    assert run('sequential_test', per_commit, body(("2026-01-07 02:00:00", nightly)), True) == (
+        [],
+        [],
+    )
+    # only per-commit failures since the Tuesday slot -> removed
+    assert run(
+        'sequential_test', per_commit, body(("2026-01-08 12:00:00", 'sequential_test')), True
+    ) == ([], ["77"])
+    # not labelled -> nothing to remove
+    assert run('sequential_test', per_commit, body(), False) == ([], [])
+    # nightly failure, even after clean nightly runs -> kept
+    assert run(nightly, commits[-1], body(), True) == ([], [])
+    # nightly failure that continues the streak -> labelled again, not removed
+    streak = body(*((f"2026-01-0{7 + i} 02:00:00", nightly, c) for i, c in enumerate(commits[:-1])))
+    assert run(nightly, commits[-1], streak, True) == (["77"], [])
+    # per-commit failure while Friday's nightly run is still going: its slot is skipped, so
+    # the window still starts at the Tuesday slot and that run's failure keeps the label
+    assert run(
+        'sequential_test',
+        per_commit,
+        body(("2026-01-07 02:00:00", nightly)),
+        True,
+        now=datetime.datetime(2026, 1, 9, 23),
+    ) == ([], [])
+
+
+def test_report_issue_passes_broken_nightly_label():
+    title = format_issue_title("SomeFlakyTest")
+
+    def search_response(labels):
+        node = {
+            "title": title,
+            "number": 99,
+            "body": "",
+            "assignees": {"totalCount": 0},
+            "labels": {"nodes": [{"name": name} for name in labels]},
+            "timelineItems": {"nodes": []},
+            "projectItems": {"nodes": []},
+        }
+        return json.dumps({"data": {"search": {"nodes": [node]}}})
+
+    for labels, expected in (
+        (["flaky", NIGHTLY_BROKEN_LABEL], True),
+        (["flaky"], False),
+    ):
+        with (
+            patch(f'{__name__}.run_gh_with_retries') as mock_gh,
+            patch(f'{__name__}.update_issue', return_value=None) as mock_update,
+        ):
+            mock_gh.return_value.returncode = 0
+            mock_gh.return_value.stdout = search_response(labels)
+            report_issue("SomeFlakyTest")
+        assert mock_update.call_args.kwargs["has_broken_nightly_label"] is expected, labels
+
+
+def test_has_broken_nightly_label():
+    label = {"name": NIGHTLY_BROKEN_LABEL}
+    assert _has_broken_nightly_label({"labels": {"nodes": [{"name": "flaky"}, label]}}) is True
+    assert _has_broken_nightly_label({"labels": {"nodes": [{"name": "flaky"}]}}) is False
+    assert _has_broken_nightly_label({"labels": None}) is False
 
 
 def test_migrate_table_header():
@@ -1385,6 +1635,103 @@ def test_migrate_table_header():
     # An already-migrated body is returned unchanged (idempotent).
     already = f"intro\n\n{_NEW_HEADER_LINE}\n{_NEW_SEPARATOR_LINE}\n{old_row}"
     assert migrate_table_header(already) == already
+
+
+def test_unlink_evidence():
+    kept = "https://github.com/DACH-NY/canton/issues/42#issuecomment-2"
+    gone = "https://github.com/DACH-NY/canton/issues/42#issuecomment-1"
+    commit = f"[aaaaaaaa](https://github.com/DACH-NY/canton/commit/{'a' * 40})"
+
+    def body(*evidence):
+        rows = [
+            f"| 2026-09-01 00:00:00 | test | 0 | [b](u) | {commit} | {e} | regular |"
+            for e in evidence
+        ]
+        # Links outside the table, also to comments, are left alone.
+        triage = f"See [triage]({gone})."
+        return "\n".join(["intro", "", _NEW_HEADER_LINE, _NEW_SEPARATOR_LINE] + rows + [triage])
+
+    # A link to a comment not known to be deleted is kept, e.g. one the listing missed.
+    unlinked = unlink_evidence(
+        body(f"[log problems]({gone})", "", f"[3 failing tests]({kept})"), {gone}
+    )
+    assert unlinked == body("log problems", "", f"[3 failing tests]({kept})"), unlinked
+
+
+def test_prune_evidence_comments():
+    def url(i):
+        return f"https://github.com/DACH-NY/canton/issues/42#issuecomment-{100 + i}"
+
+    def prune(count, linked, delete_rc=0, delete_err="gh: Forbidden (HTTP 403)"):
+        calls: list = []
+
+        def fake_gh(args):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, delete_rc, "", delete_err)
+
+        with patch(f"{__name__}.run_gh_with_retries", side_effect=fake_gh):
+            pruned = prune_evidence_comments("42", linked, [url(i) for i in range(count)])
+        # Only deletions, no listing of its own.
+        assert all(c[:2] == ["api", "-X"] for c in calls), calls
+        return pruned, [int(c[-1].rsplit("/", 1)[1]) - 100 for c in calls]
+
+    count = EVIDENCE_MAX_COMMENTS + 2
+    newest = url(count - 1)
+
+    # The oldest comments beyond the cap are deleted, the newest are kept.
+    assert prune(count, newest) == ({url(0), url(1)}, [0, 1])
+
+    # Below the cap nothing is deleted.
+    assert prune(EVIDENCE_MAX_COMMENTS - 1, newest) == (set(), [])
+
+    # A new comment the listing does not show yet counts towards the cap.
+    assert prune(EVIDENCE_MAX_COMMENTS, url(EVIDENCE_MAX_COMMENTS)) == ({url(0)}, [0])
+
+    # An old comment the new row links to (same commit, job and shard) is not deleted.
+    assert prune(count, url(1)) == ({url(0), url(2)}, [0, 2])
+
+    # A comment that could not be deleted is still there.
+    assert prune(count, newest, delete_rc=1) == (set(), [0, 1])
+
+    # A comment another shard's run deleted first is gone all the same.
+    assert prune(count, newest, delete_rc=1, delete_err="gh: Not Found (HTTP 404)") == (
+        {url(0), url(1)},
+        [0, 1],
+    )
+
+    # A failing gh call is only a warning.
+    with patch(f"{__name__}.run_gh_with_retries", side_effect=OSError("gh not found")):
+        assert prune_evidence_comments("42", newest, [url(i) for i in range(count)]) == set()
+
+
+def test_update_issue_caps_comments():
+    old_url = "https://github.com/DACH-NY/canton/issues/42#issuecomment-1"
+    new_url = "https://github.com/DACH-NY/canton/issues/42#issuecomment-2"
+    row = (
+        "| 2026-09-01 00:00:00 | test | 0 | [b](u) | [c](u) "
+        f"| [1 failing test]({old_url}) | regular |"
+    )
+    body = "\n".join(["intro", "", _NEW_HEADER_LINE, _NEW_SEPARATOR_LINE, row])
+    env = {
+        "CIRCLECI": "true",
+        "GITHUB_ACTIONS": "false",
+        "CIRCLE_SHA1": "unknown",
+        "CIRCLE_JOB": "test",
+        "CIRCLE_NODE_INDEX": "0",
+        "CIRCLE_BUILD_URL": "https://circleci.com/gh/DACH-NY/canton/1",
+    }
+    with (
+        patch.dict(os.environ, env),
+        patch(f"{__name__}.post_evidence_comment", return_value=(new_url, [old_url])),
+        # The old comment was deleted.
+        patch(f"{__name__}.prune_evidence_comments", return_value={old_url}) as prune,
+        patch(f"{__name__}.gh_issue_edit_cmd") as edit,
+    ):
+        update_issue("42", "Flaky FooTest", body, DEFAULT_CAUSE, _evidence_comment())
+    prune.assert_called_once_with("42", new_url, [old_url])
+    written = edit.call_args[0][2]
+    assert old_url not in written and "| 1 failing test | regular |" in written, written
+    assert written.endswith(f"| [1 failing test]({new_url}) | {DEFAULT_CAUSE} |"), written
 
 
 def test_update_issue_old_format():
@@ -1700,6 +2047,7 @@ def test_report_issue_assignment_grace_period():
                                 "number": 99,
                                 "body": body_with_history,
                                 "assignees": {"totalCount": total_count},
+                                "labels": {"nodes": []},
                                 "timelineItems": {"nodes": timeline_nodes},
                                 "projectItems": {"nodes": []},
                             }
@@ -1781,6 +2129,7 @@ def test_report_issue_finds_flaky_project_among_other_projects():
                             "number": 99,
                             "body": "",
                             "assignees": {"totalCount": 0},
+                            "labels": {"nodes": []},
                             "timelineItems": {"nodes": []},
                             "projectItems": {
                                 "nodes": [

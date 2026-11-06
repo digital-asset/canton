@@ -7,7 +7,6 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Allows instances to flag when they have actually closed. Works around that FlagClosable only has
   * one concurrent caller perform onClosed and other callers may not know when this has completed.
-  * TODO(#5705) This is overly complex and custom, revisit subscription pool closing
   */
 trait CloseNotification {
   private val closedP = Promise[Unit]()

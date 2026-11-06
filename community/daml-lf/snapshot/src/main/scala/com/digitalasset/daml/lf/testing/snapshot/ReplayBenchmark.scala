@@ -6,7 +6,6 @@ package testing.snapshot
 
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import org.openjdk.jmh.annotations.*
 
@@ -58,9 +57,9 @@ class ReplayBenchmark {
     val result = benchmark.replay()
     assert(result.isRight)
     val Right(metrics) = result
-    counters.stepCount += metrics.totalCount[StepCount].get
-    counters.transactionNodeCount += metrics.totalCount[TxNodeCount].get
-    counters.fetchNodeCount += metrics.totalCount[FetchNodeCount].get
+    counters.stepCount += metrics.totalCount(_.stepCount).get
+    counters.transactionNodeCount += metrics.totalCount(_.txNodeCount).get
+    counters.fetchNodeCount += metrics.totalCount(_.fetchNodeCount).get
     metrics.reset()
   }
 

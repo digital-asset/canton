@@ -14,7 +14,11 @@ import com.daml.ledger.api.v2.commands.Commands
 import com.daml.metrics.Timed
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
-import com.digitalasset.canton.ledger.api.validation.{CommandsValidator, SubmitRequestValidator}
+import com.digitalasset.canton.ledger.api.validation.{
+  CommandsValidator,
+  LedgerApiSizeLimitsConfig,
+  SubmitRequestValidator,
+}
 import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.{ReassignmentCommand, SubmissionSyncService}
@@ -52,8 +56,10 @@ final class ApiCommandSubmissionService(
     tracker: CommandProgressTracker,
     metrics: LedgerApiServerMetrics,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
-    extends CommandSubmissionServiceGrpc.CommandSubmissionService
+)(implicit
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+) extends CommandSubmissionServiceGrpc.CommandSubmissionService
     with AutoCloseable
     with NamedLogging {
 

@@ -295,6 +295,7 @@ final class BftBlockOrderer(
           clock,
           timeouts,
           loggerFactory,
+          nodeParameters.devVersionSupport,
         )
       case _ =>
         logger.info("Re-using the existing sequencer storage for BFT ordering tables as well")

@@ -1182,7 +1182,7 @@ class InMemoryFanoutBufferSpec
         reassignmentId = ReassignmentId.tryCreate("0001"),
         isReassigningParticipant = false,
       ),
-      reassignment = null,
+      reassignments = null,
       synchronizerId = synchronizerId,
     )
 

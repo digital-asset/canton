@@ -29,12 +29,11 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.retry.{Backoff, NoExceptionRetryPolicy, Success}
-import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId}
+import com.digitalasset.canton.{LedgerCommandId, LedgerSubmissionId, LedgerUserId, LfPartyId}
 import com.google.rpc.Code
 import com.google.rpc.status.Status
 import org.slf4j.event.Level
@@ -54,13 +53,22 @@ private[participant] object AutomaticAssignment {
     else delayJ
   }
 
+  /** User ID of the automatic assignments submitted by this participant.
+    */
+  private[reassignment] val userId: LedgerUserId =
+    LedgerUserId.assertFromString("AutomaticAssignment")
+
+  /** Command ID of the automatic assignment of `id`, shared by all its attempts.
+    */
+  private[reassignment] def commandId(id: ReassignmentId): LedgerCommandId =
+    LedgerCommandId.assertFromString(s"automatic-assignment-${id.toProtoPrimitive}")
+
   def perform(
       id: ReassignmentId,
       targetSynchronizer: Target[PhysicalSynchronizerId],
       targetStaticSynchronizerParameters: Target[StaticSynchronizerParameters],
       reassignmentCoordination: ReassignmentCoordination,
       stakeholders: Set[LfPartyId],
-      unassignmentSubmitterMetadata: ReassignmentSubmitterMetadata,
       participantId: ParticipantId,
       targetTimestamp: Target[CantonTimestamp],
       unassignmentTs: CantonTimestamp,
@@ -76,15 +84,7 @@ private[participant] object AutomaticAssignment {
     def hostedStakeholders(
         snapshot: Target[TopologySnapshot]
     ): FutureUnlessShutdown[Set[LfPartyId]] =
-      snapshot.unwrap
-        .hostedOn(stakeholders, participantId)
-        .map(partiesWithAttributes =>
-          partiesWithAttributes.collect {
-            case (partyId, attributes)
-                if attributes.permission == ParticipantPermission.Submission =>
-              partyId
-          }.toSet
-        )
+      snapshot.unwrap.hostedOn(stakeholders, participantId).map(_.keySet)
 
     def performAutoAssignmentOnce: EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
       for {
@@ -101,9 +101,9 @@ private[participant] object AutomaticAssignment {
             ReassignmentSubmitterMetadata(
               assignmentSubmitter,
               participantId,
-              unassignmentSubmitterMetadata.commandId,
+              commandId(id),
               submissionId = Some(LedgerSubmissionId.assertFromString(UUID.randomUUID().toString)),
-              unassignmentSubmitterMetadata.userId,
+              userId,
               workflowId = None,
             ),
             id,

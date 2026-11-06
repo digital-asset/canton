@@ -895,8 +895,10 @@ object BuildCommon {
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
         Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
-        // Explicit set the Daml project dependency to common
-        Test / damlDependencies := (`community-common` / Compile / damlBuild).value,
+        // Include external DARs in the cache inputs for dependent test packages.
+        Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+
+          ((`traffic-enforcement-component` / Compile / resourceDirectory).value /
+            "dar" / "canton-api-traffic-credit-v1-1.0.0.dar"),
         Test / damlBuildOrder := Seq(
           "daml/JsonApiTest/Upgrades/Iface",
           "daml/JsonApiTest/Upgrades/V1",
@@ -2771,18 +2773,15 @@ object BuildCommon {
             .value,
           Compile / damlDarOutput := (Compile / target).value / "dar-output",
           damlPinnedProjects := Seq(
-            (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit"
+            (Compile / sourceDirectory).value / "daml" / "canton-api-traffic-credit-v1"
           ),
           Compile / useVersionedDarName := true,
           Compile / damlJavaCodegen := Seq(
             (
-              (Compile / sourceDirectory).value / "daml" / "canton-traffic-credit",
-              (Compile / resourceDirectory).value / "dar" / "canton-traffic-credit-1.0.0.dar",
+              (Compile / sourceDirectory).value / "daml" / "canton-api-traffic-credit-v1",
+              (Compile / resourceDirectory).value / "dar" / "canton-api-traffic-credit-v1-1.0.0.dar",
               "com.digitalasset.canton.tea.daml",
             )
-          ),
-          Test / damlDependencies := Seq(
-            (Compile / resourceDirectory).value / "dar" / "canton-traffic-credit-1.0.0.dar"
           ),
           addFilesToHeaderCheck("*.daml", "daml", Compile),
           libraryDependencies ++= Seq(
@@ -3072,8 +3071,10 @@ object BuildCommon {
         libsScalaSettings,
         enablePublishLibrary,
         libraryDependencies ++= Seq(
-          scala_compiler,
+          scala_compiler % Provided,
           scala_reflect,
+          scalatest % Test,
+          scalatest_flatspec % Test,
         ),
       )
 

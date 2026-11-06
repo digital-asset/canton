@@ -19,7 +19,10 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.data.ActiveContract
+import com.digitalasset.canton.participant.admin.data.{
+  ActiveContract,
+  PartyReplicationStatus as ApiPartyReplicationStatus,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStage.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.{
@@ -120,8 +123,8 @@ final class PartyReplicator(
   private val topologyWorkflow =
     new PartyReplicationTopologyWorkflow(participantId, timeouts, loggerFactory)
 
-  private val testInterceptorO: Option[PartyReplicationTestInterceptor] =
-    config.testInterceptor.map(_())
+  private val testInterceptorO: Option[AcsReplicationTestInterceptor] =
+    config.testFileImportInterceptor.map(_())
 
   /** Validates online party replication arguments and propose party replication via the provided
     * admin workflow service.
@@ -231,20 +234,21 @@ final class PartyReplicator(
 
   private[admin] def getAddPartyStatus(
       addPartyRequestId: AddPartyRequestId
-  ): Option[PartyReplicationStatus] = partyReplicationStateManager
+  ): Option[ApiPartyReplicationStatus] = partyReplicationStateManager
     .get(addPartyRequestId)
+    .map(ApiPartyReplicationStatus.fromInternal)
     // Peek at the AcsReplicator state instead to preserve the ability to read status on the SP.
     .orElse(
       acsReplicator.acsReplicationStateManager
         .get(addPartyRequestId)
-        .map(PartyReplicationStatus.fromAcsReplicationStatus)
+        .map(ApiPartyReplicationStatus.fromAcsReplicationStatus)
     )
 
   private[admin] def getAddPartyStatus(
       partyId: PartyId,
       synchronizerId: SynchronizerId,
       targetParticipantId: ParticipantId,
-  ): Option[PartyReplicationStatus] = partyReplicationStateManager
+  ): Option[ApiPartyReplicationStatus] = partyReplicationStateManager
     .collectFirst {
       case (_, status)
           if status.params.partyId == partyId &&
@@ -253,6 +257,7 @@ final class PartyReplicator(
         status
     }
     .flatMap(status => partyReplicationStateManager.get(status.params.requestId))
+    .map(ApiPartyReplicationStatus.fromInternal)
     // Peek at the AcsReplicator state instead to preserve the ability to read status on the SP.
     .orElse(
       acsReplicator.acsReplicationStateManager
@@ -266,7 +271,7 @@ final class PartyReplicator(
         .flatMap(status =>
           acsReplicator.acsReplicationStateManager
             .get(status.params.requestId)
-            .map(PartyReplicationStatus.fromAcsReplicationStatus)
+            .map(ApiPartyReplicationStatus.fromAcsReplicationStatus)
         )
     )
 
@@ -639,6 +644,7 @@ final class PartyReplicator(
                   forceChanges = ForceFlags.none,
                   expectFullAuthorization = false,
                 )
+                .map(_.discard)
                 .leftMap(error => s"Topology manager rejected the transaction: $error")
             } yield ()
 

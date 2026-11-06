@@ -18,16 +18,12 @@ Signing key usage
 
 Canton defines the following key usages for signing keys:
 
-.. todo:: Link to appropriate reference page <https://github.com/DACH-NY/canton/issues/25832>
-
 * ``Namespace``: a key that defines a node's identity and signs topology requests (see :ref:`namespace key management<namespace-key-management>`)
 * ``SequencerAuthentication``: a key that authenticates members of the network towards a sequencer
 * ``Protocol``: a key that signs various structures as part of the synchronization protocol execution
 
 Restrict the usage of a signing key
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. todo:: fix `deleting-canton-keys` and other references in `key_management.rst` <https://github.com/DACH-NY/canton/issues/26155>
 
 Set the ``usage`` parameter with the desired usages when you :ref:`generate a new key<deleting-canton-keys>`.
 
@@ -97,8 +93,6 @@ that you can create intermediate keys to sign topology transactions, thereby lim
 These intermediate keys can be further restricted in terms of which kind of topology transactions they can sign using fine-grained delegation restrictions.
 
 Canton defines the following restrictions for namespace keys:
-
-.. todo:: Link to appropriate reference page and remove start/end markers in `topology.proto` <https://github.com/DACH-NY/canton/issues/25832>
 
 .. literalinclude:: CANTON/community/base/src/main/protobuf/com/digitalasset/canton/protocol/v30/topology.proto
    :start-after: [start-docs-entry: namespace delegation restrictions]

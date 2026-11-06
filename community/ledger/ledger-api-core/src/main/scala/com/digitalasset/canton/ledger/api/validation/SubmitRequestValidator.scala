@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import cats.implicits.{toBifunctorOps, toTraverseOps}
+import cats.implicits.{toBifunctorOps, toFoldableOps, toTraverseOps}
 import com.daml.ledger.api.v2.command_submission_service.{SubmitReassignmentRequest, SubmitRequest}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service as iss
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
@@ -12,6 +12,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   SinglePartySignatures,
   CostEstimationHints as CostEstimationHintsP,
 }
+import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
@@ -31,6 +32,8 @@ import java.time.{Duration, Instant}
 
 class SubmitRequestValidator(
     commandsValidator: CommandsValidator
+)(implicit
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig
 ) {
   import FieldValidator.*
   def validate(
@@ -125,6 +128,7 @@ class SubmitRequestValidator(
       accountIdP,
     ) = req
     for {
+      _ <- SubmitRequestValidator.validateExecuteSubmissionRequestSizeLimits(req)
       submissionId <- validateSubmissionId(submissionIdP)
         .map(_.map(_.unwrap))
         .map(
@@ -170,6 +174,25 @@ class SubmitRequestValidator(
     }
   }
 
+  def validateExecuteAndWait(
+      req: iss.ExecuteSubmissionRequest,
+      transactionFormat: Option[TransactionFormat],
+      currentLedgerTime: Instant,
+      submissionIdGenerator: SubmissionIdGenerator,
+      maxDeduplicationDuration: Duration,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, ExecuteRequest] =
+    for {
+      executeRequest <- validateExecute(
+        req,
+        currentLedgerTime,
+        submissionIdGenerator,
+        maxDeduplicationDuration,
+      )
+      _ <- transactionFormat.traverse_(format => FormatValidator.validate(format))
+    } yield executeRequest
+
   private def validateSynchronizer(string: String)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[RpcError, Synchronizer] =
@@ -209,4 +232,78 @@ class SubmitRequestValidator(
       )
     } yield submitReassignmentRequest
 
+}
+
+object SubmitRequestValidator {
+  import FieldValidator.*
+
+  def validateExecuteSubmissionRequestSizeLimits(request: iss.ExecuteSubmissionRequest)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] =
+    for {
+      _ <- request.preparedTransaction
+        .flatMap(_.transaction)
+        .traverse_(transaction =>
+          validateSerializedSizeLimit(
+            message = transaction,
+            fieldName = "transaction",
+            limit =
+              sizeLimitsConfig.interactiveLapiSizeConfig.preparedTransaction.transactionSizeLimit,
+          )
+        )
+      _ <- request.preparedTransaction.flatMap(_.metadata).traverse_(validateMetadataSizeLimits)
+      _ <- request.partySignatures.traverse_(validatePartySignaturesSizeLimits)
+    } yield ()
+
+  private def validatePartySignaturesSizeLimits(partySignatures: PartySignatures)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] =
+    for {
+      _ <- validateCardinality(
+        values = partySignatures.signatures,
+        fieldName = "signatures",
+        limit = sizeLimitsConfig.interactiveLapiSizeConfig.partySignatures.signaturesSizeLimit,
+      )
+      _ <- partySignatures.signatures.traverse_(singlePartySignatures =>
+        for {
+          _ <- validateCardinality(
+            values = singlePartySignatures.signatures,
+            fieldName = "signatures",
+            limit =
+              sizeLimitsConfig.interactiveLapiSizeConfig.singlePartySignatures.signaturesSizeLimit,
+          )
+          _ <- validateSignaturesByteSizeLimits(singlePartySignatures.signatures)
+        } yield ()
+      )
+    } yield ()
+
+  private def validateMetadataSizeLimits(metadata: iss.Metadata)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] = {
+    val interactiveSizeConfig = sizeLimitsConfig.interactiveLapiSizeConfig
+    for {
+      _ <- metadata.submitterInfo.traverse_(submitterInfo =>
+        validateCardinality(
+          values = submitterInfo.actAs,
+          fieldName = "act_as",
+          limit = interactiveSizeConfig.metadataSubmitterInfo.actAsSizeLimit,
+        )
+      )
+      _ <- validateCardinality(
+        values = metadata.inputContracts,
+        fieldName = "input_contracts",
+        limit = interactiveSizeConfig.metadata.inputContractsSizeLimit,
+      )
+      _ <- metadata.inputContracts.traverse_(inputContract =>
+        validateSerializedSizeLimit(
+          message = inputContract,
+          fieldName = "input_contracts",
+          limit = sizeLimitsConfig.metadataInputContractBytesSizeLimit,
+        )
+      )
+    } yield ()
+  }
 }

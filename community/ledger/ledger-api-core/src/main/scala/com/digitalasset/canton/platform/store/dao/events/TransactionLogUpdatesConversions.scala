@@ -21,6 +21,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.ledger.api.{ParticipantAuthorizationFormat, TransactionShape}
+import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
@@ -45,7 +46,6 @@ import com.digitalasset.canton.platform.{
   Value,
   PackageId as LfPackageId,
 }
-import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
@@ -92,17 +92,17 @@ private[events] object TransactionLogUpdatesConversions {
 
     case u: TransactionLogUpdate.ReassignmentAccepted =>
       internalUpdateFormat.includeReassignments.flatMap { reassignmentFormat =>
-        val filteredReassignments = u.reassignment.iterator.filter { r =>
+        val filteredReassignments = u.reassignments.iterator.filter { r =>
           partiesMatchFilter(
             reassignmentFormat.templatePartiesFilter,
-            u.reassignment.iterator
+            u.reassignments.iterator
               .map(r => r.templateId.toFullIdentifier(r.packageName).toNameTypeConRef)
               .toSet,
           )(r.stakeholders)
         }
         NonEmpty
           .from(filteredReassignments.toSeq)
-          .map(rs => u.copy(reassignment = rs)(u.traceContext))
+          .map(rs => u.copy(reassignments = rs)(u.traceContext))
       }
 
     case u: TransactionLogUpdate.TopologyTransactionEffective =>
@@ -172,16 +172,11 @@ private[events] object TransactionLogUpdatesConversions {
             )
           )
         )
-      val contractInstances =
-        reassignmentAccepted.reassignment.collect { case assign: TransactionLogUpdate.Assign =>
-          assign.contractId -> assign.createdContractInstance
-        }.toMap
       toReassignment(
         reassignmentAccepted,
         reassignmentInternalEventFormat.templatePartiesFilter.allFilterParties,
         reassignmentInternalEventFormat.eventProjectionProperties,
         lfValueTranslation,
-        contractInstances,
       )
         .map(reassignment =>
           UpdateResponse.ProtoUpdate(
@@ -263,17 +258,12 @@ private[events] object TransactionLogUpdatesConversions {
                 )
               )
             )
-          val contractInstances = reassignmentAccepted.reassignment.collect {
-            case assign: TransactionLogUpdate.Assign =>
-              assign.contractId -> assign.createdContractInstance
-          }.toMap
 
           toReassignment(
             reassignmentAccepted,
             reassignmentInternalEventFormat.templatePartiesFilter.allFilterParties,
             reassignmentInternalEventFormat.eventProjectionProperties,
             lfValueTranslation,
-            contractInstances,
           )
             .map(reassignment =>
               Some(
@@ -611,54 +601,42 @@ private[events] object TransactionLogUpdatesConversions {
       requestingParties: Option[Set[Party]],
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
-      contractInstances: Map[LfContractId, FatContractInstanceWithCreatedAt],
   )(implicit
       loggingContext: LoggingContextWithTrace,
-      errorLoggingContext: ErrorLoggingContext,
       executionContext: ExecutionContext,
   ): Future[ApiReassignment] = {
     val stringRequestingParties = requestingParties.map(_.map(_.toString))
     val info = reassignmentAccepted.reassignmentInfo
     (MonadUtil
-      .sequentialTraverse(reassignmentAccepted.reassignment.toSeq) {
-        case assign: TransactionLogUpdate.Assign =>
-          val instance = contractInstances.get(assign.contractId)
-          instance match {
-            case Some(contractInstance) =>
-              createdToApiCreatedEvent(
-                requestingPartiesO = requestingParties,
-                eventProjectionProperties = eventProjectionProperties,
-                lfValueTranslation = lfValueTranslation,
-                offset = reassignmentAccepted.offset,
-                nodeId = assign.nodeId,
-                representativePackageId = assign.representativePackageId,
-                createdEventWitnesses = contractInstance.stakeholders,
-                flatEventWitnesses = contractInstance.stakeholders,
-                contractInstance = contractInstance,
-              ).map(createdEvent =>
-                ApiReassignmentEvent(
-                  ApiAssigned(
-                    ApiAssignedEvent(
-                      source = info.sourceSynchronizer.unwrap.toProtoPrimitive,
-                      target = info.targetSynchronizer.unwrap.toProtoPrimitive,
-                      reassignmentId = info.reassignmentId.toProtoPrimitive,
-                      submitter = info.submitter.getOrElse(""),
-                      reassignmentCounter = assign.reassignmentCounter,
-                      createdEvent = Some(createdEvent),
-                    )
-                  )
+      .sequentialTraverse(reassignmentAccepted.reassignments.toSeq) {
+        case assign: state.Reassignment.Assign =>
+          val instance = assign.persistedContractInstance.inst
+          createdToApiCreatedEvent(
+            requestingPartiesO = requestingParties,
+            eventProjectionProperties = eventProjectionProperties,
+            lfValueTranslation = lfValueTranslation,
+            offset = reassignmentAccepted.offset,
+            nodeId = assign.nodeId,
+            representativePackageId = assign.representativePackageId,
+            createdEventWitnesses = instance.stakeholders,
+            flatEventWitnesses = instance.stakeholders,
+            contractInstance = instance,
+          ).map(createdEvent =>
+            ApiReassignmentEvent(
+              ApiAssigned(
+                ApiAssignedEvent(
+                  source = info.sourceSynchronizer.unwrap.toProtoPrimitive,
+                  target = info.targetSynchronizer.unwrap.toProtoPrimitive,
+                  reassignmentId = info.reassignmentId.toProtoPrimitive,
+                  submitter = info.submitter.getOrElse(""),
+                  reassignmentCounter = assign.reassignmentCounter,
+                  createdEvent = Some(createdEvent),
                 )
               )
+            )
+          )
 
-            case None =>
-              ErrorUtil.internalError(
-                new IllegalStateException(
-                  s"Contract instance for contract ID ${assign.contractId} not found in contract instances map"
-                )
-              )
-          }
-
-        case unassign: TransactionLogUpdate.Unassign =>
+        case unassign: state.Reassignment.Unassign =>
           val stakeholders = unassign.stakeholders
           Future.successful(
             ApiReassignmentEvent(

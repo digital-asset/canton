@@ -9,6 +9,7 @@ import cats.syntax.foldable.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -253,6 +254,7 @@ object PartyOps {
             ForceFlags.none,
             expectFullAuthorization = externalPartyOnboardingDetails.fullyAllocatesParty,
           )
+          .map(_.discard)
           .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
     } yield ()
 

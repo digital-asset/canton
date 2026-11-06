@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.party
 import cats.Eval
 import cats.data.EitherT
 import com.digitalasset.canton.RepairCounter
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -167,9 +167,6 @@ class TargetParticipantAcsPersistence(
 }
 
 object TargetParticipantAcsPersistence {
-
-  // TODO(#22251): Make this configurable.
-  private[party] val contractsToRequestEachTime = PositiveInt.tryCreate(10)
 
   def apply(
       requestId: AddPartyRequestId,

@@ -39,7 +39,6 @@ import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.version.*
-import io.scalaland.chimney.dsl.*
 
 /** Internal state representation of the party replication process. Refer to party_replication.proto
   * PartyReplicationStatus for the semantics.
@@ -214,28 +213,6 @@ object PartyReplicationStatus
     protocolVersionRepresentativeFor(pv)
   )
 
-  def fromAcsReplicationStatus(
-      acsReplicationStatus: AcsReplicationStatus
-  ): PartyReplicationStatus = {
-    val params = ReplicationParams.fromAcsReplicationStatus(acsReplicationStatus)
-    PartyReplicationStatus(
-      params,
-      authorizationO = acsReplicationStatus.partyToParticipantTopologyTransaction.map(
-        PartyReplicationAuthorization.fromAcsPartyToParticipantTopologyTransaction
-      ),
-      replicationO = acsReplicationStatus.replicationO,
-      acsReplicationStatusO = Some(acsReplicationStatus),
-      indexingO = None,
-      hasCompleted = acsReplicationStatus.hasCompleted,
-      replicationMode = ReplicationMode.SequencerChannel,
-      errorO = acsReplicationStatus.errorO.map(PartyReplicationError.fromAcsReplicationError),
-    )(
-      protocolVersionRepresentativeFor(
-        acsReplicationStatus.representativeProtocolVersion.representative
-      )
-    )
-  }
-
   final case class ReplicationParams(
       requestId: AddPartyRequestId,
       partyId: PartyId,
@@ -333,18 +310,6 @@ object PartyReplicationStatus
         "participant_permission",
         proto,
       )
-
-    def fromAcsReplicationStatus(
-        acsReplicationStatus: AcsReplicationStatus
-    ): ReplicationParams = acsReplicationStatus.params
-      .into[ReplicationParams]
-      .withFieldConst(
-        _.serial,
-        acsReplicationStatus.partyToParticipantTopologyTransaction
-          .map(_.topologySerial)
-          .getOrElse(PositiveInt.one),
-      )
-      .transform
 
     override protected val pretty: Pretty[ReplicationParams] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*

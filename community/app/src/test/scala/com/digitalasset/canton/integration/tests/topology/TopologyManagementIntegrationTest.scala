@@ -77,17 +77,19 @@ final class TopologyManagementIntegrationTest
   // TODO(#16283): disable participant / roll keys while the affected nodes are busy
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1.withSetup { implicit env =>
-      import env.*
-      participants.all.synchronizers.connect_local(sequencer1, alias = daName)
-      participants.all.dars.upload(CantonExamplesPath)
-      sequencer1.topology.synchronizer_parameters.propose_update(
-        daId,
-        _.update(
-          reconciliationInterval = config.PositiveDurationSeconds.ofDays(7)
-        ),
-      )
-    }
+    EnvironmentDefinition.P3_S1M1
+      .addConfigTransform(ConfigTransforms.enableKeyDownload)
+      .withSetup { implicit env =>
+        import env.*
+        participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+        participants.all.dars.upload(CantonExamplesPath)
+        sequencer1.topology.synchronizer_parameters.propose_update(
+          daId,
+          _.update(
+            reconciliationInterval = config.PositiveDurationSeconds.ofDays(7)
+          ),
+        )
+      }
 
   private def buildMalformedTopologyTransaction(
       mappingV30: v30.TopologyMapping,
@@ -782,7 +784,7 @@ final class TopologyManagementIntegrationTest
             store = daId,
           ),
           _.message should include(
-            "Tried to set a confirming threshold (2) above the number of hosting nodes (1)"
+            "Tried to set a confirming threshold (2) above the number of hosting nodes with Submission or Confirmation permission (1)"
           ),
         )
     }

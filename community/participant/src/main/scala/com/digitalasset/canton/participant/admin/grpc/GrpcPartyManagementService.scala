@@ -22,9 +22,11 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.data.{
   ActiveContract,
   ContractImportMode,
+  ImportPartyAcsForceFlag,
   RepresentativePackageIdOverride,
   *,
 }
+import com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService.ImportPartyAcsContext
 import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.PartyReplicationArguments
 import com.digitalasset.canton.participant.admin.party.acsreplication.{
@@ -34,7 +36,7 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.{
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore.LastSynchronizerOffset
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.store.SyncPersistentState
-import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.sync.{CantonSyncService, SyncEphemeralStateFactory}
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
@@ -200,15 +202,13 @@ class GrpcPartyManagementService(
         .fromHexString(request.addPartyRequestId)
         .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
 
-      status <- partyReplicator
+      apiStatus <- partyReplicator
         .getAddPartyStatus(requestId)
         .toRight(
           toStatusRuntimeException(Status.UNKNOWN)(
             s"Add party request id ${request.addPartyRequestId} not found"
           )
         )
-      apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
-        .fromInternal(status)
     } yield v30.GetAddPartyStatusResponse(Some(apiStatus.toProtoV30))).toFuture(identity)
 
   private def convert[T](
@@ -224,7 +224,7 @@ class GrpcPartyManagementService(
   private def ensureOnlinePartyReplicationEnabled() = partyReplicatorO
     .toRight(
       toStatusRuntimeException(Status.UNIMPLEMENTED)(
-        "Online party replication commands require the `alpha_online_party_replication_support` configuration"
+        "Online party replication commands require the `alpha-online-party-replication-support` and `alpha-acs-replication-support` configurations"
       )
     )
 
@@ -250,7 +250,7 @@ class GrpcPartyManagementService(
   private def ensureSequencerChannelAcsReplicationEnabled() = acsReplicatorO
     .toRight(
       toStatusRuntimeException(Status.UNIMPLEMENTED)(
-        "ACS replication commands require the `alpha_online_party_replication_support` configuration"
+        "ACS replication commands require the `alpha-acs-replication-support` configuration"
       )
     )
 
@@ -528,15 +528,7 @@ class GrpcPartyManagementService(
     */
   private def parseImportPartyAcsStreamingRequestGlobal(
       request: ImportPartyAcsRequest
-  ): ParsingResult[
-    (
-        SynchronizerId,
-        Option[PartyId],
-        Option[String],
-        ContractImportMode,
-        RepresentativePackageIdOverride,
-    )
-  ] =
+  ): ParsingResult[ImportPartyAcsContext] =
     for {
       synchronizerId <- ProtoConverter.parseRequired(
         SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"),
@@ -557,15 +549,17 @@ class GrpcPartyManagementService(
         "contract_import_mode",
         request.contractImportMode,
       )
+      forceFlags <- request.forceFlags.traverse(ImportPartyAcsForceFlag.fromProtoV30)
       workflowIdPrefix = request.workflowIdPrefix
         .flatMap(OptionUtil.emptyStringAsNone)
         .orElse(Some(s"import-${UUID.randomUUID}"))
-    } yield (
-      synchronizerId,
-      partyIdO,
-      workflowIdPrefix,
-      contractImportMode,
-      representativePackageIdOverride,
+    } yield ImportPartyAcsContext(
+      synchronizerId = synchronizerId,
+      partyIdO = partyIdO,
+      workflowIdPrefix = workflowIdPrefix,
+      contractImportMode = contractImportMode,
+      representativePackageIdOverride = representativePackageIdOverride,
+      forceFlags = forceFlags.toSet,
     )
 
   override def importPartyAcs(
@@ -573,19 +567,10 @@ class GrpcPartyManagementService(
   ): StreamObserver[ImportPartyAcsRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    type ImportContext =
-      (
-          SynchronizerId,
-          Option[PartyId],
-          Option[String],
-          ContractImportMode,
-          RepresentativePackageIdOverride,
-      )
-
     GrpcStreamingUtils.streamGzippedChunksFromClient[
       ImportPartyAcsRequest,
       ImportPartyAcsResponse,
-      ImportContext,
+      ImportPartyAcsContext,
       ActiveContract,
     ](
       responseObserver,
@@ -601,12 +586,13 @@ class GrpcPartyManagementService(
           .toTry
     ) {
       case (
-            (
+            ImportPartyAcsContext(
               synchronizerId,
-              partyIdO, // None if not provided by the user (backwards compatibility)
+              partyIdO,
               workflowIdPrefix,
               contractImportMode,
               representativePackageIdOverride,
+              forceFlags,
             ),
             source,
           ) =>
@@ -625,7 +611,12 @@ class GrpcPartyManagementService(
 
         val resultET = for {
           effectiveTimestampO <- partyIdO match {
-            case Some(partyId) => preImportValidation(synchronizerId, partyId)
+            case Some(partyId) =>
+              preImportValidation(
+                synchronizerId,
+                partyId,
+                forceFlags,
+              )
             case None => Right(Option.empty[EffectiveTime]).toEitherT[FutureUnlessShutdown]
           }
 
@@ -682,10 +673,18 @@ class GrpcPartyManagementService(
     * This prevents creating a phantom "pending clearance" record for a party that isn't actually
     * onboarding here, which would otherwise remain stranded in the database requiring manual
     * cleanup.
+    *
+    * Unless forced, it also aborts the import once this participant has processed events past the
+    * party's activation.
+    *
+    * @return
+    *   The activation time if the onboarding mapping is already effective, empty if it is only
+    *   proposed.
     */
   private def preImportValidation(
       synchronizerId: SynchronizerId,
       partyId: PartyId,
+      forceFlags: Set[ImportPartyAcsForceFlag],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, PartyManagementServiceError, Option[EffectiveTime]] =
@@ -746,6 +745,25 @@ class GrpcPartyManagementService(
         .filterNot(_.transaction.isProposal)
         .map(_.validFrom)
         .maxOption
+
+      // Past the activation, this participant may have processed archivals of contracts in the snapshot,
+      // which the onboarding flag lets it accept without their creation. Events at the activation time
+      // itself do not see the new hosting yet.
+      participantRecordTime = SyncEphemeralStateFactory.currentRecordTime(
+        sync.participantNodePersistentState.value.ledgerApiStore
+          .cleanSynchronizerIndex(synchronizerId)
+      )
+      _ <- effectiveTimestamp match {
+        case Some(activation)
+            if !forceFlags.contains(ImportPartyAcsForceFlag.AllowImportAfterActivation) =>
+          EitherT.cond[FutureUnlessShutdown](
+            participantRecordTime <= activation.value,
+            (),
+            PartyManagementServiceError.AcsImportAfterActivation
+              .Error(partyId, activation.value, participantRecordTime): PartyManagementServiceError,
+          )
+        case _ => EitherTUtil.unitUS[PartyManagementServiceError]
+      }
 
     } yield effectiveTimestamp
 
@@ -1052,6 +1070,20 @@ class GrpcPartyManagementService(
 }
 
 object GrpcPartyManagementService {
+
+  /** The parameters of a party ACS import, set in the first message of the stream.
+    *
+    * @param partyIdO
+    *   Empty if not provided by the user (backwards compatibility).
+    */
+  private final case class ImportPartyAcsContext(
+      synchronizerId: SynchronizerId,
+      partyIdO: Option[PartyId],
+      workflowIdPrefix: Option[String],
+      contractImportMode: ContractImportMode,
+      representativePackageIdOverride: RepresentativePackageIdOverride,
+      forceFlags: Set[ImportPartyAcsForceFlag],
+  )
 
   /** [[com.digitalasset.canton.participant.admin.grpc.GrpcPartyManagementService#getHighestOffsetByTimestamp]]
     * computation of offset from timestamp placed in a pure function for unit testing.

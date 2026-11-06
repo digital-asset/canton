@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -276,6 +277,7 @@ class GrpcSequencerConnectService(
             ForceFlags.all,
             expectFullAuthorization = true,
           )
+          .map(_.discard)
           .leftMap(err =>
             if (sanitizePublicErrorMessages) {
               // Sanitize because it is too hard to reason about the contents of err.

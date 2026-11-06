@@ -19,7 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.{
   abort,
-  objIdC,
+  objId,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.topology.SequencerId
@@ -57,14 +57,14 @@ abstract class P2PGrpcStreamingReceiver(
     with NamedLogging
     with AutoCloseable {
 
-  override def toString: String = objIdC(this)
+  override protected def classForLogger: Class[?] = classOf[P2PGrpcStreamingReceiver]
 
   def shutdown(): Unit
 
   private[grpc] val remotePeerId: String =
     maybeP2PEndpointId
       .map(_.toString)
-      .getOrElse(s"<unknown (incoming connection, receiver: $this)>")
+      .getOrElse(s"<unknown (incoming connection, receiver: ${objId(this)})>")
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   @volatile private var closed = false
@@ -110,7 +110,7 @@ abstract class P2PGrpcStreamingReceiver(
 
   final override def onNext(message: BftOrderingMessage): Unit = {
     implicit val traceContext: TraceContext = TraceContext.fromW3CTraceParent(message.traceContext)
-    logger.trace(s"$this: Received gRPC message from '$remotePeerId': $message")
+    logger.trace(s"Received gRPC message from '$remotePeerId': $message")
     message.sentAt.foreach(sendInstant =>
       updateTimer(
         metrics.p2p.send.grpcLatency,
@@ -138,7 +138,7 @@ abstract class P2PGrpcStreamingReceiver(
         // Authentication is disabled: backfill the sequencer ID promise with the first message's sentBy
         SequencerId.fromProtoPrimitive(message.sentBy, "sentBy") match {
           case Left(e) =>
-            val msg = s"$this: Received unparseable sequencer ID from '$remotePeerId': ${e.message}"
+            val msg = s"Received unparseable sequencer ID from '$remotePeerId': ${e.message}"
             logger.warn(msg)
             val error = new RuntimeException(msg)
             sequencerIdPromiseUS.complete(Failure(error))
@@ -153,7 +153,7 @@ abstract class P2PGrpcStreamingReceiver(
       }
     } else {
       logger.trace(
-        s"$this: Received sequencer ID for '$remotePeerId' already from authentication or first message"
+        s"Received sequencer ID for '$remotePeerId' already from authentication or first message"
       )
     }
 
@@ -192,7 +192,7 @@ abstract class P2PGrpcStreamingReceiver(
       // Signature verification uses the `from` field (a.k.a. original sender) from the underlying (signed) message,
       //  so validating the `sentBy` field from the top-level message is fine.
       val msg =
-        s"$this: Sequencer ID (`$sequencerId`) from authentication and `sentBy` (`${message.sentBy}`) " +
+        s"Sequencer ID (`$sequencerId`) from authentication and `sentBy` (`${message.sentBy}`) " +
           s"do not match in gRPC message from '$remotePeerId'"
       logger.warn(msg)
       emitNonCompliance(metrics)(bftNodeId)
@@ -206,14 +206,14 @@ abstract class P2PGrpcStreamingReceiver(
       closed = true
       emitStreamTeardown(t)
       logger.info(
-        s"$this: Received error (${t.getMessage}) from '$remotePeerId', " +
+        s"Received error (${t.getMessage}) from '$remotePeerId', " +
           "invalidating connection and shutting down the gRPC channel",
         t,
       )
       close()
     } else {
       logger.debug(
-        s"$this: Ignoring repeated terminal callback (onError: ${t.getMessage}) from '$remotePeerId'",
+        s"Ignoring repeated terminal callback (onError: ${t.getMessage}) from '$remotePeerId'",
         t,
       )
     }
@@ -222,13 +222,13 @@ abstract class P2PGrpcStreamingReceiver(
     if (terminated.compareAndSet(false, true)) {
       closed = true
       logger.info(
-        s"$this: Received completion from '$remotePeerId', " +
+        s"Received completion from '$remotePeerId', " +
           "invalidating connection and shutting down the gRPC channel"
       )
       close()
     } else {
       logger.debug(
-        s"$this: Ignoring repeated terminal callback (onCompleted) from '$remotePeerId'"
+        s"Ignoring repeated terminal callback (onCompleted) from '$remotePeerId'"
       )
     }
 
@@ -272,10 +272,10 @@ abstract class P2PGrpcStreamingReceiver(
           try sendToPeer(makeConnectionOpener())
           catch {
             case NonFatal(e) =>
-              logger.debug(s"$this: Failed to reflect RTT echo to '$remotePeerId'", e)
+              logger.debug(s"Failed to reflect RTT echo to '$remotePeerId'", e)
           }
         }),
-        s"$this: Failed to reflect RTT echo to '$remotePeerId'",
+        s"Failed to reflect RTT echo to '$remotePeerId'",
       )
 
   private def recordRtt(rtt: Duration): Unit = {
@@ -288,7 +288,7 @@ abstract class P2PGrpcStreamingReceiver(
         stream.labels.Peer -> peer
       )
     )
-    logger.trace(s"$this: Measured application-level RTT to '$remotePeerId': $rtt")
+    logger.trace(s"Measured application-level RTT to '$remotePeerId': $rtt")
   }
 
   // Starts the periodic RTT probe loop on the prober (outgoing) side, once the peer's identity is
@@ -334,7 +334,7 @@ abstract class P2PGrpcStreamingReceiver(
         case NonFatal(e) =>
           // The probe never went out; clear the reservation so the next tick can probe again.
           outstandingRttProbeSentAt.set(None)
-          logger.debug(s"$this: Failed to send RTT probe to '$remotePeerId'", e)
+          logger.debug(s"Failed to send RTT probe to '$remotePeerId'", e)
       }
 
   // Don't wait forever for the sequencer ID to be provided:
@@ -347,7 +347,7 @@ abstract class P2PGrpcStreamingReceiver(
     DelayUtil.delay(AuthenticationTimeout).onComplete { _ =>
       if (!sequencerIdPromiseUS.isCompleted) {
         val msg =
-          s"$this: Did not receive sequencer ID from '$remotePeerId' within $AuthenticationTimeout"
+          s"Did not receive sequencer ID from '$remotePeerId' within $AuthenticationTimeout"
         val error = new RuntimeException(msg)
         sequencerIdPromiseUS.complete(Failure(error))
         if (!closed) {
@@ -358,7 +358,7 @@ abstract class P2PGrpcStreamingReceiver(
         }
       } else {
         logger.debug(
-          s"$this: Received sequencer ID from '$remotePeerId' before the authentication timeout"
+          s"Received sequencer ID from '$remotePeerId' before the authentication timeout"
         )
       }
     }

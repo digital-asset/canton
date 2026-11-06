@@ -686,7 +686,6 @@ final class UnassignmentProcessingStepsTest
       result.left.value shouldBe expected
     }
 
-    // TODO(i13201) This should ideally be covered in integration tests as well
     "fail vetting if source validation packages are not vetted on source synchronizer" in {
       forEvery(List(submittingParticipant, participant1)) { participantId =>
         testPackageVettingFailure(
@@ -697,7 +696,6 @@ final class UnassignmentProcessingStepsTest
       }
     }
 
-    // TODO(i13201) This should ideally be covered in integration tests as well
     "fail vetting if target validation packages are not vetted in target synchronizer" in {
       forEvery(List(submittingParticipant, participant1)) { participantId =>
         testPackageVettingFailure(
@@ -1109,7 +1107,6 @@ final class UnassignmentProcessingStepsTest
       succeed
     }
 
-    // TODO(i13201) This should ideally be covered in integration tests as well
     "abstain when the contract package is not vetted on the target synchronizer" in {
       val unassignmentProcessingStepsWithoutPackages = {
         val f = createCryptoFactory(packages = Seq.empty)

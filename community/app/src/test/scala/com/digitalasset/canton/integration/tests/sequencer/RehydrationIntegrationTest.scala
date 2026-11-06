@@ -27,6 +27,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -126,6 +127,8 @@ abstract class RehydrationIntegrationTest
         features = CantonFeatures(enableRepairCommands = true),
       )
     ).withManualStart
+      // repair.identity.download exports the node keys
+      .addConfigTransforms(ConfigTransforms.enableKeyDownload)
       .withSetup { implicit env =>
         import env.*
 

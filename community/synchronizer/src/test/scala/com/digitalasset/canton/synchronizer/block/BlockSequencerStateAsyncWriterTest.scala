@@ -262,12 +262,15 @@ class BlockSequencerStateAsyncWriterTest
         // first write will start immediately, rest will be queued
         _ <- writer.append(Seq.empty, Map(aggId1 -> agg1), EitherT.pure(()))
         // adding first aggregation to the queue
-        _ = writer.append(Seq.empty, Map(aggId2 -> agg1, aggId1 -> agg1), EitherT.pure(()))
+        queued1 = writer.append(Seq.empty, Map(aggId2 -> agg1, aggId1 -> agg1), EitherT.pure(()))
         // adding second aggregation to the queue
-        _ = writer.append(Seq.empty, Map(aggId2 -> agg2), EitherT.pure(()))
-      } yield {
+        queued2 = writer.append(Seq.empty, Map(aggId2 -> agg2), EitherT.pure(()))
         // flushing first write
-        aggregationP.success(UnlessShutdown.unit)
+        _ = aggregationP.success(UnlessShutdown.unit)
+        // Await the queued writes
+        _ <- queued1
+        _ <- queued2
+      } yield {
         eventually() {
           val ret = inflightAggregations.get().written
           ret should have length (2)

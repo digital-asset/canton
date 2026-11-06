@@ -6,21 +6,41 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+    secrets:
+      GHA_CANTON_DACH_NY:
+        required: false
+        description: GitHub token with write access to DACH-NY/canton
 
 jobs:
   tag_new_releases:
     name: Tag New Releases
+    environment: release
     runs-on: ${{ inputs.runner }}
     permissions:
-      contents: write
+      contents: read
     steps:
+      # Tags pushed with github.token do not trigger other workflows, so the
+      # v* tag would never start the Canton Release run that publishes it.
+      - name: Validate repo GitHub token
+        shell: bash
+        env:
+          REPO_GITHUB_TOKEN: ${{ secrets.GHA_CANTON_DACH_NY }}
+        run: |
+          if [[ -z "${REPO_GITHUB_TOKEN}" ]]; then
+            echo "::error::Missing GitHub token for ${GITHUB_REPOSITORY}. Set GHA_CANTON_DACH_NY before running this workflow."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Authorize git
         uses: ./.github/actions/git/authorize_git
+        with:
+          github_token: ${{ secrets.GHA_CANTON_DACH_NY }}
 
       - name: Tag new releases
         shell: bash

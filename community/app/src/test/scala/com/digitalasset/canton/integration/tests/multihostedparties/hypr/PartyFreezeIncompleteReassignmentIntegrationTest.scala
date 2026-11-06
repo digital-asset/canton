@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multihostedparties.hypr
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.hypr.PartyHostingStateTestHelpers.{
@@ -141,10 +142,20 @@ abstract class PartyFreezeIncompleteReassignmentIntegrationTest
 final class PartyFreezeIncompleteReassignmentIntegrationTestPostgres
     extends PartyFreezeIncompleteReassignmentIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }
 
 final class PartyFreezeIncompleteReassignmentIntegrationTestInMemory
     extends PartyFreezeIncompleteReassignmentIntegrationTest {
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }

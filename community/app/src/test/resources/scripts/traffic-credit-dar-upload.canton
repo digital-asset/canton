@@ -1,6 +1,7 @@
-// Without Daml top-ups the participant does not load the canton-traffic-credit DAR, so upload the one bundled in the release
-val trafficCreditDar = "community/app/target/release/canton/dars/canton-traffic-credit-1.0.0.dar"
-def trafficCreditPackages = participant1.packages.list(filterName = "canton-traffic-credit")
+// Without Daml top-ups the participant does not load the canton-api-traffic-credit-v1 DAR, so upload the one bundled in the release
+val trafficCreditDar =
+  "community/app/target/release/canton/dars/canton-api-traffic-credit-v1-1.0.0.dar"
+def trafficCreditPackages = participant1.packages.list(filterName = "canton-api-traffic-credit-v1")
 
 require(
   trafficCreditPackages.isEmpty,
@@ -9,6 +10,5 @@ require(
 participant1.dars.upload(trafficCreditDar, vetAllPackages = false)
 require(trafficCreditPackages.nonEmpty, "Traffic credit DAR was not uploaded")
 println("Bundled traffic credit DAR was uploaded.")
-// TODO(i7023) remove stop again
 nodes.local.stop()
 sys.exit(0)

@@ -9,7 +9,7 @@ import scala.reflect.macros.blackbox.Context
 object NameOfImpl {
   def qualifiedNameOfCurrentFunc(c: Context): c.Expr[String] = {
     import c.universe.*
-    val cc = c.asInstanceOf[scala.reflect.macros.runtime.Context]
+    val cc = c.asInstanceOf[scala.reflect.macros.contexts.Context]
     val owner = cc.callsiteTyper.context.enclMethod.owner
     if (owner == NoSymbol)
       c.abort(c.enclosingPosition, "qualifiedNameOfCurrentFunc can be used only inside functions.")

@@ -149,5 +149,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: nightly_integration_test
+      shard_job_result: ${{ needs.nightly_integration_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

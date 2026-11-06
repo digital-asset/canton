@@ -52,7 +52,13 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
 }
 import com.digitalasset.canton.topology.ForceFlag.DisablePartyWithActiveContracts
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.{ExternalParty, ForceFlags, PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  ExternalParty,
+  ForceFlags,
+  PartyId,
+  Synchronizer,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{BaseTest, LfTimestamp}
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
@@ -324,6 +330,16 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
       party: ExternalParty,
   )(implicit
       env: TestConsoleEnvironment
+  ): (Signature, PreparedTransaction) =
+    // This is the WRONG SyncId format, so physical for <= 34 and logical otherwise
+    prepareTransactionsWithSynchronizerId(command, party, env.synchronizer1Id.logical)
+
+  protected def prepareTransactionsWithSynchronizerId(
+      command: Command,
+      party: ExternalParty,
+      wrongSyncId: Synchronizer,
+  )(implicit
+      env: TestConsoleEnvironment
   ): (Signature, PreparedTransaction) = {
     import env.*
 
@@ -331,9 +347,6 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
       Seq(party.partyId),
       Seq(command),
     )
-
-    // This is the WRONG SyncId format, so physical for <= 34 and logical otherwise
-    val wrongSyncId = synchronizer1Id.logical
 
     val preparedTransactionWithWrongSyncIdFormat =
       preparedTransaction

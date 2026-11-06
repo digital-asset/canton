@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
 import com.digitalasset.canton.protocol.v30.ExternalPartyAuthorization
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.*
 
 final case class ExternalAuthorization(
@@ -49,8 +49,7 @@ final case class ExternalAuthorization(
 }
 
 object ExternalAuthorization
-    extends VersioningCompanion[ExternalAuthorization]
-    with ProtocolVersionedCompanionDbHelpers[ExternalAuthorization]
+    extends VersioningCompanionContext[ExternalAuthorization, TransactionProtocolLimits]
     with PrettyPrintingCompanion[ExternalAuthorization] {
 
   override protected val pretty: Pretty[ExternalAuthorization] = prettyOfClass(
@@ -96,21 +95,22 @@ object ExternalAuthorization
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,
+      limits: TransactionProtocolLimits,
       proto: v32.ExternalAuthorization,
   ): ParsingResult[ExternalAuthorization] = {
-    val v32.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
+    val v32.ExternalAuthorization(authenticationsP, hashingSchemeVersionP, maxRecordTimeP) = proto
     for {
-      signatures <- ProtoValidation
+      authentications <- ProtoValidation
         .validateLengthThen(
-          signaturesP,
-          "signatures",
+          authenticationsP,
+          "authentications",
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxActAs),
         )((element, _) => fromProtoV30(pvv, element))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV32(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
-    } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, maxRecordTime)(rpv)
+    } yield ExternalAuthorization(authentications.toMap, hashingSchemeVersion, maxRecordTime)(rpv)
   }
 
 }

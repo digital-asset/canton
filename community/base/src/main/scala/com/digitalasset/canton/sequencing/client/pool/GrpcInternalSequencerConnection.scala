@@ -143,13 +143,14 @@ class GrpcInternalSequencerConnection private[sequencing] (
         }
 
         // Update connection health metric
-        metrics
-          .connectionHealth(connectionMetricsContext)
-          .updateValue(state match {
+        metrics.updateConnectionHealth(
+          connectionMetricsContext,
+          state match {
             case SequencerConnectionState.Fatal(_) => 0
             case SequencerConnectionState.Validated => 2
             case _ => 1
-          })
+          },
+        )
       }
 
     })

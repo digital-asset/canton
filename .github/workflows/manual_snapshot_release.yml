@@ -9,7 +9,7 @@ permissions:
 jobs:
   pick_runner:
     name: Pick runner
-    if: ${{ github.repository == 'DACH-NY/canton' }}
+    if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick_runner.outputs.runner }}

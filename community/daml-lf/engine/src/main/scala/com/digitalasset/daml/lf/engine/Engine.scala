@@ -26,7 +26,7 @@ import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SEMakeClo, SEValue, SExpr}
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachine}
-import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugins
 import com.digitalasset.daml.lf.speedy.{TransactionConductor as TxConductor, *}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
@@ -166,13 +166,8 @@ class Engine(
           submissionInfo = Some(
             Engine.SubmissionInfo(participantId, submissionSeed, transactionSeed, submitters)
           ),
-          metricPlugins = config.snapshotDir.fold(Seq.empty[MetricPlugin]) { _ =>
-            Seq(
-              new metrics.FetchNodeCount,
-              new metrics.StepCount(config.iterationsBetweenInterruptions),
-              new metrics.TxNodeCount,
-            )
-          },
+          metricPlugins =
+            config.snapshotDir.map(_ => new MetricPlugins(config.iterationsBetweenInterruptions)),
         )
       (tx, meta, _) = result
     } yield (tx, meta)
@@ -257,7 +252,7 @@ class Engine(
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
@@ -305,7 +300,7 @@ class Engine(
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit traceContext: TraceContext): Result[Unit] =
     validateAndCollectMetrics(
       submitters,
@@ -328,7 +323,7 @@ class Engine(
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
       interpretationConfig: InterpretationConfig,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit traceContext: TraceContext): Result[Speedy.Metrics] =
     // reinterpret
     for {
@@ -410,7 +405,7 @@ class Engine(
       interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       submissionInfo: Option[Engine.SubmissionInfo],
-      metricPlugins: Seq[MetricPlugin],
+      metricPlugins: Option[MetricPlugins],
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
@@ -457,7 +452,7 @@ class Engine(
       interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit
       traceContext: TraceContext
   ) =
@@ -506,7 +501,7 @@ class Engine(
       interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
@@ -645,7 +640,7 @@ class Engine(
       interpretationConfig: InterpretationConfig,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       submissionInfo: Option[Engine.SubmissionInfo] = None,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
   )(implicit
       traceContext: TraceContext
   ): Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] = {
@@ -917,21 +912,21 @@ class Engine(
                 val snapshotFile =
                   dir.resolve(s"snapshot-${participantId.replaceAll("[^a-zA-Z0-9-_\\.]", "_")}.bin")
                 val metricPlugins =
-                  machine.metrics.totalCount[metrics.StepCount].map { stepCount =>
+                  machine.metrics.totalCount(_.stepCount).map { stepCount =>
                     Snapshot.MetricPlugin
                       .newBuilder()
                       .setName("StepCount")
                       .setTotal(stepCount)
                       .build()
                   } ++
-                    machine.metrics.totalCount[metrics.TxNodeCount].map { txNodeCount =>
+                    machine.metrics.totalCount(_.txNodeCount).map { txNodeCount =>
                       Snapshot.MetricPlugin
                         .newBuilder()
                         .setName("TxNodeCount")
                         .setTotal(txNodeCount)
                         .build()
                     } ++
-                    machine.metrics.totalCount[metrics.FetchNodeCount].map { fetchNodeCount =>
+                    machine.metrics.totalCount(_.fetchNodeCount).map { fetchNodeCount =>
                       Snapshot.MetricPlugin
                         .newBuilder()
                         .setName("FetchNodeCount")

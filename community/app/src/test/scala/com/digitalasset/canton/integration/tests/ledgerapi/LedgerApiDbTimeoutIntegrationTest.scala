@@ -7,6 +7,7 @@ import anorm.SqlStringInterpolation
 import com.digitalasset.canton.config
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -158,5 +159,10 @@ trait LedgerApiDbTimeoutIntegrationTest
 
 class LedgerApiDbTimeoutIntegrationTestPostgres extends LedgerApiDbTimeoutIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }

@@ -266,12 +266,6 @@ In the following, we go through the parameters with known impact on performance.
 This will negatively impact throughput, because the commands consume resources without contributing to the number of accepted commands.
 To avoid this situation increase timeout parameters from the Canton console:
 
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/scripts/canton-testing/config/run-synchronizers.canton
-    start-after: user-manual-entry-begin: BumpSynchronizerTimeouts
-    end-before: user-manual-entry-end: BumpSynchronizerTimeouts
-
 If timeouts keep occurring, change your setup to submit commands at a lower rate.
 In addition, take the next paragraph on resource limits into account.
 

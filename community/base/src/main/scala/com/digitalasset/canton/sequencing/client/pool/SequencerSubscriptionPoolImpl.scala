@@ -171,9 +171,10 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
                     .toOption
                 } yield {
                   logger.debug(s"Successfully started subscription for $sequencerId")
-                  metrics
-                    .subscriptionHealth(mc.withExtraLabels("connection" -> connection.config.name))
-                    .updateValue(1)
+                  metrics.updateSubscriptionHealth(
+                    mc.withExtraLabels("connection" -> connection.config.name),
+                    1,
+                  )
                   new SubscriptionManager(subscriptionWrapper)
                 }
               }
@@ -548,9 +549,10 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
         if (trackedSubscriptions.remove(manager)) {
           logger.debug(s"Removed ${manager.connection.name} from the subscription pool")
           manager.close()
-          metrics
-            .subscriptionHealth(mc.withExtraLabels("connection" -> manager.connection.config.name))
-            .updateValue(0)
+          metrics.updateSubscriptionHealth(
+            mc.withExtraLabels("connection" -> manager.connection.config.name),
+            0,
+          )
         }
       }
 

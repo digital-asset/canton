@@ -770,7 +770,6 @@ private[reassignment] class UnassignmentProcessingSteps(
           targetStaticSynchronizerParameters,
           reassignmentCoordination,
           pendingRequestData.unassignmentValidationResult.stakeholders,
-          pendingRequestData.submitterMetadata,
           participantId,
           t0,
           pendingRequestData.requestId.unwrap,

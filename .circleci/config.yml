@@ -3483,18 +3483,6 @@ workflows:
                     - da-images
                     - aws_kms_testing
                     - gcp_kms_testing
-                name: postgres_conformance_test_14
-                postgres_version: 14
-                requires:
-                    - compile
-            - postgres_conformance_test:
-                context:
-                    - datadog
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
                 name: postgres_conformance_test_15
                 postgres_version: 15
                 requires:

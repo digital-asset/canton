@@ -239,11 +239,11 @@ trait HasVersionedMessageCompanionCommonF[F[_], ValueClass] {
           immutable.SortedMap.from(converters)(implicitly[Ordering[ProtoVersion]].reverse)
         )
       )
-      val (_, lowestProtocolVersion) = sortedConverters.last1
+      val (_, lowestCodec) = sortedConverters.last1
 
       require(
-        lowestProtocolVersion.fromInclusive == ProtocolVersion.minimum,
-        s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found ${lowestProtocolVersion.fromInclusive}",
+        lowestCodec.fromInclusive == ProtocolVersion.minimum,
+        s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found ${lowestCodec.fromInclusive}",
       )
 
       SupportedProtoVersions(sortedConverters)

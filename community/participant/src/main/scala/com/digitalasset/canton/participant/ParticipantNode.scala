@@ -696,7 +696,7 @@ class ParticipantNodeBootstrap(
                 stateName = "traffic-enforcement-app",
                 create = () =>
                   withNewTraceContext("upload_traffic_credit_dar") { implicit traceContext =>
-                    // The credit projection subscribes to the TrafficCreditIssuer interface, which
+                    // The credit projection subscribes to the TrafficCreditReporter interface, which
                     // the Ledger API rejects until the package is known, so upload it before
                     // starting TEA.
                     MonadUtil.when(parameters.damlTopUpEnabled)(
@@ -994,8 +994,8 @@ class ParticipantNodeBootstrap(
             EitherT.right[String](ledgerApiIndexServiceContainer.initializeNext())
           else EitherT.right[String](FutureUnlessShutdown.unit)
 
-        acsReplicatorContainerO = config.parameters.alphaOnlinePartyReplicationSupport.map {
-          config =>
+        acsReplicatorContainerO =
+          config.parameters.alphaAcsReplicationSupport.map { config =>
             new LifeCycleContainer[AcsReplicator](
               stateName = "acs-replicator",
               create = () =>
@@ -1019,7 +1019,7 @@ class ParticipantNodeBootstrap(
                 ),
               loggerFactory = loggerFactory,
             )
-        }
+          }
         _ <- acsReplicatorContainerO match {
           // Initialize ACS replicator only if configured and the participant is active
           case Some(acsReplicatorContainer) if sync.isActive() =>

@@ -70,11 +70,6 @@ Similar to how there is no single globally trusted entity for synchronizing Daml
 transactions, there is also no single globally trusted entity for establishing
 identities, which leads us to the first principle:
 
-.. todo:: cross-reference to the multi-synchronizer motivation <https://github.com/DACH-NY/canton/issues/25656>
-
-  *Principle 1: For global synchronization to work in reality, there cannot
-  be a single trust anchor.*
-
 A cryptographic key pair can uniquely be identified through the fingerprint
 of the public key. By owning the associated private key, an entity can always
 prove unambiguously through a signature that the entity is the owner of the
@@ -230,9 +225,6 @@ most one active ``PartyToParticipantMapping`` topology transaction for a given
 For definitions of all mappings and the respective unique keys, please refer to
 topology.proto.
 
-.. todo:: link to topology proto? <https://github.com/DACH-NY/canton/issues/25656>
-
-
 Serial
 ------
 The serial of a topology transaction is used to evolve the mapping of a
@@ -243,8 +235,6 @@ topology transaction for the same key by exactly one. There must be no gaps
 different content). However, additional signatures of expected authorizers can
 be added to an already fully authorized and currently effective topology
 transaction. More on that later.
-
-.. todo:: link to the section that covers the "more on that later". <https://github.com/DACH-NY/canton/issues/25656>
 
 The serial on the topology transaction prevents replay attacks. A malicious
 actor cannot simply take a previously fully authorized transaction and submit
@@ -294,8 +284,6 @@ any other topology transaction, because the data that is covered by the
 signature is not the same, not even for the same unique key and the same
 content. At least the serial must change in a later evolution of the
 value for the unique key.
-
-.. todo:: Section "Binding topology transactions to Synchronizers" <https://github.com/DACH-NY/canton/issues/25656>
 
 Types of topology mappings
 ==========================
@@ -418,8 +406,6 @@ either side. Furthermore, the ``VettedPackages`` topology mapping determines
 what version of a Daml template will be used for interpreting a Ledger API
 command.
 
-.. todo:: add section Synchronizer Parameters <https://github.com/DACH-NY/canton/issues/25656>
-
 Membership with a Synchronizer
 ------------------------------
 
@@ -523,9 +509,6 @@ validation.
    :width: 80%
 
 
-.. todo:: link to the PartyToParticipant mapping topology proto documentation. <https://github.com/DACH-NY/canton/issues/25656>
-
-
 Concurrent / competing proposals
 --------------------------------
 
@@ -586,8 +569,6 @@ As a consequence of the definition of the validity period, all fully authorized
 topology transaction for a unique key build a "validity timeline" with no gaps,
 which unambiguously defines which topology transaction is considered effective
 for any given point in time.
-
-.. todo:: Add pointers to API docs and howtos in "Operate" and "Subnet" subsites <https://github.com/DACH-NY/canton/issues/25656>
 
 Disseminating topology transactions
 ===================================
@@ -667,8 +648,6 @@ and can be changed by the Synchronizer owners. Therefore the actual topology
 change delay used for the calculation of the effective time must be read from
 the topology state during the validation of topology transactions.
 
-.. todo:: link to a howto for changing Synchronizer parameters <https://github.com/DACH-NY/canton/issues/25656>
-
 This mechanism allows other messages and events between ``t`` and ``t+ε`` to be
 processed normally without having to wait for the topology processing layer.
 
@@ -697,8 +676,6 @@ to t\ :sub:`5`\ .
    :align: center
    :width: 80%
 
-.. todo:: link to dynamic Synchronizer parameters reference. <https://github.com/DACH-NY/canton/issues/25656>
-
 .. _authorization:
 
 Authorization
@@ -725,8 +702,6 @@ Synchronizer may change dynamic parameters of the Synchronizer.
 
 For definitions of all mappings and the respective authorization rules, please
 refer to topology.proto.
-
-.. todo:: link to topology proto? <https://github.com/DACH-NY/canton/issues/25656>
 
 Some topology mappings define more than one required authorizer for certain
 changes. A common scenario is the hosting of a party on a Participant Node that

@@ -1,0 +1,14 @@
+name: Set Up Temporary Workspace
+description: >
+  Create a per-run workspace directory under the runner temp directory and export its path as
+  TMP_WORKSPACE for the subsequent steps of the job.
+
+runs:
+  using: composite
+  steps:
+    - name: Set up workspace path
+      run: |
+        TMP_WORKSPACE="$RUNNER_TEMP/workspace-$GITHUB_RUN_ID"
+        mkdir -p "$TMP_WORKSPACE"
+        echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+      shell: bash

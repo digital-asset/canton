@@ -113,13 +113,6 @@ trait CantonSynchronizerNodeDeprecations {
   implicit val sequencerNodeParametersConfigReaderDeprecations
       : DeprecatedFieldsFor[SequencerNodeParameterConfig] =
     new DeprecatedFieldsFor[SequencerNodeParameterConfig] {
-      override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
-        DeprecatedConfigUtils.MovedConfigPath(
-          "unsafe-enable-online-party-replication",
-          since = "3.5.0",
-          to = Seq("unsafe-sequencer-channel-support"),
-        )
-      )
       override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
         // removed as the feature is now always enabled and the flag is no longer needed (https://github.com/DACH-NY/canton/issues/30769)
         DeprecatedConfigPath[String]("produce-post-ordering-topology-ticks", since = "3.8.0"),
@@ -127,6 +120,8 @@ trait CantonSynchronizerNodeDeprecations {
           "enable-reject-delivered-aggregations-on-pv-35",
           since = "3.8.0",
         ),
+        DeprecatedConfigPath[String]("unsafe-enable-online-party-replication", since = "3.5.0"),
+        DeprecatedConfigPath[String]("unsafe-sequencer-channel-support", since = "3.7.1"),
       )
     }
 

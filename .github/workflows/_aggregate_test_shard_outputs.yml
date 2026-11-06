@@ -15,6 +15,14 @@ on:
           caller_job (as the per-protocol-version _test.yml legs do). Defaults
           to caller_job.
         type: string
+      shard_job_result:
+        required: true
+        description: >-
+          Result of the calling shard job (needs.<shard job>.result), aggregated
+          over the whole matrix. When it is 'cancelled', 'skipped' or hit its job-level timeout,
+          the shards never finished and merged timings are neither built nor uploaded, so a partial
+          set does not overwrite the latest timings; the summary steps still run.
+        type: string
       runner:
         description: GitHub Actions runner label
         required: true
@@ -138,6 +146,7 @@ jobs:
           overwrite: true
 
       - name: Build merged timings
+        if: ${{ inputs.shard_job_result == 'success' || inputs.shard_job_result == 'failure' }}
         uses: ./.github/actions/nix/nix_script_run
         with:
           command: |
@@ -153,6 +162,7 @@ jobs:
               "${EXTRA_ARGS[@]}"
 
       - name: Upload merged timings
+        if: ${{ inputs.shard_job_result == 'success' || inputs.shard_job_result == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
           name: ${{ env.LATEST_ARTIFACT_PREFIX }}-timings-latest

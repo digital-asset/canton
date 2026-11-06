@@ -13,13 +13,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicationStatus.EphemeralSequencerChannelProgress
 import com.digitalasset.canton.participant.admin.party.acsreplication.AcsReplicator.AcsReplicationRequestId
-import com.digitalasset.canton.participant.config.OnlinePartyReplicationTargetConfig
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationTargetConfig
 import com.digitalasset.canton.participant.protocol.party.*
 import com.digitalasset.canton.participant.protocol.party.AcsReplicationContractHandler.AcsTransferCheckpoint
-import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.contractsToRequestEachTime
 import com.digitalasset.canton.participant.protocol.party.acsreplication.AcsReplicationSourceParticipantMessage.GetAcsArguments
 import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
@@ -66,7 +65,7 @@ import scala.concurrent.ExecutionContext
   * @param acsReplicationContractHandler
   *   Handler that validates and persists imported ACS contracts.
   * @param config
-  *   Target participant configuration options.
+  *   ACS replication configuration options.
   * @param testOnlyInterceptor
   *   Test interceptor only alters behavior in integration tests.
   */
@@ -83,12 +82,12 @@ class AcsReplicationTargetParticipantProcessor(
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
     acsReplicationContractHandler: AcsReplicationContractHandler,
-    config: OnlinePartyReplicationTargetConfig,
+    config: AlphaAcsReplicationTargetConfig,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-    protected val testOnlyInterceptor: PartyReplicationTestInterceptor,
+    protected val testOnlyInterceptor: AcsReplicationTestInterceptor,
 )(implicit override val executionContext: ExecutionContext)
     extends AcsReplicationProcessor {
 
@@ -275,10 +274,10 @@ class AcsReplicationTargetParticipantProcessor(
 
         interceptorAction match {
 
-          case Some(PartyReplicationTestInterceptor.Proceed) =>
+          case Some(AcsReplicationTestInterceptor.Proceed) =>
             respondToSourceParticipant()
 
-          case Some(PartyReplicationTestInterceptor.Fail(reason)) =>
+          case Some(AcsReplicationTestInterceptor.Fail(reason)) =>
             // Actively fail the asynchronous task and propagate the error
             EitherT.leftT[FutureUnlessShutdown, Unit](reason)
 
@@ -325,7 +324,7 @@ class AcsReplicationTargetParticipantProcessor(
       } else if (replicatedContractCount == processorStore.requestedContractsCount) {
         logger.debug(
           s"Target participant has received all the contracts requested before ordinal ${replicatedContractCount.unwrap}. " +
-            s"Requesting ${contractsToRequestEachTime.unwrap} more contracts from source participant"
+            s"Requesting ${config.acsBatchSize.unwrap} more contracts from source participant"
         )
         requestNextSetOfContracts()
       } else {
@@ -337,7 +336,7 @@ class AcsReplicationTargetParticipantProcessor(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     val updatedContractOrdinalToRequestExclusive =
-      processorStore.requestedContractsCount.map(_ + contractsToRequestEachTime.unwrap)
+      processorStore.requestedContractsCount.map(_ + config.acsBatchSize.unwrap)
     val inclusiveContractOrdinal = updatedContractOrdinalToRequestExclusive.unwrap - 1
     val instructionMessage = AcsReplicationTargetParticipantMessage(
       AcsReplicationTargetParticipantMessage.SendAcsUpTo(

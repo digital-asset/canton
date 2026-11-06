@@ -109,9 +109,6 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
             SigningKeyUsage.ProtocolOnly,
             SigningKeySpec.EcP256,
           ).failOnShutdown
-          // clear the cache because this fingerprint is now considered validated, and the next 'invalid' key will
-          // reuse the same fingerprint.
-          _ = CryptoKeyValidation.clearValidationCaches()
           // use a different curve (P-384) compared to the one on which the public key was generated (P-256)
           validationRes =
             SigningPublicKey.create(
@@ -122,6 +119,43 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
             )
         } yield validationRes.left.value.toString should include(
           s"EC key not in curve"
+        )
+      }
+
+      "fail if a cached EC public key declares a different key spec" in {
+        for {
+          crypto <- newCrypto
+          publicKeyEcP256 <- getSigningPublicKey(
+            crypto,
+            SigningKeyUsage.ProtocolOnly,
+            SigningKeySpec.EcP256,
+          ).failOnShutdown
+          // caches the validation and the Java key conversion of the EC-P256 key
+          signature <- crypto.privateCrypto
+            .signBytes(
+              ByteString.copyFromUtf8("test"),
+              publicKeyEcP256.id,
+              SigningKeyUsage.ProtocolOnly,
+            )
+            .valueOrFail("sign message")
+            .failOnShutdown
+          _ = crypto.pureCrypto
+            .verifySignature(
+              ByteString.copyFromUtf8("test"),
+              publicKeyEcP256,
+              signature,
+              SigningKeyUsage.ProtocolOnly,
+            )
+            .valueOrFail("verify signature")
+          // the same key bytes, and so the same fingerprint, declared as an ML-DSA-65 key
+          validationRes = SigningPublicKey.create(
+            publicKeyEcP256.format,
+            publicKeyEcP256.key,
+            SigningKeySpec.MlDsa65,
+            publicKeyEcP256.usage,
+          )
+        } yield validationRes.left.value.toString should include(
+          s"Failed to deserialize or validate ${publicKeyEcP256.format} public key"
         )
       }
 
@@ -222,13 +256,13 @@ trait PublicKeyValidationTest extends BaseTest with CryptoTestHelper { this: Asy
             )
             .valueOrFail("verify signature")
 
-          inCache = jcePureCrypto.isJavaPublicKeyInCache(publicKey.id) &&
+          inCache = jcePureCrypto.isJavaPublicKeyInCache(publicKey) &&
             jcePureCrypto.isJavaPrivateKeyInCache(publicKey.id)
 
           // ensure enough time has passed for the Java keys to be removed from their respective caches
           _ = Threading.sleep(javaPrivateKeyRetentionTime.underlying.toMillis + 1000)
 
-          inPublicCache = jcePureCrypto.isJavaPublicKeyInCache(publicKey.id)
+          inPublicCache = jcePureCrypto.isJavaPublicKeyInCache(publicKey)
           inPrivateCache = jcePureCrypto.isJavaPrivateKeyInCache(publicKey.id)
 
         } yield {

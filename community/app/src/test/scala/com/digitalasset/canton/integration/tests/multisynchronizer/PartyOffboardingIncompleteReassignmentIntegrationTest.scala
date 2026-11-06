@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multisynchronizer
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{AutomaticAssignment, PartiesAllocator}
@@ -171,10 +172,20 @@ abstract class PartyOffboardingIncompleteReassignmentIntegrationTest
 final class PartyOffboardingIncompleteReassignmentIntegrationTestPostgres
     extends PartyOffboardingIncompleteReassignmentIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }
 
 final class PartyOffboardingIncompleteReassignmentIntegrationTestInMemory
     extends PartyOffboardingIncompleteReassignmentIntegrationTest {
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }

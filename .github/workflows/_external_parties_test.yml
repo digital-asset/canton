@@ -140,5 +140,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: external_parties_test
+      shard_job_result: ${{ needs.external_parties_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

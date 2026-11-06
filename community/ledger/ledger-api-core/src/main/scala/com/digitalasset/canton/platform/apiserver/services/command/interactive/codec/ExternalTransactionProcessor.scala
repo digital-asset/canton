@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfi
 import com.digitalasset.canton.platform.store.dao.events.InputContractPackages
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.protocol.hash.HashTracer
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.HashingSchemeVersion
@@ -286,11 +287,19 @@ class ExternalTransactionProcessor(
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         syncService
           .physicalSynchronizerIdForSynchronizerId(decoded.synchronizer.logical)
-          .filter(_.forExternalTransactionHashing != decoded.synchronizer)
-          .map { _ =>
-            InteractiveSubmissionExecuteError.Reject(
-              "Please use a Physical Synchronizer ID in the prepared transaction metadata."
-            )
+          .map(_.forExternalTransactionHashing)
+          .filter(_ != decoded.synchronizer)
+          .map { expected =>
+            (expected, decoded.synchronizer) match {
+              case (_: PhysicalSynchronizerId, _: SynchronizerId) =>
+                InteractiveSubmissionExecuteError.Reject(
+                  "Please use a Physical Synchronizer ID in the prepared transaction metadata."
+                )
+              case _ =>
+                InteractiveSubmissionExecuteError.Reject(
+                  s"The physical synchronizer ID in the prepared transaction metadata does not match the current physical synchronizer ID. Expected: ${expected.toProtoPrimitive}, actual: ${decoded.synchronizer.toProtoPrimitive}."
+                )
+            }
           }
           .toLeft(())
       )

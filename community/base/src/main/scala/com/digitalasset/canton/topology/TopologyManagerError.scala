@@ -883,9 +883,11 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
-    "This error indicates that the confirming threshold is higher than the number of hosting nodes, which will result in a non functional party."
+    "This error indicates that the confirming threshold is higher than the number of hosting nodes with Submission or Confirmation permission, which will result in a non functional party."
   )
-  @Resolution("Decrease the threshold or increase the number of hosting nodes.")
+  @Resolution(
+    "Decrease the threshold or increase the number of hosting nodes with Submission or Confirmation permission."
+  )
   object ConfirmingThresholdCannotBeReached
       extends ErrorCode(
         id = "TOPOLOGY_CONFIRMING_THRESHOLD_CANNOT_BE_REACHED",
@@ -895,7 +897,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         override val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            s"Tried to set a confirming threshold (${threshold.value}) above the number of hosting nodes ($numberOfHostingNodes)."
+            s"Tried to set a confirming threshold (${threshold.value}) above the number of hosting nodes with Submission or Confirmation permission ($numberOfHostingNodes)."
         )
         with TopologyManagerError
   }

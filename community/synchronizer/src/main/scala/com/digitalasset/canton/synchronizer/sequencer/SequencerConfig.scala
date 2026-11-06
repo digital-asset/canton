@@ -73,6 +73,8 @@ object SequencerConfig {
       ReferenceSequencerDriver.Config(storage = StorageConfig.Memory()),
     )
 
+  final case class DeprecatedSequencerConfig(sequencerType: String) extends SequencerConfig
+
   /** Configuration for how many sequencers are concurrently operating within the synchronizer.
     * @param enabled
     *   Set to Some(true) to enable HA for the sequencer. If None it will be enabled if the storage

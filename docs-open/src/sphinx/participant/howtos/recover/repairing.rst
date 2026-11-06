@@ -95,9 +95,6 @@ the Participant Node and upload the data again:
    :end-before: architecture-handbook-entry-end: RepairMacroCloneIdentityUpload
    :dedent:
 
-.. todo::
-   Once RepairMacros.identity.download and upload support KMS, add a note to re-register the existing KMS keys <https://github.com/DACH-NY/canton/issues/25974>
-
 Reconnect the Participant Node to the Synchronizer using a normal connect:
 
 .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/RehydrationIntegrationTest.scala

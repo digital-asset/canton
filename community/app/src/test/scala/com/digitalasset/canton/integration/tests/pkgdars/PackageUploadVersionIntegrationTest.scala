@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.pkgdars
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIdsFromJava
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,

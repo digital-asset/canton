@@ -20,10 +20,10 @@ on:
       GCLOUD_SERVICE_KEY:
         required: true
       AWS_RELEASE_ACCESS_KEY_ID:
-        required: true
+        required: false
         description: AWS key allowed to write to s3://canton-public-releases, separate from the KMS testing key
       AWS_RELEASE_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_SESSION_TOKEN:
         required: false
       AWS_REGION:
@@ -59,6 +59,7 @@ jobs:
 
   generate_data_continuity_dumps:
     name: Generate Data Continuity Dumps
+    environment: release
     needs: resolve_timings
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
@@ -147,12 +148,7 @@ jobs:
 
       - name: Allow automatic protocol version selection
         if: steps.guards.outputs.result != 'true'
-        env:
-          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
-        run: |
-          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will select the protocol version automatically"
-        shell: bash
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Run data continuity dump tests
         if: steps.guards.outputs.result != 'true'
@@ -196,5 +192,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: generate_data_continuity_dumps
+      shard_job_result: ${{ needs.generate_data_continuity_dumps.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ''

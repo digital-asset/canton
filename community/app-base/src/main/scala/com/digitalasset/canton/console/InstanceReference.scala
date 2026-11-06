@@ -206,7 +206,14 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
   override def keys: LocalKeyAdministrationGroup = _keys
 
   private val _keys =
-    new LocalKeyAdministrationGroup(this, this, consoleEnvironment, crypto, loggerFactory)(
+    new LocalKeyAdministrationGroup(
+      this,
+      this,
+      consoleEnvironment,
+      crypto,
+      enableKeyDownload,
+      loggerFactory,
+    )(
       executionContext
     )
 
@@ -382,6 +389,8 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
     * intended to be used exclusively by the admin API with a trusted operator.
     */
   protected[canton] def crypto: Crypto
+
+  protected[canton] def enableKeyDownload: Boolean
 
   protected def runCommandIfRunning[Result](
       runner: => ConsoleCommandResult[Result]

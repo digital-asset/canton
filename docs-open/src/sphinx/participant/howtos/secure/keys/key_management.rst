@@ -67,9 +67,6 @@ The following command rotates a single key of ``myNode``:
 .. note::
    Key rotation should be :ref:`interleaved with taking a backup <backup-restore-private-key-rotation>`.
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/27699>
-   Update the commands and docs so that one can actually pause in between and take a backup.
-
 .. _generate-activate-new-keys:
 
 Generate and activate keys

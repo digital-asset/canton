@@ -25,7 +25,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.HasSimClockUtils.advanceClockInStepsTo
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -138,7 +138,12 @@ abstract class SynchronizerChangeIntegrationTest(
 
   protected def additionalConfigTransforms: Seq[ConfigTransform] = Seq.empty
 
-  protected def setupTopology(alice: String, bank: String, painter: String)(implicit
+  protected def setupTopology(
+      alice: String,
+      bank: String,
+      painter: String,
+      aliceIouPermissionOnP5: ParticipantPermission = ParticipantPermission.Submission,
+  )(implicit
       env: TestConsoleEnvironment
   ): Unit = {
     import env.*
@@ -150,7 +155,7 @@ abstract class SynchronizerChangeIntegrationTest(
         alice -> Map(
           paintSynchronizerId -> (PositiveInt.one, Set(P5.id -> ParticipantPermission.Submission)),
           iouSynchronizerId -> (PositiveInt.one, Set(
-            P5.id -> ParticipantPermission.Submission,
+            P5.id -> aliceIouPermissionOnP5,
             P2.id -> ParticipantPermission.Submission,
           )),
         ),
@@ -182,14 +187,15 @@ abstract class SynchronizerChangeIntegrationTest(
   }
 
   protected def withUniqueParties[T](
-      test: (PartyId, PartyId, PartyId) => T
+      test: (PartyId, PartyId, PartyId) => T,
+      aliceIouPermissionOnP5: ParticipantPermission = ParticipantPermission.Submission,
   )(implicit env: TestConsoleEnvironment): T = {
     val pc = partyCounter.getAndIncrement()
     val Alice = s"Alice$pc"
     val Bank = s"Bank$pc"
     val Painter = s"Painter$pc"
 
-    setupTopology(Alice, Bank, Painter)
+    setupTopology(Alice, Bank, Painter, aliceIouPermissionOnP5)
 
     test(Alice.toPartyId(), Bank.toPartyId(), Painter.toPartyId())
   }
@@ -393,6 +399,57 @@ abstract class SynchronizerChangeSimClockIntegrationTest
       )
     }
 
+  private def unassignAndAwaitAutomaticAssignment(
+      alice: PartyId,
+      bank: PartyId,
+      painter: PartyId,
+  )(implicit env: TestConsoleEnvironment): Unit = {
+    val participants = Seq(P4, P5)
+    val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
+
+    logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
+
+    val reassignmentId =
+      P4.ledger_api.commands.submit_unassign(
+        painter,
+        Seq(paintOfferId),
+        paintSynchronizerId,
+        iouSynchronizerId,
+      )
+
+    val clock = env.environment.simClock.value
+
+    logger.info(s"An assignment for $reassignmentId is triggered automatically")
+
+    val (earliestAssignment, latestAssignment) =
+      automaticAssignmentWindow(reassignmentId, participants, painter)
+
+    val margin = NonNegativeFiniteDuration.tryOfSeconds(1)
+
+    // Advance clock just before the earliest automatic assignment
+    clock.advanceTo(earliestAssignment.minus(margin.unwrap))
+    participants.foreach(_.testing.fetch_synchronizer_times())
+    checkIncompleteUnassignedContracts(
+      participants,
+      painter,
+    ) // assignment did not happen yet
+
+    // BFT sequencing time can lag behind the simulated clock, so a large jump can trigger
+    //  assignments with stale timestamps whose response deadlines expire as BFT time catches
+    //  up.
+    //  Use steps below the response timeout and fetch times between them to bound this lag.
+    advanceClockInStepsTo(
+      clock,
+      latestAssignment,
+      maxStep = PositiveFiniteDuration.tryOfSeconds(10),
+    ) {
+      participants.foreach(_.testing.fetch_synchronizer_times())
+    }
+
+    // The reassignment store should be empty once the automatic assignment has completed
+    checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)
+  }
+
   "The paint fence scenario" when {
 
     "assignment triggered automatically" must {
@@ -406,52 +463,30 @@ abstract class SynchronizerChangeSimClockIntegrationTest
         ),
       ) in { implicit env =>
         withUniqueParties { case (alice, bank, painter) =>
-          val participants = Seq(P4, P5)
-          val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
-
-          logger.info("Painter reassigns the paint offer to the IOU synchronizer.")
-
-          val reassignmentId =
-            P4.ledger_api.commands.submit_unassign(
-              painter,
-              Seq(paintOfferId),
-              paintSynchronizerId,
-              iouSynchronizerId,
-            )
-
-          val clock = env.environment.simClock.value
-
-          logger.info(s"An assignment for $reassignmentId is triggered automatically")
-
-          val (earliestAssignment, latestAssignment) =
-            automaticAssignmentWindow(reassignmentId, participants, painter)
-
-          val margin = NonNegativeFiniteDuration.tryOfSeconds(1)
-
-          // Advance clock just before the earliest automatic assignment
-          clock.advanceTo(earliestAssignment.minus(margin.unwrap))
-          participants.foreach(_.testing.fetch_synchronizer_times())
-          checkIncompleteUnassignedContracts(
-            participants,
-            painter,
-          ) // assignment did not happen yet
-
-          // BFT sequencing time can lag behind the simulated clock, so a large jump can trigger
-          //  assignments with stale timestamps whose response deadlines expire as BFT time catches
-          //  up.
-          //  Use steps below the response timeout and fetch times between them to bound this lag.
-          advanceClockInStepsTo(
-            clock,
-            latestAssignment,
-            maxStep = PositiveFiniteDuration.tryOfSeconds(10),
-          ) {
-            participants.foreach(_.testing.fetch_synchronizer_times())
-          }
-
-          // The reassignment store should be empty once the automatic assignment has completed
-          checkReassignmentStoreIsEmpty(iouSynchronizerId, participants, painter)
+          unassignAndAwaitAutomaticAssignment(alice, bank, painter)
         }
 
+      }
+
+      // P5 is the only reassigning participant that does not submit the unassignment, so it
+      // submits the automatic assignment
+      "succeed when the assigning participant hosts the stakeholder with confirmation permission" in {
+        implicit env =>
+          withUniqueParties(
+            { case (alice, bank, painter) =>
+              P5.topology.party_to_participant_mappings
+                .list(iouSynchronizerId, filterParty = alice.filterString)
+                .loneElement
+                .item
+                .participants
+                .collectFirst {
+                  case host if host.participantId == P5.id => host.permission
+                } shouldBe Some(ParticipantPermission.Confirmation)
+
+              unassignAndAwaitAutomaticAssignment(alice, bank, painter)
+            },
+            aliceIouPermissionOnP5 = ParticipantPermission.Confirmation,
+          )
       }
 
       "succeed over shutdowns" in { implicit env =>

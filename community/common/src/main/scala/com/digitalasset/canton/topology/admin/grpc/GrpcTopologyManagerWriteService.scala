@@ -473,12 +473,14 @@ class GrpcTopologyManagerWriteService(
           expectFullAuthorization = false,
         )
         .leftWiden[RpcError]
-      _ = waitToBecomeEffective match {
+      _ <- waitToBecomeEffective match {
         case Some(timeout) =>
-          EitherT.rightT[FutureUnlessShutdown, TopologyManagerError](
-            timeout.awaitUS(s"addTransactions-wait-for-effective")(asyncResult.unwrap)
+          EitherT.right[RpcError](
+            FutureUnlessShutdown.fromUnlessShutdown(
+              timeout.awaitUS(s"addTransactions-wait-for-effective")(asyncResult.unwrap)
+            )
           )
-        case None => EitherTUtil.unitUS[TopologyManagerError]
+        case None => EitherTUtil.unitUS[RpcError]
       }
     } yield ()
 

@@ -34,12 +34,6 @@ Change dynamic Synchronizer parameters
 
 You can set several dynamic parameters at the same time:
 
-.. todo::
-    #. `Link to reference with all dynamic synchronizer parameters <https://github.com/DACH-NY/canton/issues/25806>`_
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25684>
-    #. Explain the concept of synchronizer owner and that for changes to become affective one needs a threshold of them to submit the same proposal
-
 .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/dynamicsynchronizerparameters/SynchronizerParametersChangeIntegrationTest.scala
    :language: scala
    :start-after: user-manual-entry-begin:-begin: SetDynamicSynchronizerParameters

@@ -58,7 +58,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms
-          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
+          .enableAlphaOnlinePartyReplicationSupport()*
       )
       .withNetworkBootstrap { implicit env =>
         import env.*

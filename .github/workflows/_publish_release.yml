@@ -18,10 +18,10 @@ on:
         default: false
     secrets:
       AWS_RELEASE_ACCESS_KEY_ID:
-        required: true
+        required: false
         description: AWS key allowed to write to s3://canton-public-releases, separate from the KMS testing key
       AWS_RELEASE_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_CF_CANTON_IO_DISTRIBUTION_ID:
         required: false
       AWS_SESSION_TOKEN:
@@ -29,23 +29,24 @@ on:
       AWS_REGION:
         required: false
       GAC_JSON:
-        required: true
+        required: false
       GPG_CODE_SIGNING:
-        required: true
+        required: false
       MAVEN_USERNAME:
-        required: true
+        required: false
       MAVEN_PASSWORD:
-        required: true
+        required: false
       GHA_CANTON_DACH_NY:
-        required: true
+        required: false
         description: GitHub token with write access to DACH-NY/canton
       GHA_CANTON_DA:
-        required: true
+        required: false
         description: GitHub token with write access to digital-asset/canton
 
 jobs:
   publish_release:
     name: Publish Release
+    environment: release
     runs-on: ${{ inputs.runner }}
     env:
       # Needed by scripts/ci/publish-to-github.sh to detect formal release tags

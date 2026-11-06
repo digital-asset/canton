@@ -32,7 +32,7 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoValidation, ValidationParam}
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -337,7 +337,7 @@ final case class EncryptedViewMessage[+VT <: ViewType](
 }
 
 object EncryptedViewMessage
-    extends VersioningCompanion[EncryptedViewMessage[ViewType]]
+    extends VersioningCompanionContext[EncryptedViewMessage[ViewType], TransactionProtocolLimits]
     with PrettyPrintingCompanion[EncryptedViewMessage[ViewType]] {
 
   override protected val pretty: Pretty[EncryptedViewMessage[ViewType]] = prettyOfClass(
@@ -375,6 +375,7 @@ object EncryptedViewMessage
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,
+      limits: TransactionProtocolLimits,
       encryptedViewMessageP: v32.EncryptedMultipleViewsMessage,
   ): ParsingResult[EncryptedViewMessage[ViewType]] = {
     val v32.EncryptedMultipleViewsMessage(
@@ -407,11 +408,18 @@ object EncryptedViewMessage
         viewHashesSeqP,
       )
 
+      // Reuses maxRecipientsPerEnvelope instead of a dedicated limit: an honest sender puts one
+      // entry per informee participant of the view group
+      // (EncryptedViewMessageFactory.createRandomnessMap, a Map keyed by participant), and those
+      // participants are the recipients of the envelope that carries this message
+      // (Witnesses.toRecipients). sequencing.protocol.Recipients.fromProtoV30 bounds the distinct
+      // recipients of an envelope by maxRecipientsPerEnvelope (from PV37), so honest messages stay
+      // within it.
       sessionKeyLookupSeqP <- ProtoValidation.validateLength(
         sessionKeyLookupP,
         "session_key_lookup",
         pvv,
-        ProtoValidation.MaxCollectionSize,
+        ValidationParam(ProtocolVersion.nextValidationBoundPV -> limits.maxRecipientsPerEnvelope),
       )
       viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
         EncryptedViewMessage.deserializeEncryptedRandomness,

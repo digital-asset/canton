@@ -55,8 +55,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequestBatch,
   SignedMessage,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{data, modules}
 import com.digitalasset.canton.time.GeneratorsTime.*
 import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -382,7 +382,12 @@ final class GeneratorsBftOrdering(
     } yield CanonicalCommitSet(commits)
   )
 
-  implicit val prePrepareArb: Arbitrary[PrePrepare] = Arbitrary(
+  implicit val prePrepareArb: Arbitrary[PrePrepare] =
+    prePrepareArbWithActualSender(Some(actualSender))
+
+  private def prePrepareArbWithActualSender(
+      sender: Option[BftNodeId]
+  ): Arbitrary[PrePrepare] = Arbitrary(
     for {
       blockMetadata <- Arbitrary.arbitrary[BlockMetadata]
       viewNumber <- Arbitrary.arbitrary[ViewNumber]
@@ -395,11 +400,16 @@ final class GeneratorsBftOrdering(
       block,
       canonicalCommitSet,
       from,
-      Some(actualSender),
+      sender,
     )(protocolVersion)
   )
 
-  implicit val prepareArb: Arbitrary[modules.ConsensusSegment.ConsensusMessage.Prepare] = Arbitrary(
+  implicit val prepareArb: Arbitrary[modules.ConsensusSegment.ConsensusMessage.Prepare] =
+    prepareArbWithActualSender(Some(actualSender))
+
+  private def prepareArbWithActualSender(
+      sender: Option[BftNodeId]
+  ): Arbitrary[modules.ConsensusSegment.ConsensusMessage.Prepare] = Arbitrary(
     for {
       blockMetadata <- Arbitrary.arbitrary[BlockMetadata]
       viewNumber <- Arbitrary.arbitrary[ViewNumber]
@@ -410,14 +420,14 @@ final class GeneratorsBftOrdering(
       viewNumber,
       hash,
       from,
-      Some(actualSender),
+      sender,
     )(protocolVersion)
   )
 
   implicit val commitCertificateArb: Arbitrary[CommitCertificate] = Arbitrary(
     for {
-      prePrepare <- Arbitrary.arbitrary[SignedMessage[PrePrepare]]
-      commits <- boundedListGen(signedMessage(commitArb(Some(actualSender))))
+      prePrepare <- signedMessage(prePrepareArbWithActualSender(None)).arbitrary
+      commits <- boundedListGen(signedMessage(commitArb(None)))
     } yield CommitCertificate(
       prePrepare,
       commits,
@@ -426,8 +436,8 @@ final class GeneratorsBftOrdering(
 
   implicit val prepareCertificateArb: Arbitrary[PrepareCertificate] = Arbitrary(
     for {
-      prePrepare <- Arbitrary.arbitrary[SignedMessage[PrePrepare]]
-      prepares <- boundedListGen(signedMessage(prepareArb))
+      prePrepare <- signedMessage(prePrepareArbWithActualSender(None)).arbitrary
+      prepares <- boundedListGen(signedMessage(prepareArbWithActualSender(None)))
     } yield PrepareCertificate(
       prePrepare,
       prepares,
@@ -472,6 +482,11 @@ final class GeneratorsBftOrdering(
   )
 
   implicit val viewChangeArb: Arbitrary[modules.ConsensusSegment.ConsensusMessage.ViewChange] =
+    viewChangeArbWithActualSender(Some(actualSender))
+
+  private def viewChangeArbWithActualSender(
+      sender: Option[BftNodeId]
+  ): Arbitrary[modules.ConsensusSegment.ConsensusMessage.ViewChange] =
     Arbitrary(
       for {
         blockMetadata <- Arbitrary.arbitrary[BlockMetadata]
@@ -483,7 +498,7 @@ final class GeneratorsBftOrdering(
         viewNumber,
         consensusCerts,
         from,
-        Some(actualSender),
+        sender,
       )(protocolVersion)
     )
 
@@ -491,10 +506,8 @@ final class GeneratorsBftOrdering(
     for {
       blockMetadata <- Arbitrary.arbitrary[BlockMetadata]
       viewNumber <- Arbitrary.arbitrary[ViewNumber]
-      viewChangeMessages <- boundedListGen[
-        data.SignedMessage[modules.ConsensusSegment.ConsensusMessage.ViewChange]
-      ]
-      prePrepares <- boundedListGen(Arbitrary.arbitrary[SignedMessage[PrePrepare]])
+      viewChangeMessages <- boundedListGen(signedMessage(viewChangeArbWithActualSender(None)))
+      prePrepares <- boundedListGen(signedMessage(prePrepareArbWithActualSender(None)))
       from <- Arbitrary.arbitrary[BftNodeId]
     } yield modules.ConsensusSegment.ConsensusMessage.NewView.create(
       blockMetadata,

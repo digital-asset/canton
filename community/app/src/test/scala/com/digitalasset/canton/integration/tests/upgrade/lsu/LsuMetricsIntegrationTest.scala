@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
@@ -65,7 +65,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "Use fixtures instead"
   )
 
-  override protected def configTransforms: List[ConfigTransform] = {
+  override protected def configTransforms: Seq[ConfigTransform] = {
     val allNewNodes = Set(
       "sequencer3",
       "sequencer4",
@@ -77,10 +77,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       "mediator6",
     )
 
-    List(
-      ConfigTransforms.disableAutoInit(allNewNodes),
-      ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+    lsuNodeConfigTransforms(allNewNodes)
   }
 
   private lazy val upgradeTime1: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
@@ -132,7 +129,6 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         )
       )
       .addConfigTransforms(configTransforms*)
-      .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .withSetup { implicit env =>
         import env.*
 

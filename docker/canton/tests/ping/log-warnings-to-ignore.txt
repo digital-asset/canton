@@ -2,3 +2,8 @@
 # WARN/ERROR lines from service logs. Lines starting with '#' and blank lines
 # are stripped by the caller before being passed to rg, so both may be used
 # freely as comments and separators.
+
+# participant-bootstrap.sc retries connecting until the synchronizer bootstrap has initialized the
+# sequencer; each failed attempt logs these. The test still fails if the connection never succeeds.
+Connection has failed validation since .*NOT_SERVING
+SYNC_SERVICE_BAD_CONNECTIVITY.*Connection pool failed to initialize within

@@ -20,7 +20,7 @@ import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
@@ -186,16 +186,14 @@ abstract class LsuRollForwardIntegrationTest
     "Use upgradeTime1 and upgradeTime2 instead"
   )
 
-  override protected def configTransforms: List[ConfigTransform] = {
+  override protected def configTransforms: Seq[ConfigTransform] = {
     val allNewNodes = Set(3, 4, 5, 6).flatMap(idx => Seq(s"sequencer$idx", s"mediator$idx"))
 
     val setLsuSequencingBoundsOverride: SequencerNodeConfig => SequencerNodeConfig =
       _.focus(_.parameters.lsuRepair.lsuSequencingBoundsOverride)
         .replace(lsuSequencingBoundsOverride.some)
 
-    List(
-      ConfigTransforms.disableAutoInit(allNewNodes),
-      ConfigTransforms.useStaticTime,
+    lsuNodeConfigTransforms(allNewNodes) ++ List(
       ConfigTransforms.updateSequencerConfig("sequencer5")(setLsuSequencingBoundsOverride),
       ConfigTransforms.updateSequencerConfig("sequencer6")(setLsuSequencingBoundsOverride),
       ConfigTransforms.updateSequencerConfig("sequencer3")(
@@ -206,7 +204,7 @@ abstract class LsuRollForwardIntegrationTest
         _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeExclusive)
           .replace(Some(maxSequencingTime))
       ),
-    ) ++ ConfigTransforms.enableDevVersionSupport
+    )
   }
 
   private var fixture1: Fixture = _

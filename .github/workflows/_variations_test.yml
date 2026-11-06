@@ -182,6 +182,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: variations_test
+      shard_job_result: ${{ needs.variations_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

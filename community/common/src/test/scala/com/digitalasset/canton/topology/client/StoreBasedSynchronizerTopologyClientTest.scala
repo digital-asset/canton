@@ -483,7 +483,7 @@ trait StoreBasedTopologySnapshotTest
             party2participant1_2,
           ),
         )
-        _ = fixture.client.observed(
+        _ <- fixture.client.observed(
           ts.immediateSuccessor,
           ts.immediateSuccessor,
           SequencerCounter(0),
@@ -514,7 +514,7 @@ trait StoreBasedTopologySnapshotTest
           effectiveTimestamp = Some(ts),
           transactions = Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation),
         )
-        _ = fixture.client.observed(
+        _ <- fixture.client.observed(
           ts.immediateSuccessor,
           ts.immediateSuccessor,
           SequencerCounter(0),
@@ -560,7 +560,7 @@ trait StoreBasedTopologySnapshotTest
           effectiveTimestamp = Some(ts2),
           transactions = Seq(mkRemoveTx(p1_pdp_observation), mkRemoveTx(p1_dtc)),
         )
-        _ = fixture.client.observed(
+        _ <- fixture.client.observed(
           ts2.immediateSuccessor,
           ts2.immediateSuccessor,
           SequencerCounter(0),

@@ -26,6 +26,7 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level.{INFO, WARN}
 
+import scala.concurrent.Future
 import scala.concurrent.duration.*
 
 class SequencerConnectionPoolImplTest
@@ -1002,8 +1003,8 @@ class SequencerConnectionPoolImplTest
       )(MetricsContext.Empty).connectionPool
 
       def currentMetrics =
-        poolMetrics.connectionHealthMetrics.map { case (mc, gauge) =>
-          mc.labels.get("connection").value -> gauge.value.getValue
+        poolMetrics.connectionHealthValues.map { case (mc, value) =>
+          mc.labels.get("connection").value -> value
         }
 
       withConnectionPool(
@@ -1014,7 +1015,7 @@ class SequencerConnectionPoolImplTest
         namePrefix = "first-config",
       ) { (pool, _, _, _) =>
         // on the first connect, the metrics should be empty
-        poolMetrics.connectionHealthMetrics shouldBe empty
+        poolMetrics.connectionHealthValues shouldBe empty
 
         pool.start().futureValueUS.value
 
@@ -1059,7 +1060,7 @@ class SequencerConnectionPoolImplTest
       }
 
       // Closing the pool closes all the metrics
-      poolMetrics.connectionHealthMetrics shouldBe empty
+      poolMetrics.connectionHealthValues shouldBe empty
 
       withConnectionPool(
         nbConnections = PositiveInt.three,
@@ -1088,8 +1089,8 @@ class SequencerConnectionPoolImplTest
       )(MetricsContext.Empty).connectionPool
 
       def currentMetricsPsids =
-        poolMetrics.connectionHealthMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
-      def currentMetricsSize = poolMetrics.connectionHealthMetrics.size
+        poolMetrics.connectionHealthValues.keySet.map(_.labels.get("psid"))
+      def currentMetricsSize = poolMetrics.connectionHealthValues.size
       def currentPenaltyMetricsPsids =
         poolMetrics.sequencerPenaltyMetrics.map { case (mc, _gauge) => mc.labels.get("psid") }.toSet
       def currentPenaltyMetricsSize = poolMetrics.sequencerPenaltyMetrics.size
@@ -1135,6 +1136,31 @@ class SequencerConnectionPoolImplTest
       currentMetricsPsids shouldBe Set()
       currentPenaltyMetricsSize shouldBe 0
       currentPenaltyMetricsPsids shouldBe Set()
+    }
+
+    "not update health gauges closed by a concurrent removal" in {
+      // NOTE: In-memory gauges throw when updated after they have been closed
+      val poolMetrics = new SequencerClientMetrics(
+        new SequencerClientHistograms(MetricName("test"))(new HistogramInventory()),
+        new InMemoryMetricsFactory,
+      )(MetricsContext.Empty).connectionPool
+      val psid = "psid"
+      val mc = MetricsContext("psid" -> psid, "connection" -> "connection")
+
+      val updates = Future {
+        (0 until 1000).foreach { i =>
+          poolMetrics.updateConnectionHealth(mc, i % 3)
+          poolMetrics.updateSubscriptionHealth(mc, i % 2)
+        }
+      }
+      val removals = Future {
+        (0 until 1000).foreach { _ =>
+          poolMetrics.removeMetricsForConnection(Set("connection"), Some(psid))
+          poolMetrics.removeMetricsForAllConnections(Some(psid))
+        }
+      }
+
+      Future.sequence(Seq(updates, removals)).futureValue
     }
   }
 

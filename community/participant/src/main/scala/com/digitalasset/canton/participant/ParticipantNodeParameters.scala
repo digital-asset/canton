@@ -49,6 +49,7 @@ final case class ParticipantNodeParameters(
     deprecatedApis: DeprecatedApiConfig,
     enableRepairService: Boolean,
     damlTopUpEnabled: Boolean,
+    alphaAcsReplicationSupport: Option[AlphaAcsReplicationConfig],
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -130,5 +131,6 @@ object ParticipantNodeParameters {
     deprecatedApis = DeprecatedApiConfig(),
     enableRepairService = false,
     damlTopUpEnabled = false,
+    alphaAcsReplicationSupport = None,
   )
 }

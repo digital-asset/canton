@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.admin.party.acsreplication
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -95,7 +94,6 @@ class AcsReplicationTopologyWorkflow(
         partyToParticipantTopologyPartyAdded.transaction.mapping.participants
           .find(_.participantId == params.targetParticipantId)
           .exists(_.onboarding),
-        partyToParticipantTopologyPartyAdded.serial,
       )
     }
   }
@@ -133,7 +131,6 @@ object AcsReplicationTopologyWorkflow {
   final case class TopologyTransactionInfo(
       validFrom: EffectiveTime,
       isOnboarding: Boolean,
-      serial: PositiveInt,
   )
 
   /** The party's current mapping, or its current proposal if `proposal` is set. Filters by the uid

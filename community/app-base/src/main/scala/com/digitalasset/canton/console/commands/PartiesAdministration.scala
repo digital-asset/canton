@@ -40,6 +40,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
   AcsReplicationStatus,
   ContractImportMode,
+  ImportPartyAcsForceFlag,
   PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
@@ -924,6 +925,12 @@ class ParticipantPartiesAdministrationGroup(
       |  what you are doing).
       |- representativePackageIdOverride: Defines override mappings for assigning
       |  representative package IDs to contracts upon ACS import.
+      |- forceFlags: Overrides of safety checks (`ImportPartyAcsForceFlag`). With `party`
+      |  set, the import is rejected once this participant has processed events past the
+      |  party's activation on it, because it may have processed archivals or unassignments
+      |  of contracts in the snapshot since then. `AllowImportAfterActivation` imports
+      |  anyway; only use it if no contract in the snapshot has been archived or unassigned
+      |  since the activation. Defaults to none.
       """
   )
   def import_party_acs(
@@ -934,6 +941,7 @@ class ParticipantPartiesAdministrationGroup(
       contractImportMode: ContractImportMode = ContractImportMode.Validation,
       representativePackageIdOverride: RepresentativePackageIdOverride =
         RepresentativePackageIdOverride.NoOverride,
+      forceFlags: Set[ImportPartyAcsForceFlag] = Set.empty,
   ): Unit =
     TraceContext.withNewTraceContext("import_party_acs") { implicit traceContext =>
       consoleEnvironment.run {
@@ -945,6 +953,7 @@ class ParticipantPartiesAdministrationGroup(
             contractImportMode,
             representativePackageIdOverride,
             party,
+            forceFlags = forceFlags,
           )
         )
       }

@@ -13,7 +13,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
@@ -79,13 +79,10 @@ final class LsuAnnounceUnsupportedPvIntegrationTest extends LsuBase {
       cancel("Skipping test because an unsupported PV would be a forbidden downgrade from pv=dev.")
     else super.withFixture(test)
 
-  override protected def configTransforms: List[ConfigTransform] = {
+  override protected def configTransforms: Seq[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "mediator2")
 
-    List(
-      ConfigTransforms.disableAutoInit(allNewNodes),
-      ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableDevVersionSupport
+    lsuNodeConfigTransforms(allNewNodes)
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

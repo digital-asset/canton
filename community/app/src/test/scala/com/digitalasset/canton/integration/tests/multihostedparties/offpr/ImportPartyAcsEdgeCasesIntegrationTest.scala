@@ -4,19 +4,34 @@
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
 import com.digitalasset.canton.admin.api.client.data.FlagNotSet
-import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
-import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.AcsImportMissingOnboardingMapping
+import com.digitalasset.canton.integration.util.{AutomaticAssignment, PartiesAllocator}
+import com.digitalasset.canton.integration.{
+  CommunityIntegrationTest,
+  ConfigTransforms,
+  EnvironmentDefinition,
+  SharedEnvironment,
+  TestConsoleEnvironment,
+}
+import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.participant.admin.data.ImportPartyAcsForceFlag
+import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.{
+  AcsImportAfterActivation,
+  AcsImportMissingOnboardingMapping,
+}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Party, SynchronizerId}
-import com.digitalasset.canton.{ReassignmentCounter, RepairCounter}
+import com.digitalasset.canton.{HasTempDirectory, ReassignmentCounter, RepairCounter}
+import org.slf4j.event.Level
 
 import java.time.Duration
 import scala.concurrent.duration.DurationInt
@@ -96,18 +111,18 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
       )
   }
 
-  /** Simulates an operator failing to follow the strict offline replication guide resulting in an
-    * effective party-to-participant mapping topology transaction known to the target participant.
+  /** Simulates an operator who leaves the target participant connected until it has processed
+    * events past the party's activation, and disconnects it only for the import.
     *
     * The expectation is that the target participant only receives the effective transaction after
     * having imported the party's ACS and (re)connected to the synchronizer.
     *
     * Asserts:
-    *   1. The ACS import still succeeds
-    *   1. The pending onboarding clearance operation is still successfully recorded and can be
-    *      cleared.
+    *   1. The ACS import is rejected.
+    *   1. With the force flag, the ACS import succeeds, and the pending onboarding clearance
+    *      operation is recorded and can be cleared.
     */
-  "ACS import succeeds even if the onboarding topology transaction is already effective" in {
+  "ACS import is rejected once the target has processed the activation, unless forced" in {
     implicit env =>
       import env.*
       val clock = env.environment.simClock.value
@@ -167,7 +182,17 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
       target.synchronizers.disconnect_all()
 
-      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath),
+        _.shouldBeCantonErrorCode(AcsImportAfterActivation),
+      )
+
+      target.parties.import_party_acs(
+        daId,
+        Some(alice),
+        acsSnapshotPath,
+        forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+      )
 
       reconnectAndEnsureOnboardingClearance(
         clock,
@@ -627,5 +652,199 @@ final class ImportPartyAcsWhileTargetOnboardsAnotherPartyIntegrationTest
           targetLedgerEnd,
         ) shouldBe FlagNotSet
       }
+  }
+}
+
+/** Test scenario: the target participant stays connected while a party's hosting on it becomes
+  * effective, and then processes reassignments of one of the party's contracts. The ACS snapshot is
+  * taken at the activation, so it still has the contract on `da`.
+  *
+  * Test goal: show what a forced ACS import does with such a contract:
+  *   - unassigned to `acme`: the import fails on it, rather than making it active on `da` again;
+  *   - unassigned and assigned back to `da`: the import skips it, and it is active on the target.
+  *
+  * Setup: participant1 (source, hosts Alice and Carol) and participant2 (hosts Bob) are connected
+  * to `da` and `acme`; the target participant3 only to `da`. Automatic assignment is disabled.
+  */
+final class ImportPartyAcsAfterUnassignmentIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with HasTempDirectory {
+
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransforms(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
+      .withSetup { implicit env =>
+        import env.*
+        AutomaticAssignment.disable(Seq(sequencer1), daId)
+        AutomaticAssignment.disable(Seq(sequencer2), acmeId)
+
+        Seq(participant1, participant2).foreach { participant =>
+          participant.synchronizers.connect_local(sequencer1, alias = daName)
+          participant.synchronizers.connect_local(sequencer2, alias = acmeName)
+          participant.dars.upload(CantonExamplesPath, synchronizerId = daId)
+          participant.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+        }
+        participant3.synchronizers.connect_local(sequencer1, alias = daName)
+        participant3.dars.upload(CantonExamplesPath, synchronizerId = daId)
+
+        def hostedOn(participant: LocalParticipantReference) = {
+          val hosting = (
+            PositiveInt.one,
+            Set((participant.id, ParticipantPermission.Submission: ParticipantPermission)),
+          )
+          Map(daId -> hosting, acmeId -> hosting)
+        }
+        val parties = PartiesAllocator(Set(participant1, participant2))(
+          Seq("alice" -> participant1.id, "carol" -> participant1.id, "bob" -> participant2.id),
+          Map(
+            "alice" -> hostedOn(participant1),
+            "carol" -> hostedOn(participant1),
+            "bob" -> hostedOn(participant2),
+          ),
+        )
+        def party(name: String) = parties.find(_.toProtoPrimitive.contains(name)).value
+        alice = party("alice")
+        carol = party("carol")
+        bob = party("bob")
+      }
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
+
+  private var alice: Party = _
+  private var carol: Party = _
+  private var bob: Party = _
+
+  /** Creates a contract of `party` on `da`, activates `party` on the connected target and exports
+    * the party's ACS at the activation.
+    *
+    * @return
+    *   The contract and the path of the ACS snapshot.
+    */
+  private def createContractAndActivateOnConnectedTarget(party: Party)(implicit
+      env: TestConsoleEnvironment
+  ): (LfContractId, String) = {
+    import env.*
+    val source = participant1
+    val target = participant3
+    val acsSnapshotPath =
+      tempDirectory.toTempFile(s"${party.partyId.uid.identifier.str}_acs_snapshot.gz").toString
+
+    val iou = IouSyntax.createIou(source, Some(daId))(party, bob)
+    val beforeActivationSourceOffset = source.ledger_api.state.end()
+
+    target.topology.party_to_participant_mappings.propose_delta(
+      party = party.partyId,
+      adds = Seq(target.id -> ParticipantPermission.Submission),
+      store = daId,
+      requiresPartyToBeOnboarded = true,
+    )
+    party.topology.party_to_participant_mappings.propose_delta(
+      source,
+      adds = Seq(target.id -> ParticipantPermission.Submission),
+      store = daId,
+      requiresPartyToBeOnboarded = true,
+    )
+    eventually() {
+      target.topology.party_to_participant_mappings.list(
+        synchronizerId = daId,
+        filterParty = party.filterString,
+        filterParticipant = target.id.filterString,
+      ) should have size 1
+    }
+
+    source.parties.export_party_acs(
+      party,
+      daId,
+      target.id,
+      exportFilePath = acsSnapshotPath,
+      beginOffsetExclusive = beforeActivationSourceOffset,
+    )
+    (LfContractId.assertFromString(iou.id.contractId), acsSnapshotPath)
+  }
+
+  /** Runs `reassign`, in which the target processes an unassignment of a contract that is not in
+    * its ACS yet. The target's indexer then warns that the contract's activation is missing.
+    */
+  private def expectMissingActivationWarnings(reassign: => Unit): Unit = {
+    val missingActivation = Seq(
+      "deactivation reference cannot be computed",
+      "Activation is missing for a deactivation",
+    )
+    loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+      {
+        reassign
+        // The indexer logs asynchronously
+        eventually() {
+          loggerFactory.fetchRecordedLogEntries.exists(
+            _.warningMessage.contains(missingActivation.last)
+          ) shouldBe true
+        }
+      },
+      entries =>
+        forAll(entries) { entry =>
+          entry.loggerName should include("participant=participant3")
+          missingActivation.exists(entry.warningMessage.contains) shouldBe true
+        },
+    )
+  }
+
+  private def importForced(party: Party, acsSnapshotPath: String)(implicit
+      env: TestConsoleEnvironment
+  ): Unit =
+    env.participant3.parties.import_party_acs(
+      env.daId,
+      Some(party),
+      acsSnapshotPath,
+      forceFlags = Set(ImportPartyAcsForceFlag.AllowImportAfterActivation),
+    )
+
+  "A forced ACS import" should {
+    "fail on a contract unassigned after the activation" in { implicit env =>
+      import env.*
+      val (contractId, acsSnapshotPath) = createContractAndActivateOnConnectedTarget(alice)
+
+      expectMissingActivationWarnings {
+        participant1.ledger_api.commands
+          .submit_unassign(alice, Seq(contractId), daId, acmeId)
+          .discard
+        // Sequenced on `da` after the unassignment, so the target has processed it once this completes
+        participant1.health.ping(participant3).discard
+      }
+      participant3.synchronizers.disconnect_all()
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        importForced(alice, acsSnapshotPath),
+        _.errorMessage should include("needs to be strictly larger"),
+      )
+    }
+
+    "skip a contract unassigned and assigned back after the activation" in { implicit env =>
+      import env.*
+      participant3.synchronizers.reconnect_all()
+      val (contractId, acsSnapshotPath) = createContractAndActivateOnConnectedTarget(carol)
+
+      expectMissingActivationWarnings {
+        // An assignment goes to the target of its unassignment, so going back takes two reassignments
+        val toAcme =
+          participant1.ledger_api.commands.submit_unassign(carol, Seq(contractId), daId, acmeId)
+        participant1.ledger_api.commands.submit_assign(carol, toAcme.reassignmentId, daId, acmeId)
+        val toDa =
+          participant1.ledger_api.commands.submit_unassign(carol, Seq(contractId), acmeId, daId)
+        participant1.ledger_api.commands.submit_assign(carol, toDa.reassignmentId, acmeId, daId)
+        // Sequenced on `da` after the assignment, so the target has processed it once this completes
+        participant1.health.ping(participant3).discard
+      }
+      participant3.synchronizers.disconnect_all()
+
+      importForced(carol, acsSnapshotPath)
+
+      // The target keeps the counter of the assignment it processed, not the snapshot's 0
+      participant3.ledger_api.state.acs
+        .of_party(carol)
+        .map(contract => contract.contractId -> contract.reassignmentCounter) shouldBe
+        Seq(contractId.coid -> 2L)
+    }
   }
 }

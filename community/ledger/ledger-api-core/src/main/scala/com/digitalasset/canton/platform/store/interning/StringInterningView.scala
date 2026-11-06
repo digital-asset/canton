@@ -142,7 +142,7 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       from = identity,
     )
 
-  override def participantId: StringInterningDomain[ParticipantId] =
+  override val participantId: StringInterningDomain[ParticipantId] =
     StringInterningDomain.prefixing(
       prefix = ParticipantIdPrefix,
       prefixedAccessor = rawAccessor,

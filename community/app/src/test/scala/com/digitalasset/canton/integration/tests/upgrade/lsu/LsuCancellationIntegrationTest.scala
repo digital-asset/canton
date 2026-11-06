@@ -11,7 +11,7 @@ import com.digitalasset.canton.error.LsuError
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
@@ -66,13 +66,10 @@ final class LsuCancellationIntegrationTest extends LsuBase {
     "Use upgradeTime1 and upgradeTime2 instead"
   )
 
-  override protected def configTransforms: List[ConfigTransform] = {
+  override protected def configTransforms: Seq[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
-    List(
-      ConfigTransforms.disableAutoInit(allNewNodes),
-      ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableDevVersionSupport
+    lsuNodeConfigTransforms(allNewNodes)
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

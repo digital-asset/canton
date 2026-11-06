@@ -15,6 +15,8 @@ object Validation {
       Right(x)
     } catch {
       case e: ValidationError => Left(e)
+      // Reject packages too deep for the stack instead of letting the error reach exit-on-fatal
+      case _: StackOverflowError => Left(EStackOverflow(Context.None))
     }
 
   def checkPackages(

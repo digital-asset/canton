@@ -58,8 +58,53 @@ runs:
         RESOLVED_RUN_ID: ${{ steps.previous_timings.outputs.run-id }}
       run: echo "run-id=${PROVIDED_RUN_ID:-$RESOLVED_RUN_ID}" >> "$GITHUB_OUTPUT"
 
+    # download-artifact gives up after about 4 minutes of internal retries, so a short
+    # storage outage would fail the shard before any test runs. Falling back to no timings
+    # here is not an option: every shard partitions independently, so one shard on an even
+    # split would duplicate or skip tests. Retry with longer pauses and fail only if the
+    # outage outlasts all attempts.
     - name: Download timings
+      id: download_timings_1
       if: always() && steps.timings_run.outputs.run-id != ''
+      continue-on-error: true
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.timings-artifact-name }}
+        path: ${{ inputs.timings-path }}
+        run-id: ${{ steps.timings_run.outputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+
+    - name: Wait 2 minutes before retrying timings download
+      if: always() && steps.download_timings_1.outcome == 'failure'
+      shell: bash
+      env:
+        TIMINGS_PATH: ${{ inputs.timings-path }}
+      run: |
+        rm -rf "$TIMINGS_PATH"
+        sleep 120
+
+    - name: Download timings (retry 1)
+      id: download_timings_2
+      if: always() && steps.download_timings_1.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.timings-artifact-name }}
+        path: ${{ inputs.timings-path }}
+        run-id: ${{ steps.timings_run.outputs.run-id }}
+        github-token: ${{ inputs.github-token }}
+
+    - name: Wait 5 minutes before retrying timings download
+      if: always() && steps.download_timings_2.outcome == 'failure'
+      shell: bash
+      env:
+        TIMINGS_PATH: ${{ inputs.timings-path }}
+      run: |
+        rm -rf "$TIMINGS_PATH"
+        sleep 300
+
+    - name: Download timings (retry 2)
+      if: always() && steps.download_timings_2.outcome == 'failure'
       uses: actions/download-artifact@v7
       with:
         name: ${{ inputs.timings-artifact-name }}

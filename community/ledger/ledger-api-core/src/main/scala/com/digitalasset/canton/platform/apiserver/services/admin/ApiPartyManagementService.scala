@@ -35,12 +35,21 @@ import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.v30.{SigningKeyScheme, SigningKeyUsage}
 import com.digitalasset.canton.crypto.{Signature, SigningKeysWithThreshold, SigningPublicKey, v30}
-import com.digitalasset.canton.ledger.api.PartyDetails
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.FieldValidator.*
+import com.digitalasset.canton.ledger.api.validation.PartyManagementServiceRequestValidator.{
+  validateAllocateExternalPartyRequest,
+  validateAllocatePartyRequest,
+  validateGenerateExternalPartyTopologyRequest,
+  validateGetPartiesRequest,
+  validateUpdatePartyDetailsRequest,
+}
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.invalidArgument
-import com.digitalasset.canton.ledger.api.validation.ValueValidator.requirePresence
-import com.digitalasset.canton.ledger.api.validation.{CryptoValidator, ValidationErrors}
+import com.digitalasset.canton.ledger.api.validation.{
+  CryptoValidator,
+  LedgerApiSizeLimitsConfig,
+  ValidationErrors,
+}
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.ledger.error.groups.{
   PartyManagementServiceErrors,
@@ -120,6 +129,7 @@ private[apiserver] final class ApiPartyManagementService private (
 )(implicit
     executionContext: ExecutionContext,
     tracer: Tracer,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends PartyManagementService
     with GrpcApiService
     with NamedLogging
@@ -146,7 +156,11 @@ private[apiserver] final class ApiPartyManagementService private (
 
   override def getParties(request: GetPartiesRequest): Future[GetPartiesResponse] =
     withEnrichedLoggingContext(TraceContextGrpc.fromGrpcContext)(
-      logging.partyStrings(request.parties)
+      logging.partyStrings(
+        request.parties.take(
+          sizeLimitsConfig.adminLapiSizeConfig.getPartiesRequest.partiesSizeLimit.unwrap
+        )
+      )
     ) { implicit loggingContextWithTrace =>
       implicit val errorLoggingContext: ErrorLoggingContext =
         ErrorLoggingContext(
@@ -157,6 +171,7 @@ private[apiserver] final class ApiPartyManagementService private (
       logger.info(s"Getting parties, ${loggingContextWithTrace.serializeFiltered("parties")}.")
       withValidation {
         for {
+          _ <- validateGetPartiesRequest(request)
           identityProviderId <- optionalIdentityProviderId(
             request.identityProviderId,
             "identity_provider_id",
@@ -313,6 +328,7 @@ private[apiserver] final class ApiPartyManagementService private (
 
       withValidation {
         for {
+          _ <- validateAllocatePartyRequest(request)
           partyIdHintO <- optionalString(
             request.partyIdHint
           )(requireParty)
@@ -491,49 +507,7 @@ private[apiserver] final class ApiPartyManagementService private (
       LoggingContextWithTrace(TraceContextGrpc.fromGrpcContext)(this.loggingContext)
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext(logger, loggingContextWithTrace)
-    withValidation {
-      for {
-        partyDetails <- requirePresence(
-          request.partyDetails,
-          "party_details",
-        )
-        party <- requireParty(partyDetails.party)
-        metadata = partyDetails.localMetadata.getOrElse(
-          ProtoObjectMeta(
-            resourceVersion = "",
-            annotations = Map.empty,
-          )
-        )
-        resourceVersionNumberO <- optionalString(metadata.resourceVersion)(
-          requireResourceVersion(
-            _,
-            "party_details.local_metadata",
-          )
-        )
-        annotations <- verifyMetadataAnnotations(
-          metadata.annotations,
-          allowEmptyValues = true,
-          "party_details.local_metadata.annotations",
-        )
-        updateMask <- requirePresence(
-          request.updateMask,
-          "update_mask",
-        )
-        identityProviderId <- optionalIdentityProviderId(
-          partyDetails.identityProviderId,
-          "identity_provider_id",
-        )
-        partyRecord = PartyDetails(
-          party = party,
-          isLocal = partyDetails.isLocal,
-          metadata = ObjectMeta(
-            resourceVersionO = resourceVersionNumberO,
-            annotations = annotations,
-          ),
-          identityProviderId = identityProviderId,
-        )
-      } yield (partyRecord, updateMask)
-    } { case (partyRecord, updateMask) =>
+    withValidation(validateUpdatePartyDetailsRequest(request)) { case (partyRecord, updateMask) =>
       for {
         _ <- identityProviderExistsOrError(partyRecord.identityProviderId)
         _ = logger.info(
@@ -857,6 +831,7 @@ private[apiserver] final class ApiPartyManagementService private (
 
     withValidation {
       for {
+        _ <- validateAllocateExternalPartyRequest(request)
         synchronizerId <- requireSynchronizerId(request.synchronizer, "synchronizer")
           .orElse(
             // Take a physical synchronizer ID too
@@ -1012,148 +987,143 @@ private[apiserver] final class ApiPartyManagementService private (
     val availableConfirmers =
       (if (localParticipantObservationOnly) 0 else 1) + otherConfirmingParticipantUids.size
 
-    val response = for {
-      publicKeyP <- ProtoConverter.required("public_key", publicKeyO).leftMap(_.message)
-      publicKeyT <- publicKeyP
-        .intoPartial[v30.SigningPublicKey]
-        .withFieldConst(_.scheme, SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED)
-        .withFieldConst(
-          _.usage,
-          // Chimney needs the field's exact type, so the fromSeq implicit cannot apply here.
-          ProtoUnvalidatedSeq(
-            Seq(
-              SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE,
-              SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP,
-              SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL,
+    validateGenerateExternalPartyTopologyRequest(request)
+      .flatMap(_ =>
+        (for {
+          publicKeyP <- ProtoConverter.required("public_key", publicKeyO).leftMap(_.message)
+          publicKeyT <- publicKeyP
+            .intoPartial[v30.SigningPublicKey]
+            .withFieldConst(_.scheme, SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED)
+            .withFieldConst(
+              _.usage,
+              // Chimney needs the field's exact type, so the fromSeq implicit cannot apply here.
+              ProtoUnvalidatedSeq(
+                Seq(
+                  SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE,
+                  SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP,
+                  SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL,
+                )
+              ),
             )
-          ),
-        )
-        .withFieldRenamed(_.keyData, _.publicKey)
-        .transform
-        .asEither
-        .leftMap(_.asErrorPathMessages.map { case (p, e) => s"$p: $e" }.mkString(", "))
-      pubKey <- SigningPublicKey
-        .fromProtoV30(publicKeyT)
-        .leftMap(_.message)
-      namespace = Namespace(pubKey.fingerprint)
-      synchronizerProtocolVersion <- UniqueIdentifier
-        .fromProtoPrimitive_(synchronizerIdP)
-        .map(SynchronizerId(_))
-        .leftMap(_.message)
-        .flatMap(synchronizerId =>
-          syncService
-            .physicalSynchronizerIdForSynchronizerId(synchronizerId)
-            .map(_.protocolVersion)
-            .toRight(s"Unknown or not connected synchronizer $synchronizerId")
-        )
-      protocolVersion <- requestedProtocolVersionP
-        .traverse(ProtocolVersion.fromProtoPrimitive(_))
-        .leftMap(_.message)
-        .flatMap(
-          TopologyTransaction.protocolVersionToCreate(synchronizerProtocolVersion, _)
-        )
-        .leftMap(error => s"protocol_version: $error")
-      _ <- Either.cond(partyHint.nonEmpty, (), "Party hint is empty")
-      _ <- UniqueIdentifier.verifyValidString(partyHint).leftMap(x => "party_hint: " + x)
-      uid <- UniqueIdentifier.create(partyHint, namespace)
-      _ <- Either.cond(confirmationThreshold >= 0, (), "Negative confirmation threshold observed")
-      confirmingPids <- otherConfirmingParticipantUids.toList
-        .traverse(UniqueIdentifier.fromProtoPrimitive_)
-        .leftMap(_.message)
-      observingPids <- observingParticipantUids.toList
-        .traverse(UniqueIdentifier.fromProtoPrimitive_)
-        .leftMap(_.message)
-      _ <- Either.cond(
-        !confirmingPids.contains(participantId.uid),
-        (),
-        s"This participant node ($participantId) is also listed in 'otherConfirmingParticipantUids'." +
-          s" By sending the request to this node, it is de facto a hosting node and must not be listed in 'otherConfirmingParticipantUids'.",
-      )
-      _ <- Either.cond(
-        !observingPids.contains(participantId.uid),
-        (),
-        s"This participant node ($participantId) is also listed in 'observingParticipantUids'." +
-          s" By sending the request to this node, it is de facto a hosting node and must not be listed in 'observingParticipantUids'.",
-      )
-      allParticipantIds = (confirmingPids ++ observingPids)
-      _ <- Either.cond(
-        allParticipantIds.distinct.sizeIs == allParticipantIds.size,
-        (), {
-          val duplicates =
-            allParticipantIds.groupBy(identity).collect { case (x, ys) if ys.sizeIs > 1 => x }
-          s"The following participant IDs are referenced multiple times in the request: ${duplicates
-              .mkString(", ")}." +
-            s" Please ensure all IDs are referenced only once" +
-            s" across 'otherConfirmingParticipantUids' and 'observingParticipantUids' fields."
-        },
-      )
-      _ <- Either.cond(
-        confirmationThreshold <= availableConfirmers,
-        (),
-        "Confirmation threshold exceeds number of confirming participants",
-      )
-      threshold =
-        if (confirmationThreshold == 0) availableConfirmers
-        else confirmationThreshold
-      party = PartyId(uid)
-      p2p <- PartyToParticipant.create(
-        party,
-        threshold = PositiveInt.tryCreate(threshold),
-        HostingParticipant(
-          participantId,
-          if (localParticipantObservationOnly) ParticipantPermission.Observation
-          else ParticipantPermission.Confirmation,
-        ) +: (confirmingPids.map(uid =>
-          HostingParticipant(ParticipantId(uid), ParticipantPermission.Confirmation)
-        ) ++ observingPids.map(uid =>
-          HostingParticipant(ParticipantId(uid), ParticipantPermission.Observation)
-        )),
-        partySigningKeysWithThreshold = Some(
-          SigningKeysWithThreshold.tryCreate(
-            keys = NonEmpty.mk(Seq, pubKey),
-            threshold = PositiveInt.one,
-          )
-        ),
-      )
-      transactions <- {
-        // Importing globally appears to conflict with `import scalaz.syntax.traverse.*`
-        import cats.syntax.traverse.*
-
-        NonEmpty
-          .mk(List, p2p)
-          .toNEF
-          .traverse(mapping =>
-            TopologyTransaction.create(
-              op = TopologyChangeOp.Replace,
-              serial = PositiveInt.one,
-              mapping = mapping,
-              protocolVersion = protocolVersion,
+            .withFieldRenamed(_.keyData, _.publicKey)
+            .transform
+            .asEither
+            .leftMap(_.asErrorPathMessages.map { case (p, e) => s"$p: $e" }.mkString(", "))
+          pubKey <- SigningPublicKey
+            .fromProtoV30(publicKeyT)
+            .leftMap(_.message)
+          namespace = Namespace(pubKey.fingerprint)
+          synchronizerProtocolVersion <- UniqueIdentifier
+            .fromProtoPrimitive_(synchronizerIdP)
+            .map(SynchronizerId(_))
+            .leftMap(_.message)
+            .flatMap(synchronizerId =>
+              syncService
+                .physicalSynchronizerIdForSynchronizerId(synchronizerId)
+                .map(_.protocolVersion)
+                .toRight(s"Unknown or not connected synchronizer $synchronizerId")
             )
+          protocolVersion <- requestedProtocolVersionP
+            .traverse(ProtocolVersion.fromProtoPrimitive(_))
+            .leftMap(_.message)
+            .flatMap(
+              TopologyTransaction.protocolVersionToCreate(synchronizerProtocolVersion, _)
+            )
+            .leftMap(error => s"protocol_version: $error")
+          _ <- Either.cond(partyHint.nonEmpty, (), "Party hint is empty")
+          _ <- UniqueIdentifier.verifyValidString(partyHint).leftMap(x => "party_hint: " + x)
+          uid <- UniqueIdentifier.create(partyHint, namespace)
+          _ <- Either
+            .cond(confirmationThreshold >= 0, (), "Negative confirmation threshold observed")
+          confirmingPids <- otherConfirmingParticipantUids.toList
+            .traverse(UniqueIdentifier.fromProtoPrimitive_)
+            .leftMap(_.message)
+          observingPids <- observingParticipantUids.toList
+            .traverse(UniqueIdentifier.fromProtoPrimitive_)
+            .leftMap(_.message)
+          _ <- Either.cond(
+            !confirmingPids.contains(participantId.uid),
+            (),
+            s"This participant node ($participantId) is also listed in 'otherConfirmingParticipantUids'." +
+              s" By sending the request to this node, it is de facto a hosting node and must not be listed in 'otherConfirmingParticipantUids'.",
           )
-      }
-    } yield {
-      GenerateExternalPartyTopologyResponse(
-        partyId = party.toProtoPrimitive,
-        publicKeyFingerprint = pubKey.fingerprint.toProtoPrimitive,
-        topologyTransactions = transactions.map(_.toByteStringChecked),
-        multiHash = MultiTransactionSignature
-          .computeCombinedHash(
-            transactions.fromNEF.map(_.hash).toSet,
-            syncService.hashOps,
+          _ <- Either.cond(
+            !observingPids.contains(participantId.uid),
+            (),
+            s"This participant node ($participantId) is also listed in 'observingParticipantUids'." +
+              s" By sending the request to this node, it is de facto a hosting node and must not be listed in 'observingParticipantUids'.",
           )
-          .getCryptographicEvidence,
-      )
+          allParticipantIds = (confirmingPids ++ observingPids)
+          _ <- Either.cond(
+            allParticipantIds.distinct.sizeIs == allParticipantIds.size,
+            (), {
+              val duplicates =
+                allParticipantIds.groupBy(identity).collect { case (x, ys) if ys.sizeIs > 1 => x }
+              s"The following participant IDs are referenced multiple times in the request: ${duplicates
+                  .mkString(", ")}." +
+                s" Please ensure all IDs are referenced only once" +
+                s" across 'otherConfirmingParticipantUids' and 'observingParticipantUids' fields."
+            },
+          )
+          _ <- Either.cond(
+            confirmationThreshold <= availableConfirmers,
+            (),
+            "Confirmation threshold exceeds number of confirming participants",
+          )
+          threshold =
+            if (confirmationThreshold == 0) availableConfirmers
+            else confirmationThreshold
+          party = PartyId(uid)
+          p2p <- PartyToParticipant.create(
+            party,
+            threshold = PositiveInt.tryCreate(threshold),
+            HostingParticipant(
+              participantId,
+              if (localParticipantObservationOnly) ParticipantPermission.Observation
+              else ParticipantPermission.Confirmation,
+            ) +: (confirmingPids.map(uid =>
+              HostingParticipant(ParticipantId(uid), ParticipantPermission.Confirmation)
+            ) ++ observingPids.map(uid =>
+              HostingParticipant(ParticipantId(uid), ParticipantPermission.Observation)
+            )),
+            partySigningKeysWithThreshold = Some(
+              SigningKeysWithThreshold.tryCreate(
+                keys = NonEmpty.mk(Seq, pubKey),
+                threshold = PositiveInt.one,
+              )
+            ),
+          )
+          transactions <- {
+            // Importing globally appears to conflict with `import scalaz.syntax.traverse.*`
+            import cats.syntax.traverse.*
 
-    }
-    response match {
-      case Left(err) =>
-        Future.failed(
-          RequestValidationErrors.InvalidArgument
-            .Reject(err)
-            .asGrpcError
-        )
-      case Right(resp) => Future.successful(resp)
-    }
+            NonEmpty
+              .mk(List, p2p)
+              .toNEF
+              .traverse(mapping =>
+                TopologyTransaction.create(
+                  op = TopologyChangeOp.Replace,
+                  serial = PositiveInt.one,
+                  mapping = mapping,
+                  protocolVersion = protocolVersion,
+                )
+              )
+          }
+        } yield {
+          GenerateExternalPartyTopologyResponse(
+            partyId = party.toProtoPrimitive,
+            publicKeyFingerprint = pubKey.fingerprint.toProtoPrimitive,
+            topologyTransactions = transactions.map(_.toByteStringChecked),
+            multiHash = MultiTransactionSignature
+              .computeCombinedHash(
+                transactions.fromNEF.map(_.hash).toSet,
+                syncService.hashOps,
+              )
+              .getCryptographicEvidence,
+          )
+        }).leftMap(err => RequestValidationErrors.InvalidArgument.Reject(err).asGrpcError)
+      )
+      .fold(Future.failed, Future.successful)
   }
 
 }
@@ -1209,6 +1179,7 @@ private[apiserver] object ApiPartyManagementService {
   )(implicit
       executionContext: ExecutionContext,
       tracer: Tracer,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
   ): PartyManagementServiceGrpc.PartyManagementService & GrpcApiService =
     new ApiPartyManagementService(
       partyManagementServiceBackend,

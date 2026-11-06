@@ -540,7 +540,6 @@ private final class ChangeAssignation(
 
 }
 
-// TODO(i14540): this needs to be called by RepairService to commit the changes
 private[repair] object ChangeAssignation {
 
   final case class ContractIdWithCounter(

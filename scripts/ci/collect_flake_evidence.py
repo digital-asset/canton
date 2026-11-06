@@ -745,7 +745,7 @@ def render_evidence_comment(records: List[dict], ctx: dict) -> str:
     }
 
     # The whole comment is collapsed under a one-line summary. The marker stays on
-    # the first line, outside: manage_flaky_issues.existing_evidence reads it there.
+    # the first line, outside: manage_flaky_issues.evidence_comments reads it there.
     summary = html.escape(
         f"{ctx['job']} (shard {ctx['shard']}), commit {ctx['sha'][:8]}, {ctx['date']}, "
         f"cause {ctx['cause']}, {evidence_label(meta['test_count'])}"

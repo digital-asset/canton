@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionResponse as PrepareResponseP,
 }
 import com.daml.ledger.api.v2.package_reference.PackageReference
+import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
 import com.daml.metrics.Timed
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService
@@ -24,6 +25,7 @@ import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.
 import com.digitalasset.canton.ledger.api.validation.{
   CommandsValidator,
   GetPreferredPackagesRequestValidator,
+  LedgerApiSizeLimitsConfig,
   SubmitRequestValidator,
 }
 import com.digitalasset.canton.ledger.api.{SubmissionIdGenerator, ValidationLogger}
@@ -58,8 +60,10 @@ class ApiInteractiveSubmissionService(
     tracker: CommandProgressTracker,
     metrics: LedgerApiServerMetrics,
     val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext)
-    extends InteractiveSubmissionServiceGrpc
+)(implicit
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+) extends InteractiveSubmissionServiceGrpc
     with GrpcApiService
     with NamedLogging {
 
@@ -210,6 +214,7 @@ class ApiInteractiveSubmissionService(
 
   private def executeAndWaitInternal[A](
       request: ExecuteSubmissionRequest,
+      transactionFormat: Option[TransactionFormat],
       execute: (ExecuteRequest, LoggingContextWithTrace) => FutureUnlessShutdown[A],
   ) = {
     val submitterInfo = request.preparedTransaction.flatMap(_.metadata.flatMap(_.submitterInfo))
@@ -229,8 +234,9 @@ class ApiInteractiveSubmissionService(
         OptionUtil.emptyStringAsNone(request.submissionId),
       )
     validator
-      .validateExecute(
-        request.transformInto[ExecuteSubmissionRequest],
+      .validateExecuteAndWait(
+        request,
+        transactionFormat,
         currentLedgerTime(),
         submissionIdGenerator,
         maxDeduplicationDuration,
@@ -249,23 +255,30 @@ class ApiInteractiveSubmissionService(
       // Convert the ExecuteSubmissionAndWaitRequest request into an ExecuteSubmissionRequest
       // They are duplicated for better UX on the API but their fields are identical
       request.transformInto[ExecuteSubmissionRequest],
+      transactionFormat = None,
       (executeRequest, loggingContext) =>
         interactiveSubmissionService.executeAndWait(executeRequest)(loggingContext),
     )
 
   override def executeSubmissionAndWaitForTransaction(
       request: ExecuteSubmissionAndWaitForTransactionRequest
-  ): Future[ExecuteSubmissionAndWaitForTransactionResponse] =
+  ): Future[ExecuteSubmissionAndWaitForTransactionResponse] = {
+    val executeSubmissionRequest = request.transformInto[ExecuteSubmissionRequest]
+    // generated before the validation, so that the generated format is validated as well
+    val transactionFormat = ApiCommandService.generateTransactionFormatIfEmpty(
+      executeSubmissionRequest.preparedTransaction.toList
+        .flatMap(_.metadata)
+        .flatMap(_.submitterInfo)
+        .flatMap(_.actAs)
+    )(request.transactionFormat)
     executeAndWaitInternal(
-      request.transformInto[ExecuteSubmissionRequest],
+      executeSubmissionRequest,
+      transactionFormat,
       (executeRequest, loggingContext) =>
         interactiveSubmissionService.executeAndWaitForTransaction(
           executeRequest,
-          ApiCommandService.generateTransactionFormatIfEmpty(
-            executeRequest.preparedTransaction.metadata.toList
-              .flatMap(_.submitterInfo)
-              .flatMap(_.actAs)
-          )(request.transactionFormat),
+          transactionFormat,
         )(loggingContext),
     )
+  }
 }

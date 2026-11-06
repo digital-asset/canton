@@ -78,6 +78,34 @@ object PartyManagementServiceError extends PartyManagementServiceErrorGroup {
   }
 
   @Explanation(
+    """The participant has processed events past the party's activation on it. Since then, it may have
+      |processed archivals or unassignments of the party's contracts that the snapshot still contains. The
+      |import then fails at such a contract, or makes an archived contract active again if its archival has
+      |been removed."""
+  )
+  @Resolution(
+    """Restore the participant from a backup taken before the activation and retry the import while it is
+      |disconnected from all synchronizers. Only if no contract in the snapshot has been archived or unassigned
+      |since the activation, import anyway with the force flag IMPORT_PARTY_ACS_FORCE_FLAG_ALLOW_IMPORT_AFTER_ACTIVATION."""
+  )
+  object AcsImportAfterActivation
+      extends ErrorCode(
+        id = "PARTY_ACS_IMPORT_AFTER_ACTIVATION",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(
+        partyId: PartyId,
+        activation: CantonTimestamp,
+        participantRecordTime: CantonTimestamp,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Aborted ACS import for party $partyId: this participant has processed events up to $participantRecordTime, past the party's activation at $activation."
+        )
+        with PartyManagementServiceError
+  }
+
+  @Explanation(
     "The requested timestamp does not match the exact record time of any known event (e.g., a topology transaction)."
   )
   @Resolution(

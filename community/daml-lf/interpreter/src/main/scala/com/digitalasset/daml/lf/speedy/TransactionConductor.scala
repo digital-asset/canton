@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error as IError
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.Speedy.*
-import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, MetricPlugin, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugins
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
 import com.google.common.annotations.VisibleForTesting
@@ -40,7 +40,7 @@ private[lf] final class TransactionConductor(
     val iterationsBetweenInterruptions: Long,
     val profile: Profile,
     private[speedy] var ptx: PartialTransaction,
-    metricPlugins: Seq[MetricPlugin],
+    metricPlugins: Option[MetricPlugins],
     transactionTraceMaxLength: Int = 10,
 ) {
 
@@ -978,7 +978,7 @@ private[lf] final class TransactionConductor(
           storeLocalContract(coid, contract.templateId, createArg)
           ptx = newPtx
           insertContractInfoCache(coid, contract)
-          metrics.incrCount[TxNodeCount]()
+          metrics.increment(_.txNodeCount)()
           Upd.pure(SValue.SContractId(coid))
         case Left((newPtx, err)) =>
           ptx = newPtx
@@ -1002,8 +1002,8 @@ private[lf] final class TransactionConductor(
     ) match {
       case Right(newPtx) =>
         ptx = newPtx
-        metrics.incrCount[TxNodeCount]()
-        metrics.incrCount[FetchNodeCount]()
+        metrics.increment(_.txNodeCount)()
+        metrics.increment(_.fetchNodeCount)()
         Upd.unit
       case Left(err) =>
         Upd.raise(err)
@@ -1091,7 +1091,7 @@ private[lf] final class TransactionConductor(
           result = mapping,
           keyVersion = assignSerializationVersion(hasKey = true),
         )
-        metrics.incrCount[TxNodeCount]()
+        metrics.increment(_.txNodeCount)()
       }
     } yield SValue.SOptional(
       Some(
@@ -1163,7 +1163,7 @@ private[lf] final class TransactionConductor(
       ) match {
         case Right(newPtx) =>
           ptx = newPtx
-          metrics.incrCount[TxNodeCount]()
+          metrics.increment(_.txNodeCount)()
           Upd.unit
         case Left(err) =>
           Upd.raise(err)
@@ -1631,7 +1631,7 @@ private[lf] object TransactionConductor {
       interpretationConfig: interpretation.InterpretationConfig,
       contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
       limits: interpretation.LimitConfig = interpretation.LimitConfig.Off,
-      metricPlugins: Seq[MetricPlugin] = Seq.empty,
+      metricPlugins: Option[MetricPlugins] = None,
       transactionTraceMaxLength: Int = 10,
   ): TransactionConductor =
     new TransactionConductor(

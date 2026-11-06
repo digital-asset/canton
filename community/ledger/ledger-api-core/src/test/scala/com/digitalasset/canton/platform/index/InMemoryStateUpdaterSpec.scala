@@ -951,15 +951,11 @@ object InMemoryStateUpdaterSpec {
           reassignmentId = ReassignmentId.tryCreate("00155555"),
           isReassigningParticipant = true,
         ),
-        reassignment = Seq(
-          TransactionLogUpdate.Assign(
+        reassignments = Seq(
+          Reassignment.Assign(
             reassignmentCounter = 15L,
             nodeId = 0,
-            contractId = someContract.inst.contractId,
-            templateId = someContract.inst.templateId,
-            packageName = someContract.inst.packageName,
-            stakeholders = someContract.inst.stakeholders,
-            createdContractInstance = someContract.inst,
+            persistedContractInstance = PersistedContractInstance(1L, someContract.inst),
             representativePackageId = representativePackageId,
           )
         ),
@@ -981,8 +977,8 @@ object InMemoryStateUpdaterSpec {
           reassignmentId = ReassignmentId.tryCreate("0001555551"),
           isReassigningParticipant = true,
         ),
-        reassignment = Seq(
-          TransactionLogUpdate.Unassign(
+        reassignments = Seq(
+          Reassignment.Unassign(
             contractId = someContract.contractId,
             templateId = templateId2,
             packageName = packageName,

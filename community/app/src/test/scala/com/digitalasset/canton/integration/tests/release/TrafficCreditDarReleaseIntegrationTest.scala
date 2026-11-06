@@ -5,8 +5,8 @@ package com.digitalasset.canton.integration.tests.release
 
 import scala.sys.process.*
 
-/** Checks that the canton-traffic-credit DAR ships with the release artifact, both as a classpath
-  * resource loaded on startup and as a file in `dars/` for manual upload.
+/** Checks that the canton-api-traffic-credit-v1 DAR ships with the release artifact, both as a
+  * classpath resource loaded on startup and as a file in `dars/` for manual upload.
   */
 class TrafficCreditDarReleaseIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
   // turn off cache-dir to avoid compilation errors due to concurrent cache access

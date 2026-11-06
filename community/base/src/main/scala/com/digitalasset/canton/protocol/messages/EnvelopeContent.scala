@@ -75,6 +75,7 @@ object EnvelopeContent
         case Content.EncryptedMultipleViewsMessage(messageP) =>
           EncryptedViewMessage.fromProtoV32(
             pvv,
+            synchronizerLimits.transactionProtocolLimits,
             messageP,
           )
         case Content.UnassignmentMediatorMessage(messageP) =>

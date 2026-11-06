@@ -17,7 +17,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.{
   NoCommonSynchronizer,
 }
 import com.digitalasset.canton.integration.EnvironmentDefinition
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.LfContractId

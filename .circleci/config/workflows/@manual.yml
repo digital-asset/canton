@@ -1024,8 +1024,8 @@ manual_postgres_conformance_tests:
           - maven-mirror
           - da-images
     - postgres_conformance_test: &postgres_conformance
-        name: postgres_conformance_test_14
-        postgres_version: 14
+        name: postgres_conformance_test_15
+        postgres_version: 15
         context:
           - datadog
           - azure-self-cache
@@ -1035,10 +1035,6 @@ manual_postgres_conformance_tests:
           - gcp_kms_testing
         requires:
           - compile
-    - postgres_conformance_test:
-        <<: *postgres_conformance
-        name: postgres_conformance_test_15
-        postgres_version: 15
     - postgres_conformance_test:
         <<: *postgres_conformance
         name: postgres_conformance_test_16

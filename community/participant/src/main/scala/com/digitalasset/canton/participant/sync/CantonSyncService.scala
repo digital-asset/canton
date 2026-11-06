@@ -362,7 +362,7 @@ class CantonSyncService(
         val acsReplicationPackagesIfShouldVet =
           if (
             AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-              parameters.alphaOnlinePartyReplicationSupport
+              parameters.alphaAcsReplicationSupport
             )
           ) {
             AdminWorkflowServices.AcsReplicationPackages.keySet

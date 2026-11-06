@@ -14,7 +14,7 @@ import com.digitalasset.canton.damltests.featuredapprightimpl.v1.java.featuredap
 import com.digitalasset.canton.damltests.featuredapprightimpl.v2.java.featuredapprightimpl.FeaturedAppRightImpl as FeaturedAppRightImplV2
 import com.digitalasset.canton.damltests.featuredapprightimpl.v2.java.featuredapprightv1.FeaturedAppRight
 import com.digitalasset.canton.damltests.{appinstall, featuredapprightimpl}
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,

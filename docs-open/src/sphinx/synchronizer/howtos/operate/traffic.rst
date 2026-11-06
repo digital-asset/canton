@@ -106,9 +106,6 @@ Top up the traffic balance for a Synchronizer member
     Top ups must be submitted by a quorum of Sequencers to become effective. This is configured by the
     ``threshold`` parameter of the ``SequencerSynchronizerState`` topology mapping.
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25832>
-    #. Link to the reference documentation of the ``SequencerSynchronizerState`` topology mapping above.
-
 Let's add some traffic for a member, for example, ``participant1``. First we need to know the current ``serial``
 (a per-member monotonically increasing ``PositiveInt``), which corresponds
 to the last traffic balance top up for that member.

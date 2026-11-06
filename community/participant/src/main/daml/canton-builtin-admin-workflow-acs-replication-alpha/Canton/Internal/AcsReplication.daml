@@ -3,8 +3,6 @@
 
 module Canton.Internal.AcsReplication where
 
-data ParticipantPermission = Submission | Confirmation | Observation deriving (Eq, Show)
-
 -- An AcsReplicationProposal is created by the target participant to reach an agreement with the source participant
 -- to replicate the specified party ACS via one of the specified sequencers.
 template AcsReplicationProposal
@@ -15,7 +13,6 @@ template AcsReplicationProposal
     targetParticipant : Party -- participant admin party
     sequencerUids : [Text]
     timestamp : Time
-    participantPermission : ParticipantPermission
     operationName : Text
   where
     signatory targetParticipant
@@ -53,7 +50,6 @@ template AcsReplicationAgreement
     targetParticipant : Party -- participant admin party
     sequencerUid : Text
     timestamp : Time
-    participantPermission : ParticipantPermission
     operationName : Text
   where
     signatory targetParticipant, sourceParticipant

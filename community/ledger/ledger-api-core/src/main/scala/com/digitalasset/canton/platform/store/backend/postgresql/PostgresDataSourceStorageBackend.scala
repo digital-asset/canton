@@ -36,12 +36,9 @@ import javax.sql.DataSource
   *   TCP keepalive count. Corresponds to `tcp_keepalives_count`. A value of 0 selects the operating
   *   system's default.
   * @param clientConnectionCheckInterval
-  *   Interval for client connection checks. Corresponds to `client_connection_check_interval`
-  *   (Postgres >= 14 only). Millisecond granularity is the lowest supported precision. A value of 0
-  *   disables connection checks. On macOS with Postgres 14, this must be set to `None` (disabled),
-  *   since in Postgres 14, this setting requires the non-standard `POLLRDHUP` extension to the
-  *   `poll` system call, which is only available on Linux. See
-  *   [[https://www.postgresql.org/docs/14/runtime-config-connection.html]] for details.
+  *   Interval for client connection checks. Corresponds to `client_connection_check_interval`.
+  *   Millisecond granularity is the lowest supported precision. A value of 0 disables connection
+  *   checks.
   * @param networkTimeout
   *   Network timeout for database operations. Millisecond granularity is the lowest supported
   *   precision. A value of 0 indicates no timeout.

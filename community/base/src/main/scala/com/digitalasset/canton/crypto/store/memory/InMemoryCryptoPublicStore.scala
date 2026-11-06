@@ -91,7 +91,7 @@ class InMemoryCryptoPublicStore(override protected val loggerFactory: NamedLogge
   ): FutureUnlessShutdown[Set[EncryptionPublicKeyWithName]] =
     FutureUnlessShutdown.pure(storedEncryptionKeyMap.values.toSet)
 
-  override def deleteKey(
+  override protected def deleteStoredKey(
       keyId: Fingerprint
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     storedSigningKeyMap.remove(keyId).discard

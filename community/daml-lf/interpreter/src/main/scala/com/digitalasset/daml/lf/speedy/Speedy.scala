@@ -4,7 +4,6 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import cats.implicits.*
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
@@ -18,7 +17,7 @@ import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFou
 import com.digitalasset.daml.lf.speedy.PartialTransaction.NodeSeeds
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SResult.*
-import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
+import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, MetricPlugins, StepCount}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
@@ -26,7 +25,6 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.ArraySeq
-import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 
 private[lf] object Speedy {
@@ -34,22 +32,15 @@ private[lf] object Speedy {
   // These have zero cost when not enabled. But they are not switchable at runtime.
   private val enableInstrumentation: Boolean = false
 
-  final class Metrics(plugins: Seq[MetricPlugin]) {
-    private[this] val registeredPlugins: Map[String, MetricPlugin] =
-      plugins.map(p => p.getClass.getSimpleName -> p).toMap
+  final class Metrics(plugins: Option[MetricPlugins]) {
+    private[speedy] def increment[P <: MetricPlugin](tpe: MetricPlugins => P)(
+        ct: MetricPlugin.Ctx*
+    ): Unit = plugins.map(tpe).foreach(_.incrCount(ct*))
 
-    private[speedy] def incrCount[P <: MetricPlugin: ClassTag](ctx: MetricPlugin.Ctx*): Unit =
-      registeredPlugins.get(implicitly[ClassTag[P]].runtimeClass.getSimpleName).foreach {
-        _.incrCount(ctx*)
-      }
+    private[lf] def totalCount[P <: MetricPlugin](tpe: MetricPlugins => P): Option[P#Result] =
+      plugins.map(tpe).map(_.totalCount)
 
-    private[lf] def totalCount[P <: MetricPlugin: ClassTag]: Option[P#Result] =
-      registeredPlugins
-        .get(implicitly[ClassTag[P]].runtimeClass.getSimpleName)
-        .map(_.totalCount.asInstanceOf[P#Result])
-
-    private[lf] def reset(): Unit =
-      registeredPlugins.values.foreach(_.reset())
+    private[lf] def reset(): Unit = plugins.foreach(_.reset())
   }
 
   /** A constructor/deconstructor of value arithmetic errors. */
@@ -188,7 +179,7 @@ private[lf] object Speedy {
       initialGasBudget: Option[CostModel.Cost],
       initialEnvSize: Int,
       initialKontStackSize: Int,
-      metricPlugins: Seq[MetricPlugin],
+      metricPlugins: Option[MetricPlugins],
       val logger: MachineLogger,
   ) extends Machine[Question.Update](
         costModel = costModel,
@@ -580,7 +571,7 @@ private[lf] object Speedy {
         initialGasBudget: Option[CostModel.Cost] = None,
         initialEnvSize: Int = 512,
         initialKontStackSize: Int = 128,
-        metricPlugins: Seq[MetricPlugin] = Seq.empty,
+        metricPlugins: Option[MetricPlugins] = None,
     ): UpdateMachine =
       new UpdateMachine(
         sexpr = expr,
@@ -626,7 +617,7 @@ private[lf] object Speedy {
       /* Profile of the run when the packages haven been compiled with profiling enabled. */
       override val profile: Profile,
       override val iterationsBetweenInterruptions: Long,
-      metricPlugins: Seq[MetricPlugin],
+      metricPlugins: Option[MetricPlugins],
       logger: MachineLogger,
   ) extends Machine[Nothing](
         costModel = CostModel.Empty,
@@ -674,7 +665,7 @@ private[lf] object Speedy {
       initialGasBudget: Option[CostModel.Cost],
       initialEnvSize: Int,
       initialKontStackSize: Int,
-      metricPlugins: Seq[MetricPlugin],
+      metricPlugins: Option[MetricPlugins],
       logger: MachineLogger,
   ) extends HasLoggerName {
 
@@ -688,7 +679,7 @@ private[lf] object Speedy {
     val iterationsBetweenInterruptions: Long
 
     private[lf] lazy val metrics = {
-      metricPlugins.foreach { plugin =>
+      metricPlugins.toList.flatMap(_.asSeq()).foreach { plugin =>
         logger.trace(s"Enabling metric plugin: ${plugin.getClass.getSimpleName}", None)
       }
 
@@ -944,13 +935,13 @@ private[lf] object Speedy {
             Classify.classifyMachine(this, track.classifyCounts)
           if (interruptionCountDown == 0) {
             interruptionCountDown = iterationsBetweenInterruptions
-            metrics.incrCount[StepCount](StepCount.BatchCtx)
+            metrics.increment(_.stepCount)(StepCount.BatchCtx)
             SResultInterruption
           } else {
             val thisControl = control
             setControl(Control.WeAreUnset)
             interruptionCountDown -= 1
-            metrics.incrCount[StepCount](StepCount.StepCtx)
+            metrics.increment(_.stepCount)(StepCount.StepCtx)
             thisControl match {
               case Control.Value(value) =>
                 popTempStackToBase()
@@ -1178,7 +1169,7 @@ private[lf] object Speedy {
         logger: MachineLogger,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
         profile: Profile = newProfile,
-        metricPlugins: Seq[MetricPlugin] = Seq.empty,
+        metricPlugins: Option[MetricPlugins] = None,
     ): PureMachine =
       new PureMachine(
         sexpr = expr,
@@ -1271,7 +1262,7 @@ private[lf] object Speedy {
         initialGasBudget = None,
         initialEnvSize = 512,
         initialKontStackSize = 128,
-        metricPlugins = Seq.empty,
+        metricPlugins = None,
         logger = logger,
       ) {
 

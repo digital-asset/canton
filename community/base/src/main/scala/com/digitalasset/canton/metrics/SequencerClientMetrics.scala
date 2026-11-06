@@ -329,8 +329,8 @@ class SequencerClientMetrics(
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
     val dummyContext = MetricsContext("connection" -> "dummy")
 
-    connectionPool.connectionHealth(dummyContext).discard
-    connectionPool.subscriptionHealth(dummyContext).discard
+    connectionPool.updateConnectionHealth(dummyContext, 0)
+    connectionPool.updateSubscriptionHealth(dummyContext, 0)
     connectionPool.registerSequencerPenalty(dummyContext, getValue = () => 0.0).discard
     handler.connectionMetrics(SequencerAlias.Default).discard
     trafficConsumption.lastTrafficUpdateTimestamp(dummyContext).discard

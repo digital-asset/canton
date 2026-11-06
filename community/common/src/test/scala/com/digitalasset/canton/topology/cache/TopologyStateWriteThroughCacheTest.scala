@@ -368,7 +368,7 @@ class TopologyStateWriteThroughCacheTest
         for {
           _ <- addF
           c1 <- grabNs(ts(1), ns1)
-          _ = cache.flush(ts(0), ts(0))
+          _ <- cache.flush(ts(0), ts(0)).failOnShutdown
           stored <- f.updateSync.get().future.map(unpack)
         } yield {
           c1.map(_.transaction) shouldBe Seq(ns1k1_k1)

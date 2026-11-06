@@ -2,17 +2,22 @@ package com.digitalasset.canton.build
 
 import sbt.*
 import sbt.Keys.*
-import org.scalafmt.sbt.ScalafmtPlugin
+import org.scalafmt.interfaces.{Scalafmt, ScalafmtReporter}
+import org.scalafmt.sbt.ScalafmtPlugin.autoImport.scalafmtConfig
+import org.scalafmt.sbt.{ScalafmtPlugin, ScalafmtSbtDependencyDownloader}
 import sbt.io.FileFilter
+import sbt.librarymanagement.{DependencyResolution, UpdateConfiguration}
 import sbt.nio.file.FileTreeView
 
-import java.io.{File, IOException}
+import java.io.{File, IOException, OutputStreamWriter, PrintWriter}
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitOption, FileVisitResult, FileVisitor, Files, Path as NioPath}
 import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
+import scala.sys.process.Process
 import scala.util.control.NonFatal
+import scala.util.{Failure, Success, Try}
 
 object CantonScalafmtPlugin extends AutoPlugin {
 
@@ -26,6 +31,101 @@ object CantonScalafmtPlugin extends AutoPlugin {
   }
 
   import autoImport._
+
+  // Moving these settings to globalSettings ensures they run EXACTLY ONCE per sbt invocation,
+  // targeting the root folder instead of evaluating on every sub-project module.
+  override lazy val globalSettings: Seq[Setting[_]] = Seq(
+    scalafmtCanton := {
+      val log = streams.value.log
+      // In global scope, we explicitly target the workspace root directory
+      val repoRoot = (ThisBuild / baseDirectory).value
+
+      val cantonFiles = listCantonScriptFiles(repoRoot, log)
+
+      val config = (ThisBuild / scalafmtConfig).value
+      val taskStreams = streams.value
+      val resolution = (LocalRootProject / dependencyResolution).value
+      val updateConf = (LocalRootProject / updateConfiguration).value
+
+      if (cantonFiles.nonEmpty) {
+        log.debug(
+          s"Found ${cantonFiles.size} workspace script file(s). Forwarding batch to scalafmt parsing engine..."
+        )
+
+        var formatFailed = false
+        formatInMemory(config, cantonFiles, taskStreams, resolution, updateConf) { failureMessage =>
+          log.error(s"Canton script formatting engine parse failure: $failureMessage")
+          formatFailed = true
+        }.foreach { case (originalFile, formattedContent) =>
+          if (IO.read(originalFile) != formattedContent) {
+            log.info(s"Reformatting ${originalFile.getPath}")
+            IO.write(originalFile, formattedContent)
+          }
+        }
+
+        if (formatFailed) {
+          throw new MessageOnlyException("Canton script formatting failed. See the errors above.")
+        }
+      } else {
+        log.info("No .canton scripts located inside workspace root.")
+      }
+    },
+    scalafmtCantonCheck := {
+      val log = streams.value.log
+      val repoRoot = (ThisBuild / baseDirectory).value
+      val config = (ThisBuild / scalafmtConfig).value
+      val taskStreams = streams.value
+      val resolution = (LocalRootProject / dependencyResolution).value
+      val updateConf = (LocalRootProject / updateConfiguration).value
+
+      val cantonFiles = listCantonScriptFiles(repoRoot, log)
+
+      if (cantonFiles.nonEmpty) {
+        log.info(
+          s"Found ${cantonFiles.size} source script(s). Running single workspace verification pass..."
+        )
+
+        var styleCheckFailed = false
+
+        try {
+          formatInMemory(config, cantonFiles, taskStreams, resolution, updateConf) {
+            failureMessage =>
+              log.error(s"Canton script formatting engine parse failure: $failureMessage")
+              styleCheckFailed = true
+          }.foreach { case (originalFile, formattedContent) =>
+            if (IO.read(originalFile) != formattedContent) {
+              styleCheckFailed = true
+              log.error(s"Canton style violation detected: ${originalFile.getPath}")
+            }
+          }
+        } catch {
+          case NonFatal(e) =>
+            log.error(s"Canton style validation check crashed internally: ${e.getMessage}")
+            log.trace(e)
+            styleCheckFailed = true
+        }
+
+        if (styleCheckFailed) {
+          throw new MessageOnlyException(
+            "Canton script lint verification failed. Please execute 'sbt format' locally to realign scripts."
+          )
+        } else {
+          log.info("Scalafmt successfully verified all .canton script styles!")
+        }
+      } else {
+        log.info("No .canton source scripts found to verify.")
+      }
+    },
+  )
+
+  private def listCantonScriptFiles(root: File, log: Logger): Seq[File] =
+    Try(Process(Seq("git", "ls-files", "-z", "--", "*.canton"), root).!!) match {
+      case Success(output) =>
+        output.split('\u0000').toSeq.filter(_.nonEmpty).map(new File(root, _)).filter(_.isFile)
+      case Failure(e) =>
+        log.warn(s"Considering all .canton scripts, git ls-files failed: ${e.getMessage}")
+        findCantonScriptFiles(root)
+    }
 
   private def findCantonScriptFiles(root: File) = {
     // copy of sbt.io.DescendantOrSelfPathFinder.native, with the difference that it allows to avoid entire
@@ -65,134 +165,50 @@ object CantonScalafmtPlugin extends AutoPlugin {
     nativeWalk.toSeq
   }
 
-  // Moving these settings to globalSettings ensures they run EXACTLY ONCE per sbt invocation,
-  // targeting the root folder instead of evaluating on every sub-project module.
-  override lazy val globalSettings: Seq[Setting[_]] = Seq(
-    scalafmtCanton := {
-      val log = streams.value.log
-      // In global scope, we explicitly target the workspace root directory
-      val repoRoot = (ThisBuild / baseDirectory).value
-
-      val cantonFiles = findCantonScriptFiles(repoRoot)
-
-      val taskState = Keys.state.value
-
-      if (cantonFiles.nonEmpty) {
-        log.debug(
-          s"Found ${cantonFiles.size} workspace script file(s). Forwarding batch to scalafmt parsing engine..."
-        )
-
-        maskCantonScripts(cantonFiles, log)
-        try {
-          val filePathsBatch = cantonFiles.map(_.getAbsolutePath).mkString(" ")
-          sbt.Command.process(
-            s"scalafmtOnly $filePathsBatch",
-            taskState,
-            (failureMessage: String) => {
-              log.error(s"Canton script formatting engine parse failure: $failureMessage")
-              taskState.fail
-            },
-          )
-        } finally {
-          restoreCantonScripts(cantonFiles, log)
-        }
-      } else {
-        log.info("No .canton scripts located inside workspace root.")
-      }
-    },
-    scalafmtCantonCheck := {
-      val log = streams.value.log
-      val repoRoot = new java.io.File(".")
-      val taskState = Keys.state.value
-
-      val cantonFiles = findCantonScriptFiles(repoRoot)
-
-      if (cantonFiles.nonEmpty) {
-        log.info(
-          s"Found ${cantonFiles.size} source script(s). Running single workspace verification pass..."
-        )
-
-        maskCantonScripts(cantonFiles, log)
-        var styleCheckFailed = false
-
-        val fileMapping = cantonFiles.map { originalFile =>
-          val backupFile =
-            new java.io.File(originalFile.getParentFile, "backup_" + originalFile.getName + ".tmp")
-          IO.copyFile(originalFile, backupFile)
-          (originalFile, backupFile)
-        }
-
-        try {
-          val originalFilePathsBatch = cantonFiles.map(_.getAbsolutePath).mkString(" ")
-          sbt.Command.process(
-            s"scalafmtOnly $originalFilePathsBatch",
-            taskState,
-            (failureMessage: String) => {
-              log.error(s"Canton script formatting engine parse failure: $failureMessage")
-              styleCheckFailed = true
-              taskState.fail
-            },
-          )
-
-          fileMapping.foreach { case (originalFile, backupFile) =>
-            val formattedContent = IO.read(originalFile)
-            val originalContent = IO.read(backupFile)
-
-            if (originalContent != formattedContent) {
-              styleCheckFailed = true
-              log.error(s"Canton style violation detected: ${originalFile.getPath}")
-            }
-          }
-        } catch {
-          case NonFatal(e) =>
-            log.error(s"Canton style validation check crashed internally: ${e.getMessage}")
-            styleCheckFailed = true
-        } finally {
-          fileMapping.foreach { case (originalFile, backupFile) =>
-            if (backupFile.exists()) {
-              IO.copyFile(backupFile, originalFile)
-              IO.delete(backupFile)
-            }
-          }
-          restoreCantonScripts(cantonFiles, log)
-        }
-
-        if (styleCheckFailed) {
-          sys.error(
-            "Canton script lint verification failed. Please execute 'sbt format' locally to realign scripts."
-          )
-        } else {
-          log.info("Scalafmt successfully verified all .canton script styles!")
-        }
-      } else {
-        log.info("No .canton source scripts found to verify.")
-      }
-    },
-  )
-
-  // --- Encapsulated Helpers ---
-
-  private def maskCantonScripts(files: Seq[File], log: Logger): Unit = {
-    log.debug(
-      s"Executing Pre-Format Pass: Masking structural '@' tokens in ${files.size} scripts..."
-    )
-    files.foreach { file =>
-      val content = IO.read(file)
-      // The mask token deliberately contains no '@' so that re-masking an already-masked file is a
-      // no-op and can never nest into corruption.
-      val masked = content.replaceAll("(?<!\\w)@(\\w*)", "/*canton-mask:$1*/")
-      IO.write(file, masked)
+  /** Formats the `.canton` scripts in memory, so that the scripts themselves only ever hold
+    * unmasked content. Returns each successfully formatted script with its formatted content.
+    */
+  private def formatInMemory(
+      config: File,
+      files: Seq[File],
+      taskStreams: TaskStreams,
+      resolution: DependencyResolution,
+      updateConf: UpdateConfiguration,
+  )(onFailure: String => Unit): Seq[(File, String)] = {
+    val log = taskStreams.log
+    val downloadOutput = new OutputStreamWriter(taskStreams.binary())
+    val reporter = new ScalafmtReporter {
+      override def error(file: NioPath, message: String): Unit = onFailure(s"$message [$file]")
+      override def error(file: NioPath, e: Throwable): Unit =
+        onFailure(s"${e.getMessage} [$file]")
+      override def excluded(file: NioPath): Unit = log.debug(s"file excluded: $file")
+      override def parsedConfig(config: NioPath, scalafmtVersion: String): Unit =
+        log.debug(s"parsed config (v$scalafmtVersion): $config")
+      override def downloadWriter(): PrintWriter = new PrintWriter(downloadOutput)
+      override def downloadOutputStreamWriter(): OutputStreamWriter = downloadOutput
     }
+    val session = Scalafmt
+      .create(ScalafmtPlugin.getClass.getClassLoader)
+      .withRespectProjectFilters(true)
+      .withRepositoryPackageDownloader(
+        new ScalafmtSbtDependencyDownloader(taskStreams, resolution, updateConf)
+      )
+      .withReporter(reporter)
+      .createSession(config.toPath)
+
+    for {
+      file <- files
+      formattedContent <- Option(
+        session.formatOrError(file.toPath, maskCantonScript(IO.read(file))).value
+      )
+    } yield file -> restoreCantonScript(formattedContent)
   }
 
-  private def restoreCantonScripts(files: Seq[File], log: Logger): Unit = {
-    log.debug(
-      s"Executing Post-Format Pass: Restoring original '@' annotations to ${files.size} scripts..."
-    )
-    files.foreach { file =>
-      val content = IO.read(file)
-      val unmasked = content.replaceAll("/\\*canton-mask:(\\w*)\\*/", "@$1")
-      IO.write(file, unmasked)
-    }
-  }
+  private def maskCantonScript(content: String): String =
+    // The mask token deliberately contains no '@' so that re-masking an already-masked file is a
+    // no-op and can never nest into corruption.
+    content.replaceAll("(?<!\\w)@(\\w*)", "/*canton-mask:$1*/")
+
+  private def restoreCantonScript(content: String): String =
+    content.replaceAll("/\\*canton-mask:(\\w*)\\*/", "@$1")
 }

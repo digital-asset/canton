@@ -31,9 +31,6 @@ Configure the Public API ``public-api`` under a Sequencer node configuration:
    :end-before: user-manual-entry-end: SimpleSequencerNodeConfig
    :dedent:
 
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/26126>
-
 All Sequencer Public API configuration parameters have defaults. For example, the default address to listen on is ``127.0.0.1``.
 To find out more about the parameters, check the reference documentation.
 

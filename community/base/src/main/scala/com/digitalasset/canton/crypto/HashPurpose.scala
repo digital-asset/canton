@@ -119,6 +119,14 @@ object HashPurpose {
   val AcsReplicationDigest = HashPurpose(68, "AcsReplicationDigest")
   val Transparency = HashPurpose(69, "ViewEncryptionTransparency")
   val ListPartiesPageToken = HashPurpose(70, "ListPartiesPageToken")
+  // Reserved for the inner nodes of MerkleHashTree. Must never be used to hash anything else, in
+  // particular not data that is signed: a signature over a hash with this purpose is a signature
+  // over the leaves of a Merkle hash tree.
+  val MerkleHashTreeInnerNode = HashPurpose(71, "MerkleHashTreeInnerNode")
+  val _LfReassignmentChangeId = HashPurpose(72, "Daml-LF Hash.Purpose.ReassignmentChangeId")
+  val _LfLedgerApiReassignmentChangeId =
+    HashPurpose(73, "Daml-LF Hash.Purpose.LedgerApiReassignmentChangeId")
+  val _LfAssignmentReassignmentId = HashPurpose(74, "Daml-LF Hash.Purpose.AssignmentReassignmentId")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

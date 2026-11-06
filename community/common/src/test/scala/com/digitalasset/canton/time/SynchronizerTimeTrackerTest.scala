@@ -184,8 +184,8 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         _ = requestSubmitter.hasRequestedTime shouldBe false
         _ = clock.advance(Duration.ofSeconds(observationLatencySecs.toLong))
         _ = requestSubmitter.hasRequestedTime shouldBe false
-        _ = observeTimestamp(1)
-        _ = advanceAndFlush(patienceDurationSecs)
+        _ <- observeTimestamp(1)
+        _ <- advanceAndFlush(patienceDurationSecs)
       } yield requestSubmitter.hasRequestedTime shouldBe true
     }
 

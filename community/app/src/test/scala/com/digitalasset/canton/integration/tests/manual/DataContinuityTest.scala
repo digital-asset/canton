@@ -25,7 +25,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.tests.*
 import com.digitalasset.canton.integration.tests.benchmarks.BongTestScenarios
 import com.digitalasset.canton.integration.tests.manual.DataContinuityTest.*

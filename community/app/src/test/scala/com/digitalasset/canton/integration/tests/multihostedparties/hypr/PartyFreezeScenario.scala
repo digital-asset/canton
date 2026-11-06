@@ -368,12 +368,14 @@ final class PartyFreezeScenario private (
   def downgrade(
       participant: LocalParticipantReference,
       permission: ParticipantPermission,
+      forceFlags: ForceFlags = ForceFlags.none,
   ): CantonTimestamp =
     write(
       signers = Seq(Authorizer.Participant(participant)),
       mapping.copy(entries =
         mapping.entries.updated(participant.id, entryOf(participant).copy(permission = permission))
       ),
+      forceFlags,
     )
 
   /** The party removes `removed` and nominates `nominee` in one transaction, signed by the party

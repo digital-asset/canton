@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.DatabaseMetrics
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state
@@ -41,6 +42,7 @@ import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscrip
   DbBatch,
   ProcessingBatch,
   SynCon,
+  TailBatch,
   UpdateBatch,
   ZeroLedgerEnd,
 }
@@ -1987,6 +1989,46 @@ class ParallelIndexerSubscriptionSpec
         Some(someSequencerIndex1),
         someSequencerIndex1,
       ),
+    )
+  }
+
+  behavior of "conflateCompletedBatches"
+
+  it should "derive the post-publish data of each completed batch with its own publication time" in {
+    def commandRejected(commandId: String): Update.SequencedCommandRejected =
+      Update.SequencedCommandRejected(
+        completionInfo = state.CompletionInfo(
+          actAs = List(Ref.Party.assertFromString("party")),
+          userId = Ref.UserId.assertFromString("user"),
+          commandId = Ref.CommandId.assertFromString(commandId),
+          optDeduplicationPeriod = None,
+          submissionId = None,
+          paidTrafficCost = NonNegativeLong.zero,
+        ),
+        reasonTemplate = Update.CommandRejected.FinalReason(new com.google.rpc.status.Status()),
+        synchronizerId = someSynchronizerId,
+        recordTime = someRecordTime1,
+        isTransaction = true,
+        transactionHash = None,
+        traceContext = implicitly,
+      )
+    val firstBatch = someUpdateBatch.copy(
+      offsetsUpdates = Vector(offset(10) -> commandRejected("first"))
+    )
+    val secondBatch = someOtherUpdateBatch.copy(
+      offsetsUpdates = Vector(offset(20) -> commandRejected("second"))
+    )
+
+    ParallelIndexerSubscription.conflateCompletedBatches(Vector.empty) shouldBe None
+
+    val tailBatch: TailBatch =
+      ParallelIndexerSubscription.conflateCompletedBatches(Vector(firstBatch, secondBatch)).value
+    tailBatch.updateBatch.ledgerEnd.lastOffset shouldBe offset(20)
+    tailBatch.updateBatch.ledgerEnd.lastPublicationTime shouldBe CantonTimestamp.ofEpochMicro(25)
+    tailBatch.updateBatch.offsetsUpdates.map(_._1) shouldBe Vector(offset(10), offset(20))
+    tailBatch.postPublishData.map(data => data.offset -> data.publicationTime) shouldBe Vector(
+      offset(10) -> CantonTimestamp.ofEpochMicro(15),
+      offset(20) -> CantonTimestamp.ofEpochMicro(25),
     )
   }
 
