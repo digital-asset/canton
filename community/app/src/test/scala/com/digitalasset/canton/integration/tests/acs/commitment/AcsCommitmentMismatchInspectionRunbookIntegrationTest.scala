@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.acs.commitment.util.ContractsAndCommitment.IouCommitmentWithContracts
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{

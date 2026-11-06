@@ -541,9 +541,7 @@ abstract class Environment[Config <: SharedCantonConfig[Config]](
           executionContext,
         )
       )
-      .valueOr(err =>
-        throw new RuntimeException(s"Failed to create sequencer node $name: $err")
-      ) // TODO(i3168): Handle node startup errors gracefully
+      .valueOr(err => throw new RuntimeException(s"Failed to create sequencer node $name: $err"))
 
   protected def createMediator(
       name: String,
@@ -565,9 +563,7 @@ abstract class Environment[Config <: SharedCantonConfig[Config]](
         executionContext,
       )
     )
-    .valueOr(err =>
-      throw new RuntimeException(s"Failed to create mediator node $name: $err")
-    ) // TODO(i3168): Handle node startup errors gracefully
+    .valueOr(err => throw new RuntimeException(s"Failed to create mediator node $name: $err"))
 
   protected def createParticipant(
       name: String,

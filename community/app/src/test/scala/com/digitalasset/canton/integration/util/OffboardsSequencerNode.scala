@@ -19,7 +19,6 @@ trait OffboardsSequencerNode {
   import org.scalatest.LoneElement.*
   import org.scalatest.matchers.should.Matchers.*
 
-  // TODO(#22509) Introduce a single off-boarding command
   protected def offboardSequencer(
       synchronizerId: SynchronizerId,
       sequencerToOffboard: LocalSequencerReference,

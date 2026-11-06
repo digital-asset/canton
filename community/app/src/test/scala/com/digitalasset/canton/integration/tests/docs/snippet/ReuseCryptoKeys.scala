@@ -28,7 +28,7 @@ object ReuseCryptoKeys {
       definition: EnvironmentDefinition
   )(implicit errorLoggingContext: ErrorLoggingContext): EnvironmentDefinition =
     definition
-      .addConfigTransform(ReuseCryptoKeys.configTransform)
+      .addConfigTransforms(ReuseCryptoKeys.configTransform, ConfigTransforms.enableKeyDownload)
       .withManualStart
       .withSetup(setupAllNodes(_, errorLoggingContext))
 

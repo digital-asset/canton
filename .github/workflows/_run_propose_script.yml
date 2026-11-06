@@ -21,6 +21,7 @@ on:
 jobs:
   run_propose_script:
     name: Run Propose Script
+    environment: release
     if: ${{ contains(fromJSON('["DACH-NY/canton", "digital-asset/canton"]'), github.repository) }}
     runs-on: ${{ inputs.runner }}
     permissions:

@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
-import com.digitalasset.canton.ledger.participant.state.{ReassignmentInfo, Update}
+import com.digitalasset.canton.ledger.participant.state.{Reassignment, ReassignmentInfo, Update}
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStore.EventSequentialId
 import com.digitalasset.canton.platform.{ContractId, Identifier}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
@@ -17,12 +17,8 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{PackageName, Party}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
-import com.digitalasset.daml.lf.transaction.{
-  CreationTime,
-  FatContractInstance,
-  GlobalKeyWithMaintainers,
-}
-import com.digitalasset.daml.lf.value.{Value, Value as LfValue}
+import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance}
+import com.digitalasset.daml.lf.value.Value as LfValue
 
 /** Generic ledger update event.
   *
@@ -113,34 +109,6 @@ object TransactionLogUpdate {
     )
   }
 
-  sealed trait ReassignmentEvent extends Product with Serializable {
-    val stakeholders: Set[Ref.Party]
-    val templateId: Ref.Identifier
-    val packageName: Ref.PackageName
-  }
-
-  final case class Assign(
-      reassignmentCounter: Long,
-      nodeId: Int,
-      contractId: Value.ContractId,
-      stakeholders: Set[Party],
-      templateId: Ref.Identifier,
-      packageName: Ref.PackageName,
-      createdContractInstance: FatContractInstanceWithCreatedAt,
-      representativePackageId: Ref.PackageId,
-  ) extends ReassignmentEvent
-
-  final case class Unassign(
-      contractId: Value.ContractId,
-      templateId: Ref.Identifier,
-      packageName: Ref.PackageName,
-      stakeholders: Set[Ref.Party],
-      assignmentExclusivity: Option[Timestamp],
-      reassignmentCounter: Long,
-      nodeId: Int,
-      keyOpt: Option[GlobalKeyWithMaintainers],
-  ) extends ReassignmentEvent
-
   final case class ReassignmentAccepted(
       updateId: String,
       commandId: String,
@@ -149,11 +117,11 @@ object TransactionLogUpdate {
       override val recordTime: Timestamp,
       completionStreamResponseO: Option[CompletionStreamResponse],
       reassignmentInfo: ReassignmentInfo,
-      reassignment: Seq[ReassignmentEvent],
+      reassignments: Seq[Reassignment],
       override val synchronizerId: String,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
-    def stakeholders: Set[Ref.Party] = reassignment.iterator.flatMap(_.stakeholders).toSet
+    def stakeholders: Set[Ref.Party] = reassignments.iterator.flatMap(_.stakeholders).toSet
   }
 
   final case class TopologyTransactionEffective(

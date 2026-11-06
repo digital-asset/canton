@@ -13,7 +13,7 @@ import com.digitalasset.canton.damltests.appinstall.v1.java.appinstall.AppInstal
 import com.digitalasset.canton.damltests.appinstall.v2.java.appinstall.AppInstall as AppInstallV2
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.{EntitySyntax, PartiesAllocator}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors.NoPreferredPackagesFound

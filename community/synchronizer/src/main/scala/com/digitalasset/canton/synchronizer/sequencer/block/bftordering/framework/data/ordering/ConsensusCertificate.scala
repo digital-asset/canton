@@ -8,7 +8,6 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
@@ -50,16 +49,15 @@ final case class CommitCertificate(
 
 object ConsensusCertificate {
   def fromProto(
-      consensusCertificate: ProtoConsensusCertificate,
-      actualSender: Option[BftNodeId],
+      consensusCertificate: ProtoConsensusCertificate
   ): ParsingResult[ConsensusCertificate] =
     consensusCertificate.certificate match {
       case ProtoConsensusCertificate.Certificate.Empty =>
         Left(ProtoDeserializationError.OtherError("consensus certificate is empty"))
       case ProtoConsensusCertificate.Certificate.PrepareCertificate(prepareCertificate) =>
-        PrepareCertificate.fromProto(prepareCertificate, actualSender)
+        PrepareCertificate.fromProto(prepareCertificate)
       case ProtoConsensusCertificate.Certificate.CommitCertificate(commitCertificate) =>
-        CommitCertificate.fromProto(commitCertificate, actualSender)
+        CommitCertificate.fromProto(commitCertificate)
     }
 }
 
@@ -74,21 +72,22 @@ object PrepareCertificate {
     new PrepareCertificate(prePrepare, sortedPrepares)
   }
   def fromProto(
-      prepareCertificate: v30.PrepareCertificate,
-      actualSender: Option[BftNodeId],
+      prepareCertificate: v30.PrepareCertificate
   ): ParsingResult[PrepareCertificate] =
     for {
+      // We set the actual sender of nested messages to `None`
+      //  as the sender is set in the outer message and is unused for nested messages.
       prePrepare <- ProtoConverter
         .parseRequired(
-          SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
-            PrePrepare.fromProtoConsensusMessage(actualSender, _)
+          SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+            claimedOriginator => PrePrepare.fromProtoConsensusMessage((claimedOriginator, None), _)
           ),
           "prePrepare",
           prepareCertificate.prePrepare,
         )
       prepares <- prepareCertificate.prepares.traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
-          Prepare.fromProtoConsensusMessage(actualSender, _)
+        SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+          claimedOriginator => Prepare.fromProtoConsensusMessage((claimedOriginator, None), _)
         )
       )
     } yield PrepareCertificate(prePrepare, prepares)
@@ -108,21 +107,22 @@ object CommitCertificate {
   }
 
   def fromProto(
-      commitCertificate: v30.CommitCertificate,
-      actualSender: Option[BftNodeId],
+      commitCertificate: v30.CommitCertificate
   ): ParsingResult[CommitCertificate] =
+    // We set the actual sender of nested messages to `None`
+    //  as the sender is set in the outer message and is unused for nested messages.
     for {
       prePrepare <- ProtoConverter
         .parseRequired(
-          SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
-            PrePrepare.fromProtoConsensusMessage(actualSender, _)
+          SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+            claimedOriginator => PrePrepare.fromProtoConsensusMessage((claimedOriginator, None), _)
           ),
           "prePrepare",
           commitCertificate.prePrepare,
         )
       commits <- commitCertificate.commits.traverse(
-        SignedMessage.fromProto(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
-          Commit.fromProtoConsensusMessage(actualSender, _)
+        SignedMessage.fromProtoWithNodeId(v30.ConsensusMessage, SupportedVersions.ProtoData30)(
+          claimedOriginator => Commit.fromProtoConsensusMessage((claimedOriginator, None), _)
         )
       )
     } yield CommitCertificate(prePrepare, commits)

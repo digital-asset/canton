@@ -16,7 +16,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,

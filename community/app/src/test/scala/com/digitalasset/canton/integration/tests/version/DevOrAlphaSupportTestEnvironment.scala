@@ -7,7 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameter
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import monocle.macros.syntax.lens.*

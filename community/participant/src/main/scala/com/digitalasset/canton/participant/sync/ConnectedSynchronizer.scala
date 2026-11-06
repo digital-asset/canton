@@ -1072,7 +1072,6 @@ class ConnectedSynchronizer(
                 Target(staticSynchronizerParameters),
                 reassignmentCoordination,
                 data.contractsBatch.stakeholders.all,
-                data.submitterMetadata,
                 participantId,
                 data.targetTimestamp,
                 data.unassignmentTs,
@@ -1108,7 +1107,8 @@ class ConnectedSynchronizer(
     for {
       // Wait to see a timestamp >= now from the synchronizer -- when we see such a timestamp, it means that the participant
       // has "caught up" on messages from the synchronizer (and so should have seen all the assignments)
-      // TODO(i9009): This assumes the participant and synchronizer clocks are synchronized, which may not be the case
+      // NOTE: This assumes that the participant and synchronizer clocks are synchronized, which
+      // may not be the case.
       _waitForReplay <- FutureUnlessShutdown.outcomeF(
         timeTracker.awaitTick(clock.now).getOrElse(Future.unit)
       )

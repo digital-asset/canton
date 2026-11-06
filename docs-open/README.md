@@ -73,12 +73,8 @@ And so, we only support a subset of `literalinclude` directive options, that are
 
 ### How can I add a TODO?
 
-Use the `.. todo::` directive. For example:
-
-```rst
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-```
+Do not add `.. todo::` directives: the RST docs in this repository are deprecated. Track missing
+documentation in an issue instead.
 
 ### How can I mark a document as "work in progress"?
 

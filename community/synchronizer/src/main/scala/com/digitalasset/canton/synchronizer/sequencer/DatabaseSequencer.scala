@@ -606,7 +606,6 @@ class DatabaseSequencer(
       "Traffic control is not supported by the database sequencer"
     )
 
-  // TODO(#26430) Make LSU work with DB sequencer
   override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
@@ -614,7 +613,6 @@ class DatabaseSequencer(
       "LSU sanity check is not supported by the database sequencer"
     )
 
-  // TODO(#26430) Make LSU work with DB sequencer
   override def handleLsuSequencerConnectionSuccessor(
       successor: TopologyTransaction[TopologyChangeOp, LsuSequencerConnectionSuccessor]
   )(implicit

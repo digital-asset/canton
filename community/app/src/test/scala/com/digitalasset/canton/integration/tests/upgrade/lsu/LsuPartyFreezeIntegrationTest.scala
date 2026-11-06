@@ -10,7 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.multihostedparties.hypr.PartyFreezeScenario
 import com.digitalasset.canton.integration.tests.multihostedparties.hypr.PartyFreezeScenario.{

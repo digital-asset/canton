@@ -668,6 +668,7 @@ object ProgrammableSequencer {
             // same as above, minimize the reordering that can happen
             .focus(_.config.minRequestsInBatch)
             .replace(1)
+        case conf: SequencerConfig.DeprecatedSequencerConfig => conf
       }
 
     val updateSequencerConfigs = ConfigTransforms.updateAllSequencerConfigs {

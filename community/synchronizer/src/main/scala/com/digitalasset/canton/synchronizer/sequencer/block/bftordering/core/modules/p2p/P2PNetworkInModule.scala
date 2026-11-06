@@ -62,15 +62,15 @@ class P2PNetworkInModule[E <: Env[E]](
   }
 
   private def parseAndForwardBody(
-      from: BftNodeId,
+      sentBy: BftNodeId,
       body: Option[BftOrderingMessageBody],
       start: Instant,
   )(implicit traceContext: TraceContext): Unit = {
     val outcome: OutcomeType =
       body.fold[OutcomeType]({
-        logger.info(s"Received empty message body from $from, dropping")
-        metrics.p2p.receive.labels.source.values.Empty(from)
-      })(body => handleMessage(from, body.message))
+        logger.info(s"Received empty message body from $sentBy, dropping")
+        metrics.p2p.receive.labels.source.values.Empty(sentBy)
+      })(body => handleMessage(sentBy, body.message))
 
     val end = Instant.now
     val mc1 = receiveMetricsContext(metrics)(outcome)
@@ -82,58 +82,70 @@ class P2PNetworkInModule[E <: Env[E]](
   }
 
   private def handleMessage(
-      from: BftNodeId,
+      sentBy: BftNodeId,
       message: Message,
   )(implicit
       traceContext: TraceContext
   ): OutcomeType =
     message match {
+
       case Message.Empty =>
-        logger.info(s"Received empty message from $from, dropping")
-        metrics.p2p.receive.labels.source.values.Empty(from)
+        logger.info(s"Received empty message from $sentBy, dropping")
+        metrics.p2p.receive.labels.source.values.Empty(sentBy)
+
       case Message.AvailabilityMessage(availabilityMessage) =>
         AvailabilityModule
           .parseNetworkMessage(availabilityMessage)
           .fold(
             errorMessage =>
               logger.warn(
-                s"Dropping availability message from $from as it couldn't be parsed: $errorMessage"
+                s"Dropping availability message from $sentBy as it couldn't be parsed: $errorMessage"
               ),
             msg => availability.asyncSend(msg),
           )
-        metrics.p2p.receive.labels.source.values.Availability(from)
+        metrics.p2p.receive.labels.source.values.Availability(sentBy)
+
       case Message.ConsensusMessage(consensusMessage) =>
         IssConsensusModule
-          .parseNetworkMessage(consensusMessage, actualSender = from)
+          .parseNetworkMessage(consensusMessage, actualSender = sentBy)
           .map(msg => Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(msg))
           .fold(
             errorMessage =>
               logger.warn(
-                s"Dropping consensus message from $from as it couldn't be parsed: $errorMessage"
+                s"Dropping consensus message from $sentBy as it couldn't be parsed: $errorMessage"
               ),
-            message => {
-              val originalSender = message.underlyingNetworkMessage.message.from
-              if (originalSender != from) {
-                val epoch = message.underlyingNetworkMessage.message.blockMetadata.epochNumber
+            unverifiedNetworkMessage => {
+              val claimedOriginator = unverifiedNetworkMessage.underlyingNetworkMessage.message.from
+              if (claimedOriginator != sentBy) {
+                val epoch =
+                  unverifiedNetworkMessage.underlyingNetworkMessage.message.blockMetadata.epochNumber
                 logger.debug(
-                  s"Received retransmitted message at epoch $epoch from $from originally created by $originalSender"
+                  s"Received retransmitted message at epoch $epoch sent by $sentBy originally created by $claimedOriginator"
                 )
               }
-              consensus.asyncSend(message)
+              consensus.asyncSend(unverifiedNetworkMessage)
             },
           )
-        metrics.p2p.receive.labels.source.values.Consensus(from)
+        metrics.p2p.receive.labels.source.values.Consensus(sentBy)
+
+      // For retransmission and state transfer messages, we assume that the authenticated sender
+      //  is the signer and this is functionally enough because we don't support forwarding
+      //  for these messages.
+      //  This doesn't allow the sender to impersonate an arbitrary originator because
+      //  the signed message is verified against the sender; the proto signed message's from
+      //  is just ignored. See `SenderBoundRequestTest`.
+
       case Message.RetransmissionMessage(message) =>
         IssConsensusModule
-          .parseRetransmissionMessage(from, message)
+          .parseRetransmissionMessage(sentBy, message)
           .fold(
             errorMessage =>
               logger.warn(
-                s"Dropping retransmission message from $from as it couldn't be parsed: $errorMessage"
+                s"Dropping retransmission message from $sentBy as it couldn't be parsed: $errorMessage"
               ),
             message => consensus.asyncSend(message),
           )
-        metrics.p2p.receive.labels.source.values.Retransmissions(from)
+        metrics.p2p.receive.labels.source.values.Retransmissions(sentBy)
 
       case Message.StateTransferMessage(message) =>
         val parsedSignedMessage =
@@ -141,29 +153,29 @@ class P2PNetworkInModule[E <: Env[E]](
             SignedMessage
               .fromProto(v31.StateTransferMessage, SupportedVersions.ProtoData31)(
                 IssConsensusModule
-                  .parseStateTransferMessage31(from, _)
+                  .parseStateTransferMessage31(sentBy, _)
               )(message)
           else
             SignedMessage
               .fromProto(v30.StateTransferMessage, SupportedVersions.ProtoData30)(
                 IssConsensusModule
-                  .parseStateTransferMessage(from, _)
+                  .parseStateTransferMessage(sentBy, _)
               )(message)
         parsedSignedMessage
           .fold(
             errorMessage =>
               logger.warn(
-                s"Dropping state transfer message from $from as it couldn't be parsed: $errorMessage"
+                s"Dropping state transfer message from $sentBy as it couldn't be parsed: $errorMessage"
               ),
             signedMessage =>
               consensus.asyncSend(
                 Consensus.StateTransferMessage.UnverifiedStateTransferMessage(signedMessage)
               ),
           )
-        metrics.p2p.receive.labels.source.values.StateTransfer(from)
+        metrics.p2p.receive.labels.source.values.StateTransfer(sentBy)
 
       case Message.ConnectionOpened(_) =>
-        logger.debug(s"Received connection opener from $from")
-        metrics.p2p.receive.labels.source.values.ConnectionOpener(from)
+        logger.debug(s"Received connection opener from $sentBy")
+        metrics.p2p.receive.labels.source.values.ConnectionOpener(sentBy)
     }
 }

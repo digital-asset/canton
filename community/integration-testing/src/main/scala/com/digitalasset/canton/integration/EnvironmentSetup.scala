@@ -7,7 +7,7 @@ import com.digitalasset.canton.CloseableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultPorts, SharedCantonConfig, TestingConfigInternal}
 import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
-import com.digitalasset.canton.integration.plugins.{UseH2, UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseH2, UsePostgres}
 import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.{MetricsFactoryType, ScopedInMemoryMetricsFactory}
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
@@ -187,7 +187,7 @@ sealed trait EnvironmentSetup[C <: SharedCantonConfig[C], E <: Environment[C]]
         /* the block sequencer makes use of its own db so we don't want to create a new one here since that would
          * set a new state and lead to conflicts with the old db.
          */
-        case _: UseH2 | _: UsePostgres | _: UseReferenceBlockSequencer[?] =>
+        case _: UseH2 | _: UsePostgres =>
           false // to prevent creating a new fresh db, the db is only deleted when the old environment is destroyed.
         case plugin => runPlugins(plugin)
       },

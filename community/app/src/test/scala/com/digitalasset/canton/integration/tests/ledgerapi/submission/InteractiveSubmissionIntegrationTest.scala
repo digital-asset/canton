@@ -36,7 +36,7 @@ import com.digitalasset.canton.examples.java.cycle.Cycle
 import com.digitalasset.canton.examples.java.trailingnone.TrailingNone
 import com.digitalasset.canton.examples.java.{cycle as M, trailingnone as T}
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
@@ -513,6 +513,33 @@ final class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIn
             testedHashingSchemeVersion.toLedgerApiProto,
           ),
         _.errorMessage should include(expectedErrorMessage),
+      )
+    }
+
+    "return a clear error if the wrong physical synchronizer ID is used" in { implicit env =>
+      val cycle: Command =
+        new M.Cycle(
+          UUID.randomUUID().toString,
+          aliceE.toProtoPrimitive,
+        ).create.commands.loneElement
+
+      val wrongPsid = env.synchronizer1Id.incrementSerial.value
+      val (signature, preparedTransactionWithWrongPsid) =
+        prepareTransactionsWithSynchronizerId(cycle, aliceE, wrongPsid)
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        cpn.ledger_api.interactive_submission
+          .execute_and_wait(
+            preparedTransactionWithWrongPsid,
+            Map(aliceE.partyId -> Seq(signature)),
+            UUID.randomUUID().toString,
+            testedHashingSchemeVersion.toLedgerApiProto,
+          ),
+        _.errorMessage should (include(
+          "does not match the current physical synchronizer ID"
+        ) and include(s"Expected: ${env.synchronizer1Id.toProtoPrimitive}") and include(
+          s"actual: ${wrongPsid.toProtoPrimitive}"
+        )),
       )
     }
 

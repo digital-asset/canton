@@ -8,7 +8,7 @@ import com.digitalasset.canton.console.{InstanceReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
@@ -62,14 +62,11 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
   protected lazy val upgradeTime1: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
   protected lazy val upgradeTime2: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(120)
 
-  override protected def configTransforms: List[ConfigTransform] = {
+  override protected def configTransforms: Seq[ConfigTransform] = {
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
-    List(
-      ConfigTransforms.disableAutoInit(allNewNodes),
-      ConfigTransforms.useStaticTime,
-    ) ++ ConfigTransforms.enableDevVersionSupport ++
-      ConfigTransforms.enableAlphaVersionSupport
+    // The first LSU upgrades to the next supported PV, which may be an alpha one
+    lsuNodeConfigTransforms(allNewNodes) ++ ConfigTransforms.enableAlphaVersionSupport
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

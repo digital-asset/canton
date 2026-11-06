@@ -12,7 +12,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
-import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Reassignment, Update}
+import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
@@ -27,10 +27,7 @@ import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
-import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
-  KeyInfo,
-  ReassignmentEvent,
-}
+import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.KeyInfo
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
@@ -535,31 +532,6 @@ private[platform] object InMemoryStateUpdater {
       offset: Offset,
       u: Update.ReassignmentAccepted,
   ): TransactionLogUpdate.ReassignmentAccepted = {
-    def toReassignmentUpdate(batch: Reassignment.Batch): Seq[ReassignmentEvent] =
-      batch.iterator.map {
-        case assign: Reassignment.Assign =>
-          TransactionLogUpdate.Assign(
-            nodeId = assign.nodeId,
-            reassignmentCounter = assign.reassignmentCounter,
-            contractId = assign.createNode.coid,
-            stakeholders = assign.createNode.stakeholders,
-            packageName = assign.createNode.packageName,
-            templateId = assign.createNode.templateId,
-            createdContractInstance = assign.persistedContractInstance.inst,
-            representativePackageId = assign.representativePackageId,
-          )
-        case unassign: Reassignment.Unassign =>
-          TransactionLogUpdate.Unassign(
-            contractId = unassign.contractId,
-            templateId = unassign.templateId,
-            packageName = unassign.packageName,
-            stakeholders = unassign.stakeholders,
-            assignmentExclusivity = unassign.assignmentExclusivity,
-            reassignmentCounter = unassign.reassignmentCounter,
-            nodeId = unassign.nodeId,
-            keyOpt = unassign.keyOpt,
-          )
-      }.toSeq
     val completionStreamResponse = u.optCompletionInfo
       .map { completionInfo =>
         val (deduplicationOffset, deduplicationDurationSeconds, deduplicationDurationNanos) =
@@ -594,7 +566,7 @@ private[platform] object InMemoryStateUpdater {
       recordTime = u.recordTime.toLf,
       completionStreamResponseO = completionStreamResponse,
       reassignmentInfo = u.reassignmentInfo,
-      reassignment = toReassignmentUpdate(u.reassignment),
+      reassignments = u.reassignment.reassignments,
       synchronizerId = u.synchronizerId.toProtoPrimitive,
     )(u.traceContext)
   }

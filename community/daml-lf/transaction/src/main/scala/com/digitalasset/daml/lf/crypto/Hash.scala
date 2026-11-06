@@ -940,7 +940,11 @@ object Hash {
     val ChangeId = new Purpose(6)
     val TransactionHash = new Purpose(7)
     val MetadataHash = new Purpose(8)
+    val ReassignmentChangeId = new Purpose(72)
+    val LedgerApiReassignmentChangeId = new Purpose(73)
+    val AssignmentReassignmentId = new Purpose(74)
     // next available id: 10
+    // 72 to 74 are taken, and reserved in com.digitalasset.canton.crypto.HashPurpose
   }
 
   private[crypto] class Version private (val id: Byte)
@@ -1058,6 +1062,38 @@ object Hash {
       .addString(userId)
       .addString(commandId)
       .addStringSet(actAs)
+      .build
+
+  def hashReassignmentChangeId(
+      userId: Ref.UserId,
+      commandId: Ref.CommandId,
+      submitter: Ref.Party,
+      contractIds: Set[Value.ContractId],
+  ): Hash =
+    // Ok to enable upgradeFriendlyUnsafe, as addString and addStringSet do not have known security limitations.
+    builder(Purpose.ReassignmentChangeId, noCid2String, upgradeFriendlyUnsafe = true)
+      .addString(userId)
+      .addString(commandId)
+      .addString(submitter)
+      .addStringSet(contractIds.map(_.coid))
+      .build
+
+  def hashLedgerApiReassignmentChangeId(
+      userId: Ref.UserId,
+      commandId: Ref.CommandId,
+      submitter: Ref.Party,
+  ): Hash =
+    // Ok to enable upgradeFriendlyUnsafe, as addString does not have known security limitations.
+    builder(Purpose.LedgerApiReassignmentChangeId, noCid2String, upgradeFriendlyUnsafe = true)
+      .addString(userId)
+      .addString(commandId)
+      .addString(submitter)
+      .build
+
+  def hashAssignmentReassignmentId(reassignmentId: Ref.HexString): Hash =
+    // Ok to enable upgradeFriendlyUnsafe, as addString does not have known security limitations.
+    builder(Purpose.AssignmentReassignmentId, noCid2String, upgradeFriendlyUnsafe = true)
+      .addString(reassignmentId)
       .build
 
   def deriveTransactionSeed(

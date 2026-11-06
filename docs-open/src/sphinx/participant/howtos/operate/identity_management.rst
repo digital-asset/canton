@@ -635,24 +635,8 @@ Synchronizer Initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The following steps describe how to manually initialize a synchronizer node:
 
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementHelper.scala
-    language: scala
-    start-after: architecture-handbook-entry-begin: ManualInitSynchronizer
-    end-before: architecture-handbook-entry-end: ManualInitSynchronizer
-    dedent:
-
 .. _manually-init-participant:
 
 Participant Initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 The following steps describe how to manually initialize a participant node:
-
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/topology/TopologyManagementHelper.scala
-    language: scala
-    start-after: architecture-handbook-entry-begin: ManualInitParticipant
-    end-before: architecture-handbook-entry-end: ManualInitParticipant
-    dedent:

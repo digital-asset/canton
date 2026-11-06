@@ -146,6 +146,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: crash_recovery_test
+      shard_job_result: ${{ needs.crash_recovery_test.result }}
       job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

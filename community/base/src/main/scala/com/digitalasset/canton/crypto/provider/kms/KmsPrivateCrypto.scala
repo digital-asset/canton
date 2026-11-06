@@ -98,8 +98,10 @@ class KmsPrivateCrypto(
         )
         .toEitherT[FutureUnlessShutdown]
       _ <- EitherT.right(publicStore.storeSigningKey(publicKey, keyName))
-      _ = privateStore.storeKeyMetadata(
-        KmsMetadata(publicKey.id, keyId, KeyPurpose.Signing, Some(publicKey.usage))
+      _ <- EitherT.right(
+        privateStore.storeKeyMetadata(
+          KmsMetadata(publicKey.id, keyId, KeyPurpose.Signing, Some(publicKey.usage))
+        )
       )
     } yield publicKey
 
@@ -135,8 +137,10 @@ class KmsPrivateCrypto(
           SigningKeyGenerationError.GeneralKmsError(err.show)
         )
         .toEitherT[FutureUnlessShutdown]
-      _ = privateStore.storeKeyMetadata(
-        KmsMetadata(publicKey.id, keyId, KeyPurpose.Signing, Some(publicKey.usage))
+      _ <- EitherT.right(
+        privateStore.storeKeyMetadata(
+          KmsMetadata(publicKey.id, keyId, KeyPurpose.Signing, Some(publicKey.usage))
+        )
       )
     } yield publicKey
 
@@ -237,7 +241,9 @@ class KmsPrivateCrypto(
         )
         .toEitherT[FutureUnlessShutdown]
       _ <- EitherT.right(publicStore.storeEncryptionKey(publicKey, keyName))
-      _ = privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
+      _ <- EitherT.right(
+        privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
+      )
     } yield publicKey
 
   override def generateEncryptionKey(
@@ -270,7 +276,9 @@ class KmsPrivateCrypto(
           EncryptionKeyGenerationError.GeneralKmsError(err.show)
         )
         .toEitherT[FutureUnlessShutdown]
-      _ = privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
+      _ <- EitherT.right(
+        privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
+      )
     } yield publicKey
 
   override def decrypt[M](encrypted: AsymmetricEncrypted[M])(

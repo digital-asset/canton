@@ -26,7 +26,7 @@ import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.examples.java.iou.{Amount, GetCash, Iou}
 import com.digitalasset.canton.http.LfValue
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.{

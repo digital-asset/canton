@@ -68,6 +68,8 @@ echo "***** Replaying events..."
   export JVM_NAME="participants"
 
   export JAVA_OPTS="$COMMON_JAVA_OPTS $PARTICIPANTS_JAVA_OPTS"
+  # The replayed completions have no TEA correlation, so don't warn for each of them
+  export NO_MISSING_TEA_CORRELATION=1
 
   run-in-namespace.sh "$PARTICIPANTS_NAMESPACE" \
   sbt -J-Dlogback.configurationFile=logback.xml \

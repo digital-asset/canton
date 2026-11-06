@@ -46,8 +46,6 @@ Step 2: Sign the transaction
 
 Once you have the transaction, sign it using ``Alice``'s private key to prove to the network that she agrees to the effects of this transaction on the ledger.
 
-.. todo:: `#24019: Add link to transaction validation how-to <https://github.com/DACH-NY/canton/issues/24019>`_
-
 In practice, the signature is performed on a hash of the transaction. The hash value is returned in the API response from the PPN along with the transaction.
 However, you should compute the hash yourself from the transaction directly. Otherwise, the party may sign a different transaction given by a mismatching hash.
 Instructions on how to compute the hash are available :ref:`here <external_signing_hashing_algo>`.

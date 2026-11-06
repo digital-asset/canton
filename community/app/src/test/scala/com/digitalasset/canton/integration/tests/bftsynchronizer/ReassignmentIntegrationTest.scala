@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.topology.TopologyTransactionReSignHelpers
@@ -31,20 +31,20 @@ final class ReassignmentIntegrationTest
     with TopologyTransactionReSignHelpers
     with SharedEnvironment {
 
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-
-  override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P5S4M4_Manual
-      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
-      .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
-
   protected val sequencerGroups: MultiSynchronizer = MultiSynchronizer(
     Seq(
       Set(InstanceName.tryCreate("sequencer1"), InstanceName.tryCreate("sequencer2")),
       Set(InstanceName.tryCreate("sequencer3"), InstanceName.tryCreate("sequencer4")),
     )
   )
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory, sequencerGroups))
+
+  override def environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P5S4M4_Manual
+      .addConfigTransform(ConfigTransforms.disableAutomaticAssignment)
+      .addConfigTransform(ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag)
 
   private val synchronizer1: SynchronizerAlias = SynchronizerAlias.tryCreate("bft-synchronizer1")
   private val synchronizer2: SynchronizerAlias = SynchronizerAlias.tryCreate("bft-synchronizer2")

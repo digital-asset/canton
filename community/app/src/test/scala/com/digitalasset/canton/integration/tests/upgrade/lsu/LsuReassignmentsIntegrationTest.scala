@@ -7,7 +7,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1_S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes

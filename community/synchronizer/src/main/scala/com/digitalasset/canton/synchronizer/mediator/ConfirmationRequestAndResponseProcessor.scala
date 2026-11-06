@@ -44,7 +44,7 @@ import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.jdk.DurationConverters.JavaDurationOps
 
 /** Scalable service to validate the received MediatorConfirmationRequests and
@@ -857,13 +857,11 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
               .replace(responseAggregation, nextResponseAggregation)
               .map(Option.when(_)(()))
           )
-          _ <- OptionT.some[FutureUnlessShutdown](
-            // we can send the result asynchronously, as there is no need to reply in
-            // order and there is no need to guarantee delivery of verdicts
-            doNotAwait(
-              responses.requestId,
-              sendResultIfDone(nextResponseAggregation, decisionTime),
-            )
+          // we can send the result asynchronously, as there is no need to reply in
+          // order and there is no need to guarantee delivery of verdicts
+          _ = doNotAwait(
+            responses.requestId,
+            sendResultIfDone(nextResponseAggregation, decisionTime),
           )
         } yield ()).value.map(_ => ())
     }
@@ -872,14 +870,12 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     */
   protected def doNotAwait(requestId: RequestId, f: => FutureUnlessShutdown[Any])(implicit
       tc: TraceContext
-  ): Future[Unit] = {
+  ): Unit =
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
       synchronizeWithClosing("send-result-if-done")(f),
       s"send-result-if-done failed for request $requestId",
       level = Level.WARN,
     )
-    Future.unit
-  }
 
   private def sendResultIfDone(
       responseAggregation: ResponseAggregation[?],

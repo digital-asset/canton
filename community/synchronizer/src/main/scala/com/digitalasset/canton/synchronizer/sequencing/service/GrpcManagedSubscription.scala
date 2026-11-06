@@ -143,7 +143,6 @@ private[service] class GrpcManagedSubscription[T](
   }
 
   def initialize(): FutureUnlessShutdown[Unit] =
-    // TODO(#5705) Redo this when revisiting the subscription pool
     withNewTraceContext("init_grpc_subscription") { implicit traceContext =>
       synchronizeWithClosing("grpc-managed-subscription-handler") {
         val createSub =

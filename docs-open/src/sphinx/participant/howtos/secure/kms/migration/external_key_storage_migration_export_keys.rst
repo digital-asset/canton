@@ -22,6 +22,10 @@ You must ensure that the private keys you are going to import have not been comp
 Export Keys
 -----------
 
+The Participant only allows exporting its private keys when key download is enabled in its configuration:
+
+.. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/enable-key-download.conf
+
 You must first export all cryptographic keys, for example, to files:
 
 .. snippet:: export_keys
@@ -42,8 +46,6 @@ You must first export all cryptographic keys, for example, to files:
     .. success:: privateKeys.foreach{ case (keyId, privateKey) => Files.write(Paths.get(s"key_${keyId.unwrap}"), privateKey.toByteArray)}
     .. hidden:: import java.io.File
     .. hidden:: keyIds.foreach(keyId => (new File(s"key_${keyId.unwrap}")).delete())
-
-.. todo:: Improve UX for downloading private keys <https://github.com/DACH-NY/canton/issues/31244>
 
 When exporting keys, make sure to **copy the output from `keyIds` into a file**, as this information is needed
 again during import. Note that in this case, setting a password on the exported key **cannot be used**, because the key
@@ -70,9 +72,6 @@ Currently, the two KMSs supported by Canton (apart from any custom KMS implement
 all key schemes used by Canton, **except for the ``ECIES`` encryption key scheme**. Since ``ECIES`` encryption keys are
 not supported, a new key (e.g., ``RSA``) must be used. This process is explained in more detail
 in :ref:`Using new keys <using_new_keys>`.
-
-.. todo::
-    Add integration test to check KMS import APIs. <https://github.com/DACH-NY/canton/issues/31233>
 
 Below are instructions for importing keys into:
 

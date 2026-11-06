@@ -14,10 +14,11 @@ services:
       - "5432:5432"
 
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U cnadmin -d cantonnet" ]
-      interval: 10s
+      # Over TCP: during its init scripts, Postgres runs a temporary server on the Unix socket only
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U cnadmin -d cantonnet" ]
+      interval: 2s
       timeout: 5s
-      retries: 5
+      retries: 30
 
   participant:
     build:
@@ -37,7 +38,8 @@ services:
       - "7575:7575"
       - "10013:10013"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   sequencer:
     build:
@@ -49,7 +51,8 @@ services:
       CANTON_DOMAIN_POSTGRES_PORT: "5432"
     container_name: sequencer
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   mediator:
     build:
@@ -61,7 +64,8 @@ services:
       CANTON_DOMAIN_POSTGRES_PORT: "5432"
     container_name: mediator
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   synchronizer:
     build:
@@ -99,7 +103,8 @@ services:
       HOSTPORT: "participant:5002"
       SERVICE: "com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityService"
       METHOD: "ListConnectedSynchronizers"
-      TIMEOUT: "180"
+      # Covers the bootstrap's connect retry window (participant-bootstrap.sc) plus its last attempt and the ping
+      TIMEOUT: "240"
       INTERVAL: "3"
     # Don’t restart: we want a clean exit code and single log stream
     restart: "no"

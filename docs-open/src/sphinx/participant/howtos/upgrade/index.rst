@@ -404,9 +404,6 @@ Existing contracts will not automatically move over to the new synchronizer. The
 pick the synchronizer by minimizing the number of transfers and the priority. Therefore, most contracts
 will remain on the old synchronizer without additional action. However, by using the
 
-.. todo:: `#22917: Fix broken ref <https://github.com/DACH-NY/canton/issues/22917>`_
-    ref:`transfer command <transfer.execute>`
-
 , contracts can be moved over to the new synchronizer
 one by one, such that eventually, all contracts are associated with the new synchronizer, allowing
 the old synchronizer to be decommissioned and turned off.

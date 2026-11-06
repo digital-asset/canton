@@ -17,7 +17,17 @@ import com.daml.platform.v1.page_tokens.ListUsersPageTokenPayload
 import com.digitalasset.base.error.ErrorResource
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.ledger.api.validation.{FieldValidator, ValueValidator}
+import com.digitalasset.canton.ledger.api.validation.UserManagementServiceRequestValidator.{
+  validateCreateUserRequest,
+  validateGrantUserRightsRequest,
+  validateRevokeUserRightsRequest,
+  validateUpdateUserRequest,
+}
+import com.digitalasset.canton.ledger.api.validation.{
+  FieldValidator,
+  LedgerApiSizeLimitsConfig,
+  ValueValidator,
+}
 import com.digitalasset.canton.ledger.error.groups.{
   RequestValidationErrors,
   UserManagementServiceErrors,
@@ -57,7 +67,8 @@ private[apiserver] final class ApiUserManagementService(
     submissionIdGenerator: SubmissionIdGenerator,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext
+    executionContext: ExecutionContext,
+    sizeLimitsConfig: LedgerApiSizeLimitsConfig,
 ) extends proto.UserManagementServiceGrpc.UserManagementService
     with GrpcApiService
     with NamedLogging
@@ -81,6 +92,7 @@ private[apiserver] final class ApiUserManagementService(
         resolveAuthenticatedUserContext
       withValidation {
         for {
+          _ <- validateCreateUserRequest(request)
           pUser <- requirePresence(request.user, "user")
           pUserId <- requireUserId(pUser.id, "id")
           pMetadata = pUser.metadata.getOrElse(
@@ -141,45 +153,7 @@ private[apiserver] final class ApiUserManagementService(
       implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
       val authorizedUserContextF: Future[AuthenticatedUserContext] =
         resolveAuthenticatedUserContext
-      withValidation {
-        for {
-          pUser <- requirePresence(request.user, "user")
-          pUserId <- requireUserId(pUser.id, "user.id")
-          pMetadata = pUser.metadata.getOrElse(
-            com.daml.ledger.api.v2.admin.object_meta.ObjectMeta(
-              resourceVersion = "",
-              annotations = Map.empty,
-            )
-          )
-          pFieldMask <- requirePresence(request.updateMask, "update_mask")
-          pOptPrimaryParty <- optionalString(pUser.primaryParty)(requireParty)
-          identityProviderId <- optionalIdentityProviderId(
-            pUser.identityProviderId,
-            "identity_provider_id",
-          )
-          pResourceVersion <- optionalString(pMetadata.resourceVersion)(
-            FieldValidator.requireResourceVersion(_, "user.metadata.resource_version")
-          )
-          pAnnotations <- verifyMetadataAnnotations(
-            pMetadata.annotations,
-            allowEmptyValues = true,
-            "user.metadata.annotations",
-          )
-        } yield (
-          User(
-            id = pUserId,
-            primaryParty = pOptPrimaryParty,
-            isDeactivated = pUser.isDeactivated,
-            metadata = ObjectMeta(
-              resourceVersionO = pResourceVersion,
-              annotations = pAnnotations,
-            ),
-            identityProviderId = identityProviderId,
-            primaryPartyAuthentication = pUser.primaryPartyAuthentication,
-          ),
-          pFieldMask,
-        )
-      } { case (user, fieldMask) =>
+      withValidation(validateUpdateUserRequest(request)) { case (user, fieldMask) =>
         for {
           userUpdate <- handleUpdatePathResult(user.id, UserUpdateMapper.toUpdate(user, fieldMask))
           _ <- identityProviderExistsOrError(user.identityProviderId)
@@ -319,6 +293,7 @@ private[apiserver] final class ApiUserManagementService(
         resolveAuthenticatedUserContext
       withValidation(
         for {
+          _ <- validateGrantUserRightsRequest(request)
           userId <- requireUserId(request.userId, "user_id")
           rights <- fromProtoRights(request.rights)
           identityProviderId <- optionalIdentityProviderId(
@@ -355,6 +330,7 @@ private[apiserver] final class ApiUserManagementService(
         resolveAuthenticatedUserContext
       withValidation(
         for {
+          _ <- validateRevokeUserRightsRequest(request)
           userId <- FieldValidator.requireUserId(request.userId, "user_id")
           rights <- fromProtoRights(request.rights)
           identityProviderId <- optionalIdentityProviderId(

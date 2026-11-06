@@ -159,6 +159,8 @@ trait CantonNodeBootstrap[+T <: CantonNode]
 
   def getNode: Option[T]
 
+  def parameters: CantonNodeParameters
+
   /** Access to the private and public store to support local key inspection commands */
   protected[canton] def crypto: Option[Crypto]
   def isActive: Boolean
@@ -233,7 +235,7 @@ abstract class CantonNodeBootstrapImpl[
   override def name: InstanceName = arguments.name
   override def clock: Clock = arguments.clock
   def config: NodeConfig = arguments.config
-  def parameters: ParameterConfig = arguments.parameterConfig
+  override def parameters: ParameterConfig = arguments.parameterConfig
   override def timeouts: ProcessingTimeout = arguments.parameterConfig.processingTimeouts
   override def loggerFactory: NamedLoggerFactory = arguments.loggerFactory
   protected def futureSupervisor: FutureSupervisor = arguments.futureSupervisor

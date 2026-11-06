@@ -29,13 +29,10 @@ import com.digitalasset.canton.participant.admin.party.acsreplication.{
   AcsReplicationAdminWorkflow,
   AcsReplicator,
 }
-import com.digitalasset.canton.participant.config.{
-  AlphaOnlinePartyReplicationConfig,
-  ParticipantNodeConfig,
-}
+import com.digitalasset.canton.participant.config.{AlphaAcsReplicationConfig, ParticipantNodeConfig}
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCreditIssuer
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.TrafficCreditReporter
 import com.digitalasset.canton.tea.ingestion.TeaCreditIngestionService
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.ParticipantId
@@ -140,7 +137,7 @@ class AdminWorkflowServices(
     acsReplicatorO
       .collect {
         case acsReplicator
-            if isAcsReplicationWorkflowLoaded(parameters.alphaOnlinePartyReplicationSupport) =>
+            if isAcsReplicationWorkflowLoaded(parameters.alphaAcsReplicationSupport) =>
           createService(
             "acs-replication-management",
             // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
@@ -218,7 +215,7 @@ class AdminWorkflowServices(
           partReplicationWorkflowLoaded <-
             if (
               AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaOnlinePartyReplicationSupport
+                config.parameters.alphaAcsReplicationSupport
               )
             ) {
               isLoaded(AdminWorkflowServices.AcsReplicationDarResourceFileName)
@@ -252,7 +249,7 @@ class AdminWorkflowServices(
           _ <-
             if (
               AdminWorkflowServices.isAcsReplicationWorkflowLoaded(
-                config.parameters.alphaOnlinePartyReplicationSupport
+                config.parameters.alphaAcsReplicationSupport
               )
             ) {
               load(AdminWorkflowServices.AcsReplicationDarResourceFileName)
@@ -380,7 +377,7 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
   private val AcsReplicationDarResourceFileName: String =
     s"dar/$AcsReplicationDarResourceName.dar"
   val AdminWorkflowNames: Set[String] =
-    Set(PingDarResourceName, AcsReplicationDarResourceName, TrafficCreditIssuer.PACKAGE_NAME)
+    Set(PingDarResourceName, AcsReplicationDarResourceName, TrafficCreditReporter.PACKAGE_NAME)
 
   private def getDarInputStream(resourceName: String): InputStream =
     Option(
@@ -420,7 +417,9 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
     )
   }
 
-  /** Whether all packages of the canton-traffic-credit DAR are registered with the participant. */
+  /** Whether all packages of the canton-api-traffic-credit-v1 DAR are registered with the
+    * participant.
+    */
   private[participant] def isTrafficCreditDarRegistered(packageService: PackageService)(implicit
       loggingContext: ErrorLoggingContext
   ): Boolean =
@@ -428,8 +427,8 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       packageService.getPackageMetadataView.getSnapshot.packages.keySet
     )
 
-  /** Uploads the canton-traffic-credit DAR read by the traffic enforcement top-up ingestion, unless
-    * all its packages are already registered with the participant. Does NOT vet the DAR.
+  /** Uploads the canton-api-traffic-credit-v1 DAR read by the traffic enforcement top-up ingestion,
+    * unless all its packages are already registered with the participant. Does NOT vet the DAR.
     */
   private[participant] def uploadTrafficCreditDarUnlessRegistered(packageService: PackageService)(
       implicit
@@ -465,11 +464,10 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
           Left(new IllegalStateException(CantonError.stringFromContext(err)))
       }
 
-  // The ACS replication admin workflow is only loaded when online party replication is enabled
-  // in sequencer channel mode.
+  // The ACS replication admin workflow is only loaded when ACS replication is enabled.
   private[participant] def isAcsReplicationWorkflowLoaded(
-      config: Option[AlphaOnlinePartyReplicationConfig]
-  ): Boolean = config.exists(_.unsafeSequencerChannelSupport)
+      config: Option[AlphaAcsReplicationConfig]
+  ): Boolean = config.nonEmpty
 
   lazy val PingPackages: Map[PackageId, Ast.Package] = getDarPackages(PingDarResourceFileName)
   lazy val AcsReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(

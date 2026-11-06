@@ -59,11 +59,7 @@ jobs:
         with: {fetch-depth: 0}
 
       - name: Set up workspace path
-        shell: bash
-        run: |
-          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
-          mkdir -p "$TMP_WORKSPACE"
-          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+        uses: ./.github/actions/utils/setup_tmp_workspace
 
       - name: Start Postgres container
         id: postgres
@@ -129,6 +125,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: unstable_test
+      shard_job_result: ${{ needs.unstable_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
       # The set of tests marked with @UnstableTest can legitimately be empty, in which case no

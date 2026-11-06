@@ -1003,6 +1003,7 @@ class ExportKeysSnippetGeneratorTest
         "docs-open/src/sphinx/participant/howtos/secure/kms/migration/external_key_storage_migration_export_keys.rst"
       ),
       File("community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"),
+      File("community/app/src/test/resources/documentation-snippets/enable-key-download.conf"),
     )
 
 // ─── Canton Network documentation snippet tests ────────────────────────────

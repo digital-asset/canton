@@ -124,6 +124,7 @@ class ReferenceSequencerDriverFactory extends SequencerDriverFactory {
       clock,
       processingTimeout,
       loggerFactory,
+      false,
       setMigrationsPath,
     )
 

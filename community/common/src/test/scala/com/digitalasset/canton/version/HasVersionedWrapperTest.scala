@@ -19,7 +19,7 @@ import scala.annotation.nowarn
    proto               0           1     2
    protocolVersion     30    31    32    33    34  ...
  */
-class HasVersionedWrapperTest extends AnyWordSpec with BaseTest {
+final class HasVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
   import HasVersionedWrapperTest.*
 

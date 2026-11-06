@@ -28,5 +28,16 @@ trait DiscardedFutureTestWithMockito extends AnyWordSpec with Smockito {
       }
       assertErrors(result, 0)
     }
+
+    "allow Mockito verify calls as wildcard aliases in for-comprehensions" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        val mocked = mock[TraitWithFuture]
+        for {
+          a <- Option(1)
+          _ = verify(mocked).returnsFuture
+        } yield a
+      }
+      assertErrors(result, 0)
+    }
   }
 }

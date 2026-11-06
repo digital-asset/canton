@@ -13,7 +13,11 @@ import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig}
 import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
-import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.admin.party.AcsReplicationTestInterceptor
+import com.digitalasset.canton.participant.config.AlphaAcsReplicationConfig.{
+  defaultAcsBatchSizeRequestedByTarget,
+  defaultAcsBatchSizeSentBySource,
+}
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig.DefaultRateLimit
 import com.digitalasset.canton.participant.sync.CommandProgressTrackerConfig
 import com.digitalasset.canton.platform.apiserver.ApiServiceOwner
@@ -396,6 +400,8 @@ object TestingTimeServiceConfig {
   *   Has impact only if manual-start is false.
   * @param acsCommitments
   *   Configuration options for ACS commitments
+  * @param alphaAcsReplicationSupport
+  *   ACS replication alpha config.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -442,6 +448,7 @@ final case class ParticipantNodeParameterConfig(
     validateLegacyContractsV11: Boolean = true,
     connectToSynchronizersOnStartup: Boolean = true,
     acsCommitments: AcsCommitmentConfig = AcsCommitmentConfig(),
+    alphaAcsReplicationSupport: Option[AlphaAcsReplicationConfig] = None,
 ) extends LocalNodeParametersConfig
 
 /** Config for the ACS commitment processing pipeline.
@@ -819,39 +826,78 @@ object ContractLoaderConfig {
 
 /** Parameters for the Online Party Replication (OnPR) alpha preview feature
   *
-  * @param unsafeSequencerChannelSupport
-  *   enable Sequencer Channel based ACS replication
   * @param target
   *   target participant specific configuration
-  * @param testInterceptor
-  *   test-only configuration to inject ProgrammableSequencer-style behavior during ACS replication
-  *   protocol processing.
+  * @param testFileImportInterceptor
+  *   test-only configuration to inject during ACS file import.
   */
 final case class AlphaOnlinePartyReplicationConfig(
-    unsafeSequencerChannelSupport: Boolean = false,
-    target: OnlinePartyReplicationTargetConfig = OnlinePartyReplicationTargetConfig(),
-    testInterceptor: Option[AlphaOnlinePartyReplicationConfig.TestInterceptor] = None,
+    target: AlphaOnlinePartyReplicationTargetConfig = AlphaOnlinePartyReplicationTargetConfig(),
+    testFileImportInterceptor: Option[AlphaAcsReplicationConfig.TestInterceptor] = None,
 )
-
-object AlphaOnlinePartyReplicationConfig {
-
-  /** The PartyReplicator supports adding a test interceptor for manipulating behavior during tests.
-    * This is used for delaying and/or dropping messages to verify the behavior in abnormal
-    * scenarios in a deterministic way. It is not expected to be used at runtime in any capacity and
-    * is not possible to set through pureconfig.
-    */
-  type TestInterceptor = () => PartyReplicationTestInterceptor
-}
 
 /** Target participant specific online party replication configuration.
   *
   * @param pauseSynchronizerIndexingDuringPartyReplication
   *   whether to pause the indexer during online party replication.
+  */
+final case class AlphaOnlinePartyReplicationTargetConfig(
+    pauseSynchronizerIndexingDuringPartyReplication: Boolean = false
+)
+
+/** Parameters of the ACS Replication alpha preview feature.
+  *
+  * @param source
+  *   source participant specific configuration.
+  * @param target
+  *   target participant specific configuration.
+  * @param testInterceptor
+  *   test-only configuration to inject ProgrammableSequencer-style behavior during ACS replication
+  *   protocol processing.
+  */
+final case class AlphaAcsReplicationConfig(
+    source: AlphaAcsReplicationSourceConfig = AlphaAcsReplicationSourceConfig(),
+    target: AlphaAcsReplicationTargetConfig = AlphaAcsReplicationTargetConfig(),
+    testInterceptor: Option[AlphaAcsReplicationConfig.TestInterceptor] = None,
+)
+
+object AlphaAcsReplicationConfig {
+
+  /** The AcsReplicator supports adding a test interceptor for manipulating behavior during tests.
+    * This is used for delaying and/or dropping messages to verify the behavior in abnormal
+    * scenarios in a deterministic way. It is not expected to be used at runtime in any capacity and
+    * is not possible to set through pureconfig.
+    */
+  type TestInterceptor = () => AcsReplicationTestInterceptor
+
+  val defaultAcsBatchSizeSentBySource: PositiveInt = PositiveInt.tryCreate(10)
+  val defaultAcsBatchSizeRequestedByTarget: PositiveInt = PositiveInt.tryCreate(100)
+}
+
+/** Parameters of the ACS Replication source participant.
+  *
+  * @param acsBatchSize
+  *   the number of ACS contracts sent by the source participant in a single AcsBatch message.
+  * @param acsReaderMaxQueueSize
+  *   the maximum number of ACS contracts prefetched in memory by the source participant ACS reader
+  *   so that they are ready to be sent to the target participant when requested. Must be at least
+  *   as large as acsBatchSize to prevent becoming stuck and preserve to ability to fetch at least
+  *   one ACS batch.
+  */
+final case class AlphaAcsReplicationSourceConfig(
+    acsBatchSize: PositiveInt = defaultAcsBatchSizeSentBySource,
+    acsReaderMaxQueueSize: PositiveInt = defaultAcsBatchSizeRequestedByTarget,
+)
+
+/** Parameters of the ACS Replication target participant.
+  *
+  * @param acsBatchSize
+  *   the number of ACS contracts requested by the target participant at a time.
   * @param disableAcsDigestSourceSignatureValidation
   *   by default the target validates the source participant signature of the ACS digest. This
   *   allows to disable signature verification.
   */
-final case class OnlinePartyReplicationTargetConfig(
-    pauseSynchronizerIndexingDuringPartyReplication: Boolean = false,
+final case class AlphaAcsReplicationTargetConfig(
+    acsBatchSize: PositiveInt = defaultAcsBatchSizeRequestedByTarget,
     disableAcsDigestSourceSignatureValidation: Boolean = false,
 )

@@ -11,11 +11,16 @@ import com.digitalasset.canton.tracing.TraceContext
 import GrpcSubscriptionErrorRetryPolicy.*
 
 class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerFactory)
-    extends CheckedSubscriptionErrorRetryPolicy[GrpcSubscriptionError]
+    extends CheckedSubscriptionErrorRetryPolicy[GrpcSubscriptionErrorTrait]
     with NamedLogging {
-  override protected def retryInternal(error: GrpcSubscriptionError)(implicit
+  override protected def retryInternal(error: GrpcSubscriptionErrorTrait)(implicit
       traceContext: TraceContext
-  ): Boolean = logAndDetermineRetry(error.grpcError)
+  ): Boolean = error match {
+    case GrpcSubscriptionError(grpcError) => logAndDetermineRetry(grpcError)
+    case _: GrpcSubscriptionUnexpectedException =>
+      // Already logged at exception site
+      false
+  }
 }
 
 object GrpcSubscriptionErrorRetryPolicy {

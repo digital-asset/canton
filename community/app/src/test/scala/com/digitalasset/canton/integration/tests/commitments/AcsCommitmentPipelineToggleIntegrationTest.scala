@@ -14,7 +14,7 @@ import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantRe
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.examples.java.iou
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter

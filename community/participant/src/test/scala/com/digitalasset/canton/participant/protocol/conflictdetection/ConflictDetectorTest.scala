@@ -1892,10 +1892,12 @@ final class ConflictDetectorTest
         _ = assert(cr1 == mkActivenessResult())
         _ = checkContractState(cd, coid00, 0, 1, 0)(s"Unknown contract $coid00 is locked.")
         // Contract becomes known before its archive is finalized.
-        _ = cd.addReplicatedContracts(
-          addPartyRequestId,
-          Seq((coid00, sourceSynchronizer1, initialReassignmentCounter, toc0)),
-        )
+        addResult <- cd
+          .addReplicatedContracts(
+            addPartyRequestId,
+            Seq((coid00, sourceSynchronizer1, initialReassignmentCounter, toc0)),
+          )
+          .value
         // Finalizing the result succeeds without internal consistency errors.
         finalizeResult <- cd.finalizeRequest(mkCommitSet(arch = Set(coid00)), tor1).flatten
         _ = assert(finalizeResult == Either.unit)

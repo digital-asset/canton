@@ -13,7 +13,7 @@ import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, Transaction
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.Speedy
-import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugins
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.{
@@ -56,12 +56,8 @@ final case class TransactionSnapshot(
       loggerFactory = loggerFactory,
     )
 
-  private[this] lazy val metricPlugins =
-    Seq(
-      new FetchNodeCount,
-      new StepCount(engine.config.iterationsBetweenInterruptions),
-      new TxNodeCount,
-    )
+  private[this] lazy val metricPlugins: Option[MetricPlugins] =
+    Some(new MetricPlugins(engine.config.iterationsBetweenInterruptions))
 
   // TODO(36899) Replay with the recorded interpretation config. Until then, use the dev config.
   private[this] val interpretationConfig = InterpretationConfig.Dev

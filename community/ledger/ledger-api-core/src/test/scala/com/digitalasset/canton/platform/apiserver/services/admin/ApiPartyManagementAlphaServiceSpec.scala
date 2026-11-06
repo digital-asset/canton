@@ -13,8 +13,10 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
 }
 import com.daml.ledger.api.v2.state_service.ParticipantPermission as ProtoParticipantPermission
 import com.digitalasset.base.error.ErrorsAssertions
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule}
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TestTelemetrySetup
@@ -82,11 +84,14 @@ class ApiPartyManagementAlphaServiceSpec
     finally context.detach(previous)
   }
 
+  private implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
+
   private def createService(
       mockEndpoints: PartyReplicationEndpoints,
       mockStore: UserManagementStore,
       mockIdpExists: IdentityProviderExists,
       maxSelfAllocatedParties: Int = 100,
+      sizeLimits: LedgerApiSizeLimitsConfig = sizeLimitsConfig,
   ) = ApiPartyManagementAlphaService.createApiService(
     mockEndpoints,
     mockStore,
@@ -94,7 +99,7 @@ class ApiPartyManagementAlphaServiceSpec
     NonNegativeInt.tryCreate(maxSelfAllocatedParties),
     new PendingPartyAllocations(),
     loggerFactory,
-  )
+  )(ec, sizeLimits)
 
   "ApiPartyManagementAlphaService" should {
 
@@ -303,6 +308,42 @@ class ApiPartyManagementAlphaServiceSpec
               Success(succeed)
             case other =>
               fail(s"Expected StatusRuntimeException, but got $other")
+          }
+        }
+      }
+
+      "rejecting a request exceeding the size limits before the pre-flight checks" in {
+        // the exact errors are tested in PartyManagementAlphaServiceRequestValidatorTest
+        val maxTransactionBytes = 4
+        val sizeLimitsWithLimit = sizeLimitsConfig.copy(adminLapiSizeConfig =
+          sizeLimitsConfig.adminLapiSizeConfig.copy(authorizePartyUpdateRequest =
+            sizeLimitsConfig.adminLapiSizeConfig.authorizePartyUpdateRequest
+              .copy(transactionSizeLimit = PositiveInt.tryCreate(maxTransactionBytes))
+          )
+        )
+        val (mockEndpoints, mockStore, mockIdpExists) = mockedServices()
+        val service =
+          createService(mockEndpoints, mockStore, mockIdpExists, sizeLimits = sizeLimitsWithLimit)
+
+        // the missing identity provider would fail the pre-flight checks with NOT_FOUND
+        val request = AuthorizePartyUpdateRequest(
+          synchronizerId = "da::1220...",
+          transaction = ByteString.copyFrom(Array.fill(maxTransactionBytes + 1)(1.toByte)),
+          signatures = Seq.empty,
+          userId = "valid-user",
+          identityProviderId = "missing-idp",
+        )
+
+        withUserClaims {
+          service.authorizePartyUpdate(request).transform {
+            case Failure(ex: StatusRuntimeException) =>
+              assertMatchesErrorCode(ex, RequestValidationErrors.FieldSizeLimitExceeded)
+              verify(mockEndpoints, never).authorizePartyUpdate(any[AuthorizePartyUpdateRequest])
+              verify(mockIdpExists, never)
+                .apply(any[IdentityProviderId])(any[LoggingContextWithTrace])
+              Success(succeed)
+            case other =>
+              fail(s"Expected a FIELD_SIZE_LIMIT_EXCEEDED StatusRuntimeException, but got $other")
           }
         }
       }

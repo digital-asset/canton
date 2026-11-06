@@ -59,9 +59,6 @@ nodes to a newly-onboarded Sequencer.
 
 If you encounter issues, refer to the :ref:`troubleshooting guide<synchronizer-troubleshoot-new-sequencer-onboarding>`.
 
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/25963>
-
 For details on the necessary admin commands, check the reference documentation.
 
 Use separate consoles
@@ -111,8 +108,5 @@ at a later point as described in this section.
        :dedent:
 
 The reverse procedure is documented in the :ref:`Mediator decommissioning section<decommissioning-mediators>`.
-
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/25832>
 
 For details on the necessary admin commands, check the reference documentation.

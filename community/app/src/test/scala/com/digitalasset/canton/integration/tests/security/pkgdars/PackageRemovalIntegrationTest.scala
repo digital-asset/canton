@@ -20,7 +20,7 @@ import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.damltests.java.iou
 import com.digitalasset.canton.damltests.java.iou.Amount
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.pkgdars.PackageUsableMixin
 import com.digitalasset.canton.integration.{
@@ -714,12 +714,6 @@ sealed trait PackageRemovalIntegrationTest
         daId,
         acmeId,
       )
-
-      // Ensure that the latest time proof known to the reassigning participant
-      // is more recent than the vetting, since the vetting status is checked at
-      // the time proof, rather than at the latest known status
-      // TODO(i13200) The following line can be removed once the ticket is closed
-      participant1.testing.fetch_synchronizer_time(acmeId)
 
       val activeContractsForPkg = participant1.testing.acs_search(
         daName,

@@ -18,6 +18,8 @@ import com.daml.ledger.api.v2.commands.{
   PrefetchContractKey,
   DisclosedContract as ProtoDisclosedContract,
 }
+import com.daml.ledger.api.v2.crypto as lapiCrypto
+import com.daml.ledger.api.v2.interactive.interactive_submission_service as iss
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   PrepareSubmissionRequest,
   HashingSchemeVersion as ApiHashingSchemeVersion,
@@ -39,17 +41,32 @@ import com.daml.ledger.api.v2.value.{
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.ApiMocks.{commandId, submissionId, userId, workflowId}
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.interactive.{
+  CostEstimationHintsSizeConfig,
+  MetadataSubmitterInfoSizeConfig,
+  PartySignaturesSizeConfig,
+  PrepareSubmissionRequestSizeConfig,
+  PreparedTransactionSizeConfig,
+  SinglePartySignaturesSizeConfig,
+}
 import com.digitalasset.canton.ledger.api.sizeconfig.v2.{
   CommandsSizeConfig,
   CreateCommandSizeConfig,
   DisclosedContractSizeConfig,
+  EventFormatSizeConfig,
   ExerciseCommandSizeConfig,
   PrefetchContractKeySizeConfig,
   PublicLapiSizeConfig,
   ReassignmentCommandsSizeConfig,
+  SignatureSizeConfig,
 }
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
-import com.digitalasset.canton.ledger.api.{ApiMocks, DisclosedContract, Commands as ApiCommands}
+import com.digitalasset.canton.ledger.api.{
+  ApiMocks,
+  DisclosedContract,
+  SubmissionIdGenerator,
+  Commands as ApiCommands,
+}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.tea.AccountId
@@ -1148,6 +1165,339 @@ class SubmitRequestValidatorTest
             PrefetchContractKeySizeConfig(argumentsLimit)
           ),
         )
+      )
+    }
+
+    "validating the size limits of prepare submission requests" should {
+      val maxCommands = 2
+      val maxActAs = 3
+      val maxReadAs = 4
+      val maxDisclosedContracts = 5
+      val maxPackageIdSelectionPreference = 6
+      val maxPrefetchContractKeys = 7
+      val maxExpectedSignatures = 8
+      val maxCreatedEventBlobBytes = 9
+
+      val sizeLimitsConfigWithLimits = sizeLimitsConfig.copy(
+        publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+          disclosedContract = DisclosedContractSizeConfig(
+            createdEventBlobSizeLimit = PositiveInt.tryCreate(maxCreatedEventBlobBytes)
+          )
+        ),
+        interactiveLapiSizeConfig = sizeLimitsConfig.interactiveLapiSizeConfig.copy(
+          prepareSubmissionRequest = PrepareSubmissionRequestSizeConfig(
+            commandsSizeLimit = PositiveInt.tryCreate(maxCommands),
+            actAsSizeLimit = PositiveInt.tryCreate(maxActAs),
+            readAsSizeLimit = PositiveInt.tryCreate(maxReadAs),
+            disclosedContractsSizeLimit = PositiveInt.tryCreate(maxDisclosedContracts),
+            packageIdSelectionPreferenceSizeLimit =
+              PositiveInt.tryCreate(maxPackageIdSelectionPreference),
+            prefetchContractKeysSizeLimit = PositiveInt.tryCreate(maxPrefetchContractKeys),
+          ),
+          costEstimationHints = CostEstimationHintsSizeConfig(
+            expectedSignaturesSizeLimit = PositiveInt.tryCreate(maxExpectedSignatures)
+          ),
+        ),
+      )
+
+      val prepareRequest = PrepareSubmissionRequest.defaultInstance
+
+      def validate(prepareRequest: PrepareSubmissionRequest) =
+        CommandsValidator.validatePrepareSubmissionRequestSizeLimits(prepareRequest)(
+          sizeLimitsConfigWithLimits,
+          errorLoggingContext,
+        )
+
+      def disclosedContract(createdEventBlobBytes: Int) = ProtoDisclosedContract(
+        templateId = Some(api.identifier),
+        contractId = contractId.coid,
+        createdEventBlob = bytes(createdEventBlobBytes),
+        synchronizerId = api.synchronizerId,
+      )
+
+      "validate the size limits of the prepare request when validating a prepare request" in {
+        requestMustFailWith(
+          request = new CommandsValidator(ValidateUpgradingPackageResolutions.Empty)(
+            sizeLimitsConfigWithLimits
+          ).validatePrepareRequest(
+            prepareRequest.copy(actAs = parties(maxActAs + 1)),
+            internal.ledgerTime,
+            internal.submittedAt,
+          ),
+          code = INVALID_ARGUMENT,
+          description = cardinalityLimitExceeded("act_as", actual = maxActAs + 1, limit = maxActAs),
+        )
+      }
+
+      cardinalityLimit("commands", limit = maxCommands)(numberOfCommands =>
+        validate(prepareRequest.copy(commands = Seq.fill(numberOfCommands)(api.command)))
+      )
+
+      cardinalityLimit("act_as", limit = maxActAs)(numberOfParties =>
+        validate(prepareRequest.copy(actAs = parties(numberOfParties)))
+      )
+
+      cardinalityLimit("read_as", limit = maxReadAs)(numberOfParties =>
+        validate(prepareRequest.copy(readAs = parties(numberOfParties)))
+      )
+
+      cardinalityLimit("disclosed_contracts", limit = maxDisclosedContracts)(numberOfContracts =>
+        validate(
+          prepareRequest.copy(disclosedContracts =
+            Seq.fill(numberOfContracts)(disclosedContract(1))
+          )
+        )
+      )
+
+      cardinalityLimit("package_id_selection_preference", limit = maxPackageIdSelectionPreference)(
+        numberOfPackageIds =>
+          validate(
+            prepareRequest.copy(packageIdSelectionPreference =
+              (1 to numberOfPackageIds).map(i => s"packageId$i")
+            )
+          )
+      )
+
+      cardinalityLimit("prefetch_contract_keys", limit = maxPrefetchContractKeys)(numberOfKeys =>
+        validate(
+          prepareRequest.copy(prefetchContractKeys = Seq.fill(numberOfKeys)(api.prefetchKey))
+        )
+      )
+
+      cardinalityLimit("expected_signatures", limit = maxExpectedSignatures)(numberOfSignatures =>
+        validate(
+          prepareRequest.copy(estimateTrafficCost =
+            Some(
+              iss.CostEstimationHints(
+                disabled = false,
+                expectedSignatures = Seq.fill(numberOfSignatures)(
+                  lapiCrypto.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519
+                ),
+              )
+            )
+          )
+        )
+      )
+
+      byteSizeLimit("created_event_blob", limit = maxCreatedEventBlobBytes)(numberOfBytes =>
+        validate(prepareRequest.copy(disclosedContracts = Seq(disclosedContract(numberOfBytes))))
+      )
+    }
+
+    "validating the size limits of execute submission requests" should {
+      // distinct limits, so that a check reading the limit of another field fails
+      val maxActAs = 2
+      val maxInputContracts = 3
+      val maxPartySignatures = 5
+      val maxSinglePartySignatures = 6
+      val maxSignatureBytes = 7
+      val maxFiltersByParty = 8
+      val maxTransactionBytes = 20
+      val maxInputContractBytes = 30
+
+      val sizeLimitsConfigWithLimits = sizeLimitsConfig.copy(
+        metadataInputContractBytesSizeLimit = PositiveInt.tryCreate(maxInputContractBytes),
+        publicLapiSizeConfig = sizeLimitsConfig.publicLapiSizeConfig.copy(
+          signature =
+            SignatureSizeConfig(signatureSizeLimit = PositiveInt.tryCreate(maxSignatureBytes)),
+          eventFormat = EventFormatSizeConfig(
+            filtersByPartySizeLimit = PositiveInt.tryCreate(maxFiltersByParty)
+          ),
+        ),
+        interactiveLapiSizeConfig = sizeLimitsConfig.interactiveLapiSizeConfig.copy(
+          preparedTransaction = PreparedTransactionSizeConfig(
+            transactionSizeLimit = PositiveInt.tryCreate(maxTransactionBytes)
+          ),
+          metadata = sizeLimitsConfig.interactiveLapiSizeConfig.metadata.copy(
+            inputContractsSizeLimit = PositiveInt.tryCreate(maxInputContracts)
+          ),
+          metadataSubmitterInfo = MetadataSubmitterInfoSizeConfig(
+            actAsSizeLimit = PositiveInt.tryCreate(maxActAs)
+          ),
+          partySignatures = PartySignaturesSizeConfig(
+            signaturesSizeLimit = PositiveInt.tryCreate(maxPartySignatures)
+          ),
+          singlePartySignatures = SinglePartySignaturesSizeConfig(
+            signaturesSizeLimit = PositiveInt.tryCreate(maxSinglePartySignatures)
+          ),
+        ),
+      )
+
+      val submitRequestValidatorWithLimits =
+        new SubmitRequestValidator(testedCommandValidator)(sizeLimitsConfigWithLimits)
+
+      def validate(executeRequest: iss.ExecuteSubmissionRequest) =
+        SubmitRequestValidator.validateExecuteSubmissionRequestSizeLimits(executeRequest)(
+          errorLoggingContext,
+          sizeLimitsConfigWithLimits,
+        )
+
+      def withMetadata(metadata: iss.Metadata) =
+        iss.ExecuteSubmissionRequest.defaultInstance
+          .withPreparedTransaction(
+            iss.PreparedTransaction(transaction = None, metadata = Some(metadata))
+          )
+
+      def withPartySignatures(signatures: Seq[iss.SinglePartySignatures]) =
+        iss.ExecuteSubmissionRequest.defaultInstance.withPartySignatures(
+          iss.PartySignatures(signatures)
+        )
+
+      def signature(numberOfBytes: Int) = lapiCrypto.Signature(
+        format = lapiCrypto.SignatureFormat.SIGNATURE_FORMAT_RAW,
+        signature = bytes(numberOfBytes),
+        signedBy = "fingerprint",
+        signingAlgorithmSpec = lapiCrypto.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519,
+      )
+
+      def singlePartySignatures(signatures: Seq[lapiCrypto.Signature]) =
+        iss.SinglePartySignatures(party = "alice::fingerprint", signatures = signatures)
+
+      def damlTransaction(numberOfBytes: Int) = {
+        val transaction = iss.DamlTransaction.defaultInstance.withVersion("a" * (numberOfBytes - 2))
+        assert(transaction.serializedSize == numberOfBytes)
+        transaction
+      }
+
+      def inputContract(numberOfBytes: Int) = {
+        // 3 bytes of field tag and length of event_blob
+        val inputContract =
+          iss.Metadata.InputContract.defaultInstance.withEventBlob(bytes(numberOfBytes - 3))
+        assert(inputContract.serializedSize == numberOfBytes)
+        inputContract
+      }
+
+      // passes the non-size validation of an execute request
+      val executeRequest = iss.ExecuteSubmissionRequest(
+        preparedTransaction = Some(
+          iss.PreparedTransaction(
+            transaction = None,
+            metadata = Some(
+              iss.Metadata.defaultInstance
+                .withSubmitterInfo(
+                  iss.Metadata
+                    .SubmitterInfo(actAs = Seq(api.submitter), commandId = commandId.unwrap)
+                )
+                .withSynchronizerId(api.synchronizerId)
+            ),
+          )
+        ),
+        partySignatures = Some(iss.PartySignatures(Seq(singlePartySignatures(Seq(signature(1)))))),
+        deduplicationPeriod = iss.ExecuteSubmissionRequest.DeduplicationPeriod.Empty,
+        submissionId = "",
+        userId = userId,
+        hashingSchemeVersion = ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
+        minLedgerTime = None,
+        accountId = "",
+      )
+
+      "validate the size limits of the execute request when validating an execute request" in {
+        requestMustFailWith(
+          request = submitRequestValidatorWithLimits.validateExecute(
+            withPartySignatures(Seq.fill(maxPartySignatures + 1)(singlePartySignatures(Nil))),
+            internal.ledgerTime,
+            SubmissionIdGenerator.Random,
+            internal.maxDeduplicationDuration,
+          )(errorLoggingContext),
+          code = INVALID_ARGUMENT,
+          description = cardinalityLimitExceeded(
+            "signatures",
+            actual = maxPartySignatures + 1,
+            limit = maxPartySignatures,
+          ),
+        )
+      }
+
+      "validate the transaction format when validating an execute-and-wait request" in {
+        requestMustFailWith(
+          request = submitRequestValidatorWithLimits.validateExecuteAndWait(
+            executeRequest,
+            Some(
+              TransactionFormat(
+                eventFormat = Some(
+                  EventFormat(
+                    filtersByParty = parties(maxFiltersByParty + 1).map(_ -> Filters(Nil)).toMap,
+                    filtersForAnyParty = None,
+                    verbose = false,
+                  )
+                ),
+                transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
+              )
+            ),
+            internal.ledgerTime,
+            SubmissionIdGenerator.Random,
+            internal.maxDeduplicationDuration,
+          )(errorLoggingContext),
+          code = INVALID_ARGUMENT,
+          description = cardinalityLimitExceeded(
+            "filters_by_party",
+            actual = maxFiltersByParty + 1,
+            limit = maxFiltersByParty,
+          ),
+        )
+      }
+
+      serializedSizeLimit("transaction", limit = maxTransactionBytes)(numberOfBytes =>
+        validate(
+          iss.ExecuteSubmissionRequest.defaultInstance.withPreparedTransaction(
+            iss.PreparedTransaction(
+              transaction = Some(damlTransaction(numberOfBytes)),
+              metadata = None,
+            )
+          )
+        )
+      )
+
+      cardinalityLimit("act_as", limit = maxActAs)(numberOfParties =>
+        validate(
+          withMetadata(
+            iss.Metadata.defaultInstance.withSubmitterInfo(
+              iss.Metadata.SubmitterInfo(actAs = parties(numberOfParties), commandId = "")
+            )
+          )
+        )
+      )
+
+      cardinalityLimit("input_contracts", limit = maxInputContracts)(numberOfContracts =>
+        validate(
+          withMetadata(
+            iss.Metadata.defaultInstance.withInputContracts(
+              Seq.fill(numberOfContracts)(iss.Metadata.InputContract.defaultInstance)
+            )
+          )
+        )
+      )
+
+      serializedSizeLimit("input_contracts", limit = maxInputContractBytes)(numberOfBytes =>
+        validate(
+          withMetadata(
+            iss.Metadata.defaultInstance.withInputContracts(Seq(inputContract(numberOfBytes)))
+          )
+        )
+      )
+
+      cardinalityLimit(
+        "signatures",
+        limit = maxPartySignatures,
+        limitName = "limit of the party signatures",
+      )(numberOfParties =>
+        validate(withPartySignatures(Seq.fill(numberOfParties)(singlePartySignatures(Nil))))
+      )
+
+      cardinalityLimit(
+        "signatures",
+        limit = maxSinglePartySignatures,
+        limitName = "limit of the signatures of a party",
+      )(numberOfSignatures =>
+        validate(
+          withPartySignatures(
+            Seq(singlePartySignatures(Seq.fill(numberOfSignatures)(signature(1))))
+          )
+        )
+      )
+
+      byteSizeLimit("signature", limit = maxSignatureBytes)(numberOfBytes =>
+        validate(withPartySignatures(Seq(singlePartySignatures(Seq(signature(numberOfBytes))))))
       )
     }
 

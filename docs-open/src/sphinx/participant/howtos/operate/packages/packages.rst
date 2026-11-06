@@ -83,9 +83,6 @@ To display the Synchronizer/Participant Node vetting state for a specific packag
     .. hidden:: utils.synchronize_topology()
     .. success:: val mainPackageId = participant2.dars.list(filterName = "CantonExamples").head.mainPackageId
 
-.. todo::
-    `#25944: Provide pretty printed macro for filter/map operations below <https://github.com/DACH-NY/canton/issues/25944>`_
-
 .. snippet:: packages
     .. success:: participant1.topology.vetted_packages.list().filter(_.item.packages.exists(_.packageId == mainPackageId)).map(r => (r.context.storeId, r.item.participantId))
 

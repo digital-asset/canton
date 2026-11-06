@@ -27,13 +27,8 @@ object IdentityProviderConfigServiceRequestValidator {
       )
       jwksUrl <- optionalString(config.jwksUrl)(requireJwksUrl(_, "jwks_url"))
       issuer <- optionalString(config.issuer)(requireNonEmptyString(_, "issuer"))
-      updateMask <- requirePresence(
-        request.updateMask,
-        "update_mask",
-      )
-      _ <- validateSerializedSizeLimit(
-        message = updateMask,
-        fieldName = "update_mask",
+      updateMask <- requireUpdateMask(
+        updateMask = request.updateMask,
         limit =
           sizeLimitsConfig.adminLapiSizeConfig.updateIdentityProviderConfigRequest.updateMaskSizeLimit,
       )

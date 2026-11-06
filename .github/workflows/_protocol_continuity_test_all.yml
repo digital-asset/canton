@@ -86,12 +86,7 @@ jobs:
           previous-timings-resolved: "true"
 
       - name: Allow automatic protocol version selection
-        env:
-          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
-        run: |
-          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will select the protocol version automatically"
-        shell: bash
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Run all protocol continuity tests
         uses: ./.github/actions/test/run_tests
@@ -120,5 +115,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: protocol_continuity_test_all
+      shard_job_result: ${{ needs.protocol_continuity_test_all.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ""

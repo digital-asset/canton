@@ -1086,6 +1086,122 @@ class HashSpec extends AnyWordSpec with Matchers with TableDrivenPropertyChecks 
     }
   }
 
+  "Hash.hashReassignmentChangeId" should {
+
+    val userId = Ref.UserId.assertFromString("user")
+    val commandId = Ref.CommandId.assertFromString("command")
+    val submitter = Ref.Party.assertFromString("alice")
+    val cid1: ContractId = ContractId.V1.assertFromString(
+      "0007e7b5534931dfca8e1b485c105bae4e10808bd13ddc8e897f258015f9d921c5"
+    )
+    val cid2: ContractId = ContractId.V1.assertFromString(
+      "0059b59ad7a6b6066e77b91ced54b8282f0e24e7089944685cb8f22f32fcbc4e1b"
+    )
+    val contractIds = Set(cid1)
+
+    "not produce collisions" in {
+      val set = for {
+        u <- Set(userId, Ref.UserId.assertFromString("other-user"))
+        c <- Set(commandId, Ref.CommandId.assertFromString("other-command"))
+        p <- Set(submitter, Ref.Party.assertFromString("bob"))
+        cids <- Set(Set(cid1), Set(cid1, cid2))
+      } yield Hash.hashReassignmentChangeId(u, c, p, cids)
+
+      set.size shouldBe 16
+    }
+
+    "not produce collisions when characters shift between fields" in {
+      Hash.hashReassignmentChangeId(
+        userId,
+        Ref.CommandId.assertFromString("ab"),
+        Ref.Party.assertFromString("c"),
+        contractIds,
+      ) should not be Hash.hashReassignmentChangeId(
+        userId,
+        Ref.CommandId.assertFromString("a"),
+        Ref.Party.assertFromString("bc"),
+        contractIds,
+      )
+    }
+
+    "differ from the change id hash" in {
+      Hash.hashReassignmentChangeId(
+        userId,
+        commandId,
+        submitter,
+        contractIds,
+      ) should not be Hash.hashChangeId(userId, commandId, Set(submitter))
+    }
+
+    "be stable" in {
+      Hash.hashReassignmentChangeId(userId, commandId, submitter, contractIds) shouldBe
+        Hash.assertFromString(
+          "0a73750690a5bf237bd1871725fecd89b161893434fc5929fd1ff58a06852aaa"
+        )
+    }
+  }
+
+  "Hash.hashLedgerApiReassignmentChangeId" should {
+
+    val userId = Ref.UserId.assertFromString("user")
+    val commandId = Ref.CommandId.assertFromString("command")
+    val submitter = Ref.Party.assertFromString("alice")
+
+    "not produce collisions" in {
+      val set = for {
+        u <- Set(userId, Ref.UserId.assertFromString("other-user"))
+        c <- Set(commandId, Ref.CommandId.assertFromString("other-command"))
+        p <- Set(submitter, Ref.Party.assertFromString("bob"))
+      } yield Hash.hashLedgerApiReassignmentChangeId(u, c, p)
+
+      set.size shouldBe 8
+    }
+
+    "not produce collisions when characters shift between fields" in {
+      Hash.hashLedgerApiReassignmentChangeId(
+        Ref.UserId.assertFromString("ab"),
+        Ref.CommandId.assertFromString("c"),
+        submitter,
+      ) should not be Hash.hashLedgerApiReassignmentChangeId(
+        Ref.UserId.assertFromString("a"),
+        Ref.CommandId.assertFromString("bc"),
+        submitter,
+      )
+    }
+
+    "differ from the change id hash" in {
+      Hash.hashLedgerApiReassignmentChangeId(
+        userId,
+        commandId,
+        submitter,
+      ) should not be Hash.hashChangeId(userId, commandId, Set(submitter))
+    }
+
+    "be stable" in {
+      Hash.hashLedgerApiReassignmentChangeId(userId, commandId, submitter) shouldBe
+        Hash.assertFromString(
+          "1048c38bbd2b2892be3930b3ac1f26dc875ee74ba14afcb27b0635ae8f462937"
+        )
+    }
+  }
+
+  "Hash.hashAssignmentReassignmentId" should {
+
+    val reassignmentId = Ref.HexString.assertFromString("00" + "a" * 64)
+
+    "not produce collisions" in {
+      Hash.hashAssignmentReassignmentId(reassignmentId) should not be
+        Hash.hashAssignmentReassignmentId(Ref.HexString.assertFromString("00" + "b" * 64))
+    }
+
+    "be stable" in {
+      Hash.hashAssignmentReassignmentId(reassignmentId) shouldBe
+        Hash.assertFromString(
+          "38efc06b129aac674e2f14bd553908eea3bfaec39490e9b7fd26013e41767930"
+        )
+    }
+  }
+
   "Hash.hashContractKey" should {
 
     val templateId = defRef(name = "upgradable")

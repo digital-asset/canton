@@ -173,6 +173,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: toxiproxy_test_fast
+      shard_job_result: ${{ needs.toxiproxy_test_fast.result }}
       job_name: ${{ inputs.job_name }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}

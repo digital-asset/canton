@@ -18,8 +18,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.UseExternalProcess.ReleasePath
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseExternalConsole,

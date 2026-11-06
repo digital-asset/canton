@@ -10,8 +10,8 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
 import com.digitalasset.canton.integration.plugins.*
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{

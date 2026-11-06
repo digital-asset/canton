@@ -17,24 +17,6 @@ Synchronizers
 The Sequencer
 =============
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25653>
-   See also https://github.com/DACH-NY/canton/blob/main/docs/src/sphinx/arch/canton/sequencing.rst
-
-
-   * Members; envelopes and recipients including projection (confidential delivery)
-
-   * Ordering guarantees
-
-     * Ordering as a separate protocol layer (see below)
-
-   * Traffic management
-
-   * Traffic credits managed by the sequencers and topped up by sequencer operators
-
-   * Source of time
-
-     * Ledger time, submission time (rename to preparation time???), skews
-
 ..
    .. _time-in-canton:
 
@@ -81,36 +63,8 @@ The Sequencer
 The Mediator
 ============
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25653>
-
-   Mediator = Two-phase commit coordinator
-
-   * Obtain list of expected quorums (currently it's a tree)
-
-     * Deduplicate requests within bounded periods
-
-
 The Ordering Layer
 ------------------
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25653>
-   * API spec
-
-   * Overview of integrations with links
-
-     * CometBFT
-
-     * DA BFT (once we have docs on this)
-
-     * DB sequencer (once we have this ready)
-
-   * No mention of Fabric / Besu
-
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25653>
-   * Remove all implementation details (in particular internal architecture)
-
-     * If suitable, move them to the "subnet" chapter.
 
 ..
   Synchronizer Entities

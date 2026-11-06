@@ -202,16 +202,13 @@ class PartyReplicationEndpointsImpl(
     )
       .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err))
 
-    status <- partyReplicator
+    apiStatus <- partyReplicator
       .getAddPartyStatus(partyId, synchronizerId, targetParticipantId)
       .toRight(
         toStatusRuntimeException(Status.NOT_FOUND)(
           s"Party replication status not found for party ${request.partyId} on synchronizer ${request.synchronizerId}"
         )
       )
-
-    apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
-      .fromInternal(status)
   } yield GetAddPartyStatusResponse(Some(apiStatus.toLapiProto))).toFuture(identity)
 
   private def toStatusRuntimeException(status: Status)(err: String): StatusRuntimeException =
@@ -291,15 +288,6 @@ class PartyReplicationEndpointsImpl(
         request.transaction,
         toStatusRuntimeException(Status.INVALID_ARGUMENT)(
           "transaction cannot be empty"
-        ),
-      )
-
-      // TODO(#33975) – Use configurable size to limit the unbounded signature collection (once it is available)
-      _ <- EitherT.cond[FutureUnlessShutdown](
-        request.signatures.sizeIs <= 10,
-        (),
-        toStatusRuntimeException(Status.INVALID_ARGUMENT)(
-          s"Too many signatures provided. Maximum allowed is 10, but got ${request.signatures.size}."
         ),
       )
 

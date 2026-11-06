@@ -13,7 +13,7 @@ import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -42,7 +42,8 @@ abstract class CryptoIntegrationTest(cryptoConfig: CryptoConfig)
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.setCrypto(cryptoConfig)
+        ConfigTransforms.setCrypto(cryptoConfig),
+        ConfigTransforms.enableKeyDownload,
       )
       // force sequencer2 to use the same publicApi port as sequencer1
       .addConfigTransform { config =>

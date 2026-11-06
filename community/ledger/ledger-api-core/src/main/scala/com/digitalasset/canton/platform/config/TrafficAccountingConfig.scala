@@ -178,11 +178,11 @@ object TopUpConfig {
     lazy implicit val configWriter: ConfigWriter[Disabled.type] = deriveWriter
   }
 
-  /** Top-ups are ingested from exercises of the `PublishCredit` choice of the `TrafficCreditIssuer`
-    * interface in the `canton-traffic-credit` Daml package. The participant uploads that package
-    * before it starts ingesting top-ups and vets it on every synchronizer it connects to. With
-    * `parameters.admin-workflow.auto-load-dar` disabled, the operator has to upload and vet it
-    * instead.
+  /** Top-ups are ingested from exercises of the `PublishCredit` choice of the
+    * `TrafficCreditReporter` interface in the `canton-api-traffic-credit-v1` Daml package. The
+    * participant uploads that package before it starts ingesting top-ups and vets it on every
+    * synchronizer it connects to. With `parameters.admin-workflow.auto-load-dar` disabled, the
+    * operator has to upload and vet it instead.
     *
     * @param paymasters
     *   parties whose credits are trusted: only credits published with the authority of one of these

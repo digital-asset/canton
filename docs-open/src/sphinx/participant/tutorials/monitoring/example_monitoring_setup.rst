@@ -83,9 +83,6 @@ Synchronizer Setup
 ~~~~~~~~~~~~~~~~~~
 Run the synchronizer with the `--log-profile container` that writes plain text to standard out at debug level.
 
-.. todo::
-   #. Add examples here <https://github.com/DACH-NY/canton/issues/23872>
-
 Participant Setup
 ~~~~~~~~~~~~~~~~~
 The participant container has two files mapped into it on container creation. The `.conf` file provides details of the synchronizer and database locations. An HTTP metrics endpoint is exposed that returns metrics in the `Prometheus Text Based Format <https://github.com/prometheus/docs/blob/main/content/docs/instrumenting/exposition_formats.md#text-based-format>`_. By default, participants do not connect to remote synchronizers, so a bootstrap script is provided to accomplish that.

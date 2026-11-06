@@ -195,7 +195,7 @@ object SubmitterMetadata
 
     for {
       externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV32(pvv, _)
+        ExternalAuthorization.fromProtoV32(pvv, synchronizerLimits.transactionProtocolLimits, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
       result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(

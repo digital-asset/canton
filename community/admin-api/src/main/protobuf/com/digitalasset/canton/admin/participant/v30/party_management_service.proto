@@ -241,7 +241,6 @@ message PartyReplicationStatus {
     string synchronizer_id = 3;
     string source_participant_uid = 4;
     string target_participant_uid = 5;
-    uint32 topology_serial = 6;
   }
 
   // Authorization by party owners and target participant to onboard the party.
@@ -493,6 +492,24 @@ message ImportPartyAcsRequest {
   //
   // Optional in the first request, ignored in all subsequent request messages.
   optional string party_id = 6;
+
+  // Overrides of safety checks of the import. Unspecified or unknown values are rejected.
+  //
+  // Optional in the first request, ignored in all subsequent request messages.
+  repeated ImportPartyAcsForceFlag force_flags = 7;
+}
+
+// Overrides a safety check of `ImportPartyAcs`.
+enum ImportPartyAcsForceFlag {
+  // Default value; requests with it are rejected.
+  IMPORT_PARTY_ACS_FORCE_FLAG_UNSPECIFIED = 0;
+  // The import of a party's ACS is rejected once this participant has processed events past the
+  // party's activation on it. Since then, it may have processed archivals or unassignments of the party's
+  // contracts that the snapshot still contains. The import then fails at such a contract, or makes an
+  // archived contract active again if its archival has been removed.
+  // With this flag, the import proceeds anyway. Only use it if no contract in the snapshot has been
+  // archived or unassigned since the activation. Only effective if `party_id` is set.
+  IMPORT_PARTY_ACS_FORCE_FLAG_ALLOW_IMPORT_AFTER_ACTIVATION = 1;
 }
 
 message ImportPartyAcsResponse {}

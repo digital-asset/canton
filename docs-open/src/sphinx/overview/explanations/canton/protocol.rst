@@ -131,12 +131,8 @@ Examples:
 Two-phase commit
 ----------------
 
-.. todo:: Write this section <https://github.com/DACH-NY/canton/issues/25689>
-
 Required properties
 ^^^^^^^^^^^^^^^^^^^
-
-.. todo:: Write this section <https://github.com/DACH-NY/canton/issues/25689>
 
 .. _protocol-point-to-point:
 
@@ -147,12 +143,8 @@ Point-to-point protocols allow a member of the Synchronizer to send messages to 
 Since Sequencers are used as gateways, such messages are ordered with respect to other messages of the other protocols.
 One use case of point-to-point communication is :ref:`ACS commitments <pruning-non-repudiation>`.
 
-.. todo:: Write this section <https://github.com/DACH-NY/canton/issues/25689>
-
 Running example
 ---------------
-
-.. todo:: Unify with example of the daml ledger model (SimpleAsset, SimpleDvp) <https://github.com/DACH-NY/canton/issues/25689>
 
 We illustrate the different aspects of Canton two-phase commit protocol using a simple DvP example.
 Alice and Bob want to exchange an `IOU` given to Alice by a bank for some shares that Bob owns.
@@ -175,7 +167,3 @@ The Daml transaction consists of Alice exercising choice `Swap` on her IOU, lead
 
 Canton's Transaction Protocol
 *****************************
-
-.. todo:: Write this section <https://github.com/DACH-NY/canton/issues/25689>
-
-.. todo:: Use image found in  https://docs.daml.com/canton/architecture/overview.html to show all messages <https://github.com/DACH-NY/canton/issues/25689>

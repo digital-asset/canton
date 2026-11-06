@@ -18,10 +18,11 @@ import com.digitalasset.canton.ledger.client.services.updates.UpdateServiceClien
 import com.digitalasset.canton.platform.config.TopUpConfig
 import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TopUpNotCredited
-import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.{
-  PublishCredit,
-  TrafficCreditIssuer,
-  AccountId as DamlAccountId,
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.{
+  Metadata,
+  TrafficCreditReporter,
+  TrafficCreditReporter_PublishCredit,
+  TrafficCreditReporter_PublishCreditResult,
 }
 import com.digitalasset.canton.tea.projection.{AccountDelta, EventId, ProjectionEvent, TrafficDelta}
 import com.digitalasset.canton.topology.PartyId
@@ -38,6 +39,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
+import scala.jdk.CollectionConverters.*
 
 class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -56,9 +58,10 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
   private val recordTime: CantonTimestamp = CantonTimestamp.ofEpochSecond(1000)
 
   private val paymaster = PartyId.tryFromProtoPrimitive("paymaster::default")
+  private val purchaser = PartyId.tryFromProtoPrimitive("purchaser::default")
   private val defaultConfig = TopUpConfig.DamlCredit(paymasters = NonEmpty(Set, paymaster))
   private val interfaceId =
-    Identifier.fromJavaProto(TrafficCreditIssuer.INTERFACE_ID_WITH_PACKAGE_ID.toProto)
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID_WITH_PACKAGE_ID.toProto)
   private val issuerTemplateId = Identifier("b" * 64, "Wallet", "TrafficPurchaser")
 
   private def serviceWith(
@@ -98,23 +101,38 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
   private def record(value: com.daml.ledger.javaapi.data.DamlRecord): Value =
     Value(Value.Sum.Record(Record.fromJavaProto(value.toProtoRecord)))
 
+  private val emptyMetadata: Metadata = new Metadata(Map.empty[String, String].asJava)
+
   private def published(
       nodeId: Int,
       account: String = "alice",
       amount: Long = 1L,
+      purchaserParty: String = purchaser.toProtoPrimitive,
       paymasterParty: String = paymaster.toProtoPrimitive,
+      observers: Seq[String] = Seq.empty,
+      metadata: Metadata = emptyMetadata,
   ): ExercisedEvent =
     ExercisedEvent.defaultInstance.copy(
       nodeId = nodeId,
       contractId = s"issuer-$nodeId",
       templateId = Some(issuerTemplateId),
       interfaceId = Some(interfaceId),
-      choice = TrafficCreditIssuer.CHOICE_PublishCredit.name,
+      choice = TrafficCreditReporter.CHOICE_TrafficCreditReporter_PublishCredit.name,
       consuming = false,
-      choiceArgument = Some(record(new PublishCredit(new DamlAccountId(account), amount).toValue)),
+      choiceArgument = Some(
+        record(
+          new TrafficCreditReporter_PublishCredit(
+            account,
+            amount,
+            purchaserParty,
+            observers.asJava,
+            metadata,
+          ).toValue
+        )
+      ),
       actingParties = Seq(paymasterParty),
-      witnessParties = Seq(paymasterParty),
-      exerciseResult = Some(Value(Value.Sum.Unit(com.google.protobuf.empty.Empty()))),
+      witnessParties = paymasterParty +: observers,
+      exerciseResult = Some(record(new TrafficCreditReporter_PublishCreditResult().toValue)),
       packageName = "test-wallet",
     )
 
@@ -198,6 +216,14 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       )
     }
 
+    "credit the account when additional observers are specified" in {
+      val exercised =
+        published(nodeId = 3, amount = 1000L, observers = Seq("observer::one", "observer::two"))
+      decode(transaction(10L, asEvent(exercised))) shouldBe Seq(
+        projectionEvent(10L, 3 -> credit(alice, 1000L))
+      )
+    }
+
     "ignore creates and other choices on an implementing template" in {
       val credit = published(nodeId = 0)
       val otherChoice = credit.copy(
@@ -221,6 +247,21 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
           asEvent(credit),
         )
       ) shouldBe Seq(projectionEvent(10L, 0 -> this.credit(alice, 1L)))
+    }
+
+    "ignore credits from a different interface, including the same name in another package" in {
+      val exercised = published(nodeId = 0)
+      forAll(
+        Seq(
+          interfaceId.copy(packageId = "a" * 64),
+          interfaceId.copy(moduleName = "Other.Module"),
+          interfaceId.copy(entityName = "OtherInterface"),
+        )
+      ) { otherInterfaceId =>
+        decode(
+          transaction(10L, asEvent(exercised.copy(interfaceId = Some(otherInterfaceId))))
+        ) shouldBe empty
+      }
     }
 
     "ignore reassignment of an implementing contract" in {
@@ -323,7 +364,7 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
         _.errorMessage should include(
           "node 4: cannot decode: Expected field to be of type com.daml.ledger.javaapi.data.Int64"
         ),
-        _.errorMessage should include("node 5: cannot decode: Expected 2 fields, got 0"),
+        _.errorMessage should include("node 5: cannot decode: Expected 5 fields, got 0"),
         _.errorMessage should include("node 6: missing choice argument"),
         _.errorMessage should include(
           "node 8: cannot decode: Contracts must be constructed from Records"
@@ -332,7 +373,7 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
         _.errorMessage should include("node 10: cannot decode: Sum not set for value"),
         _.errorMessage should include("node 11: cannot decode: Sum not set for value"),
         _.errorMessage should include(
-          "node 12: cannot decode: Contracts must be constructed from Records"
+          "node 12: cannot decode: Expected field to be of type com.daml.ledger.javaapi.data.Text"
         ),
         _.errorMessage should include("node 13: invalid account id"),
         _.errorMessage should include("node 14: invalid account id"),
@@ -396,7 +437,7 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
       )
     }
 
-    "subscribe to TrafficCreditIssuer by package name for the paymasters with non-verbose ledger effects" in {
+    "subscribe to TrafficCreditReporter by package name for the paymasters with non-verbose ledger effects" in {
       val otherPaymaster = PartyId.tryFromProtoPrimitive("paymaster::other")
       val (service, updateServiceClient, _) = serviceWith(topUpConfig =
         TopUpConfig.DamlCredit(paymasters = NonEmpty(Set, paymaster, otherPaymaster))
@@ -421,7 +462,11 @@ class TeaCreditIngestionServiceTest extends AnyWordSpec with BaseTest with HasEx
           IdentifierFilter.InterfaceFilter(
             InterfaceFilter(
               Some(
-                Identifier("#canton-traffic-credit", "Canton.Traffic.Credit", "TrafficCreditIssuer")
+                Identifier(
+                  "#canton-api-traffic-credit-v1",
+                  "Canton.Api.Traffic.CreditV1",
+                  "TrafficCreditReporter",
+                )
               ),
               includeInterfaceView = false,
               includeCreatedEventBlob = false,

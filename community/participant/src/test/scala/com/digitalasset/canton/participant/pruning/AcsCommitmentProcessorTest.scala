@@ -3908,7 +3908,7 @@ class AcsCommitmentProcessorTest
             processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
-          _ = loggerFactory.assertLogs(
+          _ <- loggerFactory.assertLogs(
             {
               changes.foreach { case (recordTime, change) =>
                 processor.publish(recordTime, change)
@@ -3916,7 +3916,7 @@ class AcsCommitmentProcessorTest
               processor.flush()
             },
             entry => {
-              entry.message should include(AcsCommitmentDegradationWithIneffectiveConfig.id)
+              entry.message should include(AcsCommitmentDegradation.id)
             },
           )
 

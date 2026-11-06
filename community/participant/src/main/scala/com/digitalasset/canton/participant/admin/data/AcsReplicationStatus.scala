@@ -148,7 +148,6 @@ object AcsReplicationStatus extends PrettyPrintingCompanion[AcsReplicationStatus
             targetParticipantId,
             timestamp,
             _,
-            _,
           ) =>
         AcsReplicationParameters(
           requestId.toHexString,

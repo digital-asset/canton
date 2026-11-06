@@ -16,7 +16,7 @@ class GrpcSubscriptionErrorRetryPolicyTest extends AnyWordSpec with BaseTest {
   private val requestDescription = "request description"
   private val serverName = "sequencer"
 
-  "GrpcSubscriptionErrorRetryRule" should {
+  "GrpcSubscriptionErrorRetryPolicy" should {
     val tokenExpiredMetadata = new Metadata()
     tokenExpiredMetadata.put(
       Constant.AUTHENTICATION_ERROR_CODE,
@@ -32,17 +32,17 @@ class GrpcSubscriptionErrorRetryPolicyTest extends AnyWordSpec with BaseTest {
       ),
     )
 
+    val policy = new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
+
     forEvery(recoverableErrors) { error =>
       s"retry if sequencer temporarily fails with ${error.status.getCode}" in {
-        shouldRetry(error) shouldBe true
+        policy.retryOnError(GrpcSubscriptionError(error)) shouldBe true
       }
     }
 
-  }
-
-  def shouldRetry(grpcError: GrpcError): Boolean = {
-    val rule = new GrpcSubscriptionErrorRetryPolicy(loggerFactory)
-
-    rule.retryOnError(GrpcSubscriptionError(grpcError))
+    s"not retry if sequencer fails with GrpcSubscriptionUnexpectedException" in {
+      val error = GrpcSubscriptionUnexpectedException(new RuntimeException("BOOM"))
+      policy.retryOnError(error) shouldBe false
+    }
   }
 }

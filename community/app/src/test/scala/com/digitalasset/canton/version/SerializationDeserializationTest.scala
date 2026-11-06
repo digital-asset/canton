@@ -106,6 +106,69 @@ final class SerializationDeserializationTest
     import sequencerGenerators.*
     import bftOrderingGenerators.*
 
+    def commitWithOriginator(
+        message: bftmodules.ConsensusSegment.ConsensusMessage.Commit,
+        originator: bft.BftOrderingIdentifiers.BftNodeId,
+    ) =
+      bftmodules.ConsensusSegment.ConsensusMessage.Commit.create(
+        message.blockMetadata,
+        message.viewNumber,
+        message.hash,
+        message.localTimestamp,
+        originator,
+        Some(actualSender),
+      )(version)
+
+    def prepareWithOriginator(
+        message: bftmodules.ConsensusSegment.ConsensusMessage.Prepare,
+        originator: bft.BftOrderingIdentifiers.BftNodeId,
+    ) =
+      bftmodules.ConsensusSegment.ConsensusMessage.Prepare.create(
+        message.blockMetadata,
+        message.viewNumber,
+        message.hash,
+        originator,
+        Some(actualSender),
+      )(version)
+
+    def prePrepareWithOriginator(
+        message: bftmodules.ConsensusSegment.ConsensusMessage.PrePrepare,
+        originator: bft.BftOrderingIdentifiers.BftNodeId,
+    ) =
+      bftmodules.ConsensusSegment.ConsensusMessage.PrePrepare.create(
+        message.blockMetadata,
+        message.viewNumber,
+        message.block,
+        message.canonicalCommitSet,
+        originator,
+        Some(actualSender),
+      )(version)
+
+    def viewChangeWithOriginator(
+        message: bftmodules.ConsensusSegment.ConsensusMessage.ViewChange,
+        originator: bft.BftOrderingIdentifiers.BftNodeId,
+    ) =
+      bftmodules.ConsensusSegment.ConsensusMessage.ViewChange.create(
+        message.blockMetadata,
+        message.viewNumber,
+        message.consensusCerts,
+        originator,
+        Some(actualSender),
+      )(version)
+
+    def newViewWithOriginator(
+        message: bftmodules.ConsensusSegment.ConsensusMessage.NewView,
+        originator: bft.BftOrderingIdentifiers.BftNodeId,
+    ) =
+      bftmodules.ConsensusSegment.ConsensusMessage.NewView.create(
+        message.blockMetadata,
+        message.viewNumber,
+        message.viewChanges,
+        message.prePrepares,
+        originator,
+        Some(actualSender),
+      )(version)
+
     s"Serialization and deserialization methods using protocol version $version" should {
       "compose to the identity" in {
         implicit val getByteStringId: Id[ByteString] => ByteString = identity
@@ -208,7 +271,7 @@ final class SerializationDeserializationTest
           getByteStringId,
         )
 
-        test(EncryptedViewMessage, version)(
+        testContext(EncryptedViewMessage, testedTransactionLimits, version)(
           encryptedViewMessageArb,
           getByteStringId,
         )
@@ -244,9 +307,11 @@ final class SerializationDeserializationTest
         testVersioned(SequencerConnections, version)
         testVersioned(CounterParticipantIntervalsBehind, version)
         test(GetTrafficStateForMemberRequest, version)
-        // This fails, which is expected, because PartySignatures serialization is only defined on PV.dev
-        // We do this on purpose to make clear that this is a work in progress and should **NOT** be merged to 3.1
-        test(ExternalAuthorization, version)
+        testContext(
+          ExternalAuthorization,
+          testedSynchronizerLimits.transactionProtocolLimits,
+          version,
+        )
         test(GetTrafficStateForMemberResponse, version)
         test(TopologyStateForInitRequest, version)
         test(SubscriptionRequest, version)
@@ -383,28 +448,45 @@ final class SerializationDeserializationTest
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.Commit,
-          Some(actualSender),
+          (actualSender, Some(actualSender)),
           version,
-        )(arb = commitArb(Some(actualSender)), getByteStringValue = getByteStringId)
+        )(
+          arb = Arbitrary(
+            commitArb(Some(actualSender)).arbitrary.map(commitWithOriginator(_, actualSender))
+          ),
+          getByteStringValue = getByteStringId,
+        )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.Prepare,
-          Some(actualSender),
+          (actualSender, Some(actualSender)),
           version,
+        )(
+          arb = Arbitrary(prepareArb.arbitrary.map(prepareWithOriginator(_, actualSender))),
+          getByteStringValue = getByteStringId,
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.PrePrepare,
-          Some(actualSender),
+          (actualSender, Some(actualSender)),
           version,
+        )(
+          arb = Arbitrary(prePrepareArb.arbitrary.map(prePrepareWithOriginator(_, actualSender))),
+          getByteStringValue = getByteStringId,
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.ViewChange,
-          Some(actualSender),
+          (actualSender, Some(actualSender)),
           version,
+        )(
+          arb = Arbitrary(viewChangeArb.arbitrary.map(viewChangeWithOriginator(_, actualSender))),
+          getByteStringValue = getByteStringId,
         )
         testContext(
           bftmodules.ConsensusSegment.ConsensusMessage.NewView,
-          Some(actualSender),
+          (actualSender, Some(actualSender)),
           version,
+        )(
+          arb = Arbitrary(newViewArb.arbitrary.map(newViewWithOriginator(_, actualSender))),
+          getByteStringValue = getByteStringId,
         )
         if (version < ProtocolVersion.v37) {
           testContext(
@@ -420,6 +502,7 @@ final class SerializationDeserializationTest
           )
         }
       }
+
     }
 
     forAll(Table("contract ID version", CantonContractIdVersion.all*)) { contractIdVersion =>

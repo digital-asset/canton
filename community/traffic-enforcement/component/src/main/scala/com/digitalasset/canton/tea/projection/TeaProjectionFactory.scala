@@ -17,8 +17,8 @@ import com.digitalasset.canton.tea.projection.memory.{
 }
 import com.digitalasset.canton.tracing.Spanning.SpanWrapper
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
-import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.util.PekkoUtil.RecoveryStrategy
+import com.digitalasset.canton.util.{LoggerUtil, PekkoUtil}
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
@@ -31,6 +31,7 @@ import org.apache.pekko.projection.{
   StatusObserver,
 }
 import org.apache.pekko.stream.scaladsl.Source
+import org.slf4j.event.Level
 
 import java.sql.{SQLNonTransientConnectionException, SQLRecoverableException, SQLTransientException}
 import scala.concurrent.duration.*
@@ -83,10 +84,11 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           completion.paidTrafficCost.value,
         )
         if (completion.reason == UnchargedReason.MissingCorrelation)
-          logger.warn(
+          LoggerUtil.logAtLevel(
+            MissingCorrelationLogLevel,
             s"No correlation found for completion at offset ${completion.offset}, so it isn't charged: " +
               s"changeIdHash=${completion.changeIdHash.toHexString}, submissionId=${completion.submissionId}, " +
-              s"paidTrafficCost=${completion.paidTrafficCost}, actAsCategory=${completion.actAsCategory.label}"
+              s"paidTrafficCost=${completion.paidTrafficCost}, actAsCategory=${completion.actAsCategory.label}",
           )
         (TrafficEnforcementOutcome.Skipped, Some(completion.reason.label))
       case CompletionDecision.NoEvent =>
@@ -231,6 +233,11 @@ object TeaProjectionFactory {
   private[projection] val DeltaAttribute = "delta"
   private[projection] val EventSourceAttribute = "event_source"
   private[projection] val OffsetAttribute = "offset"
+
+  // NO_MISSING_TEA_CORRELATION is set where missing correlations are expected and the warning would flood the log,
+  // e.g. the participant replay benchmark of the nightly performance tests
+  private val MissingCorrelationLogLevel: Level =
+    if (sys.env.contains("NO_MISSING_TEA_CORRELATION")) Level.DEBUG else Level.WARN
 
   /** Open the shared storage once, based on the configured storage backend. */
   def create(

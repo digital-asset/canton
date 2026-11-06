@@ -13,7 +13,7 @@ import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
 import com.digitalasset.canton.console.{LocalParticipantReference, LocalSequencerReference}
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.tests.acs.commitment.util.{
   CommitmentTestUtil,
@@ -247,7 +247,7 @@ trait AcsCommitmentRepairIntegrationTest
       participant1.synchronizers.reconnect(daName)
 
       // exchange commitments again, all should be fine
-      val (_, period2da, _) = createContractsAndCheck(sequencer1, daName)
+      createContractsAndCheck(sequencer1, daName)
       val (_, period2acme, _) = createContractsAndCheck(sequencer2, acmeName)
 
       // Corrupt P2's running commitments on da by emptying them in the DB and adding a bogus entry to the DB.
@@ -260,11 +260,14 @@ trait AcsCommitmentRepairIntegrationTest
       // compute a different commitment for participant1 than it had persisted previously,
       // which triggers an internal error.
       eventually() {
-        // last computed and sent should be at least period2da, but due to the synchronization in
-        // createContractsAndCheck, it might be higher
+        // createContractsAndCheck on acme makes both participants observe the latest tick on both
+        // synchronizers, so P2 also advances on da up to the period ending at period2acme. We need to
+        // wait for the commitment watermark for that period to be persisted. Otherwise, the disconnect
+        // can race with persisting the watermark, and after disconnect we corrupt commitments,
+        // which will give an error when we try to persist different commitments in the db for the same period.
         participant2.commitments
           .lastComputedAndSent(daName)
-          .value should be >= period2da.toInclusive
+          .value should be >= period2acme.toInclusive
       }
       eventually() {
         participant2.commitments.lastComputedAndSent(acmeName) should contain(

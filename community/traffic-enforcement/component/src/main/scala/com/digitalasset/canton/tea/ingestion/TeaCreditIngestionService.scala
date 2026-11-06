@@ -26,9 +26,9 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.config.TopUpConfig
 import com.digitalasset.canton.tea.AccountId
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TopUpNotCredited
-import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.{
-  PublishCredit,
-  TrafficCreditIssuer,
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.{
+  TrafficCreditReporter,
+  TrafficCreditReporter_PublishCredit,
 }
 import com.digitalasset.canton.tea.projection.{AccountDelta, ProjectionEvent, TrafficDelta}
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.fromDamlProtoSafeOpt
@@ -158,12 +158,17 @@ final class TeaCreditIngestionService(
 
 object TeaCreditIngestionService {
 
-  /** Classpath resource of the canton-traffic-credit DAR that the generated bindings come from. */
+  /** Classpath resource of the canton-api-traffic-credit-v1 DAR that the generated bindings come
+    * from.
+    */
   val DarResourceFileName: String =
-    s"dar/${TrafficCreditIssuer.PACKAGE_NAME}-${TrafficCreditIssuer.PACKAGE_VERSION}.dar"
+    s"dar/${TrafficCreditReporter.PACKAGE_NAME}-${TrafficCreditReporter.PACKAGE_VERSION}.dar"
 
   private val interfaceId =
-    Identifier.fromJavaProto(TrafficCreditIssuer.INTERFACE_ID.toProto)
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID.toProto)
+
+  private val interfaceIdWithPackageId =
+    Identifier.fromJavaProto(TrafficCreditReporter.INTERFACE_ID_WITH_PACKAGE_ID.toProto)
 
   private final case class TopUp(nodeId: Int, account: AccountId, amount: Long)
 
@@ -191,9 +196,8 @@ object TeaCreditIngestionService {
     tx.events
       .flatMap(_.event.exercised)
       .filter(exercised =>
-        exercised.interfaceId.exists(id =>
-          id.moduleName == interfaceId.moduleName && id.entityName == interfaceId.entityName
-        ) && exercised.choice == TrafficCreditIssuer.CHOICE_PublishCredit.name
+        exercised.interfaceId.contains(interfaceIdWithPackageId) &&
+          exercised.choice == TrafficCreditReporter.CHOICE_TrafficCreditReporter_PublishCredit.name
       )
       .map(decodeTopUp(_, paymasters))
 
@@ -209,7 +213,9 @@ object TeaCreditIngestionService {
       argument <- exercised.choiceArgument.toRight(invalid("missing choice argument"))
       credit <- Either
         .catchNonFatal(
-          PublishCredit.valueDecoder().decode(JavaValue.fromProto(Value.toJavaProto(argument)))
+          TrafficCreditReporter_PublishCredit
+            .valueDecoder()
+            .decode(JavaValue.fromProto(Value.toJavaProto(argument)))
         )
         .leftMap(err => invalid(s"cannot decode: ${err.getMessage}"))
       paymaster <- exercised.actingParties match {
@@ -224,9 +230,9 @@ object TeaCreditIngestionService {
           describe(s"paymaster $paymaster is not one of the configured top-up paymasters")
         ),
       )
-      _ <- Either.cond(credit.accountId.value.nonEmpty, (), invalid("account id must not be empty"))
+      _ <- Either.cond(credit.accountId.nonEmpty, (), invalid("account id must not be empty"))
       account <- AccountId
-        .create(credit.accountId.value)
+        .create(credit.accountId)
         .leftMap(err => invalid(s"invalid account id: $err"))
       _ <- Either.cond(
         credit.trafficAmount > 0,

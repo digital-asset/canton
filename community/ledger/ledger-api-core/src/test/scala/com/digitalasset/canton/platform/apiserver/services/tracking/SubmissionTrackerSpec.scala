@@ -273,20 +273,12 @@ class SubmissionTrackerSpec
     override def run: Future[Assertion] = for {
       _ <- Future.unit
 
-      _ = submissionTracker.track(
-        submissionKey.copy(commandId = "c1"),
-        `1 day timeout`,
-        submitSucceeds,
-      )
-      _ = submissionTracker.track(
-        submissionKey.copy(commandId = "c2"),
-        `1 day timeout`,
-        submitSucceeds,
-      )
-      _ = submissionTracker.track(
-        submissionKey.copy(commandId = "c3"),
-        `1 day timeout`,
-        submitSucceeds,
+      inFlightFs = Seq("c1", "c2", "c3").map(commandId =>
+        submissionTracker.track(
+          submissionKey.copy(commandId = commandId),
+          `1 day timeout`,
+          submitSucceeds,
+        )
       )
       // max-commands-in-flight = 3. Expect rejection
       submissionOverLimitF = submissionTracker.track(
@@ -298,6 +290,7 @@ class SubmissionTrackerSpec
       // Close the tracker to ensure clean pending map at the end
       _ = submissionTracker.close()
       failure <- submissionOverLimitF.failed
+      _ <- Future.sequence(inFlightFs.map(_.failed))
     } yield inside(failure) { case actualStatusRuntimeException: StatusRuntimeException =>
       assertError(
         actual = actualStatusRuntimeException,

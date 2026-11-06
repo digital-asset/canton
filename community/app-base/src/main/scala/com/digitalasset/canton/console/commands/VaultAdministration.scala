@@ -14,7 +14,6 @@ import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleCommandResult,
   ConsoleEnvironment,
-  FeatureFlag,
   FeatureFlagFilter,
   Help,
   Helpful,
@@ -471,10 +470,12 @@ class SecretKeyAdministration(
       )
     }
 
-  // TODO(i13613): Remove feature flag
-  @Help.Summary("Download key pair", FeatureFlag.Preview)
+  @Help.Summary("Download key pair")
   @Help.Description(
     """Download the key pair with the private and public key in its binary representation.
+      |
+      |The node must allow key download with
+      |`canton.parameters.enable-key-download = yes`.
       |
       |Parameters:
       |- fingerprint: The identifier of the key pair to download.
@@ -488,18 +489,19 @@ class SecretKeyAdministration(
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
       password: Option[String] = None,
   ): ByteString =
-    check(FeatureFlag.Preview) {
-      consoleEnvironment.run {
-        adminCommand(
-          VaultAdminCommands.ExportKeyPair(fingerprint, protocolVersion, password)
-        )
-      }
+    consoleEnvironment.run {
+      adminCommand(
+        VaultAdminCommands.ExportKeyPair(fingerprint, protocolVersion, password)
+      )
     }
 
-  @Help.Summary("Download key pair and save it to a file", FeatureFlag.Preview)
+  @Help.Summary("Download key pair and save it to a file")
   @Help.Description(
     """Download the key pair with the private and public key in its binary representation and
       |store it in a file.
+      |
+      |The node must allow key download with
+      |`canton.parameters.enable-key-download = yes`.
       |
       |Parameters:
       |- fingerprint: The identifier of the key pair to download.
@@ -903,6 +905,7 @@ class LocalSecretKeyAdministration(
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
+    enableKeyDownload: => Boolean,
     loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends SecretKeyAdministration(instance, runner, consoleEnvironment, loggerFactory) {
@@ -912,15 +915,20 @@ class LocalSecretKeyAdministration(
       fingerprint: Fingerprint,
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
       password: Option[String] = None,
-  ): ByteString =
+  ): ByteString = {
+    if (!enableKeyDownload)
+      consoleEnvironment.raiseError(
+        "Export of private keys is only allowed when explicitly enabled with canton.parameters.enable-key-download"
+      )
     TraceContext.withNewTraceContext("download_key_pair") { implicit traceContext =>
       val cmd =
         LocalSecretKeyAdministration.download(crypto, fingerprint, protocolVersion, password)
 
       consoleEnvironment.run(ConsoleCommandResult.fromEitherTUS(cmd)(consoleEnvironment))
     }
+  }
 
-  @Help.Summary("Download key pair and save it to a file", FeatureFlag.Preview)
+  @Help.Summary("Download key pair and save it to a file")
   override def download_to(
       fingerprint: Fingerprint,
       outputFile: String,
@@ -983,12 +991,20 @@ class LocalKeyAdministrationGroup(
     runner: AdminCommandRunner,
     consoleEnvironment: ConsoleEnvironment,
     crypto: => Crypto,
+    enableKeyDownload: => Boolean,
     loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends KeyAdministrationGroup(instance, runner, consoleEnvironment, loggerFactory) {
 
   private lazy val localSecretAdmin: LocalSecretKeyAdministration =
-    new LocalSecretKeyAdministration(instance, runner, consoleEnvironment, crypto, loggerFactory)
+    new LocalSecretKeyAdministration(
+      instance,
+      runner,
+      consoleEnvironment,
+      crypto,
+      enableKeyDownload,
+      loggerFactory,
+    )
 
   @Help.Summary("Manage secret keys")
   @Help.Group("Secret keys")

@@ -36,17 +36,19 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.*
 import scala.util.{Failure, Success, Try}
 
+/** Trait for gRPC subscription errors */
+sealed trait GrpcSubscriptionErrorTrait extends SubscriptionCloseReason.SubscriptionError
+
 /** Supply the grpc error that caused the subscription to fail */
-final case class GrpcSubscriptionError(grpcError: GrpcError)
-    extends SubscriptionCloseReason.SubscriptionError
+final case class GrpcSubscriptionError(grpcError: GrpcError) extends GrpcSubscriptionErrorTrait
+
+/** The GPRC subscription observer was called with an unexpected exception */
+final case class GrpcSubscriptionUnexpectedException(exception: Throwable)
+    extends GrpcSubscriptionErrorTrait
 
 /** Supply the grpc error and specially tag permission denied issues */
 final case class GrpcPermissionDeniedError(grpcError: GrpcError)
     extends SubscriptionCloseReason.PermissionDeniedError
-
-/** The GPRC subscription observer was called with an unexpected exception */
-final case class GrpcSubscriptionUnexpectedException(exception: Throwable)
-    extends SubscriptionCloseReason.SubscriptionError
 
 trait HasProtoTraceContext[R] {
   def traceContext(value: R): Option[com.digitalasset.canton.v30.TraceContext]

@@ -403,8 +403,6 @@ There are several reasons to not require the submission permission to submit a r
 * :ref:`Decentralized parties <decentralized-parties>` cannot submit Daml transactions but should be able to submit
   reassignments for composability of applications.
 
-.. todo:: Mention external parties use case once implemented <https://github.com/DACH-NY/canton/issues/25878>
-
 .. _entering-leaving-visibility:
 
 Contracts entering and leaving the visibility of the participant
@@ -498,8 +496,6 @@ It is advised to consider reassignments explicitly when designing Daml workflows
 
 Multi-Synchronizer Time
 ***********************
-
-.. todo:: Fill that section <https://github.com/DACH-NY/canton/issues/25859>
 
 Relate to time monotonicity of the ledger model
 

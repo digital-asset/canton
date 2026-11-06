@@ -576,22 +576,14 @@ class QueueBasedSynchronizerOutboxTest
         )
         preFlushF = handle.preFlushNotification.get().futureUS
 
-        _ = push(
-          manager,
-          transactions.take(1),
-          None,
-        )
+        _ <- push(manager, transactions.take(1))
 
         // wait until the mock is blocked before writing to the store, so that we can push
         // another transaction that will end up in the unsent-queue, while the first one is still being processed.
         _ <- preFlushF
 
         // push another transaction, so that we have one pending and one unsent transaction
-        _ = push(
-          manager,
-          transactions.slice(1, 2),
-          None,
-        )
+        _ <- push(manager, transactions.slice(1, 2))
 
         _ = eventually() {
           manager.outboxQueue.numInProcessTransactions shouldBe 1
@@ -649,7 +641,7 @@ class QueueBasedSynchronizerOutboxTest
         _ <- outboxConnected(manager, handle2, client2, target)
 
         // Submit TB3 (gamma) through the reconnected outbox, in addition to the requeued TB2.
-        _ = push(manager, transactions.slice(2, 3))
+        _ <- push(manager, transactions.slice(2, 3))
 
         _ <- handle2.allObserved()
 

@@ -150,6 +150,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: stability_crash_recovery_test
+      shard_job_result: ${{ needs.stability_crash_recovery_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ${{ inputs.protocol_version }}
     secrets: inherit

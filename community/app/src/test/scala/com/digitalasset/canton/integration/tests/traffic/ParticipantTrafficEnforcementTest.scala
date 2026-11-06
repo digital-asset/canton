@@ -46,7 +46,7 @@ import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
   TransientFailure,
   UnsafeToPrune,
 }
-import com.digitalasset.canton.tea.daml.java.canton.traffic.credit.TrafficCreditIssuer
+import com.digitalasset.canton.tea.daml.java.canton.api.traffic.creditv1.TrafficCreditReporter
 import com.digitalasset.canton.tea.projection.{ActAsCategory, UnchargedReason}
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
@@ -859,7 +859,7 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
 
         participant1.packages
           .list()
-          .map(_.packageId) should not contain TrafficCreditIssuer.PACKAGE_ID
+          .map(_.packageId) should not contain TrafficCreditReporter.PACKAGE_ID
       }
 
       "do not enforce traffic on submissions (allow negative balances) but still debit traffic from submitting party account" in {

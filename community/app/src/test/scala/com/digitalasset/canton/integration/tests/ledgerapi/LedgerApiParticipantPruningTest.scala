@@ -27,6 +27,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByOwner
 import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipantConfigs_
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -742,5 +743,10 @@ trait LedgerApiParticipantPruningTest
 
 class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 }

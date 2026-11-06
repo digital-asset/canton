@@ -147,6 +147,8 @@ private[topology] class LsuChaos(
           (2 to maxLsu.unwrap + 1).flatMap(i => Seq(s"sequencer$i", s"mediator$i")).toSet
         ),
       enableMetrics,
+      // Node keys are exported for the successor nodes
+      ConfigTransforms.enableKeyDownload,
     ) ++
       // pv=dev is used
       ConfigTransforms.enableDevVersionSupport

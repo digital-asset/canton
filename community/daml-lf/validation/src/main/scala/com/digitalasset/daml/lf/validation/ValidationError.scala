@@ -396,6 +396,9 @@ final case class ETypeSynCycle(context: Context, names: List[TypeSynId]) extends
   protected def prettyInternal: String =
     s"cycle in type synonym definitions ${names.mkString(" -> ")}"
 }
+final case class EStackOverflow(context: Context) extends ValidationError {
+  protected def prettyInternal: String = "package is too deeply nested to be validated"
+}
 final case class EIllegalHigherEnumType(context: Context, defn: TypeConId) extends ValidationError {
   protected def prettyInternal: String = s"illegal higher order enum type"
 }

@@ -248,7 +248,7 @@ class PartitionManagerDatabaseTest
         // checking that custom autovacuum settings are applied to a new partition
         opts <- getPartitionSettings(s"${PartitionManager.consensusInProgressTable}_p2")
         _ =
-          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=-1,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\}".r
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=-1\}".r
 
         _ <- creator
           .createPartitionsIfNeeded(EpochNumber(200))
@@ -335,7 +335,7 @@ class PartitionManagerDatabaseTest
         // checking that custom autovacuum settings are applied to a new partition
         opts <- getPartitionSettings(partitionName)
         _ =
-          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=-1,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\}".r
+          opts should fullyMatch regex raw"\{autovacuum_freeze_min_age=0,autovacuum_freeze_table_age=0,autovacuum_vacuum_insert_scale_factor=0\}".r
 
         _ = eventually() {
           // we should see that manual vacuum took place (twice instead of once because of how unit tests run everything twice)

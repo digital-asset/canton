@@ -70,19 +70,32 @@ private[lsu] trait LsuBase
 
   protected val useStaticTime: Boolean = true
 
-  protected def configTransforms: Seq[ConfigTransform] = List(
-    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
+  /** The config transforms for the nodes of an LSU, which every LSU test needs.
+    *
+    * @param newNodes
+    *   the successor sequencers and mediators, which are initialized from the exported data of
+    *   their predecessors
+    */
+  protected def lsuNodeConfigTransforms(newNodes: Set[String]): Seq[ConfigTransform] =
+    Seq(
+      ConfigTransforms.disableAutoInit(newNodes),
+      // Node keys are exported for the successor nodes
+      ConfigTransforms.enableKeyDownload,
+    ) ++ ConfigTransforms.enableDevVersionSupport ++
+      (if (useStaticTime) Seq(ConfigTransforms.useStaticTime) else Seq.empty)
+
+  protected def configTransforms: Seq[ConfigTransform] = lsuNodeConfigTransforms(
+    newOldNodesResolution.keySet
+  ) ++ List(
     ConfigTransforms.updateAllParticipantConfigs_(
       _.focus(_.sequencerClient.maxConnectionRetryDelay)
         // Retry more frequently so that eventually blocks don't need to wait for too long
         .replace(config.NonNegativeFiniteDuration.ofSeconds(2))
-    ),
-  ) ++ ConfigTransforms.enableDevVersionSupport
-    ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
-      // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
-      config.NonNegativeFiniteDuration.ofHours(1)
-    ) ++
-    (if (useStaticTime) Seq(ConfigTransforms.useStaticTime) else Seq.empty) ++
+    )
+  ) ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
+    // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
+    config.NonNegativeFiniteDuration.ofHours(1)
+  ) ++
     Seq(
       ConfigTransforms.updateAllParticipantConfigs_(
         _.focus(_.parameters.journalGarbageCollectionMinimumGap)

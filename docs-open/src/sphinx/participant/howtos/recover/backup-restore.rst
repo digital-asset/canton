@@ -18,9 +18,6 @@ It is recommended that your database is frequently backed up so that the data ca
 In the case of a restore, a participant can replay missing data from the synchronizer
 as long as the synchronizer's backup is more recent than that of the participant's.
 
-.. todo::
-  #. `Ability to recover from partial data loss on a synchronizer <https://github.com/DACH-NY/canton/issues/4839>`_.
-
 .. _order-of-backups:
 
 Order of Backups

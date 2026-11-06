@@ -565,7 +565,6 @@ class GrpcVaultService(
   ): Future[v30.ExportKeyPairResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     for {
-      // TODO(i13613): Remove feature flag check in favor of exportable keys check
       _ <-
         if (enableKeyDownload) FutureUnlessShutdown.unit
         else

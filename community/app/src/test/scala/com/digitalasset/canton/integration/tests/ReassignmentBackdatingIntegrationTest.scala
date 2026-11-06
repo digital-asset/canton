@@ -7,7 +7,7 @@ import com.digitalasset.canton.NeedsNewLfContractIds
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.{KeyPurpose, SigningPublicKey}
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseH2,

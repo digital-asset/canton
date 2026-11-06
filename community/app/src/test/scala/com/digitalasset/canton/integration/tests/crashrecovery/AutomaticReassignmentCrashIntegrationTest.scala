@@ -7,7 +7,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.console.{CommandFailure, RemoteParticipantReference}
 import com.digitalasset.canton.error.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseExternalProcess,

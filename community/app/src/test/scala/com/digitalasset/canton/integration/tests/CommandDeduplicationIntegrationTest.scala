@@ -20,7 +20,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.examples.java.cycle as C
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.CommandDeduplicationIntegrationTest.DelayPromises
 import com.digitalasset.canton.integration.util.TestUtils

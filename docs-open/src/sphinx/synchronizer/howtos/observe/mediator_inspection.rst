@@ -31,10 +31,6 @@ The output is a list of verdicts. Each verdict contains, among others, its resul
 a submitting participant, submitting parties, a finalization time, a record time of the corresponding confirmation request,
 and metadata of transaction views.
 
-.. todo::
-    #. Link the reference documentation. <https://github.com/DACH-NY/canton/issues/25832>
-    #. Link the Admin API Protobuf reference docs once available. <https://github.com/DACH-NY/canton/issues/26126>
-
 For more details on the `verdicts` admin command, check the reference documentation.
 
 To learn more about related concepts, see :brokenref:`the Mediator overview<mediator-overview>`.

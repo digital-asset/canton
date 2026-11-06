@@ -101,11 +101,11 @@ jobs:
 
   tag_new_releases:
     name: Tag New Releases
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-')}}
+    if: ${{ github.repository == 'DACH-NY/canton' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release-line-')) }}
     needs: pick_runner
     uses: ./.github/workflows/_tag_new_releases.yml
     permissions:
-      contents: write
+      contents: read
     secrets: inherit
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}

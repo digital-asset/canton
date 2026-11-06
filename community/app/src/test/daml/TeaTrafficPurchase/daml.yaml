@@ -7,12 +7,12 @@ override-components:
   codegen:
     version: $DAML_VERSION
 build-options:
-- --target=2.2
+  - --target=2.2
 name: TeaTrafficPurchase
 data-dependencies:
-- ../../../../traffic-enforcement/component/src/main/resources/dar/canton-traffic-credit-1.0.0.dar
+  - ../../../../traffic-enforcement/component/src/main/resources/dar/canton-api-traffic-credit-v1-1.0.0.dar
 source: daml
 version: 1.0.0
 dependencies:
-- daml-prim
-- daml-stdlib
+  - daml-prim
+  - daml-stdlib

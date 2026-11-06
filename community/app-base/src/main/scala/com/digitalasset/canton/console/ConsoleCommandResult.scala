@@ -169,7 +169,6 @@ object CommandErrors extends CommandErrorGroup {
 
   // The majority of the use cases of this error are for generic Either[..., ...] => ConsoleCommandResult[...] conversions
   // Thus, it doesn't have an error code because the underlying error that is wrapped should provide the error code
-  // TODO(i6183) - replace uses of this wrapper with a CantonParentError wrapper except when parsing gRPC errors
   final case class GenericCommandError(cause: String)
       extends ConsoleCommandResult[Nothing]
       with CommandError

@@ -32,6 +32,7 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -72,6 +73,7 @@ trait LedgerTransparencyIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Config
+      .addConfigTransform(ConfigTransforms.enableKeyDownload)
       .withNetworkBootstrap { implicit env =>
         import env.*
 

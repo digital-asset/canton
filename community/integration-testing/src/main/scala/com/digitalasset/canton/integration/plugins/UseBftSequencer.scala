@@ -19,11 +19,11 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
-import com.digitalasset.canton.integration.plugins.UseBftSequencer.UseStandaloneConfig
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.{
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.{
   MultiSynchronizer,
   SequencerSynchronizerGroups,
   SingleSynchronizer,
+  UseStandaloneConfig,
 }
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -598,4 +598,22 @@ object UseBftSequencer {
       stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
       testSlowdown: Option[TestSlowdownConfig],
   )
+
+  sealed trait SequencerSynchronizerGroups {
+    def numberOfSynchronizers: Int
+  }
+
+  case object SingleSynchronizer extends SequencerSynchronizerGroups {
+    override val numberOfSynchronizers: Int = 1
+  }
+
+  final case class MultiSynchronizer(sequencerGroups: Seq[Set[InstanceName]])
+      extends SequencerSynchronizerGroups {
+    override val numberOfSynchronizers: Int = sequencerGroups.size
+  }
+
+  object MultiSynchronizer {
+    def tryCreate(sequencerGroups: Set[String]*): MultiSynchronizer =
+      MultiSynchronizer(sequencerGroups.map(_.map(InstanceName.tryCreate)))
+  }
 }

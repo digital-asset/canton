@@ -16,7 +16,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.tests.scripts.offlinerootkey.OfflineRootKeyCertificates
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId

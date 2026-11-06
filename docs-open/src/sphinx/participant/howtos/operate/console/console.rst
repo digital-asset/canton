@@ -111,10 +111,6 @@ in the command submission and completion subscription requests. This affects the
 - ledger_api.completions.list_with_checkpoint
 - ledger_api.completions.subscribe
 
-.. todo:: `#22917: Fix broken ref <https://github.com/DACH-NY/canton/issues/22917>`_
-    note:: If you want to know more about the authorization please read the following article
-    about the ref:`authorization tokens <user-access-tokens>`
-
 Node References
 ---------------
 

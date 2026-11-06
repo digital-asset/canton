@@ -92,11 +92,7 @@ jobs:
         uses: ./.github/actions/build/restore_compile_sbt_caches
 
       - name: Set up workspace path
-        shell: bash
-        run: |
-          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
-          mkdir -p "$TMP_WORKSPACE"
-          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+        uses: ./.github/actions/utils/setup_tmp_workspace
 
       - name: Restore KMS driver artifacts
         uses: actions/download-artifact@v7
@@ -120,12 +116,7 @@ jobs:
           previous-timings-resolved: "true"
 
       - name: Allow automatic protocol version selection
-        env:
-          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
-        run: |
-          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will select the protocol version automatically"
-        shell: bash
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Run tests
         uses: ./.github/actions/test/run_tests
@@ -157,5 +148,6 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: release_test
+      shard_job_result: ${{ needs.release_test.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ""

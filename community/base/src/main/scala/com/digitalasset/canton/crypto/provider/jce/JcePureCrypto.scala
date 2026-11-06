@@ -101,8 +101,9 @@ class JcePureCrypto(
     with ShowUtil
     with NamedLogging {
 
-  // Caches for the java key conversion results
-  private val javaPublicKeyCache: Cache[Fingerprint, Either[KeyParseAndValidateError, JPublicKey]] =
+  // Caches for the java key conversion results.
+  // NOTE: Keyed by the whole public key, as keys with the same fingerprint can declare different key specs
+  private val javaPublicKeyCache: Cache[PublicKey, Either[KeyParseAndValidateError, JPublicKey]] =
     publicKeyConversionCacheConfig
       .buildScaffeine(loggerFactory)
       // allow the JVM garbage collector to remove entries from it when there is pressure on memory
@@ -124,8 +125,8 @@ class JcePureCrypto(
       .build()
 
   @VisibleForTesting
-  private[crypto] def isJavaPublicKeyInCache(keyId: Fingerprint): Boolean =
-    javaPublicKeyCache.getIfPresent(keyId).exists(_.isRight)
+  private[crypto] def isJavaPublicKeyInCache(publicKey: PublicKey): Boolean =
+    javaPublicKeyCache.getIfPresent(publicKey).exists(_.isRight)
 
   @VisibleForTesting
   private[crypto] def isJavaPrivateKeyInCache(keyId: Fingerprint): Boolean =
@@ -184,7 +185,7 @@ class JcePureCrypto(
     for {
       javaPublicKey <- javaPublicKeyCache
         .get(
-          publicKey.id,
+          publicKey,
           _ =>
             JceJavaKeyConverter
               .toJava(publicKey)
@@ -193,9 +194,15 @@ class JcePureCrypto(
               ),
         )
         .leftMap(err => errFn(s"Failed to deserialize ${publicKey.format} public key: $err"))
-      // The public key is already validated, including its type, during creation/deserialization,
-      // so we can throw an exception here. This type check should never fail, except in case of an internal error.
-      checkedPublicKey <- typeMatcher(javaPublicKey)
+      checkedPublicKey <- typeMatcher.applyOrElse(
+        javaPublicKey,
+        (key: JPublicKey) =>
+          Left(
+            errFn(
+              s"Unexpected Java key type ${key.getClass.getSimpleName} for public key ${publicKey.id}"
+            )
+          ),
+      )
     } yield checkedPublicKey
 
   /** Converts a private key to a java private key. We store the deserialization result in a cache.
@@ -224,9 +231,15 @@ class JcePureCrypto(
         .leftMap(err =>
           errFn(s"Failed to deserialize ${privateKey.format} private key [${privateKey.id}]: $err")
         )
-      // The private key is already validated, including its type, during creation/deserialization,
-      // so we can throw an exception here. This type check should never fail, except in case of an internal error.
-      checkedPrivateKey <- typeMatcher(javaPrivateKey)
+      checkedPrivateKey <- typeMatcher.applyOrElse(
+        javaPrivateKey,
+        (key: JPrivateKey) =>
+          Left(
+            errFn(
+              s"Unexpected Java key type ${key.getClass.getSimpleName} for private key ${privateKey.id}"
+            )
+          ),
+      )
     } yield checkedPrivateKey
 
   private def encryptAes128Gcm(

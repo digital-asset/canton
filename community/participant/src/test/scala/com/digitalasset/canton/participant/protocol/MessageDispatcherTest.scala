@@ -610,6 +610,7 @@ trait MessageDispatcherTest {
           .onShutdown(
             fail(s"Encountered shutdown while handling $event with sequencer counter $counter")
           )
+          .map(_.discard)
       } yield {
         checks
       }

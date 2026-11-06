@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import cats.implicits.toBifunctorOps
+import cats.implicits.{toBifunctorOps, toFoldableOps}
 import com.daml.jwt.JwksUrl
+import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
+import com.daml.ledger.api.v2.crypto.Signature
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
@@ -35,6 +37,7 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Party, TypeConRef}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
+import com.google.protobuf.field_mask.FieldMask
 import io.grpc.StatusRuntimeException
 import scalapb.{GeneratedMessage, GeneratedMessageCompanion}
 
@@ -192,6 +195,43 @@ object FieldValidator {
           s"Serialized message size for $fieldName (${message.serializedSize} bytes) exceeds maximum limit of ${max.value} bytes",
         ),
     ).leftMap(protoDeserializationError => sizeLimitExceeded(protoDeserializationError.message))
+
+  def requireUpdateMask(
+      updateMask: Option[FieldMask],
+      limit: PositiveInt,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, FieldMask] =
+    for {
+      updateMask <- requirePresence(updateMask, "update_mask")
+      _ <- validateSerializedSizeLimit(
+        message = updateMask,
+        fieldName = "update_mask",
+        limit = limit,
+      )
+    } yield updateMask
+
+  def validateObjectMetaSizeLimits(objectMeta: ObjectMeta)(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] =
+    validateCardinality(
+      values = objectMeta.annotations,
+      fieldName = "annotations",
+      limit = sizeLimitsConfig.adminLapiSizeConfig.objectMeta.annotationsSizeLimit,
+    )
+
+  def validateSignaturesByteSizeLimits(signatures: Seq[Signature])(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[StatusRuntimeException, Unit] =
+    signatures.traverse_(signature =>
+      validateByteSizeLimit(
+        bytes = signature.signature,
+        fieldName = "signature",
+        limit = sizeLimitsConfig.publicLapiSizeConfig.signature.signatureSizeLimit,
+      )
+    )
 
   def requireUserId(
       s: String,

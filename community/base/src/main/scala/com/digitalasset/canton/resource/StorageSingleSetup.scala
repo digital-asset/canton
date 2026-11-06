@@ -49,6 +49,7 @@ object StorageSingleSetup {
       clock: Clock,
       processingTimeout: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      devVersionSupport: Boolean,
       setMigrationsPath: StorageConfig => StorageConfig = identity,
   )(implicit
       executionContext: ExecutionContext,
@@ -60,7 +61,7 @@ object StorageSingleSetup {
     storageConfigWithMigrations match {
       case dbConfig: DbConfig =>
         migrateDb(
-          new DbMigrations(dbConfig, false, processingTimeout, loggerFactory)
+          new DbMigrations(dbConfig, devVersionSupport, processingTimeout, loggerFactory)
         )
       case _ =>
         // Not a DB storage (currently, only memory) => no need for migrations.

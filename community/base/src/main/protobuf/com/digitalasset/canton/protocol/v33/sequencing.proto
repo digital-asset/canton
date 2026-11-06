@@ -177,7 +177,6 @@ message AcsCommitmentLimits {
 
 // Differences with v32:
 // - uses v33.SynchronizerLimits instead of v32, which adds new topology limits
-// TODO(i36918): mention in release notes when a change is made
 message StaticSynchronizerParameters {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 

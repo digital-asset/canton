@@ -13,7 +13,11 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.HASequencerExclusiveStorageBuilder.ExclusiveStorage
-import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
+  BftSequencer,
+  DeprecatedSequencerConfig,
+  External,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
@@ -181,6 +185,11 @@ object SequencerMetaFactory {
           metrics,
           loggerFactory,
           blockSequencerConfig.testingInterceptor,
+        )
+
+      case DeprecatedSequencerConfig(sequencerType) =>
+        sys.error(
+          s"Sequencer of type $sequencerType is no longer supported. Please use a supported sequencer type instead."
         )
     }
 }

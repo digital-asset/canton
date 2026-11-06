@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.validation
 
-import cats.implicits.toTraverseOps
+import cats.implicits.{toFoldableOps, toTraverseOps}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   GetPreferredPackagesRequest,
   PackageVettingRequirement,
@@ -17,11 +17,28 @@ import io.grpc.StatusRuntimeException
 object GetPreferredPackagesRequestValidator {
   def validate(
       request: GetPreferredPackagesRequest
-  )(implicit errorLoggingContext: ErrorLoggingContext): Either[
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      sizeLimitsConfig: LedgerApiSizeLimitsConfig,
+  ): Either[
     StatusRuntimeException,
     (PackageVettingRequirements, Option[SynchronizerId], Option[CantonTimestamp]),
   ] =
     for {
+      _ <- FieldValidator.validateCardinality(
+        values = request.packageVettingRequirements,
+        fieldName = "package_vetting_requirements/packageVettingRequirements",
+        limit =
+          sizeLimitsConfig.interactiveLapiSizeConfig.getPreferredPackagesRequest.packageVettingRequirementsSizeLimit,
+      )
+      _ <- request.packageVettingRequirements.traverse_(requirement =>
+        FieldValidator.validateCardinality(
+          values = requirement.parties,
+          fieldName = "parties",
+          limit =
+            sizeLimitsConfig.interactiveLapiSizeConfig.packageVettingRequirement.partiesSizeLimit,
+        )
+      )
       _ <- FieldValidator
         .requireNonEmpty(
           s = request.packageVettingRequirements,

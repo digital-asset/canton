@@ -92,19 +92,14 @@ jobs:
         with:
           shard-index: ${{ matrix.shard_index }}
 
-      - name: Download test names artifact
-        uses: actions/download-artifact@v7
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
         with:
-          name: test-full-class-names
-
-      - name: Download timings
-        if: always() && needs.resolve_timings.outputs.run-id != ''
-        uses: actions/download-artifact@v7
-        with:
-          name: test_data_continuity_dumps-timings-latest
-          path: ${{ github.job }}/.timings
-          run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
 
       - name: Set Docker bind mount permissions
         run: |
@@ -113,12 +108,7 @@ jobs:
         shell: bash
 
       - name: Allow automatic protocol version selection
-        env:
-          CANTON_AUTOMATIC_PROTOCOL_VERSION: "1"
-        run: |
-          echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
-          echo "Canton will select the protocol version automatically"
-        shell: bash
+        uses: ./.github/actions/test/set_automatic_protocol_version
 
       - name: Run Data Continuity Tests
         uses: ./.github/actions/test/run_tests
@@ -155,6 +145,7 @@ jobs:
     uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
     with:
       caller_job: test_data_continuity_dumps
+      shard_job_result: ${{ needs.test_data_continuity_dumps.result }}
       runner: ${{ inputs.runner }}
       protocol_version: ""
       allow_empty_current_timings: ${{ !inputs.full_coverage }}

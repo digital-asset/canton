@@ -215,7 +215,6 @@ class ManagedNodes[
         promise: Promise[Either[StartupError, NodeBootstrap]]
     ): EitherT[Future, StartupError, NodeBootstrap] = {
       val startup = for {
-        // TODO(#3168): Handle node startup errors gracefully
         // We use Future here to properly capture and process exception in `create`
         instance <- EitherT.right(
           Future(

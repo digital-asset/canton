@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
+import com.digitalasset.canton.synchronizer.sequencer.config.AlphaSequencerChannelConfig.defaultMaxActiveSequencerChannels
 import io.scalaland.chimney.dsl.*
 
 /** Async block sequencer writer control parameters
@@ -41,6 +42,8 @@ final case class AsyncWriterConfig(
   * @param maxConfirmationRequestsBurstFactor
   *   how forgiving the rate limit is in case of bursts (so rate limit starts after observing an
   *   initial burst of factor * max_rate commands)
+  * @param alphaSequencerChannelSupport
+  *   configures sequencer channels alpha support
   * @param asyncWriter
   *   controls the async writer
   * @param producePostOrderingTopologyTicks
@@ -77,7 +80,7 @@ final case class SequencerNodeParameterConfig(
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
-    unsafeSequencerChannelSupport: Boolean = false,
+    alphaSequencerChannelSupport: Option[AlphaSequencerChannelConfig] = None,
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),
     timeAdvancingTopology: TimeAdvancingTopologyConfig = TimeAdvancingTopologyConfig(),
     lsuRepair: LsuRepair = LsuRepair(),
@@ -135,3 +138,18 @@ final case class LsuSequencingBoundsOverride(
     lowerBoundSequencingTimeExclusive: CantonTimestamp,
     upgradeTime: CantonTimestamp,
 )
+
+/** Sequencer channel alpha support configuration.
+  *
+  * @param maxActiveSequencerChannels
+  *   The Maximum concurrently active sequencer channels that the sequencer node supports.
+  */
+final case class AlphaSequencerChannelConfig(
+    // TODO(#21339): Enforce the maximum number of sequencer channels; config already listed to avoid empty case class
+    maxActiveSequencerChannels: config.RequireTypes.PositiveInt = defaultMaxActiveSequencerChannels
+)
+
+object AlphaSequencerChannelConfig {
+  lazy val defaultMaxActiveSequencerChannels: PositiveInt =
+    config.RequireTypes.PositiveInt.tryCreate(10)
+}

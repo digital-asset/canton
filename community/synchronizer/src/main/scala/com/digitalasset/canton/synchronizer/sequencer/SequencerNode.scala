@@ -739,9 +739,7 @@ class SequencerNodeBootstrap(
               synchronizerLoggerFactory,
             )
 
-          sequencerChannelServiceO = Option.when(
-            parameters.unsafeSequencerChannelSupport
-          )(
+          sequencerChannelServiceO = parameters.alphaSequencerChannelSupport.map(_ =>
             GrpcSequencerChannelService(
               authenticationConfig.check,
               clock,

@@ -51,6 +51,10 @@ The following topology limits are static synchronizer parameters (`synchronizerL
 - `TopologyLimits.maxTransactionsPerBroadcast` (default 1000) bounds the number of signed topology transactions in a topology transactions broadcast.
   A node's `topology.broadcast-batch-size` must not exceed it.
 - `TopologyLimits.maxEndpointsPerSequencerConnection` (default 10) bounds the number of endpoints in the sequencer connection of an `LsuSequencerConnectionSuccessor` topology mapping.
+- `EncryptedMultipleViewsMessage.session_key_lookup` is now bounded by `TransactionProtocolLimits.maxRecipientsPerEnvelope` (default 10000).
+
+The following existing transaction protocol limit now also bounds another field.
+- `ExternalAuthorization.authentications` of a submission is bounded by `TransactionProtocolLimits.maxActAs` (default 1000) from the dev protocol version (`nextValidationBoundPV`); stable versions are unchanged.
 
 ### For application developers
 
@@ -71,7 +75,6 @@ A shorthand field `includeTransactionsAndReassignments` of type `TransactionForm
     }
   }
 ```
-- Request-Timeout header of JSON Ledger API requests now also supports a time unit, for example 15s. Values without a time unit are still interpreted as milliseconds.
 
 #### JSON Ledger API: cookie authentication for websocket endpoints
 
@@ -142,6 +145,12 @@ Currently, the following events make use of this mechanism:
   Readiness is now only reported once database migrations and storage initialization have completed, so after an upgrade with long-running migrations the container stays unhealthy for longer.
   Tooling that waits for the container to become healthy (e.g., `docker compose up --wait` or `condition: service_healthy`) may need longer timeouts.
 
+#### Removal of support for Postgres 14
+
+- Postgres 14 reaches end-of-life in November 2026, as announced in the 3.6.1 release notes. Canton no longer supports it, and by default nodes do not start against a Postgres 14 database.
+- Upgrade the database to Postgres 15 or later before upgrading Canton.
+- To start a node on Postgres 14 nevertheless, set `canton.parameters.non-standard-config = true`. This configuration is not supported.
+
 ### Participant node operators
 
 #### Explicit onboarding transactions disable authorized store dispatching
@@ -154,6 +163,7 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 
 #### Removal of support for sequencer drivers
 - Sequencer drivers (such as CometBFT) are no longer supported.
+- Reference sequencer is also no longer supported.
 
 ## Deprecations
 
@@ -165,6 +175,10 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
 
 ## Minor Improvements
 
+- The `Request-Timeout` header of JSON Ledger API requests now also accepts a time unit, for example `15s`. Values without a time unit are still interpreted as milliseconds.
+- Indexer pipeline now breaks up heavy transaction to evenly sized batches, where the 'size' is determined by the number of database operations.
+- Reads and writes from the active contract journal now use a batch aggregator for efficiency.
+
 ### Ledger API
 
 - Ledger API `UpdateService`: participant authorization topology events (`TopologyFormat.include_participant_authorization_events`) are now publicly available.
@@ -175,6 +189,9 @@ The new field `disable_authorized_store_dispatching` of `SynchronizerConnectionC
   requested. Page tokens issued by another participant are rejected.
 
 ### All node operators
+
+- The console commands `keys.secret.download` and `keys.secret.download_to` no longer require the preview feature flag.
+  Downloading a key pair from a node still requires `canton.parameters.enable-key-download = true` on that node.
 
 ### Participant node operators
 
@@ -220,6 +237,7 @@ fix is deployed on MainNet:
 - Minor bugfix to synchronization of `participants.parties.enable` which always timed out on a network
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
+- Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
 
 ## Compatibility
 

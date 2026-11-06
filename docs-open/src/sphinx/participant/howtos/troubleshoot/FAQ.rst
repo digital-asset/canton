@@ -147,7 +147,7 @@ Canton environment.
 * **Version Warnings:** Canton will issue a ``WARN`` log if it detects a PostgreSQL version
   newer than those officially tested.
 * **Minimum Requirement:** By default, Canton will not start if the PostgreSQL version is
-  older than version 14.
+  older than version 15.
 
 Using non-standard database versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -178,11 +178,6 @@ Note that IA features are not generally supported. Customers using Daml Enterpri
 by explicit agreement with Digital Asset. Please contact your relationship manager to discuss any such arrangement.
 
 If you have enabled `dev version support`, you can use the alpha protocol versions without any additional configuration.
-
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/beta-version-support.conf
-
 
 How to troubleshoot included configuration files?
 ----------------------------------------------------

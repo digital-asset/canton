@@ -18,7 +18,6 @@ import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SValue.{SValue as SV, *}
 import com.digitalasset.daml.lf.speedy.Speedy.*
 import com.digitalasset.daml.lf.speedy.compiler.SExpr0 as compileTime
-import com.digitalasset.daml.lf.speedy.metrics.{FetchNodeCount, TxNodeCount}
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKeyWithMaintainers,
@@ -1557,7 +1556,7 @@ private[lf] object SBuiltinFun {
             machine.storeLocalContract(coid, templateId, templateArg)
             machine.ptx = newPtx
             machine.insertContractInfoCache(coid, contract)
-            machine.metrics.incrCount[TxNodeCount]()
+            machine.metrics.increment(_.txNodeCount)()
             Control.Value(SContractId(coid))
 
           case Left((newPtx, err)) =>
@@ -1631,7 +1630,7 @@ private[lf] object SBuiltinFun {
           ) match {
           case Right(ptx) =>
             machine.ptx = ptx
-            machine.metrics.incrCount[TxNodeCount]()
+            machine.metrics.increment(_.txNodeCount)()
             Control.Value(SUnit)
           case Left(err) =>
             Control.Error(err)
@@ -2082,8 +2081,8 @@ private[lf] object SBuiltinFun {
         ) match {
           case Right(ptx) =>
             machine.ptx = ptx
-            machine.metrics.incrCount[TxNodeCount]()
-            machine.metrics.incrCount[FetchNodeCount]()
+            machine.metrics.increment(_.txNodeCount)()
+            machine.metrics.increment(_.fetchNodeCount)()
             Control.Value(templateArg)
           case Left(err) =>
             Control.Error(err)
@@ -2407,7 +2406,7 @@ private[lf] object SBuiltinFun {
           result = result,
           keyVersion = machine.assignSerializationVersion(hasKey = true),
         )
-        machine.metrics.incrCount[TxNodeCount]()
+        machine.metrics.increment(_.txNodeCount)()
         Control.Value(
           SOptional(
             Some(

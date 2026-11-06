@@ -24,30 +24,10 @@ Security properties
 Security properties
 *******************
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25691>
-   Repeat integrity, consensus, transparency from protocols section,
-   introduce privacy and finality (measured on synchronizer time)
-
-   Define them formally, e.g., via projection of a virtual shared ledger
-
-   Command deduplication / injective agreement with submissions
-
 .. _system-model-and-trust-assumptions:
 
 Trust Assumptions
 *****************
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25691>
-   Define the appropriate system and trust model for each security property (i.e., the attacker capabilities).
-
-   See security.rst for resilience to malicious nodes
-
-   Define honest-but-curious in a way that generalizes to a BFT sequencer
-
-   Include trust model for completions (injective agreement)
-
-   Explain how trust can be distributed by decentralization (with forward ref to the decentralization section).
-
 
 ..
   Trust Assumptions
@@ -373,9 +353,6 @@ Trust Assumptions
 
       This item is scheduled on the Daml roadmap.
 
-    .. todo::
-       #. `Ledger evidence for Non-repudiation <https://github.com/DACH-NY/canton/issues/158>`_.
-
     .. _finality-hlreq:
 
   * **Finality**. I want the shared ledger to be append-only, so that, once I am
@@ -468,10 +445,6 @@ Trust Assumptions
 
     **Design limitation 4**: If the mediator of the synchronizer has crashed and lost
     the in-flight transaction, which then times out.
-
-    .. todo::
-       #. `Referee for algorithmic dispute resolution <https://github.com/DACH-NY/canton/issues/191>`_
-       #. `Improved Fairness <https://github.com/DACH-NY/canton/issues/194>`_.
 
   ..
      **Design limitation 5**:
@@ -605,9 +578,6 @@ Trust Assumptions
     actions of the ledger (but none of the contents of the contracts,
     such as templates used or their arguments).
 
-    .. todo::
-       #. `Mediator Free Synchronization <https://github.com/DACH-NY/canton/issues/195>`_.
-
   .. _transaction-stream-auditability-hlreq:
 
   * **Transaction stream auditability**. I want the system to be able to
@@ -626,9 +596,6 @@ Trust Assumptions
 
     This item is scheduled on the Daml roadmap.
 
-    .. todo::
-       #. `Transaction stream auditability <https://github.com/DACH-NY/canton/issues/215>`_.
-
   .. _service-auditability-hlreq:
 
   * **Service Auditability**. I want the synchronization protocol
@@ -644,17 +611,10 @@ Trust Assumptions
 
          This item is scheduled on the Daml roadmap.
 
-    .. todo::
-       #. `Participant node audit tool <https://github.com/DACH-NY/canton/issues/162>`_
-       #. `Mediator audit tool <https://github.com/DACH-NY/canton/issues/164>`_
-
   .. _gdpr-compliance-hlreq:
 
   * **GDPR Compliance**. I want the system to be compliant with the General Data
     Protection Regulation (GDPR).
-
-    .. todo::
-       #. `GDPR Compliance <https://github.com/DACH-NY/canton/issues/157>`_
 
   .. _configurable-trust-liveness-trade-off-hlreq:
 
@@ -683,15 +643,6 @@ Trust Assumptions
   ..
      :ref:`confirmation policies  <sirius-overview-confirmation-response>`.
 
-  .. todo::
-    #. `Attestator for Liveness <https://github.com/DACH-NY/canton/issues/186>`_.
-
-    **Note**: If a participant is trusted, then the trust assumption
-    extends to all parties hosted by the participant.
-    Conversely, the system does not support to trust a participant for the actions
-    performed on behalf of one party and distrust the same participant for the
-    actions performed on behalf of a different party.
-
   .. _workflow-isolation-hlreq:
 
   * **Workflow isolation**. I want the system to be built such that
@@ -700,10 +651,6 @@ Trust Assumptions
     not affect each other's performance.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Priority based Basic Capacity Management <https://github.com/DACH-NY/canton/issues/179>`_
-    #. `Quota based Advanced Capacity Management <https://github.com/DACH-NY/canton/issues/192>`_.
 
   .. _pruning-hlreq:
 
@@ -762,9 +709,6 @@ Trust Assumptions
 
     This item is scheduled on the roadmap.
 
-  .. todo::
-    #. `Atomic Multi-Synchronizer Transactions <https://github.com/DACH-NY/canton/issues/167>`_.
-
   .. _standards-compliant-cryptography-hlreq:
 
   * **Standards compliant cryptography**. I want the system to be built
@@ -791,9 +735,6 @@ Trust Assumptions
 
     **Design Limitation 2** When a replicated node needs to be upgraded, all
     replicas of the node need to be upgraded at the same time.
-
-  .. todo::
-    #. `Upgradability <https://github.com/DACH-NY/canton/issues/169>`_.
 
   .. _semantic-versioning-hlreq:
 
@@ -841,9 +782,6 @@ Trust Assumptions
 
     This item is scheduled on the roadmap.
 
-  .. todo::
-    #. `Testability of participant node upgrades on historical data <https://github.com/DACH-NY/canton/issues/175>`_.
-
   .. _seamless-participant-failover-hlreq:
 
   * **Seamless participant failover**. I want the applications using
@@ -873,10 +811,6 @@ Trust Assumptions
     moving the operations to a different data center, without loss of
     data.
 
-  .. todo::
-    #. `Participant site disaster recovery <https://github.com/DACH-NY/canton/issues/189>`_.
-    #. `Synchronizer site disaster recovery <https://github.com/DACH-NY/canton/issues/190>`_.
-
   .. _participant-compromise-recovery-hlreq:
 
   * **Participant corruption recovery**. I want to have a procedure in
@@ -886,9 +820,6 @@ Trust Assumptions
     transparency) as the honest participants on the part of the shared
     ledger created after the end of the recovery procedure.
 
-  .. todo::
-    #. `Participant site compromise attack recovery <https://github.com/DACH-NY/canton/issues/187>`_.
-
   .. _synchronizer-entity-compromise-recovery-hlreq:
 
   * **Synchronizer entity corruption recovery**. I want to have a procedure
@@ -897,9 +828,6 @@ Trust Assumptions
     is complete.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Synchronizer entities compromise attack recovery <https://github.com/DACH-NY/canton/issues/188>`_.
 
   .. _fundamental-dispute-resolution:
 
@@ -915,9 +843,6 @@ Trust Assumptions
 
     This item is scheduled on the roadmap.
 
-  .. todo::
-    #. `Fundamental dispute resolution <https://github.com/DACH-NY/canton/issues/185>`_.
-
   .. _distributed-recovery-participant-data-hlreq:
 
   * **Distributed recovery of participant data**. I want to be able to reconstruct
@@ -928,9 +853,6 @@ Trust Assumptions
     failures themselves.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Distributed recovery of participant data <https://github.com/DACH-NY/canton/issues/193>`_
 
   .. _adding-parties-to-participants-hlreq:
 
@@ -954,9 +876,6 @@ Trust Assumptions
     the ledger changes prior to migration.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Party migration between participant nodes <https://github.com/DACH-NY/canton/issues/197>`_
 
   .. _parties-using-multiple-participants-hlreq:
 
@@ -1023,9 +942,6 @@ Trust Assumptions
 
     This item is scheduled on the roadmap.
 
-  .. todo::
-    #. `Horizontal scalability <https://github.com/DACH-NY/canton/issues/207>`_.
-
   .. _large-transaction-support-hlreq:
 
   * **Large transaction support**. I want the system to support
@@ -1033,9 +949,6 @@ Trust Assumptions
     workflows.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Large transaction support <https://github.com/DACH-NY/canton/issues/210>`_.
 
   .. _resilience-to-erroneous-behavior-hlreq:
 
@@ -1045,9 +958,6 @@ Trust Assumptions
 
     This item is scheduled on the roadmap.
 
-  .. todo::
-    #. `Resilience to erroneous behavior <https://github.com/DACH-NY/canton/issues/211>`_.
-
   .. _resilience-to-faulty-synchronizer-behavior-hlreq:
 
   * **Resilience to faulty synchronizer behavior**. I want the system
@@ -1056,9 +966,6 @@ Trust Assumptions
     permanently.
 
     This item is scheduled on the roadmap.
-
-  .. todo::
-    #. `Resilience to faulty synchronizer behavior <https://github.com/DACH-NY/canton/issues/212>`_.
 
   .. _requirements-known-limitations:
 
@@ -1106,10 +1013,6 @@ Trust Assumptions
   * **Public identity information:**
     The topology state of a synchronizer (i.e., participants known to the synchronizer and parties hosted by them) is known to
     all participants connected to the synchronizer.
-
-  .. todo::
-     #. `Only selectively disclose topology information <https://github.com/DACH-NY/canton/issues/1251>`_.
-
 
   Limitations that apply only sometimes
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

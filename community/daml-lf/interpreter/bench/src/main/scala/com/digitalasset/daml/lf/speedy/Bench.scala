@@ -7,7 +7,7 @@ package speedy
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.engine.Engine
-import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
+import com.digitalasset.daml.lf.speedy.metrics.MetricPlugins
 import com.digitalasset.daml.lf.testing.parser.*
 import org.openjdk.jmh.annotations.*
 
@@ -26,10 +26,13 @@ class Bench extends NamedLogging {
   implicit def parserParameters: ParserParameters[this.type] =
     ParserParameters.default
 
-  private[this] val metricPlugins = {
-    val config = Engine.DevConfig
+  @Param(Array("none", "all"))
+  var plugins: String = null
 
-    Seq(new StepCount(config.iterationsBetweenInterruptions), new TxNodeCount)
+  private[this] def mkPlugins(): Option[MetricPlugins] = plugins match {
+    case "none" => None
+    case "all" => Some(new MetricPlugins(Engine.DevConfig.iterationsBetweenInterruptions))
+    case other => throw new IllegalArgumentException(s"unknown plugins mode: $other")
   }
 
   import TraceContext.Implicits.Empty.emptyTraceContext
@@ -167,13 +170,16 @@ class Bench extends NamedLogging {
     machine = Speedy.Machine.fromPureSExpr(
       compiledPackages,
       sexpr,
-      metricPlugins = metricPlugins,
+      metricPlugins = mkPlugins(),
       logger = machineLogger,
     )
     machine.setExpressionToEvaluate(sexpr)
     machine.run() match {
       case SResult.SResultFinal(v) =>
-        counters.update(machine.metrics)
+        counters.update(
+          machine.metrics.totalCount(_.stepCount).getOrElse(0L),
+          machine.metrics.totalCount(_.txNodeCount).getOrElse(0L),
+        )
         v
       case otherwise =>
         throw new UnknownError(otherwise.toString)
@@ -194,9 +200,9 @@ object Bench {
       transactionNodeCount = 0
     }
 
-    def update(metrics: Speedy.Metrics): Unit = {
-      stepCount += metrics.totalCount[StepCount].get
-      transactionNodeCount += metrics.totalCount[TxNodeCount].get
+    def update(steps: Long, txNodes: Long): Unit = {
+      stepCount += steps
+      transactionNodeCount += txNodes
     }
   }
 }

@@ -51,7 +51,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, NodeLoggingUtil}
 import com.digitalasset.canton.metrics.MetricsConfig.JvmMetrics
-import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -383,6 +383,8 @@ class SequencerCatchUpPerformanceIntegrationTest
 
   private val testLogger = loggerFactory.getLogger(getClass)
 
+  private val BlockEventsMetricName = "daml.sequencer.block.events"
+
   private val trafficControlParameters = TrafficControlParameters(
     maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(1L),
     readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
@@ -395,18 +397,16 @@ class SequencerCatchUpPerformanceIntegrationTest
 
   def blockEventCount(sequencer: LocalSequencerReference): Long =
     sequencer.underlying.value.sequencer.metrics.block.blockEvents match {
-      // When using NoOpMetricsFactory in the PerformanceRunner, we get an InMemoryMeter here that can always sum the block event metrics.
-      // However, for other Meters such as OpenTelemetryMeter, we don't have such solution, so we fall back to zero.
-      // When NIGHTLY_PERF_RUN is set, we rely on CSV metric reporting, making a fallback to zero appropriate for this case.
-      // Although sequencer4 statistics are not collected directly, the nightly performance test doesn't deal with
-      // this specific metric and instead reports other metrics.
       case meter: InMemoryMeter =>
-        meter.valuesWithContext.toList
-          .map(_._2)
-          .sum
+        meter.valuesWithContext.values.sum
+      // With metrics reporters configured (e.g. the CSV reporter of the nightly runs), the meters are
+      // OpenTelemetry ones, so read their current values through the on-demand metrics reader
       case _ =>
-        // There is no block event count for non in memory meters so we fall back to 0!
-        0L
+        sequencer.metrics
+          .list(BlockEventsMetricName)
+          .getOrElse(BlockEventsMetricName, Seq.empty)
+          .collect { case point: MetricValue.LongPoint => point.value }
+          .sum
     }
 
   "Test the speed of the sequencer catch-up" in { implicit env =>
@@ -525,7 +525,9 @@ class SequencerCatchUpPerformanceIntegrationTest
 
         val before = Instant.now()
         val seq2EventCountBeforeOpt: Option[Long] =
-          if (exposeHttpMetrics || !countBlockEvents) None else Some(blockEventCount(sequencer4))
+          // The metrics of an external sequencer process are not available in this JVM
+          if (exposeHttpMetrics || !countBlockEvents || useExternalSequencerProcess) None
+          else Some(blockEventCount(sequencer4))
 
         def instantToSeconds(instant: Instant): Double =
           instant.getEpochSecond.toDouble + (instant.getNano.toDouble / 1000_000_000)
@@ -534,7 +536,8 @@ class SequencerCatchUpPerformanceIntegrationTest
           case Some(seq2EventCountBefore) =>
             eventually(
               timeUntilSuccess = afterRestartDurationMillis milliseconds,
-              maxPollInterval = 50 milliseconds,
+              // Not shorter: reading OpenTelemetry metrics collects all metrics of the environment
+              maxPollInterval = 500 milliseconds,
             ) {
               val seq1EventCount = blockEventCount(sequencer1)
               val seq4EventCount = blockEventCount(sequencer4)

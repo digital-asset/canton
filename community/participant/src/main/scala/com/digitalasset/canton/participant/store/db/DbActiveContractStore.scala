@@ -14,9 +14,10 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyUtil}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.*
@@ -38,7 +39,7 @@ import com.digitalasset.canton.store.{
   PrunableByTimeParameters,
 }
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.IterableUtil
@@ -48,8 +49,8 @@ import slick.jdbc.*
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.Ordered.orderingToOrdered
-import scala.collection.View
 import scala.collection.immutable.SortedMap
+import scala.collection.{View, immutable}
 import scala.concurrent.ExecutionContext
 
 /** Active contracts journal
@@ -140,6 +141,57 @@ class DbActiveContractStore(
       StoredActiveContract(activenessChange, toc)
     }
 
+  private val fetchAggregatorProcessor =
+    new BatchAggregator.Processor[LfContractId, Option[ContractState]] {
+      override def kind: String = "fetch-active-contract-states"
+
+      override def logger: TracedLogger = DbActiveContractStore.this.logger
+
+      override def executeBatch(items: NonEmpty[Seq[Traced[LfContractId]]])(implicit
+          traceContext: TraceContext,
+          closeContext: CloseContext,
+      ): FutureUnlessShutdown[immutable.Iterable[Option[ContractState]]] =
+        fetchStatesFromDb(items.map(_.value)).map { res =>
+          items.map { tracedCid =>
+            res.get(tracedCid.value)
+          }
+        }
+
+      override val prettyItem: Pretty[LfContractId] = PrettyUtil.prettyOfString(_.coid)
+    }
+
+  private val fetchAggregator = BatchAggregator(
+    fetchAggregatorProcessor,
+    batchingConfig.contractStoreAggregator,
+  )
+
+  private type ActiveContractJournalUpdate = ((LfContractId, TimeOfChange), ActivenessChangeDetail)
+
+  private val insertAggregatorProcessor =
+    new BatchAggregator.Processor[ActiveContractJournalUpdate, Unit] {
+      override def kind: String = "insert-active-contract-states"
+
+      override def logger: TracedLogger = DbActiveContractStore.this.logger
+
+      override def executeBatch(items: NonEmpty[Seq[Traced[ActiveContractJournalUpdate]]])(implicit
+          traceContext: TraceContext,
+          closeContext: CloseContext,
+      ): FutureUnlessShutdown[immutable.Iterable[Unit]] =
+        bulkInsert(items.forgetNE.map(_.value)).map { _ =>
+          items.map(_ => ())
+        }
+
+      override val prettyItem: Pretty[ActiveContractJournalUpdate] = PrettyUtil.prettyOfString {
+        case ((coid, toc), cd) =>
+          s"$coid at $toc with change $cd"
+      }
+    }
+
+  private val insertAggregator = BatchAggregator(
+    insertAggregatorProcessor,
+    batchingConfig.contractStoreAggregator,
+  )
+
   override def markContractsCreatedOrAdded(
       contracts: Seq[(LfContractId, ReassignmentCounter, TimeOfChange)],
       isCreation: Boolean,
@@ -157,7 +209,7 @@ class DbActiveContractStore(
             .leftMap(errorMessage => ActiveContractsDataInvariantViolation(errorMessage))
         )
       )
-      _ <- bulkInsert(
+      _ <- bulkInsertAndCheckConsistency(
         activeContractsData.asMap.fmap(builder),
         change = ChangeType.Activation,
       )
@@ -201,7 +253,7 @@ class DbActiveContractStore(
       else (ActivenessChangeDetail.purge, ActivenessChangeDetail.Purge)
 
     for {
-      _ <- bulkInsert(
+      _ <- bulkInsertAndCheckConsistency(
         contracts.map(contract => (contract, operation)).toMap,
         change = ChangeType.Deactivation,
       )
@@ -260,7 +312,7 @@ class DbActiveContractStore(
         Seq[PreparedReassignment],
       ]
 
-      _ <- bulkInsert(
+      _ <- bulkInsertAndCheckConsistency(
         preparedReassignments.toMap,
         change,
       )
@@ -291,6 +343,22 @@ class DbActiveContractStore(
   )
 
   override def fetchStates(
+      contractIds: Iterable[LfContractId]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfContractId, ContractState]] =
+    NonEmpty.from(contractIds.map(Traced(_)).toSeq) match {
+      case Some(value) =>
+        fetchAggregator.runMany(value).map { res =>
+          value.view
+            .zip(res)
+            .collect { case (in, Some(out)) =>
+              (in.value, out)
+            }
+            .toMap
+        }
+      case None => FutureUnlessShutdown.pure(Map.empty)
+    }
+
+  private def fetchStatesFromDb(
       contractIds: Iterable[LfContractId]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[LfContractId, ContractState]] =
     storage.profile match {
@@ -344,8 +412,6 @@ class DbActiveContractStore(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[(LfContractId)]] = {
     // The contractStore is unused
     // As we can directly query daml_contracts from the database
-
-    // TODO(i9480): Integrate with performance tests to check that we can remove packages when there are many contracts.
 
     val query =
       sql"""
@@ -997,12 +1063,21 @@ class DbActiveContractStore(
     }
   }
 
-  private def bulkInsert(
-      contractChanges: Map[(LfContractId, TimeOfChange), ActivenessChangeDetail],
-      change: ChangeType,
+  private def bulkInsertViaAggregator(
+      contractChanges: Map[(LfContractId, TimeOfChange), ActivenessChangeDetail]
   )(implicit
       traceContext: TraceContext
-  ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = {
+  ): FutureUnlessShutdown[Unit] =
+    NonEmpty.from(contractChanges.map(Traced(_)).toSeq) match {
+      case Some(value) => insertAggregator.runMany(value).map(_ => ())
+      case None => FutureUnlessShutdown.unit
+    }
+
+  private def bulkInsert(
+      contractChanges: Seq[((LfContractId, TimeOfChange), ActivenessChangeDetail)]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
     val insertQuery =
       """insert into par_active_contracts(contract_id, ts, repair_counter, change, synchronizer_idx, operation, reassignment_counter, remote_synchronizer_idx)
          values (?, ?, ?, CAST(? as change_type), ?, CAST(? as operation_type), ?, ?)
@@ -1016,6 +1091,15 @@ class DbActiveContractStore(
         pp >> indexedSynchronizer
         pp >> operationType
       }
+    storage.queryAndUpdate(insertAll, functionFullName)
+  }
+
+  private def bulkInsertAndCheckConsistency(
+      contractChanges: Map[(LfContractId, TimeOfChange), ActivenessChangeDetail],
+      change: ChangeType,
+  )(implicit
+      traceContext: TraceContext
+  ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = {
 
     @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
     def unzip(toCheck: NonEmpty[Seq[(LfContractId, TimeOfChange)]]): (
@@ -1089,7 +1173,7 @@ class DbActiveContractStore(
       CheckedT(warningsF.map(_.traverse_(Checked.continue)))
     }
 
-    CheckedT.result(storage.queryAndUpdate(insertAll, functionFullName)).flatMap { (_: Unit) =>
+    CheckedT.result(bulkInsertViaAggregator(contractChanges)).flatMap { (_: Unit) =>
       enableAdditionalConsistencyChecks.traverse_ { _ =>
         // Check all contracts whether they have been inserted or are already there
         NonEmpty.from(contractChanges.keySet.toSeq).traverse_(checkIdempotence)

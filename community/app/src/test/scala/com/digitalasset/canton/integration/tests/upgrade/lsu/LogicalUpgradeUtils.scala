@@ -39,7 +39,8 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
   protected def testName: String
   protected def logger: TracedLogger
 
-  /** Export nodes data for the specified nodes.
+  /** Export nodes data for the specified nodes. The nodes must allow key download
+    * (`ConfigTransforms.enableKeyDownload`).
     * @return
     *   Directory containing the data
     */
@@ -50,7 +51,8 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
   ): File =
     exportNodesData(nodes.sequencers, nodes.mediators, successorPsid, sequencerLsuStateTsOverride)
 
-  /** Export nodes data for the specified nodes, which can be local or remote.
+  /** Export nodes data for the specified nodes, which can be local or remote. The nodes must allow
+    * key download (`ConfigTransforms.enableKeyDownload`).
     * @return
     *   Directory containing the data
     */

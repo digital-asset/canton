@@ -50,27 +50,8 @@ Participant nodes
 Package vetting
 ***************
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25695>
-  Package = 1 deployable unit of smart-contract code, does not include dependencies
-
-  DAR = self-contained set of packages
-
-  Announce knowledge of package (required for validation) and opt-in executing packages in the first place
-
-  * safeguard against rogue packages
-
-  * useful for selecting upgrades (cross-reference to build subsite?) and controlling synchronizer selection (forward ref to multi-synchronizer)
-
-
 Concurrent / conflicting transactions
 *************************************
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25695>
-   Contention: Conflict detection with locking
-
-   Aggressive retries lead to lower success rates
-
-   Back-reference from the relevant performance howto sections in Build / Operate
 
 ..
   .. _conflict-detection-overview:
@@ -162,28 +143,5 @@ Concurrent / conflicting transactions
 Indexing
 ********
 
-.. todo:: <https://github.com/DACH-NY/canton/issues/25695>
-   Prepare state updates and current state for serving to users
-
-   Record-order publishing
-
-   LAPI user vs. Daml party
-
-   Not indexed: Template fields of contracts, point to PQS in build subsite
-
-
 Command Deduplication
 *********************
-
-.. todo:: <https://github.com/DACH-NY/canton/issues/25695>
-   * What is it useful for?
-
-   * Change ID for deduplication (user ID + actAs + command ID)
-
-   * Completion events emitted only on submitting participant, submission IDs
-
-   * Time bounds (measured locally on the participant)
-
-   * Injective agreement completion <-> submission if submission IDs are unique.
-
-   * Note: UTXOs already provide a basic form of deduplication for self-conflicting commands. Less general as not all commands are self-conflicting and cannot choose the identifier to deduplicate on.

@@ -1,0 +1,13 @@
+name: Allow Automatic Protocol Version Selection
+description: >
+  Export CANTON_AUTOMATIC_PROTOCOL_VERSION=1 for the subsequent steps of the job so that Canton
+  selects the protocol version automatically.
+
+runs:
+  using: composite
+  steps:
+    - name: Allow automatic protocol version selection
+      run: |
+        echo "CANTON_AUTOMATIC_PROTOCOL_VERSION=1" >> "$GITHUB_ENV"
+        echo "Canton will select the protocol version automatically"
+      shell: bash

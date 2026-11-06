@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.LsuError
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.SingleSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.SingleSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,

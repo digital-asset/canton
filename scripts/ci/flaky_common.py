@@ -35,6 +35,9 @@ NIGHTLY_CONSECUTIVE_FAILURES: Final[int] = 3
 NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
 # Nightly cron from .circleci/config/workflows/canton_nightly.yml: "0 22 * * 1-5".
 NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
+# Upper bound on how long a nightly run takes to record its failures. A non-nightly job
+# ignores cron slots younger than this, since their nightly run may not have reported yet.
+NIGHTLY_REPORT_DELAY: Final[datetime.timedelta] = datetime.timedelta(hours=12)
 # Nightly jobs that keep a historical name instead of the `nightly_` prefix. Matched
 # on the job name (CIRCLE_JOB / GITHUB_JOB), so keep in sync across a GHA migration.
 NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset(
@@ -403,7 +406,7 @@ def with_evidence_link(row: str, evidence_url: Optional[str], label: str = "evid
 def create_issue_table_row(
     cause: str = DEFAULT_CAUSE, evidence_url: Optional[str] = None, evidence_label: str = "evidence"
 ):
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     commit_hash = get_ci_commit_hash()
     commit_url = get_ci_commit_url(commit_hash)
     build_url = get_ci_build_url()

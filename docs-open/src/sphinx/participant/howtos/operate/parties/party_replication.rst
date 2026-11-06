@@ -97,9 +97,6 @@ Simple party replication consists of the following steps. You must execute them
 
 The following demonstrates these steps using two participants:
 
-.. todo::
-    `#27707: Remove reconciliationInterval when ACS commitments consider the onboarding flag <https://github.com/DACH-NY/canton/issues/27707>`_
-
 .. snippet:: simple_party_replication
     .. hidden:: bootstrap.synchronizer(
          synchronizerName = "da",
@@ -375,9 +372,6 @@ Scenario description
 The following steps show how to replicate party ``alice`` from the ``source``
 participant to a new ``target`` participant on the synchronizer ``mysynchronizer``.
 The ``source`` can be any participant already hosting the party.
-
-.. todo::
-    `#27707: Remove reconciliationInterval when ACS commitments consider the onboarding flag <https://github.com/DACH-NY/canton/issues/27707>`_
 
 .. snippet:: offline_party_replication
     .. hidden:: bootstrap.synchronizer(

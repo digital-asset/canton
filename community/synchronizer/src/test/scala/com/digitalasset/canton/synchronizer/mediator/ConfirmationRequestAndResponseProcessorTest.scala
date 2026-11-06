@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.{AssignmentViewType, TransactionViewType}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -18,9 +19,9 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject}
-import com.digitalasset.canton.sequencing.UnthrottledAsyncF
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.{HandlerResult, UnthrottledAsync, UnthrottledAsyncF}
 import com.digitalasset.canton.synchronizer.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
@@ -50,11 +51,27 @@ import org.slf4j.event.Level
 
 import java.util
 import scala.annotation.nowarn
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.language.reflectiveCalls
 
 import ResponseAggregation.ConsortiumVotingState
+
+object ConfirmationRequestAndResponseProcessorTest extends FutureHelpers {
+  import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+  private implicit class RequestResultSyntax(
+      val result: FutureUnlessShutdown[UnthrottledAsync]
+  ) extends AnyVal {
+    // Finalization may require responses that the test sends after registration.
+    def discardingFinalization(implicit ec: ExecutionContext): Future[Unit] =
+      result.failOnShutdown.map(_.discard)
+  }
+
+  private implicit class HandlerResultSyntax(val result: HandlerResult) extends AnyVal {
+    def awaitingCompletion(implicit ec: ExecutionContext): Future[Unit] =
+      result.flatMap(_.unwrap).flatMap(_.future).failOnShutdown
+  }
+}
 
 @nowarn("msg=match may not be exhaustive")
 class ConfirmationRequestAndResponseProcessorTest
@@ -64,6 +81,8 @@ class ConfirmationRequestAndResponseProcessorTest
     with HasTestCloseContext
     with HasExecutionContext
     with FailOnShutdown {
+
+  import ConfirmationRequestAndResponseProcessorTest.{HandlerResultSyntax, RequestResultSyntax}
 
   protected val synchronizerId: PhysicalSynchronizerId = SynchronizerId(
     UniqueIdentifier.tryFromProtoPrimitive("synchronizer::test")
@@ -454,7 +473,7 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           shouldBeViewThresholdBelowMinimumAlarm(
             RequestId(requestTimestamp),
             testMediatorRequest.firstFaultyViewPosition,
@@ -485,7 +504,7 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           entry => {
             entry.level shouldBe Level.WARN
             entry.shouldBeCantonError(
@@ -526,7 +545,7 @@ class ConfirmationRequestAndResponseProcessorTest
             rootHashMessages,
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
         response = ConfirmationResponses.tryCreate(
           reqId,
           fullInformeeTree.updateId.toRootHash,
@@ -812,7 +831,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     rootHashMessages,
                     batchAlsoContainsTopologyTransaction = false,
                   )
-                  .failOnShutdown,
+                  .discardingFinalization,
                 _.shouldBeCantonError(
                   MediatorError.MalformedMessage,
                   _ shouldBe s"Received a mediator confirmation request with id ${RequestId(ts)} with invalid root hash messages. Rejecting... Reason: $msg",
@@ -883,7 +902,7 @@ class ConfirmationRequestAndResponseProcessorTest
               ),
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
             message => {
@@ -921,7 +940,7 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
             _ shouldBe s"Rejecting mediator confirmation request with $requestId, mediator $mediatorGroupRecipient, topology at $requestIdTs due to wrong recipients (expected $expectedRecipients, actual $wrongRecipients)",
@@ -1285,7 +1304,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
 
         // receiving a confirmation response
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
@@ -1435,7 +1454,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
 
         // receiving a confirmation response
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
@@ -1571,7 +1590,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
 
         // receiving a confirmation response
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
@@ -1661,7 +1680,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
         response <- createConfirmationResponses(
           Some(ViewPosition.root),
           participant,
@@ -1796,7 +1815,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     recipients = Recipients.cc(mediatorGroupRecipient),
                   )
                 )
-                .failOnShutdown,
+                .awaitingCompletion,
               _.shouldBeCantonError(
                 MediatorError.MalformedMessage,
                 _ should include("at or before the synchronizer's initial topology sequencing time"),
@@ -1834,7 +1853,7 @@ class ConfirmationRequestAndResponseProcessorTest
                     batchAlsoContainsTopologyTransaction = false,
                   )
                 )
-                .failOnShutdown,
+                .awaitingCompletion,
               _.shouldBeCantonError(
                 MediatorError.MalformedMessage,
                 _ should include("at or before the synchronizer's initial topology sequencing time"),
@@ -1880,7 +1899,7 @@ class ConfirmationRequestAndResponseProcessorTest
               ),
               batchAlsoContainsTopologyTransaction = true,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
             message => {
@@ -1928,7 +1947,7 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           entry => {
             entry.level shouldBe Level.WARN
             entry.shouldBeCantonError(
@@ -1984,7 +2003,7 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .failOnShutdown,
+            .discardingFinalization,
           entry => {
             entry.level shouldBe Level.WARN
             entry.shouldBeCantonError(
@@ -2037,7 +2056,7 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .failOnShutdown
+          .discardingFinalization
         _ = sut.verdictSender.sentResults shouldBe empty
 
         // If it nevertheless gets a response, it will complain about the request not being known

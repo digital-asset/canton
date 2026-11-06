@@ -34,9 +34,8 @@ trait SequencerParameters {
   *   Whether the sequencer writes are async or sync
   * @param timeAdvancingTopology
   *   How the sequencer should send time advancing broadcasts after topology transactions
-  * @param unsafeSequencerChannelSupport
-  *   Whether to enable online party replication sequencer channels. Unsafe as still under
-  *   development.
+  * @param alphaSequencerChannelSupport
+  *   Configures sequencer channels. TODO(#21339): Unsafe until resource caps in place.
   * @param requestLimits
   *   optional stream limit for the number of active requests or streams
   * @param maxAuthTokensPerMember
@@ -65,7 +64,7 @@ final case class SequencerNodeParameters(
     maxConfirmationRequestsBurstFactor: PositiveDouble,
     asyncWriter: AsyncWriterParameters,
     timeAdvancingTopology: TimeAdvancingTopologyConfig,
-    unsafeSequencerChannelSupport: Boolean = false,
+    alphaSequencerChannelSupport: Option[AlphaSequencerChannelConfig] = None,
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,

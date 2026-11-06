@@ -20,17 +20,18 @@ on:
       DATADOG_API_KEY:
         required: true
       GAC_JSON:
-        required: true
+        required: false
       GPG_CODE_SIGNING:
-        required: true
+        required: false
       MAVEN_USERNAME:
-        required: true
+        required: false
       MAVEN_PASSWORD:
-        required: true
+        required: false
 
 jobs:
   publish_libraries:
     name: Publish Libraries
+    environment: release
     timeout-minutes: 120
     runs-on: ${{ inputs.runner }}
     env:

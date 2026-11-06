@@ -205,23 +205,30 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
       )
 
       // Use the old env (without the override), submission should work
-      eventually(retryOnTestFailuresOnly = false) {
-        // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
-        loggerFactory.assertLogsUnorderedOptional(
-          {
-            restart
+      // The suppression wraps the whole `eventually`: CantonBFT keeps warning about oversized messages
+      // in the background until the new max request size is active, including between retries.
+      loggerFactory.assertLogsUnorderedOptional(
+        eventually(retryOnTestFailuresOnly = false) {
+          // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
+          restart
 
-            val (_, submissionF) = submitCommand(participant1)
-            submissionF.futureValue.discard
-          },
-          LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
-            s"but it exceeds the maximum (${lowMaxRequestSize.value}), rejecting"
-          )),
-          LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
-            "is larger than max allowed"
-          )),
-        )
-      }
+          val (_, submissionF) = submitCommand(participant1)
+          submissionF.futureValue.discard
+        },
+        LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+          s"but it exceeds the maximum (${lowMaxRequestSize.value}), rejecting"
+        )),
+        LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+          "is larger than max allowed"
+        )),
+        LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+          "Could not send a time-advancing message"
+        )),
+        // Failed attempts are reported to the console as backpressure
+        LogEntryOptionality.OptionalMany -> (_.errorMessage should include(
+          "SEQUENCER_BACKPRESSURE"
+        )),
+      )
     }
   }
 }

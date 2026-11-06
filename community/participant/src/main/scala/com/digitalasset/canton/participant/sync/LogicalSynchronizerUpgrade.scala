@@ -524,7 +524,7 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
       Handshake and topology copy are useless now: the node is doing the LSU regardless of the outcome.
        Potential issues will be flagged upon connection attempt to the synchronizer.
        */
-      _ <- EitherT.rightT[FutureUnlessShutdown, LsuError](
+      _ <- EitherT.right[LsuError](
         pendingLsuOperationsStore.delete(
           currentPsid,
           PendingLsuOperation.operationKey,
@@ -1129,7 +1129,7 @@ class UncheckedLateLogicalSynchronizerUpgrade(
       /* Handshake and topology copy are useless now: the node is doing the LSU regardless of the
        * outcome. Potential issues will be flagged upon connection attempt to the synchronizer.
        */
-      _ <- EitherT.rightT[FutureUnlessShutdown, LsuError](
+      _ <- EitherT.right[LsuError](
         pendingLsuOperationsStore.delete(
           currentPsid,
           PendingLsuOperation.operationKey,

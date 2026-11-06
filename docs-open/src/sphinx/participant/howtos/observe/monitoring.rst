@@ -523,11 +523,6 @@ Known Limitations
 
 Not every trace created which can be observed in logs is reported to the configured trace collector service. Traces originated at console commands or that are part of the transaction protocol are largely reported, while other types of traces are added to the set of reported traces as the need arises.
 
-.. todo::
-    The limitation mentioned below is to be addressed as part of the below tickets:
-    `#22920 <https://github.com/DACH-NY/canton/issues/22920>`_
-    `#14256 <https://github.com/digital-asset/daml/issues/14256>`_
-
 Also, the transaction protocol trace has a known limitation: once a command is submitted and its trace is fully reported, a new trace is created for any resulting Daml events that are processed. This occurs because the Ledger API does not propagate any trace context information from the command submission to the transaction subscription. As an example, when a participant creates a ``Ping`` contract, you can see the full transaction processing trace of the ``Ping`` command being submitted. However, a participant that processes the ``Ping`` by exercising ``Respond`` and creating a ``Pong`` contract creates a separate trace instead of using the same one.
 
 This differs from a situation where a single Daml transaction results in multiple actions at the same time, such as archiving and creating multiple contracts. In that case, a single trace encompasses the entire process, since it occurs as part of a single transaction rather than the result of an external process reacting to Daml events.
@@ -558,9 +553,6 @@ The Canton ping consists of three Daml commands:
 1. The admin party for ``participant1`` creates a ``Ping`` contract.
 2. The admin party for ``participant2`` exercises the ``Respond`` consuming choice on the contract, which results in the creation of a ``Pong`` contract.
 3. The admin party for ``participant1`` exercises the ``Ack`` consuming choice on it.
-
-.. todo::
-    `#22920 <https://github.com/DACH-NY/canton/issues/22920>`_
 
 The submission of the first of the three Daml commands (the creation of the Ping contract) starts at span 3 in the example trace. Due to a limitation explained in the next section, the other two Daml command submissions are not linked to this trace. It is possible to find them separately. In any case, span 2 will only complete once the three Daml commands are completed.
 

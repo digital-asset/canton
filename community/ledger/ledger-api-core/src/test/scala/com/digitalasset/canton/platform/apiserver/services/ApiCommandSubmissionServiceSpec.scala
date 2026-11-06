@@ -128,12 +128,13 @@ class ApiCommandSubmissionServiceSpec
 
   private def grpcCommandSubmissionService(
       commandSubmissionService: CommandSubmissionService & AutoCloseable
-  ) =
+  ) = {
+    implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = LedgerApiSizeLimitsConfig()
     new ApiCommandSubmissionService(
       commandSubmissionService = commandSubmissionService,
       commandsValidator = new CommandsValidator(
         validateUpgradingPackageResolutions = ValidateUpgradingPackageResolutions.Empty
-      )(sizeLimitsConfig = LedgerApiSizeLimitsConfig()),
+      ),
       submissionSyncService = null,
       currentLedgerTime = () => Instant.EPOCH,
       currentUtcTime = () => Instant.EPOCH,
@@ -143,6 +144,7 @@ class ApiCommandSubmissionServiceSpec
       metrics = LedgerApiServerMetrics.ForTesting,
       loggerFactory = loggerFactory,
     )
+  }
 }
 
 object ApiCommandSubmissionServiceSpec {

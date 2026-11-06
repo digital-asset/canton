@@ -8,6 +8,11 @@ search(query: $searchstr, type: ISSUE, first: 10) {
             assignees(first: 0) {
                 totalCount
             }
+            labels(first: 20) {
+                nodes {
+                    name
+                }
+            }
             timelineItems(last: 100, itemTypes: [ASSIGNED_EVENT]) {
                 nodes {
                     ... on AssignedEvent {

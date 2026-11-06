@@ -51,6 +51,7 @@ import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.data.{
   AcsReplicationStatus,
   ContractImportMode,
+  ImportPartyAcsForceFlag,
   PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
@@ -758,6 +759,7 @@ object ParticipantAdminCommands {
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
         party: Option[PartyId],
+        forceFlags: Set[ImportPartyAcsForceFlag] = Set.empty,
     )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext)
         extends GrpcAdminCommand[
           Unit,
@@ -792,6 +794,7 @@ object ParticipantAdminCommands {
               representativePackageIdOverride =
                 Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
               partyId = Option.when(isFirst)(party.map(_.toProtoPrimitive)).flatten,
+              forceFlags = if (isFirst) forceFlags.toSeq.map(_.toProtoV30) else Seq.empty,
             )
           },
           new FileInputStream(file),

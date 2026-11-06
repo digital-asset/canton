@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.console.{FeatureFlag, LocalParticipantReference}
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.repair.RepairServiceIntegrationTest

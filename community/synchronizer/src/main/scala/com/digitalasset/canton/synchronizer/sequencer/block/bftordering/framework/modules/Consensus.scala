@@ -135,11 +135,11 @@ object Consensus {
 
     object RetransmissionRequest {
       def fromProto(
-          from: BftNodeId,
+          sentBy: BftNodeId,
           request: v30.SignedMessage,
       ): ParsingResult[RetransmissionRequest] = SignedMessage
         .fromProto(v30.EpochStatus, SupportedVersions.ProtoData30)(
-          ConsensusStatus.EpochStatus.fromProto(from, _)
+          ConsensusStatus.EpochStatus.fromProto(sentBy, _)
         )(request)
         .map(Consensus.RetransmissionsMessage.RetransmissionRequest.apply)
     }
@@ -158,16 +158,15 @@ object Consensus {
 
     object RetransmissionResponse {
       def fromProto(
-          from: BftNodeId,
+          sentBy: BftNodeId,
           protoRetransmissionResponse: v30.RetransmissionResponse,
       ): ParsingResult[RetransmissionResponse] =
         for {
           commitCertificates <- protoRetransmissionResponse.commitCertificates.traverse(
-            CommitCertificate.fromProto(_, actualSender = Some(from))
+            CommitCertificate.fromProto
           )
-        } yield RetransmissionResponse(from, commitCertificates)
+        } yield RetransmissionResponse(from = sentBy, commitCertificates)
     }
-
   }
 
   sealed trait StateTransferMessage extends ProtocolMessage
@@ -347,7 +346,7 @@ object Consensus {
       ): ParsingResult[BlockTransferResponse30] =
         for {
           commitCert <- protoResponse.commitCertificate
-            .map(CommitCertificate.fromProto(_, actualSender = Some(from)))
+            .map(CommitCertificate.fromProto)
             .sequence
           rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData30)
         } yield BlockTransferResponse30(commitCert, from)(rpv, Some(originalByteString))
@@ -421,7 +420,7 @@ object Consensus {
       ): ParsingResult[BlockTransferResponse31] =
         for {
           commitCerts <- protoResponse.commitCertificates
-            .map(CommitCertificate.fromProto(_, actualSender = Some(from)))
+            .map(CommitCertificate.fromProto)
             .sequence
           rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData31)
         } yield BlockTransferResponse31(commitCerts, from)(rpv, Some(originalByteString))

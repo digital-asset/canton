@@ -115,6 +115,7 @@ final class RemoteDumpIntegrationTest
     )
 
   registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(external)
 
   private def verifyHealthDumpContent(

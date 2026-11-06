@@ -796,7 +796,7 @@ class BftOrderingMetrics private[metrics] (
       private val prefix = security.prefix :+ "noncompliant"
 
       object labels {
-        val Endpoint: String = "endpoint"
+        val Endpoint: String = "p2p-endpoint"
         val Sequencer: String = "sequencer"
 
         object violationType {
@@ -1298,7 +1298,7 @@ class BftOrderingMetrics private[metrics] (
     private val p2pPrefix = histograms.p2p.p2pPrefix
 
     object labels {
-      val endpoint: String = "endpoint"
+      val endpoint: String = "p2p-endpoint"
     }
 
     private object statuses {
@@ -1498,12 +1498,12 @@ class BftOrderingMetrics private[metrics] (
           object values {
             sealed trait SourceValue extends PrettyNameOnlyCase
             case object SourceParsingFailed extends SourceValue
-            case class Empty(from: BftNodeId) extends SourceValue
-            case class ConnectionOpener(from: BftNodeId) extends SourceValue
-            case class Availability(from: BftNodeId) extends SourceValue
-            case class Consensus(from: BftNodeId) extends SourceValue
-            case class Retransmissions(from: BftNodeId) extends SourceValue
-            case class StateTransfer(from: BftNodeId) extends SourceValue
+            case class Empty(sentBy: BftNodeId) extends SourceValue
+            case class ConnectionOpener(sentBy: BftNodeId) extends SourceValue
+            case class Availability(sentBy: BftNodeId) extends SourceValue
+            case class Consensus(sentBy: BftNodeId) extends SourceValue
+            case class Retransmissions(sentBy: BftNodeId) extends SourceValue
+            case class StateTransfer(sentBy: BftNodeId) extends SourceValue
           }
         }
       }

@@ -78,7 +78,10 @@ trait ExternalPartyOnboardingIntegrationTestSetup
           )
         )
       }
-      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
+      .addConfigTransforms(
+        ConfigTransforms.enableInteractiveSubmissionTransforms,
+        ConfigTransforms.enableKeyDownload,
+      )
 }
 
 class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingIntegrationTestSetup {

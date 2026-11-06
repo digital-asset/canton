@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.component
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.DatabaseMetrics
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
@@ -27,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.{
+  CompletionInfo,
   IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
@@ -85,6 +87,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{JarResourceUtils, MonadUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RepairCounter, platform}
 import com.digitalasset.daml.lf.archive.DarParser
+import com.digitalasset.daml.lf.data.Ref.{CommandId, UserId}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -573,6 +576,7 @@ trait IndexComponentTest
       createPayloadLength: Int,
       archiveArgumentPayloadLengthFromTo: (Int, Int),
       archiveResultPayloadLengthFromTo: (Int, Int),
+      userIdSupplier: Option[() => UserId] = None,
   ): Vector[(Update.SequencedTransactionAccepted, Vector[ContractInstance])] = {
     val (createTxs, contracts) =
       (1 to txsCreatedThenArchived + txsCreatedNotArchived).iterator
@@ -580,6 +584,7 @@ trait IndexComponentTest
           creates(
             recordTime = nextRecordTime,
             payloadLength = createPayloadLength,
+            userIdSupplier = userIdSupplier,
           )(txSize)
         )
         .toVector
@@ -592,6 +597,7 @@ trait IndexComponentTest
           recordTime = nextRecordTime,
           argumentLength = randomLength(archiveArgumentPayloadLengthFromTo),
           resultLength = randomLength(archiveResultPayloadLengthFromTo),
+          userIdSupplier = userIdSupplier,
         )
       )
       .toVector
@@ -685,6 +691,7 @@ trait IndexComponentTest
       recordTime: () => CantonTimestamp,
       payloadLength: Int,
       synchronizer: SynchronizerId = synchronizer1,
+      userIdSupplier: Option[() => UserId] = None,
   )(
       size: Int
   ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
@@ -697,6 +704,7 @@ trait IndexComponentTest
     transaction(
       synchronizerId = synchronizer,
       recordTime = recordTimeAndLedgerEffectiveTime,
+      userId = userIdSupplier.map(_()),
     )(tx, contracts) -> contracts
   }
 
@@ -769,6 +777,7 @@ trait IndexComponentTest
       argumentLength: Int,
       resultLength: Int,
       synchronizerId: SynchronizerId = synchronizer1,
+      userIdSupplier: Option[() => UserId] = None,
   )(
       creates: Seq[Node.Create]
   ): Update.SequencedTransactionAccepted = {
@@ -781,6 +790,7 @@ trait IndexComponentTest
     transaction(
       synchronizerId = synchronizerId,
       recordTime = recordTime(),
+      userId = userIdSupplier.map(_()),
     )(tx, Nil)
   }
 
@@ -844,12 +854,22 @@ trait IndexComponentTest
   protected def transaction(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
+      userId: Option[UserId] = None,
   )(
       transaction: CommittedTransaction,
       contracts: Seq[ContractInstance],
   ): Update.SequencedTransactionAccepted =
     Update.SequencedTransactionAccepted(
-      completionInfoO = None,
+      completionInfoO = userId.map(userId =>
+        CompletionInfo(
+          actAs = dsoParty.value :: Nil,
+          userId = userId,
+          commandId = CommandId.assertFromString(userId + recordTime.toEpochMilli),
+          optDeduplicationPeriod = None,
+          submissionId = None,
+          paidTrafficCost = NonNegativeLong.zero,
+        )
+      ),
       transactionMeta = TransactionMeta(
         ledgerEffectiveTime = recordTime.underlying,
         workflowId = None,

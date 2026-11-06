@@ -66,9 +66,6 @@ Advanced Configurations
 Configuration files can be nested and combined together. First, using the ``include required`` directive (with relative paths), a
 configuration file can include other configuration files.
 
-.. todo::
-   #. Rework this example <https://github.com/DACH-NY/canton/issues/23924>
-
 ::
 
     canton {
@@ -111,9 +108,6 @@ configuration settings in a setup involving several synchronizers or participant
 
 Such a definition can subsequently be referenced in the actual node definition:
 
-.. todo::
-   #. Add examples here <https://github.com/DACH-NY/canton/issues/23873>
-
 ::
 
     canton {
@@ -136,10 +130,6 @@ production use.
 
 In particular, contract key uniqueness cannot be enforced over multiple synchronizers. In this situation,
 we need to turn contract key uniqueness off by setting
-
-.. todo::
-    `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/non-uck-mode.conf
 
 Please note that the setting is final and cannot be changed subsequently. We will provide a migration
 path once multi-synchronizer functionality is fully implemented.

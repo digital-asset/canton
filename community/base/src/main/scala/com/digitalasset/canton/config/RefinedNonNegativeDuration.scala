@@ -194,7 +194,6 @@ object RefinedNonNegativeDuration {
 
     def log(level: Level, message: String): Unit = LoggerUtil.logAtLevel(level, message)
 
-    // TODO(i4008) increase the log level to WARN
     val res =
       noisyAwaitResultForTesting(
         future,

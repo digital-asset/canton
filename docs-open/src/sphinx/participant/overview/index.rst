@@ -15,8 +15,6 @@ In essence, a Canton Participant is the **private, self-sovereign computational 
 Core Technical Responsibilities
 -------------------------------
 
-.. todo:: Link to protocol description when referring to the canton protocol below <https://github.com/DACH-NY/canton/issues/25689>
-
 #. **Daml Smart Contract Execution**
 
    * The Participant node is the **runtime environment for Daml smart contracts**.

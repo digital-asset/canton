@@ -17,9 +17,11 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.wartremover.test.WartTestTraverser
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 class DiscardedFutureTest extends AnyWordSpec with Matchers with DiscardedFutureTestWithMockito {
+
+  implicit val ec: ExecutionContext = ExecutionContext.global
 
   "DiscardedFuture" should {
     "detect statements in blocks that discard a future" in {
@@ -126,6 +128,187 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with DiscardedFuture
         ()
       }
       assertErrors(result, 4)
+    }
+
+    "detect wildcard aliases of futures in for-comprehensions" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Future.successful(1)
+          _ = Future.unit
+          b <- Future.successful(a)
+        } yield b
+      }
+      assertErrors(result, 1)
+    }
+
+    "detect nested futures in a for comprehension" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          _ <- Future.successful(Future.unit)
+        } yield ()
+      }
+      assertErrors(result, 1)
+    }
+
+    "detect nested futures followed by a guard in a for comprehension" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          _ <- Future.successful(Future.unit)
+          if true
+        } yield ()
+      }
+      assertErrors(result, 1)
+    }
+
+    "detect nested futures discarded by a wildcard lambda" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        Future.successful(Future.unit).map(_ => ())
+      }
+      assertErrors(result, 1)
+    }
+
+    "allow nested futures used via a placeholder" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        Future.successful(Future.unit).map(_.isCompleted)
+      }
+      assertErrors(result, 0)
+    }
+
+    "allow nested futures used in a match scrutinee" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        Future
+          .successful(Future.unit)
+          .map(inner => inner.isCompleted match { case _ => () })
+      }
+      assertErrors(result, 0)
+    }
+
+    "detect a wildcard alias of a future as the last step of a for-comprehension" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Future.successful(1)
+          _ = EitherT(Future.successful(Either.unit))
+        } yield a
+      }
+      assertErrors(result, 1)
+    }
+
+    "detect wildcard aliases of futures in for-comprehensions over other monads" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Option(1)
+          _ = Future.unit
+        } yield a
+      }
+      assertErrors(result, 1)
+    }
+
+    "detect several wildcard aliases of futures in one for-comprehension step" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Option(1)
+          _ = Future.unit
+          _ = Future.successful(a)
+        } yield a
+      }
+      assertErrors(result, 2)
+    }
+
+    "detect a wildcard alias of a future between named aliases" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Option(1)
+          x = 1
+          _ = Future.successful(a)
+          z = 3
+          b <- Option(x + z)
+        } yield b
+      }
+      assertErrors(result, 1)
+    }
+
+    // The compiler splits more than 21 consecutive aliases into several blocks with nested tuples.
+    // Each block ends in its own tuple, so the wart still sees every alias.
+    "detect wildcard aliases of futures in more than 22 consecutive aliases" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Option(1)
+          _ = Future.unit
+          b2 = 2
+          b3 = 3
+          b4 = 4
+          b5 = 5
+          b6 = 6
+          b7 = 7
+          b8 = 8
+          b9 = 9
+          b10 = 10
+          b11 = 11
+          b12 = 12
+          b13 = 13
+          b14 = 14
+          b15 = 15
+          b16 = 16
+          b17 = 17
+          b18 = 18
+          b19 = 19
+          b20 = 20
+          b21 = 21
+          b22 = 22
+          _ = Future.unit
+          b24 = 24
+        } yield a + b2 + b3 + b4 + b5 + b6 + b7 + b8 + b9 + b10 + b11 + b12 + b13 + b14 + b15 +
+          b16 + b17 + b18 + b19 + b20 + b21 + b22 + b24
+      }
+      assertErrors(result, 2)
+    }
+
+    "detect wildcard aliases of annotated future-like classes in for-comprehensions" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Option(1)
+          _ = new WannabeFuture[Int]()
+        } yield a
+      }
+      assertErrors(result, 1)
+    }
+
+    "allow named aliases of futures in for-comprehensions" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Future.successful(1)
+          f = Future.unit
+          _ <- f
+        } yield a
+      }
+      assertErrors(result, 0)
+    }
+
+    "allow wildcard aliases of non-futures in for-comprehensions" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        for {
+          a <- Future.successful(1)
+          _ = ()
+          _ = a
+        } yield a
+      }
+      assertErrors(result, 0)
+    }
+
+    "allow hand-written tuples of futures" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        val x = Future.unit
+        (1, x)
+      }
+      assertErrors(result, 0)
+    }
+
+    "allow futures passed as named arguments to functions returning tuples" in {
+      def pair(a: Int, f: Future[Unit]): (Int, Future[Unit]) = (a, f)
+      val result = WartTestTraverser(DiscardedFuture) {
+        pair(f = Future.unit, a = 1)
+      }
+      assertErrors(result, 0)
     }
 
   }

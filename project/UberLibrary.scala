@@ -8,7 +8,6 @@ import sbt.librarymanagement.InclExclRule
 import org.apache.ivy.core.module.descriptor.ExcludeRule
 import sbtassembly.AssemblyPlugin.autoImport.*
 
-// TODO(i12761): remove when closed
 object UberLibrary {
 
   private def externalDependenciesOf(project: Project): Def.Initialize[Task[Seq[ModuleID]]] =

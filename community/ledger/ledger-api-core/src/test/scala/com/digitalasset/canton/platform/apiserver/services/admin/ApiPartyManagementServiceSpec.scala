@@ -4,21 +4,24 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import cats.syntax.traverse.*
+import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta as ProtoObjectMeta
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyRequest.SignedTransaction
 import com.daml.ledger.api.v2.admin.party_management_service.{
   AllocateExternalPartyRequest,
   AllocatePartyRequest,
   GenerateExternalPartyTopologyRequest,
   GenerateExternalPartyTopologyResponse,
+  GetPartiesRequest,
   ListKnownPartiesRequest,
+  UpdatePartyDetailsRequest,
   PartyDetails as ProtoPartyDetails,
 }
 import com.daml.ledger.api.v2.crypto.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.daml.ledger.api.v2.{crypto, crypto as lapicrypto}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.base.error.ErrorsAssertions
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.base.error.utils.ErrorDetails.RetryInfoDetail
+import com.digitalasset.base.error.{ErrorCode, ErrorsAssertions}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED
 import com.digitalasset.canton.crypto.{
@@ -29,6 +32,12 @@ import com.digitalasset.canton.crypto.{
   TestHash,
   v30,
 }
+import com.digitalasset.canton.ledger.api.sizeconfig.v2.admin.{
+  GetPartiesRequestSizeConfig,
+  ObjectMetaSizeConfig,
+}
+import com.digitalasset.canton.ledger.api.validation.LedgerApiSizeLimitsConfig
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.localstore.api.{PartyRecord, PartyRecordStore}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
@@ -89,15 +98,16 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import com.google.protobuf.field_mask.FieldMask
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import io.scalaland.chimney.dsl.*
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar, MockitoSugar}
-import org.scalatest.BeforeAndAfterEach
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, BeforeAndAfterEach}
 import org.slf4j.event.Level
 import scalapb.lenses.{Lens, Mutation}
 
@@ -144,6 +154,30 @@ class ApiPartyManagementServiceSpec
   ) = mockedServices()
   val partyAllocationTracker = makePartyAllocationTracker(loggerFactory)
 
+  private val maxParties = 1
+  private val maxAnnotations = 1
+  private val maxOnboardingTransactions = 5
+  private val maxOtherConfirmingParticipantUids = 2
+  implicit val sizeLimitsConfig: LedgerApiSizeLimitsConfig = {
+    val defaultSizeLimitsConfig = LedgerApiSizeLimitsConfig()
+    defaultSizeLimitsConfig.copy(
+      adminLapiSizeConfig = defaultSizeLimitsConfig.adminLapiSizeConfig.copy(
+        getPartiesRequest =
+          GetPartiesRequestSizeConfig(partiesSizeLimit = PositiveInt.tryCreate(maxParties)),
+        objectMeta =
+          ObjectMetaSizeConfig(annotationsSizeLimit = PositiveInt.tryCreate(maxAnnotations)),
+        allocateExternalPartyRequest =
+          defaultSizeLimitsConfig.adminLapiSizeConfig.allocateExternalPartyRequest.copy(
+            onboardingTransactionsSizeLimit = PositiveInt.tryCreate(maxOnboardingTransactions)
+          ),
+        generateExternalPartyTopologyRequest =
+          defaultSizeLimitsConfig.adminLapiSizeConfig.generateExternalPartyTopologyRequest.copy(
+            otherConfirmingParticipantUidsSizeLimit =
+              PositiveInt.tryCreate(maxOtherConfirmingParticipantUids)
+          ),
+      )
+    )
+  }
   lazy val apiService = ApiPartyManagementService.createApiService(
     mockIndexPartyManagementService,
     mockUserManagementStore,
@@ -1394,6 +1428,83 @@ class ApiPartyManagementServiceSpec
         }
       }
 
+    }
+
+    "validating the size limits" when {
+      def mustFailWith[T](result: Future[T], errorCode: ErrorCode): Future[Assertion] =
+        result.transform {
+          case Failure(e: StatusRuntimeException) => Success(assertMatchesErrorCode(e, errorCode))
+          case Failure(other) => fail(s"Expected a StatusRuntimeException, but got $other")
+          case Success(_) => fail("Expected a failure, but received success")
+        }
+
+      val annotations = (1 to maxAnnotations + 1).map(i => s"key$i" -> s"value$i").toMap
+
+      "reject get parties exceeding the parties limit" in {
+        mustFailWith(
+          apiService.getParties(
+            GetPartiesRequest(
+              parties = (1 to maxParties + 1).map(i => s"party$i"),
+              identityProviderId = "",
+            )
+          ),
+          RequestValidationErrors.FieldCardinalityLimitExceeded,
+        )
+      }
+
+      "reject a party allocation exceeding the annotations limit" in {
+        // no claims in the context, so resolving the authenticated user logs an error
+        loggerFactory.suppress(ApiPartyManagementServiceSuppressionRule) {
+          mustFailWith(
+            apiService.allocateParty(
+              AllocatePartyRequest("aParty", Some(ProtoObjectMeta("", annotations)), "", "", "")
+            ),
+            RequestValidationErrors.FieldCardinalityLimitExceeded,
+          )
+        }
+      }
+
+      "reject a party details update exceeding the annotations limit" in {
+        mustFailWith(
+          apiService.updatePartyDetails(
+            UpdatePartyDetailsRequest(
+              partyDetails = Some(
+                protoPartyDetails.copy(localMetadata = Some(ProtoObjectMeta("", annotations)))
+              ),
+              updateMask = Some(FieldMask(Seq("local_metadata"))),
+            )
+          ),
+          RequestValidationErrors.FieldCardinalityLimitExceeded,
+        )
+      }
+
+      "reject an external party allocation exceeding the onboarding transactions limit" in {
+        // no claims in the context, so resolving the authenticated user logs an error
+        loggerFactory.suppress(ApiPartyManagementServiceSuppressionRule) {
+          mustFailWith(
+            apiService.allocateExternalParty(
+              AllocateExternalPartyRequest.defaultInstance.copy(onboardingTransactions =
+                Seq.fill(maxOnboardingTransactions + 1)(
+                  SignedTransaction(ByteString.EMPTY, Seq.empty)
+                )
+              )
+            ),
+            RequestValidationErrors.FieldCardinalityLimitExceeded,
+          )
+        }
+      }
+
+      "reject an external party topology generation exceeding the participant uids limit" in {
+        mustFailWith(
+          apiService.generateExternalPartyTopology(
+            GenerateExternalPartyTopologyRequest.defaultInstance.copy(
+              otherConfirmingParticipantUids =
+                (1 to maxOtherConfirmingParticipantUids + 1).map(i => s"participant$i::id")
+            )
+          ),
+          RequestValidationErrors.FieldCardinalityLimitExceeded,
+        )
+      }
     }
 
   }

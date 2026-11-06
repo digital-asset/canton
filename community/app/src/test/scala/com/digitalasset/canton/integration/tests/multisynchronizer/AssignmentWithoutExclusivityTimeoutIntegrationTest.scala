@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.HasSimClockUtils.advanceClockInStepsTo
+import com.digitalasset.canton.integration.plugins.UseBftSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.PartiesAllocator
@@ -37,7 +38,12 @@ final class AssignmentWithoutExclusivityTimeoutIntegrationTest
     with SharedEnvironment {
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 
   private val exclusivityTimeout = config.NonNegativeFiniteDuration.ofMinutes(10)
   private val p1AutomaticAssignmentDelay = config.NonNegativeFiniteDuration.ofMinutes(1)
@@ -131,6 +137,7 @@ final class AssignmentWithoutExclusivityTimeoutIntegrationTest
         import env.*
 
         val iou = IouSyntax.createIou(participant2, Some(daId))(bob, alice)
+        val ledgerEnd = participant1.ledger_api.state.end()
 
         // P2 initiates the unassignment, and P1 submits the automatic assignment 1 to 2 minutes later
         val unassigned = participant2.ledger_api.commands.submit_unassign(
@@ -170,6 +177,16 @@ final class AssignmentWithoutExclusivityTimeoutIntegrationTest
           .filter(_.createdEvent.value.contractId == iou.id.contractId)
           .loneElement
           .synchronizerId shouldBe acmeId.logical.toProtoPrimitive
+
+        participant1.ledger_api.completions
+          .list(
+            alice,
+            atLeastNumCompletions = 1,
+            beginOffsetExclusive = ledgerEnd,
+            userId = "AutomaticAssignment",
+          )
+          .loneElement
+          .commandId shouldBe s"automatic-assignment-${unassigned.reassignmentId}"
     }
   }
 }
