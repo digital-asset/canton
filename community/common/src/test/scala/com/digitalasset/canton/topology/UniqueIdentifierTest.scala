@@ -32,6 +32,16 @@ class UniqueIdentifierTest extends AnyWordSpec with BaseTest {
   }
 
   "identifier" should {
+    "accept 185 characters and reject longer identifiers" in {
+      val maxLengthIdentifier = "a" * 185
+
+      UniqueIdentifier.create(maxLengthIdentifier, "12345678").value.identifier.unwrap shouldBe
+        maxLengthIdentifier
+      UniqueIdentifier.create(maxLengthIdentifier + "a", "12345678").left.value should include(
+        "maximum length of 185"
+      )
+    }
+
     "contain only simple characters" in {
       forEvery(Seq("#a", "\\a", "/a", "ä")) { s =>
         UniqueIdentifier.create(s, s).left.value shouldBe a[String]

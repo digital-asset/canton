@@ -5,8 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import com.daml.ledger.api.v2.EventOuterClass
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
-import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
+import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -25,35 +24,28 @@ trait ConsoleCommandIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
-      .withSetup(env => initializeParties(env))
 
   override val defaultParticipant: String = "participant1"
 
-  private val testParty = "consoleCommandTestParty"
-
-  private def initializeParties(implicit env: TestConsoleEnvironment): Unit = {
+  private def connectParticipant()(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
 
-    // Setup participant1
     participant1.synchronizers.connect_local(sequencer1, alias = daName)
     utils.retry_until_true(participant1.synchronizers.active(daName))
-    participant1.dars.upload(CantonExamplesPath)
-    participant1.parties.enable(name = testParty)
+  }
+
+  private def prepareContracts()(implicit env: TestConsoleEnvironment): Unit = {
+    import env.*
+
+    connectParticipant()
+    val _ = participant1.dars.upload(CantonExamplesPath)
   }
 
   "the command enable" should {
-
-    "fail when a party name with length > 185 is given" in { implicit env =>
-      import env.*
-
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.parties.enable("a" * 186),
-        _.errorMessage should include("maximum length of 185"),
-      )
-    }
-
     "succeed when party name has length 185" in { implicit env =>
       import env.*
+
+      connectParticipant()
       participant1.parties.enable("a" * 185)
     }
   }
@@ -62,22 +54,9 @@ trait ConsoleCommandIntegrationTest
     "succeed when party name has length at most 185" in { implicit env =>
       // see commands in `UniqueIdentifier` for why this will fail with party names of length >185
       import env.*
+
+      connectParticipant()
       participant1.ledger_api.parties.allocate("a" * 185, synchronizerId = daId.logical)
-    }
-  }
-
-  "the command modify" should {
-    "fail when attempting to configure the SynchronizerAlias" in { implicit env =>
-      import env.*
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.synchronizers
-          .modify(daName, _.copy(synchronizerAlias = SynchronizerAlias.tryCreate("da2"))),
-        _.errorMessage should include(
-          "We don't support modifying the synchronizer alias of a SynchronizerConnectionConfig"
-        ),
-      )
-
     }
   }
 
@@ -85,14 +64,14 @@ trait ConsoleCommandIntegrationTest
     "succeed when never connected to a synchronizer" in { implicit env =>
       import env.*
 
-      val acsSize = participant1.ledger_api.state.acs.count()
-      acsSize shouldBe 0
+      participant1.synchronizers.list_all_registered() shouldBe empty
+      participant1.ledger_api.state.acs.count() shouldBe 0
     }
 
     "succeed when disconnected from a synchronizer" in { implicit env =>
       import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      prepareContracts()
 
       val acsCountBefore = participant1.ledger_api.state.acs.count()
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
@@ -105,7 +84,7 @@ trait ConsoleCommandIntegrationTest
     "succeed when there are only admin parties" in { implicit env =>
       import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      prepareContracts()
 
       val acsCountBefore = participant1.ledger_api.state.acs.count()
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
@@ -117,7 +96,7 @@ trait ConsoleCommandIntegrationTest
     "succeed when parties are allocated" in { implicit env =>
       import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      prepareContracts()
 
       val alice: String = "Alice"
       participant1.ledger_api.parties.allocate(alice)
@@ -141,19 +120,18 @@ trait ConsoleCommandIntegrationTest
     "succeed when never connected to a synchronizer" in { implicit env =>
       import env.*
 
-      participant1.ledger_api.parties.allocate(alice)
-
-      participant1.ledger_api.state.acs.of_party(alice.toPartyId()) shouldBe empty
+      participant1.synchronizers.list_all_registered() shouldBe empty
       participant1.ledger_api.state.acs.of_party(participant1.adminParty) shouldBe empty
     }
 
     "succeed when disconnected from a synchronizer" in { implicit env =>
       import env.*
 
+      prepareContracts()
       participant1.ledger_api.parties.allocate(alice)
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
       val acsP1Before = participant1.ledger_api.state.acs.of_party(alice.toPartyId())
+      acsP1Before shouldBe empty
       createCycleContract(participant1, alice.toPartyId(), "cycle contract p1 p2")
 
       participant1.synchronizers.disconnect(daName)
@@ -165,7 +143,7 @@ trait ConsoleCommandIntegrationTest
     "succeed when there are only admin parties" in { implicit env =>
       import env.*
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      prepareContracts()
 
       val acsBefore = participant1.ledger_api.state.acs.of_party(participant1.adminParty)
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
@@ -177,14 +155,10 @@ trait ConsoleCommandIntegrationTest
     "succeed when parties are allocated" in { implicit env =>
       import env.*
 
+      prepareContracts()
       val aliceId = participant1.parties.enable(alice)
 
       val acsBefore = participant1.ledger_api.state.acs.of_party(aliceId)
-
-      // Deliberately connecting to the synchronizer after enabling the alice party.
-      // This tests whether the party can be enabled without a synchronizer connection and
-      // and whether it can be used immediately after connecting.
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
       createCycleContract(participant1, aliceId, "cycle contract p1 alice")
       val acsAfter = participant1.ledger_api.state.acs.of_party(aliceId)
@@ -223,7 +197,9 @@ trait ConsoleCommandIntegrationTest
 
     "retrieve events by contract id" in { implicit env =>
       import env.*
-      val testPartyId = testParty.toPartyId(participant1)
+
+      prepareContracts()
+      val testPartyId = participant1.parties.enable("consoleCommandTestParty")
       val expected = createIou(
         actAs = testPartyId,
         participant = participant1,

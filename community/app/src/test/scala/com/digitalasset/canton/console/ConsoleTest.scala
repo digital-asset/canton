@@ -7,10 +7,16 @@ import ammonite.runtime.Storage.InMemory
 import ammonite.util.Colors
 import cats.syntax.either.*
 import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
+import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.admin.api.client.commands.{
   GrpcAdminCommand,
   ParticipantAdminCommands,
 }
+import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.SynchronizerConnectivity.{
+  ListActiveRegisteredSynchronizers,
+  ModifySynchronizerConnection,
+}
+import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
 import com.digitalasset.canton.auth.{CantonAdminToken, CantonAdminTokenDispenser}
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{CantonConfig, ClientConfig, TestingConfigInternal}
@@ -22,14 +28,17 @@ import com.digitalasset.canton.console.HeadlessConsole.{
 }
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
+import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
+import com.digitalasset.canton.topology.{DefaultTestIdentities, UnknownPhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TracerProvider
-import com.digitalasset.canton.{BaseTest, ConfigStubs}
+import com.digitalasset.canton.{BaseTest, ConfigStubs, SequencerAlias, SynchronizerAlias}
 import io.grpc.stub.AbstractStub
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
+import org.mockito.Mockito.{verifyNoInteractions, verifyNoMoreInteractions}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -135,6 +144,26 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
             apiName: String,
         ): GrpcAdminCommandRunner = adminCommandRunner
       }
+
+    lazy val participantReference: LocalParticipantReference =
+      consoleEnvironment.participants.local.find(_.name == "p1").value
+
+    def stubActiveSynchronizer(): SynchronizerConnectionConfig = {
+      val connection = SynchronizerConnectionConfig.tryGrpcSingleConnection(
+        SynchronizerAlias.tryCreate("da"),
+        SequencerAlias.tryCreate("sequencer1"),
+        "http://localhost:1234",
+      )(consoleEnvironment)
+      when(
+        adminCommandRunner.runCommand(
+          isEq("p1"),
+          isEq(ListActiveRegisteredSynchronizers),
+          any[ClientConfig],
+          isEq(Some(adminToken)),
+        )
+      ).thenReturn(CommandSuccessful(Seq((connection, UnknownPhysicalSynchronizerId, true))))
+      connection
+    }
 
     def runOrFail(commands: String*): Unit = {
       val (result, stderr) = run(commands*)
@@ -324,6 +353,73 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
           helpText should include("dars")
           helpText should include("synchronizers")
         },
+      )
+    }
+  }
+
+  "Party enable" should {
+    "reject a party name longer than 185 characters before sending a command" in new TestEnvironment {
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participantReference.parties.enable(
+          "a" * 186,
+          namespace = DefaultTestIdentities.participant1.namespace,
+          synchronizeParticipants = Seq.empty,
+        ),
+        _.errorMessage should include("maximum length of 185"),
+      )
+
+      verifyNoInteractions(adminCommandRunner)
+    }
+  }
+
+  "Synchronizer modify" should {
+    "reject a change to the synchronizer alias without sending a modification" in new TestEnvironment {
+      val connection = stubActiveSynchronizer()
+
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participantReference.synchronizers.modify(
+          connection.synchronizerAlias,
+          _.copy(synchronizerAlias = SynchronizerAlias.tryCreate("da2")),
+        ),
+        _.errorMessage should include(
+          "We don't support modifying the synchronizer alias of a SynchronizerConnectionConfig"
+        ),
+      )
+
+      discard(
+        verify(adminCommandRunner).runCommand(
+          isEq("p1"),
+          isEq(ListActiveRegisteredSynchronizers),
+          any[ClientConfig],
+          isEq(Some(adminToken)),
+        )
+      )
+      verifyNoMoreInteractions(adminCommandRunner)
+    }
+
+    "send the modified connection to the participant" in new TestEnvironment {
+      val connection = stubActiveSynchronizer()
+      val modification = ModifySynchronizerConnection(
+        None,
+        connection.withPriority(1).toInternal,
+        SequencerConnectionValidation.All,
+      )
+      when(
+        adminCommandRunner.runCommand(
+          isEq("p1"),
+          isEq(modification),
+          any[ClientConfig],
+          isEq(Some(adminToken)),
+        )
+      ).thenReturn(CommandSuccessful(()))
+
+      participantReference.synchronizers.modify(connection.synchronizerAlias, _.withPriority(1))
+
+      verify(adminCommandRunner).runCommand(
+        isEq("p1"),
+        isEq(modification),
+        any[ClientConfig],
+        isEq(Some(adminToken)),
       )
     }
   }
