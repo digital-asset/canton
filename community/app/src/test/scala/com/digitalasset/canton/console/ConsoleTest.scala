@@ -164,7 +164,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       when(
         adminCommandRunner.runCommand[ActiveSynchronizers](
           isEq("p1"),
-          isEq(ListActiveRegisteredSynchronizers),
+          isEq[ListActiveRegisteredSynchronizers.type](ListActiveRegisteredSynchronizers),
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
@@ -396,7 +396,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       discard(
         verify(adminCommandRunner).runCommand[ActiveSynchronizers](
           isEq("p1"),
-          isEq(ListActiveRegisteredSynchronizers),
+          isEq[ListActiveRegisteredSynchronizers.type](ListActiveRegisteredSynchronizers),
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
