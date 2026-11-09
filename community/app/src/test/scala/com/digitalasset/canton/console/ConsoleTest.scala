@@ -8,15 +8,19 @@ import ammonite.util.Colors
 import cats.syntax.either.*
 import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.admin.api.client.commands.{
-  GrpcAdminCommand,
-  ParticipantAdminCommands,
-}
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.SynchronizerConnectivity.{
   ListActiveRegisteredSynchronizers,
   ModifySynchronizerConnection,
 }
-import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
+import com.digitalasset.canton.admin.api.client.commands.{
+  GrpcAdminCommand,
+  ParticipantAdminCommands,
+}
+import com.digitalasset.canton.admin.api.client.data.{
+  ConfiguredPhysicalSynchronizerId,
+  SynchronizerConnectionConfig,
+  UnknownPhysicalSynchronizerId,
+}
 import com.digitalasset.canton.auth.{CantonAdminToken, CantonAdminTokenDispenser}
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{CantonConfig, ClientConfig, TestingConfigInternal}
@@ -30,19 +34,15 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
-import com.digitalasset.canton.topology.{
-  ConfiguredPhysicalSynchronizerId,
-  DefaultTestIdentities,
-  UnknownPhysicalSynchronizerId,
-}
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TracerProvider
 import com.digitalasset.canton.{BaseTest, ConfigStubs, SequencerAlias, SynchronizerAlias}
 import io.grpc.stub.AbstractStub
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.{anyString, argThat, eq as isEq}
-import org.mockito.Mockito.{verifyNoInteractions, verifyNoMoreInteractions}
+import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
+import org.mockito.Mockito.verifyNoInteractions
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -53,10 +53,6 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
 
   private type ActiveSynchronizers =
     Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)]
-
-  private def matchListActiveRegisteredSynchronizers()
-      : GrpcAdminCommand[?, ?, ActiveSynchronizers] =
-    argThat[GrpcAdminCommand[?, ?, ActiveSynchronizers]](_ == ListActiveRegisteredSynchronizers)
 
   private lazy val DefaultConfig: CantonConfig = CantonConfig(
     sequencers = Map(
@@ -168,13 +164,23 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       when(
         adminCommandRunner.runCommand[ActiveSynchronizers](
           isEq("p1"),
-          matchListActiveRegisteredSynchronizers(),
+          isEq(ListActiveRegisteredSynchronizers),
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
       ).thenReturn(CommandSuccessful(Seq((connection, UnknownPhysicalSynchronizerId, true))))
       connection
     }
+
+    def verifyActiveSynchronizerQuery(runner: GrpcAdminCommandRunner): Unit =
+      discard(
+        runner.runCommand[ActiveSynchronizers](
+          isEq("p1"),
+          isEq(ListActiveRegisteredSynchronizers),
+          any[ClientConfig],
+          isEq(Some(adminToken)),
+        )
+      )
 
     def runOrFail(commands: String*): Unit = {
       val (result, stderr) = run(commands*)
@@ -397,28 +403,16 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
         ),
       )
 
-      discard(
-        verify(adminCommandRunner).runCommand[ActiveSynchronizers](
-          isEq("p1"),
-          matchListActiveRegisteredSynchronizers(),
-          any[ClientConfig],
-          isEq(Some(adminToken)),
-        )
-      )
+      verifyActiveSynchronizerQuery(verify(adminCommandRunner))
       verifyNoMoreInteractions(adminCommandRunner)
     }
 
     "send the modified connection to the participant" in new TestEnvironment {
       val connection = stubActiveSynchronizer()
-      val modification = ModifySynchronizerConnection(
-        None,
-        connection.withPriority(1).toInternal,
-        SequencerConnectionValidation.All,
-      )
       when(
-        adminCommandRunner.runCommand(
+        adminCommandRunner.runCommand[Unit](
           isEq("p1"),
-          isEq(modification),
+          isA[ModifySynchronizerConnection],
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
@@ -426,12 +420,22 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
 
       participantReference.synchronizers.modify(connection.synchronizerAlias, _.withPriority(1))
 
-      verify(adminCommandRunner).runCommand(
-        isEq("p1"),
-        isEq(modification),
-        any[ClientConfig],
-        isEq(Some(adminToken)),
-      )
+      val commands = org.mockito.Mockito.inOrder(adminCommandRunner)
+      verifyActiveSynchronizerQuery(commands.verify(adminCommandRunner))
+      val captor = ArgumentCaptor.forClass(classOf[ModifySynchronizerConnection])
+      commands
+        .verify(adminCommandRunner)
+        .runCommand[Unit](
+          isEq("p1"),
+          captor.capture(),
+          any[ClientConfig],
+          isEq(Some(adminToken)),
+        )
+      val modification = captor.getValue
+      modification.synchronizerId shouldBe None
+      modification.config.toProtoV30 shouldBe connection.withPriority(1).toInternal.toProtoV30
+      modification.sequencerConnectionValidation.toProtoV30 shouldBe
+        SequencerConnectionValidation.All.toProtoV30
     }
   }
 
