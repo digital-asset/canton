@@ -107,6 +107,7 @@ trait ConsoleCommandIntegrationTest
       }
 
       val acsCountBefore = participant1.ledger_api.state.acs.count()
+      acsCountBefore shouldBe 0
       createCycleContract(participant1, alice.toPartyId(), "cycle contract p1 alice")
       val acsCountAfter = participant1.ledger_api.state.acs.count()
 
@@ -146,6 +147,7 @@ trait ConsoleCommandIntegrationTest
       prepareContracts()
 
       val acsBefore = participant1.ledger_api.state.acs.of_party(participant1.adminParty)
+      acsBefore shouldBe empty
       createCycleContract(participant1, participant1.adminParty, "cycle contract p1 p2")
       val acsAfter = participant1.ledger_api.state.acs.of_party(participant1.adminParty)
 
