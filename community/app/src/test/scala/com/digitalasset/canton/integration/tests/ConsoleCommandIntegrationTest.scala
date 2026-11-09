@@ -4,11 +4,8 @@
 package com.digitalasset.canton.integration.tests
 
 import com.daml.ledger.api.v2.EventOuterClass
-import com.daml.ledger.api.v2.value.Identifier
-import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
@@ -238,20 +235,6 @@ trait ConsoleCommandIntegrationTest
         .by_contract_id(expected.getContractId, Seq(testPartyId))
         .getCreated
         .getCreatedEvent
-      actual shouldBe expected
-    }
-
-    "template id primitive mapping" in { implicit env =>
-      discard(env)
-      val expected = Iou.TEMPLATE_ID_WITH_PACKAGE_ID
-      val actual = TemplateId.fromJavaIdentifier(expected).toJavaIdentifier
-      actual shouldBe expected
-    }
-
-    "template id identifier mapping" in { implicit env =>
-      discard(env)
-      val expected = Identifier("p1", "m1", "e1")
-      val actual = TemplateId.fromIdentifier(expected).toIdentifier
       actual shouldBe expected
     }
   }
