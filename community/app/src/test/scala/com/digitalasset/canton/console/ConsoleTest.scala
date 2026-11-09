@@ -30,7 +30,11 @@ import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
-import com.digitalasset.canton.topology.{DefaultTestIdentities, UnknownPhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  ConfiguredPhysicalSynchronizerId,
+  DefaultTestIdentities,
+  UnknownPhysicalSynchronizerId,
+}
 import com.digitalasset.canton.tracing.TracerProvider
 import com.digitalasset.canton.{BaseTest, ConfigStubs, SequencerAlias, SynchronizerAlias}
 import io.grpc.stub.AbstractStub
@@ -46,6 +50,9 @@ import java.io.ByteArrayOutputStream
 import java.nio.file.Paths
 
 final class ConsoleTest extends AnyWordSpec with BaseTest {
+
+  private type ActiveSynchronizers =
+    Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)]
 
   private lazy val DefaultConfig: CantonConfig = CantonConfig(
     sequencers = Map(
@@ -155,7 +162,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
         "http://localhost:1234",
       )(consoleEnvironment)
       when(
-        adminCommandRunner.runCommand(
+        adminCommandRunner.runCommand[ActiveSynchronizers](
           isEq("p1"),
           isEq(ListActiveRegisteredSynchronizers),
           any[ClientConfig],
@@ -387,7 +394,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       )
 
       discard(
-        verify(adminCommandRunner).runCommand(
+        verify(adminCommandRunner).runCommand[ActiveSynchronizers](
           isEq("p1"),
           isEq(ListActiveRegisteredSynchronizers),
           any[ClientConfig],
