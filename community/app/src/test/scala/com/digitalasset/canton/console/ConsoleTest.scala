@@ -41,7 +41,7 @@ import io.grpc.stub.AbstractStub
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import org.mockito.ArgumentCaptor
-import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
+import org.mockito.ArgumentMatchers.{anyString, argThat, eq as isEq}
 import org.mockito.Mockito.{verifyNoInteractions, verifyNoMoreInteractions}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -53,6 +53,10 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
 
   private type ActiveSynchronizers =
     Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)]
+
+  private def matchListActiveRegisteredSynchronizers()
+      : GrpcAdminCommand[?, ?, ActiveSynchronizers] =
+    argThat[GrpcAdminCommand[?, ?, ActiveSynchronizers]](_ == ListActiveRegisteredSynchronizers)
 
   private lazy val DefaultConfig: CantonConfig = CantonConfig(
     sequencers = Map(
@@ -164,7 +168,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       when(
         adminCommandRunner.runCommand[ActiveSynchronizers](
           isEq("p1"),
-          isEq[ListActiveRegisteredSynchronizers.type](ListActiveRegisteredSynchronizers),
+          matchListActiveRegisteredSynchronizers(),
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
@@ -396,7 +400,7 @@ final class ConsoleTest extends AnyWordSpec with BaseTest {
       discard(
         verify(adminCommandRunner).runCommand[ActiveSynchronizers](
           isEq("p1"),
-          isEq[ListActiveRegisteredSynchronizers.type](ListActiveRegisteredSynchronizers),
+          matchListActiveRegisteredSynchronizers(),
           any[ClientConfig],
           isEq(Some(adminToken)),
         )
