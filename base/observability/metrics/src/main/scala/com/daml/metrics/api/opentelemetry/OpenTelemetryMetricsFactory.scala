@@ -9,9 +9,7 @@ import com.daml.metrics.api.MetricHandle.Gauge.{CloseableGauge, SimpleCloseableG
 import com.daml.metrics.api.MetricHandle.Timer.TimerHandle
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryTimer.{
-  DurationSuffix,
   TimerUnit,
-  TimerUnitAndSuffix,
   convertNanosecondsToSeconds,
 }
 import com.daml.scalautil.Statement.discard
@@ -105,14 +103,10 @@ class OpenTelemetryMetricsFactory(
         case None => throw new IllegalArgumentException(msg)
       }
     }
-    val nameWithSuffix =
-      if (info.name.endsWith(DurationSuffix)) info.name :+ TimerUnit
-      else info.name :+ TimerUnitAndSuffix
-
     OpenTelemetryTimer(
       info,
       otelMeter
-        .histogramBuilder(nameWithSuffix)
+        .histogramBuilder(OpenTelemetryTimer.instrumentName(info.name))
         .setUnit(TimerUnit)
         .setDescription(info.summary)
         .build(),
@@ -276,6 +270,15 @@ object OpenTelemetryTimer {
   private[opentelemetry] val DurationSuffix = "duration"
 
   val TimerUnitAndSuffix: MetricName = MetricName(DurationSuffix, TimerUnit)
+
+  /** The instrument name a timer is registered under.
+    *
+    * A timer records seconds, so its unit is appended to the metric name. The name a timer has in
+    * the `HistogramInventory` is therefore not the name of its instrument, and a view that selects
+    * a timer has to select this name.
+    */
+  def instrumentName(name: MetricName): MetricName =
+    if (name.endsWith(DurationSuffix)) name :+ TimerUnit else name :+ TimerUnitAndSuffix
 
   private val NanosecondsInASecond = 1_000_000_000
 

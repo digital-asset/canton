@@ -825,6 +825,7 @@ object BuildCommon {
           opentelemetry_exporter_otlp,
           opentelemetry_exporter_prometheus,
           opentelemetry_sdk,
+          opentelemetry_sdk_testing % Test,
           scalatest % Test,
           // bump transitive deps introduced by opentelemetry to address vulnerabilities
           kotlin_stdlib,

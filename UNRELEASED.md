@@ -238,6 +238,11 @@ fix is deployed on MainNet:
   with more than 100 parties.
 - ACS commitments tolerate when a party changes its hosting state on a participant from "actively hosted" to back "onboarding".
 - Fixed a bug in `topology_util.sh` where `compute_canton_hash` intermittently produced a wrong hash, causing certificates from `prepare-cert.sh` to be rejected.
+- Timer metrics now use their configured histogram bucket boundaries. A timer is reported as a histogram named
+  `<metric>_duration_seconds`, and no view reached that instrument, so every timer fell back to the boundaries of
+  the OpenTelemetry SDK. Those are millisecond-scaled while Canton records seconds, so every sub-second latency
+  shared one bucket and quantiles over these metrics were meaningless. Canton's own seconds-scaled defaults and
+  any `metrics.histograms` entry now apply to timers.
 
 ## Compatibility
 
