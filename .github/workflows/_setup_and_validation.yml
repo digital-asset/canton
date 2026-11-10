@@ -3,6 +3,10 @@ name: Setup nix and validate skip-ci label and yaml files
 on:
   workflow_call:
     inputs:
+      draft_only:
+        description: Run only the setup and skip-CI check for draft PRs
+        type: boolean
+        default: false
       runner:
         description: GitHub Actions runner label
         required: true
@@ -38,6 +42,7 @@ jobs:
 
   yaml_lint:
     name: Check YAML files with yamllint
+    if: ${{ !inputs.draft_only }}
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
@@ -67,6 +72,7 @@ jobs:
 
   verify_circleci_config:
     name: Verify CircleCI config
+    if: ${{ !inputs.draft_only }}
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
